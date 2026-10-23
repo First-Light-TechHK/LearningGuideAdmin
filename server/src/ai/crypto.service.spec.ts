@@ -27,7 +27,13 @@ describe('CryptoService（§2 红线：apiKey 加密存储）', () => {
     const svc = makeService(KEY);
     const cipher = svc.encrypt('hello');
     const [iv, tag, data] = cipher.split(':');
-    const tampered = `${iv}:${tag}:${(data.slice(0, -2) + 'ff')}`;
+    // 末字节按位取反：保证篡改后的密文一定不同（固定写成 'ff' 在原文本身
+    // 以 ff 结尾时是空操作，会间歇性通过 CI）
+    const flipped = (parseInt(data.slice(-2), 16) ^ 0xff)
+      .toString(16)
+      .padStart(2, '0');
+    const tampered = `${iv}:${tag}:${data.slice(0, -2)}${flipped}`;
+    expect(tampered).not.toBe(cipher);
     expect(() => svc.decrypt(tampered)).toThrow();
   });
 
