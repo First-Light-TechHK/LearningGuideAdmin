@@ -102,7 +102,8 @@ const source = {
       CodeConfigurationValues: {
         Runtime: "NODEJS_22",
         BuildCommand: "cd server && npm ci && npx prisma generate && npm run build && cd ../client && npm ci && npm run build",
-        StartCommand: "cd server && npx prisma migrate deploy && node dist/main",
+        // StartCommand is not a shell: keep the operators inside the script.
+        StartCommand: "sh ./start-admin.sh",
         Port: "3000",
         RuntimeEnvironmentVariables: { NODE_ENV: "production", APP_ENV: "DEV", PORT: "3000" },
         RuntimeEnvironmentSecrets: { DATABASE_URL: secretArns.DATABASE_URL, ADMIN_API_KEY: secretArns.ADMIN_API_KEY }
