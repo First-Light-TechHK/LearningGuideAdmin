@@ -35,3 +35,7 @@ App Runner does not run StartCommand through a shell, so shell operators live in
 
 - ACM validation CNAME for `admin.ilovelearningguide.com` must be added by the DNS owner.
 - Add the alias + certificate to the distribution, upload the client build, then point the `admin` CNAME at `d5twyee4s494s.cloudfront.net`.
+
+## Publishing the SPA
+
+App Runner builds only the API. After a client change run `scripts/publish-admin-spa.sh` (S3 sync + CloudFront invalidation).
