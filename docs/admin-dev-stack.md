@@ -39,3 +39,12 @@ App Runner does not run StartCommand through a shell, so shell operators live in
 ## Publishing the SPA
 
 App Runner builds only the API. After a client change run `scripts/publish-admin-spa.sh` (S3 sync + CloudFront invalidation).
+
+## Continuous deploy
+
+- `.github/workflows/dev-deploy.yml` must exist on `main`: GitHub only registers `workflow_run`
+  triggers from the default branch, so a copy kept only on `dev` never fires.
+- Repo secrets `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` belong to IAM user
+  `learning-guide-admin-ci`, whose only permission is `apprunner:StartDeployment`,
+  `DescribeService` and `ListOperations` on the DEV service ARN.
+- Chain: push to `dev` → CI → Deploy DEV → App Runner source build → `/api/health`.
