@@ -11,6 +11,7 @@ import { SyncModule } from './sync/sync.module';
 import { FilesModule } from './files/files.module';
 import { AiModule } from './ai/ai.module';
 import { TagsModule } from './tags/tags.module';
+import { HealthController } from './health/health.controller';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -39,7 +40,7 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     // 全局 Tag 词库（§3.3.3 方案 B、§5.1.6）
     TagsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [
     AppService,
     // 统一响应格式（§5.3、§7 Phase 2 第 4 项），SSE 流式接口豁免点见拦截器注释

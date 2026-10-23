@@ -50,7 +50,8 @@ if (!optional("rds", "describe-db-instances", { DBInstanceIdentifier: dbId })) {
     DBInstanceIdentifier: dbId,
     DBInstanceClass: process.env.DB_INSTANCE_CLASS || "db.t4g.micro",
     Engine: "postgres",
-    EngineVersion: "16.4",
+    // Keep the DEV engine on the same minor line as learning-guide-sit.
+    EngineVersion: process.env.DB_ENGINE_VERSION || "16.13",
     AllocatedStorage: 20,
     DBName: "learning_guide_admin_dev",
     MasterUsername: "lg_admin_dev",
@@ -112,7 +113,8 @@ const source = {
 const common = {
   SourceConfiguration: source,
   InstanceConfiguration: { Cpu: "1024", Memory: "2048", InstanceRoleArn: process.env.INSTANCE_ROLE_ARN },
-  HealthCheckConfiguration: { Protocol: "HTTP", Path: "/health", Interval: 20, Timeout: 10, HealthyThreshold: 1, UnhealthyThreshold: 5 },
+  // The server mounts every route under the /api prefix, health included.
+  HealthCheckConfiguration: { Protocol: "HTTP", Path: "/api/health", Interval: 20, Timeout: 10, HealthyThreshold: 1, UnhealthyThreshold: 5 },
   NetworkConfiguration: { EgressConfiguration: { EgressType: "VPC", VpcConnectorArn: process.env.VPC_CONNECTOR_ARN }, IngressConfiguration: { IsPubliclyAccessible: true } }
 };
 const created = existing
