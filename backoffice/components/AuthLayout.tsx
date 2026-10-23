@@ -1,12 +1,12 @@
 "use client";
 
 import { LocaleSwitch } from "@/components/LocaleSwitch";
-import { BrandMark, ShieldIcon } from "@/components/icons";
+import { DiamondIcon } from "@/components/icons";
 import { getMessages, t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 
 /**
- * 认证页外壳，按设计稿：白色品牌条 + 深色背景图 + 居中徽标/标题/副标题 + 白卡。
+ * 认证页外壳，按设计稿：64px 白色品牌条 + 背景图 + 居中 logo 行 / 标题 / 副标题 + 白卡。
  */
 export function AuthLayout({
   title,
@@ -30,7 +30,7 @@ export function AuthLayout({
     <div className="authPage">
       <div className="authPageHeader">
         <span className="authBrand">
-          <BrandMark size={24} />
+          <DiamondIcon size={22} />
           {messages.app.name}
         </span>
         <LocaleSwitch persist={false} />
@@ -38,7 +38,7 @@ export function AuthLayout({
 
       <main className="authBody">
         <span className="authBadge">
-          <ShieldIcon size={14} />
+          <DiamondIcon size={18} />
           {messages.app.name}
         </span>
 

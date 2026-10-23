@@ -215,7 +215,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
         </div>
         <button
           type="button"
-          className="button"
+          className="button buttonCompact"
           onClick={() =>
             setEditor({
               mode: "create",
@@ -225,7 +225,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
             })
           }
         >
-          <PlusIcon size={14} />
+          <PlusIcon size={15} />
           {t(locale, "employees.addEmployee")}
         </button>
       </div>
@@ -274,6 +274,14 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
 
       <div className="tableWrap">
         <table className="table">
+          <colgroup>
+            {/* 设计稿列宽：300 / 180 / 140 / 240 / 158（内容宽 1018） */}
+            <col style={{ width: "29.5%" }} />
+            <col style={{ width: "17.7%" }} />
+            <col style={{ width: "13.8%" }} />
+            <col style={{ width: "23.6%" }} />
+            <col style={{ width: "15.4%" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>{t(locale, "employees.columns.email")}</th>
@@ -428,7 +436,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
               </div>
               <button
                 type="button"
-                className="iconButton"
+                className="modalClose"
                 onClick={() => setEditor(null)}
                 aria-label={t(locale, "common.cancel")}
               >
@@ -437,87 +445,97 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
             </div>
 
             {errorCode ? (
-              <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
+              <div className="alert alertError" style={{ margin: "0 28px" }}>
+                {t(locale, `errors.${errorCode}`)}
+              </div>
             ) : null}
 
-            <label className="field">
-              <span className="fieldLabel">{t(locale, "employees.fields.email")}</span>
-              <input
-                className="fieldInput"
-                type="email"
-                placeholder="name@company.com"
-                value={editor.email}
-                disabled={editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED"}
-                onChange={(event) =>
-                  setEditor((current) =>
-                    current ? { ...current, email: event.target.value } : current
-                  )
-                }
-                required
-              />
-              <span className="fieldHint">
-                {editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED"
-                  ? t(locale, "employees.hintEmailVerified")
-                  : t(locale, "employees.hintActivation")}
-              </span>
-            </label>
+            <div className="modalBody">
+              <label className="field">
+                <span className="fieldLabel">{t(locale, "employees.fields.email")}</span>
+                <input
+                  className="fieldInput"
+                  type="email"
+                  placeholder="name@company.com"
+                  value={editor.email}
+                  disabled={editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED"}
+                  onChange={(event) =>
+                    setEditor((current) =>
+                      current ? { ...current, email: event.target.value } : current
+                    )
+                  }
+                  required
+                />
+                <span className="fieldHint">
+                  {editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED"
+                    ? t(locale, "employees.hintEmailVerified")
+                    : t(locale, "employees.hintActivation")}
+                </span>
+              </label>
 
-            <label className="field">
-              <span className="fieldLabel">{t(locale, "employees.fields.role")}</span>
-              <select
-                className="fieldSelect"
-                value={editor.role}
-                disabled={editor.mode === "edit" && editor.employee.isBootstrapAdmin}
-                onChange={(event) =>
-                  setEditor((current) =>
-                    current ? { ...current, role: event.target.value as EmployeeRole } : current
-                  )
-                }
-                required
-              >
-                <option value="">{t(locale, "employees.rolePlaceholder")}</option>
-                {EMPLOYEE_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {t(locale, `roles.${role}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label className="field">
+                <span className="fieldLabel">{t(locale, "employees.fields.role")}</span>
+                <select
+                  className="fieldSelect"
+                  value={editor.role}
+                  disabled={editor.mode === "edit" && editor.employee.isBootstrapAdmin}
+                  onChange={(event) =>
+                    setEditor((current) =>
+                      current ? { ...current, role: event.target.value as EmployeeRole } : current
+                    )
+                  }
+                  required
+                >
+                  <option value="">{t(locale, "employees.rolePlaceholder")}</option>
+                  {EMPLOYEE_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {t(locale, `roles.${role}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-            <div className="field">
-              <span className="fieldLabel">{t(locale, "employees.fields.status")}</span>
-              <div className="segmented" role="radiogroup" aria-label={t(locale, "employees.fields.status")}>
-                {(["ACTIVE", "INACTIVE"] as AccountStatus[]).map((option) => {
-                  const selected = editor.accountStatus === option;
-                  const locked = editor.mode === "edit" && editor.employee.isBootstrapAdmin;
-                  return (
-                    <button
-                      key={option}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      disabled={locked}
-                      className={selected ? "segment segmentSelected" : "segment"}
-                      onClick={() =>
-                        setEditor((current) =>
-                          current ? { ...current, accountStatus: option } : current
-                        )
-                      }
-                    >
-                      <span
-                        className={
-                          option === "ACTIVE" ? "segmentDot segmentDotActive" : "segmentDot segmentDotInactive"
+              <div className="field">
+                <span className="fieldLabel">{t(locale, "employees.fields.status")}</span>
+                <div
+                  className="segmented"
+                  role="radiogroup"
+                  aria-label={t(locale, "employees.fields.status")}
+                >
+                  {(["ACTIVE", "INACTIVE"] as AccountStatus[]).map((option) => {
+                    const selected = editor.accountStatus === option;
+                    const locked = editor.mode === "edit" && editor.employee.isBootstrapAdmin;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        disabled={locked}
+                        className={selected ? "segment segmentSelected" : "segment"}
+                        onClick={() =>
+                          setEditor((current) =>
+                            current ? { ...current, accountStatus: option } : current
+                          )
                         }
-                        aria-hidden="true"
-                      />
-                      {t(locale, `status.${option === "ACTIVE" ? "Active" : "Inactive"}`)}
-                    </button>
-                  );
-                })}
+                      >
+                        <span
+                          className={
+                            option === "ACTIVE"
+                              ? "segmentDot segmentDotActive"
+                              : "segmentDot segmentDotInactive"
+                          }
+                          aria-hidden="true"
+                        />
+                        {t(locale, `status.${option === "ACTIVE" ? "Active" : "Inactive"}`)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {editor.mode === "edit" && editor.employee.isBootstrapAdmin ? (
+                  <span className="fieldHint">{t(locale, "employees.bootstrapLocked")}</span>
+                ) : null}
               </div>
-              {editor.mode === "edit" && editor.employee.isBootstrapAdmin ? (
-                <span className="fieldHint">{t(locale, "employees.bootstrapLocked")}</span>
-              ) : null}
             </div>
 
             <div className="modalFooter">

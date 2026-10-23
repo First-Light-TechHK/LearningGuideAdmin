@@ -86,17 +86,15 @@ export function AppShell({
   return (
     <div className={collapsed ? "shell shellCollapsed" : "shell"}>
       <nav className="sidebar" aria-label={t(locale, "app.subtitle")}>
-        <div className="sidebarTop">
-          <button
-            type="button"
-            className="sidebarToggle"
-            aria-label={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
-            title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
-            onClick={() => setCollapsed((value) => !value)}
-          >
-            <PanelToggleIcon size={16} />
-          </button>
-        </div>
+        <button
+          type="button"
+          className="sidebarToggle"
+          aria-label={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
+          title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          <PanelToggleIcon size={18} />
+        </button>
 
         {menus.map((menu) => {
           const Icon = MENU_ICON[menu];
@@ -108,9 +106,9 @@ export function AppShell({
               title={t(locale, MENU_LABEL[menu])}
             >
               <span className="navIcon">
-                <Icon size={16} />
+                <Icon size={20} />
               </span>
-              {collapsed ? null : <span>{t(locale, MENU_LABEL[menu])}</span>}
+              <span>{t(locale, MENU_LABEL[menu])}</span>
             </a>
           );
         })}
@@ -120,7 +118,7 @@ export function AppShell({
         <header className="header">
           {/* PORT-NAV-001：共享顶部栏展示 logo 与产品名 */}
           <span className="headerBrand">
-            <BrandMark size={26} />
+            <BrandMark size={42} />
             {t(locale, "app.name")}
           </span>
 
@@ -229,50 +227,54 @@ function ChangePasswordDialog({ locale, onClose }: { locale: Locale; onClose: ()
             <h2 className="modalTitle">{t(locale, "changePassword.title")}</h2>
             <p className="modalSubtitle">{t(locale, "changePassword.subtitle")}</p>
           </div>
-          <button type="button" className="iconButton" onClick={onClose} aria-label={t(locale, "common.cancel")}>
+          <button type="button" className="modalClose" onClick={onClose} aria-label={t(locale, "common.cancel")}>
             <CloseIcon size={16} />
           </button>
         </div>
 
         {errorCode ? (
-          <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
+          <div className="alert alertError" style={{ margin: "0 28px" }}>
+            {t(locale, `errors.${errorCode}`)}
+          </div>
         ) : null}
 
-        <label className="field">
-          <span className="fieldLabel">{t(locale, "changePassword.currentLabel")}</span>
-          <input
-            className="fieldInput"
-            type="password"
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(event) => setCurrentPassword(event.target.value)}
-            required
-          />
-        </label>
+        <div className="modalBody">
+          <label className="field">
+            <span className="fieldLabel">{t(locale, "changePassword.currentLabel")}</span>
+            <input
+              className="fieldInput"
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              required
+            />
+          </label>
 
-        <label className="field">
-          <span className="fieldLabel">{t(locale, "changePassword.newLabel")}</span>
-          <input
-            className="fieldInput"
-            type="password"
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            required
-          />
-        </label>
+          <label className="field">
+            <span className="fieldLabel">{t(locale, "changePassword.newLabel")}</span>
+            <input
+              className="fieldInput"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              required
+            />
+          </label>
 
-        <label className="field">
-          <span className="fieldLabel">{t(locale, "changePassword.confirmLabel")}</span>
-          <input
-            className="fieldInput"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            required
-          />
-        </label>
+          <label className="field">
+            <span className="fieldLabel">{t(locale, "changePassword.confirmLabel")}</span>
+            <input
+              className="fieldInput"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+            />
+          </label>
+        </div>
 
         <div className="modalFooter">
           <button type="button" className="button buttonGhost" onClick={onClose}>

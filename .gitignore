@@ -30,3 +30,9 @@ next-env.d.ts
 
 # 本地测试上传文件（不上库）
 test_files/
+
+# Figma 访问令牌（本地导出设计图用，绝不入库）
+.figma-token
+
+# 设计走查用的临时页面快照
+docs/design/figma/preview/

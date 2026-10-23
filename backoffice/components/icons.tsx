@@ -222,8 +222,9 @@ export function CloseIcon({ size = 16, className }: IconProps) {
 export function PanelToggleIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size, className)}>
-      <rect x="2.4" y="3" width="11.2" height="10" rx="1.8" />
-      <path d="M6.6 3v10" />
+      <rect x="2" y="2.6" width="12" height="10.8" rx="2" />
+      <path d="M6.4 2.6v10.8" />
+      <path d="M11.4 6.2 9.9 8l1.5 1.8" />
     </svg>
   );
 }
@@ -237,14 +238,31 @@ export function ShieldIcon({ size = 16, className }: IconProps) {
   );
 }
 
-export function BrandMark({ size = 28 }: { size?: number }) {
+export function DiamondIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...svgProps(size, className)} strokeWidth={1.8}>
+      <path d="M8 1.8 14.2 8 8 14.2 1.8 8z" />
+    </svg>
+  );
+}
+
+export function BrandMark({ size = 42 }: { size?: number }) {
   return (
     <span className="brandMarkSvg" aria-hidden="true" style={{ width: size, height: size }}>
-      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 16 16" fill="none">
-        <path
-          d="M2.6 6.4c0-2.1 2-3.6 5.4-3.6s5.4 1.5 5.4 3.6-2 3.6-5.4 3.6c-.7 0-1.4-.1-2-.2L3.4 11l.5-2.2A3.7 3.7 0 0 1 2.6 6.4z"
-          fill="#fff"
-        />
+      <svg
+        width={size * 0.6}
+        height={size * 0.6}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {/* 学士帽：设计稿顶栏 logo */}
+        <path d="M12 3.5 22 8l-10 4.5L2 8z" />
+        <path d="M6 10.2v4.4c0 1.9 2.7 3.4 6 3.4s6-1.5 6-3.4v-4.4" />
+        <path d="M22 8v5" />
       </svg>
     </span>
   );
