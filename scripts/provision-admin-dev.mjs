@@ -7,11 +7,10 @@ import { randomBytes } from "node:crypto";
 
 const region = process.env.REGION || "ap-southeast-1";
 const apply = process.argv.includes("--apply");
-const required = ["VPC_ID", "SUBNET_IDS", "SECURITY_GROUP_ID", "ECR_IMAGE"];
+const required = ["VPC_ID", "SUBNET_IDS", "SECURITY_GROUP_ID", "GITHUB_CONNECTION_ARN", "INSTANCE_ROLE_ARN", "VPC_CONNECTOR_ARN"];
 for (const key of required) if (!process.env[key]) throw new Error(`${key} is required`);
-if (!/^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com\/.+@sha256:[a-f0-9]{64}$/.test(process.env.ECR_IMAGE)) {
-  throw new Error("ECR_IMAGE must be a digest-pinned image");
-}
+const repositoryUrl = process.env.REPOSITORY_URL || "https://github.com/First-Light-TechHK/LearningGuideAdmin";
+const branch = process.env.ADMIN_BRANCH || "dev";
 
 function aws(service, operation, input = {}) {
   const args = [service, operation, "--region", region, "--output", "json"];
@@ -90,15 +89,23 @@ for (const [key, value] of Object.entries(secrets)) {
 const service = optional("apprunner", "describe-service", { ServiceArn: `arn:aws:apprunner:${region}:${process.env.AWS_ACCOUNT_ID}:service/${serviceName}/placeholder` });
 const existing = aws("apprunner", "list-services", {}).ServiceSummaryList.find((item) => item.ServiceName === serviceName);
 const source = {
-  AutoDeploymentsEnabled: false,
-  AuthenticationConfiguration: { AccessRoleArn: process.env.ECR_ACCESS_ROLE_ARN },
-  ImageRepository: {
-    ImageIdentifier: process.env.ECR_IMAGE,
-    ImageRepositoryType: "ECR",
-    ImageConfiguration: {
-      Port: "3000",
-      RuntimeEnvironmentVariables: { NODE_ENV: "production", APP_ENV: "DEV", PORT: "3000" },
-      RuntimeEnvironmentSecrets: { DATABASE_URL: secretArns.DATABASE_URL, ADMIN_API_KEY: secretArns.ADMIN_API_KEY }
+  // Source-based deployment: App Runner builds and deploys on every push, like
+  // the Portal services. No local image build.
+  AutoDeploymentsEnabled: true,
+  AuthenticationConfiguration: { ConnectionArn: process.env.GITHUB_CONNECTION_ARN },
+  CodeRepository: {
+    RepositoryUrl: repositoryUrl,
+    SourceCodeVersion: { Type: "BRANCH", Value: branch },
+    CodeConfiguration: {
+      ConfigurationSource: "API",
+      CodeConfigurationValues: {
+        Runtime: "NODEJS_22",
+        BuildCommand: "cd server && npm ci && npx prisma generate && npm run build && cd ../client && npm ci && npm run build",
+        StartCommand: "cd server && npx prisma migrate deploy && node dist/main",
+        Port: "3000",
+        RuntimeEnvironmentVariables: { NODE_ENV: "production", APP_ENV: "DEV", PORT: "3000" },
+        RuntimeEnvironmentSecrets: { DATABASE_URL: secretArns.DATABASE_URL, ADMIN_API_KEY: secretArns.ADMIN_API_KEY }
+      }
     }
   }
 };
