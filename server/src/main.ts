@@ -1,11 +1,14 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureApp } from './common/app-setup';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // App Runner 前有一层代理：只信任最近一跳的 X-Forwarded-For，限流与审计用的 IP 不可被客户端伪造
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
   // /api 全局前缀 + 输入校验（§5.1、§9.3），与 e2e 共用同一设置
   configureApp(app);
   // PORT 经 ConfigService 读取，缺省 3000（开发文档 §7 Phase 2 第 6 项、§8）

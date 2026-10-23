@@ -39,7 +39,9 @@ function sharedWithAiTutor(method: string, segments: string[]): boolean {
 }
 
 export function routeAccess(method: string, path: string): RouteAccess {
-  const trimmed = path.replace(/\/+$/, '');
+  // Express 路由默认不区分大小写（/API/courses 也会命中 /api/courses），
+  // 这里同样按小写判定，否则大写路径会被当成非 /api 放行
+  const trimmed = path.toLowerCase().replace(/\/+$/, '');
   if (trimmed !== '/api' && !trimmed.startsWith('/api/'))
     return { kind: 'public' };
   const segments = trimmed.slice('/api'.length).split('/').filter(Boolean);

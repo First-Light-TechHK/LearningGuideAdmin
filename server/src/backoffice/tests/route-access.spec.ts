@@ -79,6 +79,23 @@ describe('route access classification', () => {
     assert.deepEqual(routeAccess('GET', '/api/tags'), knowledge);
   });
 
+  it('classifies upper-case paths like Express routes them (case-insensitive)', () => {
+    assert.deepEqual(routeAccess('GET', '/API/Courses'), {
+      kind: 'menu',
+      menus: ['knowledge', 'aiTutor'],
+    });
+    assert.deepEqual(routeAccess('POST', '/Api/Sync/all'), {
+      kind: 'menu',
+      menus: ['knowledge'],
+    });
+    assert.deepEqual(routeAccess('GET', '/API/USER/ai-tutors'), {
+      kind: 'service',
+    });
+    assert.deepEqual(routeAccess('GET', '/API/admin/employees'), {
+      kind: 'employeeAdmin',
+    });
+  });
+
   it('gives unregistered endpoints to Admin only', () => {
     assert.deepEqual(routeAccess('GET', '/api/something-new'), {
       kind: 'employeeAdmin',

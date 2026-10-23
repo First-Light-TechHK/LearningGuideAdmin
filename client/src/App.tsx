@@ -2,13 +2,10 @@ import { useState } from 'react'
 import { App as AntApp, ConfigProvider } from 'antd'
 import enGB from 'antd/locale/en_GB'
 import zhCN from 'antd/locale/zh_CN'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { MainLayout } from './components/layout/MainLayout'
 import { Sidebar } from './components/layout/Sidebar'
-import {
-  KnowledgeTabBar,
-  type KnowledgeTabKey,
-} from './components/knowledge/KnowledgeTabBar'
+import { KnowledgeTabBar, type KnowledgeTabKey } from './components/knowledge/KnowledgeTabBar'
 import { KnowledgeSystem } from './pages/KnowledgeSystem'
 import { AITutor, AITutorTopBar } from './pages/AITutor'
 import { tokens } from './theme/tokens'
@@ -91,12 +88,22 @@ function useAntdLocale() {
 
 const LANDING = menuHref(DEFAULT_LOCALE, DEFAULT_LANDING_MENU)
 
+/** 第一段不是语言（如旧书签 /knowledge）时补上默认语言，否则会被当成语言参数 */
+function LocaleGate() {
+  const { locale } = useParams<{ locale: string }>()
+  const { pathname, search } = useLocation()
+  if (isLocale(locale)) return <Outlet />
+  return <Navigate to={`/${DEFAULT_LOCALE}${pathname}${search}`} replace />
+}
+
 /** 未带语言前缀的地址补上默认语言 */
 function LocaleFallback() {
   const { pathname, search } = useLocation()
   const [, first] = pathname.split('/')
   if (isLocale(first)) return <Navigate to={`/${first}/course`} replace />
-  return <Navigate to={pathname === '/' ? LANDING : `/${DEFAULT_LOCALE}${pathname}${search}`} replace />
+  return (
+    <Navigate to={pathname === '/' ? LANDING : `/${DEFAULT_LOCALE}${pathname}${search}`} replace />
+  )
 }
 
 function App() {
@@ -105,40 +112,45 @@ function App() {
       {/* App 包裹层：提供 message/modal 上下文（§3.2.2 全量同步警告弹框等） */}
       <AntApp>
         <Routes>
-          <Route path="/:locale/sign-in" element={<SignInPage />} />
-          <Route path="/:locale/activate" element={<ActivatePage />} />
-          <Route path="/:locale/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/:locale/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/:locale" element={<ShellRoute />}>
-            <Route index element={<Navigate to="course" replace />} />
-            <Route path="course" element={<CoursePage />} />
-            <Route
-              path="knowledge"
-              element={
-                <MenuGuard menu="knowledge">
-                  <KnowledgeWorkspace />
-                </MenuGuard>
-              }
-            />
-            <Route
-              path="ai-tutor"
-              element={
-                <MenuGuard menu="aiTutor">
-                  <AITutorWorkspace />
-                </MenuGuard>
-              }
-            />
-            <Route path="order" element={<PlaceholderPage menu="order" />} />
-            <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
-            <Route path="student" element={<PlaceholderPage menu="student" />} />
-            <Route path="help-desk" element={<PlaceholderPage menu="helpDesk" />} />
-            <Route path="settings" element={<SettingsIndexPage />} />
-            <Route path="settings/employee-account" element={<EmployeeAccountSettingsPage />} />
-            <Route path="settings/payment-gateway" element={<SettingsEntryPage section="paymentGateway" />} />
-            <Route
-              path="settings/notification-configuration"
-              element={<SettingsEntryPage section="notificationConfiguration" />}
-            />
+          <Route path="/:locale" element={<LocaleGate />}>
+            <Route path="sign-in" element={<SignInPage />} />
+            <Route path="activate" element={<ActivatePage />} />
+            <Route path="forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="reset-password" element={<ResetPasswordPage />} />
+            <Route element={<ShellRoute />}>
+              <Route index element={<Navigate to="course" replace />} />
+              <Route path="course" element={<CoursePage />} />
+              <Route
+                path="knowledge"
+                element={
+                  <MenuGuard menu="knowledge">
+                    <KnowledgeWorkspace />
+                  </MenuGuard>
+                }
+              />
+              <Route
+                path="ai-tutor"
+                element={
+                  <MenuGuard menu="aiTutor">
+                    <AITutorWorkspace />
+                  </MenuGuard>
+                }
+              />
+              <Route path="order" element={<PlaceholderPage menu="order" />} />
+              <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
+              <Route path="student" element={<PlaceholderPage menu="student" />} />
+              <Route path="help-desk" element={<PlaceholderPage menu="helpDesk" />} />
+              <Route path="settings" element={<SettingsIndexPage />} />
+              <Route path="settings/employee-account" element={<EmployeeAccountSettingsPage />} />
+              <Route
+                path="settings/payment-gateway"
+                element={<SettingsEntryPage section="paymentGateway" />}
+              />
+              <Route
+                path="settings/notification-configuration"
+                element={<SettingsEntryPage section="notificationConfiguration" />}
+              />
+            </Route>
           </Route>
           <Route path="*" element={<LocaleFallback />} />
         </Routes>

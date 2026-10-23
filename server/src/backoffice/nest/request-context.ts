@@ -1,7 +1,7 @@
 import type { Request } from 'express';
 
 import type { SessionEmployee } from '../contracts/employee';
-import { configuredAppBaseUrl } from '../lib/env';
+import { configuredAppBaseUrl, isDeployed } from '../lib/env';
 import { SESSION_COOKIE_NAME } from './cookies';
 
 export type BackofficeRequest = Request & { employee?: SessionEmployee };
@@ -27,12 +27,12 @@ export function sessionToken(request: Request): string | undefined {
   return readCookie(request, SESSION_COOKIE_NAME);
 }
 
+/**
+ * 客户端 IP 只取 request.ip：X-Forwarded-For 首项可由客户端伪造，
+ * 代理层数由 main.ts 的 trust proxy 决定（App Runner 前有一层代理）。
+ */
 export function clientIp(request: Request): string {
-  const forwarded = request.headers['x-forwarded-for'];
-  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)
-    ?.split(',')[0]
-    ?.trim();
-  return first || request.ip || 'unknown';
+  return request.ip || 'unknown';
 }
 
 export function userAgent(request: Request): string | null {
@@ -54,7 +54,7 @@ export function appUrlFor(request: Request): string {
   const origin = request.headers.origin;
   if (
     typeof origin === 'string' &&
-    (LOCAL_ORIGIN.test(origin) || ADMIN_ORIGIN.test(origin))
+    ((LOCAL_ORIGIN.test(origin) && !isDeployed()) || ADMIN_ORIGIN.test(origin))
   ) {
     return origin;
   }

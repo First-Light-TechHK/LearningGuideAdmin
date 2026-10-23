@@ -8,6 +8,7 @@ import { query } from '../src/backoffice/lib/db';
 import {
   E2E_PASSWORD,
   ensureEmployee,
+  resetIpBuckets,
   resetRateLimits,
   signInAs,
 } from './helpers/employee-session';
@@ -44,6 +45,42 @@ describe('BackOffice access (e2e)', () => {
     expect(res.body.error.code).toBe('INVALID_EMPLOYEE_ACCOUNT');
     await request(server()).get('/api/session').expect(401);
     await request(server()).get('/api/admin/employees').expect(401);
+  });
+
+  it('does not let upper-case paths slip past the guard', async () => {
+    await request(server()).get('/API/courses').expect(401);
+    await request(server()).get('/Api/Admin/Employees').expect(401);
+    await request(server()).post('/API/sync/all').expect(401);
+  });
+
+  it('ignores a spoofed X-Forwarded-For when rate limiting sign-in', async () => {
+    for (let i = 0; i < 10; i += 1) {
+      await request(server())
+        .post('/api/auth/sign-in')
+        .set('X-Forwarded-For', `10.0.0.${i}`)
+        .send({ email: `nobody${i}@example.com`, password: 'wrong-password' })
+        .expect(401);
+    }
+    await request(server())
+      .post('/api/auth/sign-in')
+      .set('X-Forwarded-For', '10.0.0.99')
+      .send({ email: 'nobody99@example.com', password: 'wrong-password' })
+      .expect(429);
+  });
+
+  it('limits sign-in attempts per account across addresses', async () => {
+    for (let i = 0; i < 10; i += 1) {
+      resetIpBuckets();
+      await request(server())
+        .post('/api/auth/sign-in')
+        .send({ email: 'Target@Example.com', password: 'wrong-password' })
+        .expect(401);
+    }
+    resetIpBuckets();
+    await request(server())
+      .post('/api/auth/sign-in')
+      .send({ email: 'target@example.com', password: 'wrong-password' })
+      .expect(429);
   });
 
   it('leaves the Portal learner API on the service key, not on employee sessions', async () => {

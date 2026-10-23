@@ -9,6 +9,17 @@ function buckets(): Map<string, Bucket> {
   return global.__lgboRateBuckets;
 }
 
+/** 超过上限时清掉已过期的窗口，避免大量不同 key 让内存无限增长。 */
+const SWEEP_THRESHOLD = 10_000;
+
+function sweepExpired(now: number): void {
+  const map = buckets();
+  if (map.size < SWEEP_THRESHOLD) return;
+  for (const [key, bucket] of map) {
+    if (bucket.resetsAt <= now) map.delete(key);
+  }
+}
+
 export type RateLimitResult = { allowed: boolean; retryAfterSeconds: number };
 
 /**
@@ -22,6 +33,7 @@ export function consume(
 ): RateLimitResult {
   const now = Date.now();
   const windowMs = windowMinutes * 60_000;
+  sweepExpired(now);
   const existing = buckets().get(key);
 
   if (!existing || existing.resetsAt <= now) {

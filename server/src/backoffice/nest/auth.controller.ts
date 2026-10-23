@@ -12,8 +12,8 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
-import type { SessionEmployee } from '../contracts/employee';
-import { appEnvName } from '../lib/env';
+import { normaliseEmail, type SessionEmployee } from '../contracts/employee';
+import { isDeployed } from '../lib/env';
 import { DEFAULT_LOCALE, isLocale, type Locale } from '../lib/i18n/config';
 import { consume } from '../lib/rateLimit';
 import {
@@ -115,6 +115,11 @@ export class BackofficeAuthController {
     const ip = clientIp(request);
     limit(`sign-in:${ip}`, SIGN_IN_MAX_PER_WINDOW);
     const body = asBody(raw);
+    // 按账号再限一次：换 IP 也不能对同一邮箱无限试密码
+    limit(
+      `sign-in-email:${normaliseEmail(readString(body, 'email'))}`,
+      SIGN_IN_MAX_PER_WINDOW,
+    );
     const outcome = await signIn({
       rawEmail: readString(body, 'email'),
       password: readString(body, 'password'),
@@ -170,6 +175,10 @@ export class BackofficeAuthController {
   async forgotPassword(@Req() request: Request, @Body() raw: unknown) {
     limit(`forgot-password:${clientIp(request)}`, EMAIL_SEND_MAX_PER_WINDOW);
     const body = asBody(raw);
+    limit(
+      `forgot-password-email:${normaliseEmail(readString(body, 'email'))}`,
+      EMAIL_SEND_MAX_PER_WINDOW,
+    );
     // PORT-PWD-001：结果对外一致，避免账号枚举
     await requestPasswordReset({
       rawEmail: readString(body, 'email'),
@@ -304,15 +313,18 @@ export class BackofficeAuthController {
   }
 }
 
-/** 配置了服务间密钥（AUTH_TOKEN）就必须提供它；生产环境没有密钥时不开放网页初始化。 */
+/**
+ * 配置了服务间密钥（AUTH_TOKEN）就必须提供它；没有密钥时只在本地开发开放网页初始化，
+ * 部署环境（NODE_ENV=production）须用 AUTH_TOKEN 或 BOOTSTRAP_ADMIN_* 创建首个管理员。
+ */
 function setupNeedsServiceKey(): boolean {
-  return Boolean(process.env.AUTH_TOKEN?.trim()) || appEnvName() === 'PROD';
+  return Boolean(process.env.AUTH_TOKEN?.trim()) || isDeployed();
 }
 
 function setupKeyAccepted(provided: string): boolean {
   const expected = process.env.AUTH_TOKEN?.trim() ?? '';
   if (expected !== '') return sameSecret(provided, expected);
-  return appEnvName() !== 'PROD';
+  return !isDeployed();
 }
 
 function sameSecret(a: string, b: string): boolean {

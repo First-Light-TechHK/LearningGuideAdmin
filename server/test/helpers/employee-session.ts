@@ -31,6 +31,13 @@ export function resetRateLimits(): void {
   globalThis.__lgboRateBuckets?.clear();
 }
 
+/** 只清按 IP 计数的登录窗口，用来模拟攻击者不断换 IP。 */
+export function resetIpBuckets(): void {
+  for (const key of globalThis.__lgboRateBuckets?.keys() ?? []) {
+    if (key.startsWith('sign-in:')) globalThis.__lgboRateBuckets?.delete(key);
+  }
+}
+
 /** 以指定角色登录，返回带会话 Cookie 的 supertest agent。 */
 export async function signInAs(app: INestApplication<App>, role = 'ADMIN') {
   const email = await ensureEmployee(

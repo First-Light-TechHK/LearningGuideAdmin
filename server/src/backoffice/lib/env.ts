@@ -52,6 +52,19 @@ export function configuredAppBaseUrl(): string | null {
   return raw === '' ? null : raw.replace(/\/+$/, '');
 }
 
+/** 部署运行（App Runner 等，NODE_ENV=production）或生产环境。 */
+export function isDeployed(): boolean {
+  return process.env.NODE_ENV === 'production' || appEnvName() === 'PROD';
+}
+
+/**
+ * 明确声明为非生产环境（APP_ENV 已设置且不是 PROD）。
+ * 漏配 APP_ENV 时按生产对待，不放开任何调试便利。
+ */
+export function isDeclaredNonProd(): boolean {
+  return (process.env.APP_ENV?.trim() ?? '') !== '' && appEnvName() !== 'PROD';
+}
+
 /** 本地开发把邮件内容打到日志，便于走通激活流程。 */
 export function isDevRuntime(): boolean {
   return appEnvName() === 'DEV' && process.env.NODE_ENV !== 'production';

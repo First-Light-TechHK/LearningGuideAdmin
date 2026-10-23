@@ -1,16 +1,16 @@
-import { appEnvName, isDevRuntime } from '../../../lib/env';
+import { isDeclaredNonProd, isDevRuntime } from '../../../lib/env';
 
 export type EmailDeliveryResult = 'SENT' | 'FAILED' | 'NOT_CONFIGURED';
 
 /**
  * 非生产环境没有接入邮件服务时，把一次性链接交给发起操作的 Admin 手工转交，
- * 否则 DEV/SIT 上新建的员工永远无法激活。生产环境绝不返回链接。
+ * 否则 DEV/SIT 上新建的员工永远无法激活。生产环境（含漏配 APP_ENV）绝不返回链接。
  */
 export function manualLinkFor(
   delivery: EmailDeliveryResult,
   link: string,
 ): string | null {
-  return delivery !== 'SENT' && appEnvName() !== 'PROD' ? link : null;
+  return delivery !== 'SENT' && isDeclaredNonProd() ? link : null;
 }
 
 export type EmailMessage = {
