@@ -15,8 +15,12 @@ Facts verified against AWS account 851987565851, ap-southeast-1.
 
 ## Routing
 
-- Default behavior → S3 bucket through OAC, `index.html` root object, 403/404 rewritten to `/index.html` for SPA routes.
-- `/api/*` → App Runner, caching disabled, `Managed-AllViewerExceptHostHeader`.
+- Default behavior → S3 bucket through OAC with `index.html` as root object. SPA routes are handled by the
+  CloudFront Function `admin-spa-router` (viewer-request rewrites extension-less paths to `/index.html`).
+  Do not reintroduce distribution-wide custom error responses: they also rewrote `/api/*` 404s into HTML 200,
+  so API clients could not tell a missing endpoint from a page.
+- `/api/*` → App Runner, caching disabled, `Managed-AllViewerExceptHostHeader`; an exact `/api` behavior
+  exists because `/api/*` does not match the bare prefix.
   The Host header must stay the App Runner domain: the service returns 404 for unknown viewer hosts,
   so do not switch this policy back to `Managed-AllViewer`.
 - The SPA calls `baseURL: '/api'`, so it works on any host CloudFront is reached through.
