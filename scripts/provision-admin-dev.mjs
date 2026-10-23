@@ -19,7 +19,7 @@ function aws(service, operation, input = {}) {
 }
 function optional(service, operation, input) {
   try { return aws(service, operation, input); }
-  catch (error) { if (/ResourceNotFound|NoSuchEntity|DBInstanceNotFound/i.test(String(error.stderr))) return null; throw error; }
+  catch (error) { if (/ResourceNotFound|NoSuchEntity|DBInstanceNotFound|DBSubnetGroupNotFound/i.test(String(error.stderr))) return null; throw error; }
 }
 
 const plan = { region, apply, steps: [] };
@@ -34,8 +34,8 @@ if (!apply) {
 }
 
 // 1) DB subnet group
-const groups = aws("rds", "describe-db-subnet-groups", { DBSubnetGroupName: dbId });
-if (!groups.DBSubnetGroups?.length) {
+const groups = optional("rds", "describe-db-subnet-groups", { DBSubnetGroupName: dbId });
+if (!groups?.DBSubnetGroups?.length) {
   aws("rds", "create-db-subnet-group", {
     DBSubnetGroupName: dbId,
     DBSubnetGroupDescription: "Learning Guide admin DEV",
@@ -56,7 +56,7 @@ if (!optional("rds", "describe-db-instances", { DBInstanceIdentifier: dbId })) {
     DBName: "learning_guide_admin_dev",
     MasterUsername: "lg_admin_dev",
     MasterUserPassword: dbPassword,
-    VPCSecurityGroupIds: [process.env.SECURITY_GROUP_ID],
+    VpcSecurityGroupIds: [process.env.SECURITY_GROUP_ID],
     DBSubnetGroupName: dbId,
     PubliclyAccessible: false,
     BackupRetentionPeriod: 1,
