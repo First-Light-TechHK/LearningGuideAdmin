@@ -15,7 +15,8 @@ import { HealthController } from './health/health.controller';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { ApiKeyGuard } from './common/guards/api-key.guard';
+import { BackofficeModule } from './backoffice/nest/backoffice.module';
+import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
 
 @Module({
   imports: [
@@ -39,6 +40,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     AiModule,
     // 全局 Tag 词库（§3.3.3 方案 B、§5.1.6）
     TagsModule,
+    // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）
+    BackofficeModule,
   ],
   controllers: [AppController, HealthController],
   providers: [
@@ -47,8 +50,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     // 全局错误处理（§5.3、§7 Phase 2 第 5 项）
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
-    // 接口鉴权骨架（§7 Phase 3 第 6 项注记：AUTH_ENABLED 默认 false，不拦截）
-    { provide: APP_GUARD, useClass: ApiKeyGuard },
+    // 员工会话 + 菜单级权限；Portal 学员端 /api/user/** 仍走 X-API-Key（ApiKeyGuard 规则）
+    { provide: APP_GUARD, useClass: BackofficeAccessGuard },
   ],
 })
 export class AppModule {}

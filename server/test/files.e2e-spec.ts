@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/common/app-setup';
+import { signInAs } from './helpers/employee-session';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MAX_FILE_SIZE } from '../src/files/files.service';
 import * as XLSX from 'xlsx';
@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
  */
 describe('Files API (e2e)', () => {
   let app: INestApplication<App>;
+  let api: Awaited<ReturnType<typeof signInAs>>;
   let prisma: PrismaService;
   let courseId: string;
 
@@ -24,9 +25,10 @@ describe('Files API (e2e)', () => {
     app = moduleFixture.createNestApplication();
     configureApp(app);
     await app.init();
+    api = await signInAs(app);
     prisma = app.get(PrismaService);
 
-    const course = await request(app.getHttpServer())
+    const course = await api
       .post('/api/courses')
       .send({ title: 'E2E-上传测试课程' })
       .expect(201);
@@ -48,11 +50,14 @@ describe('Files API (e2e)', () => {
 
   it('POST /api/files/convert 上传 md 应返回 title+markdown 且不建页（§5.1.5）', async () => {
     const before = await prisma.page.count({ where: { courseId } });
-    const res = await request(app.getHttpServer())
+    const res = await api
       .post('/api/files/convert')
       .attach(
         'file',
-        Buffer.from('# 极限与连续\n\n$\\lim_{x\\to 0}\\frac{\\sin x}{x}=1$', 'utf8'),
+        Buffer.from(
+          '# 极限与连续\n\n$\\lim_{x\\to 0}\\frac{\\sin x}{x}=1$',
+          'utf8',
+        ),
         { filename: '上传笔记.md', contentType: 'text/markdown' },
       )
       .expect(201);
@@ -75,7 +80,7 @@ describe('Files API (e2e)', () => {
       bookType: 'biff8',
     }) as Buffer;
 
-    const res = await request(app.getHttpServer())
+    const res = await api
       .post('/api/files/convert')
       .attach('file', buffer, { filename: '术语表.xls' })
       .expect(201);
@@ -86,7 +91,7 @@ describe('Files API (e2e)', () => {
   });
 
   it('上传伪装成 .xls 的非表格文件应 400（内容签名校验，2026-10-19）', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('this is not a real xls'), {
         filename: 'fake.xls',
@@ -97,14 +102,14 @@ describe('Files API (e2e)', () => {
   });
 
   it('完整两步流程：convert 预览 → Import 经 §5.1.2 建页并落库', async () => {
-    const conv = await request(app.getHttpServer())
+    const conv = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('# Import 测试\n\n内容', 'utf8'), {
         filename: 'import-doc.md',
         contentType: 'text/markdown',
       })
       .expect(201);
-    const created = await request(app.getHttpServer())
+    const created = await api
       .post(`/api/courses/${courseId}/pages`)
       .send({ title: conv.body.data.title, contentMd: conv.body.data.markdown })
       .expect(201);
@@ -118,23 +123,23 @@ describe('Files API (e2e)', () => {
   });
 
   it('上传白名单外扩展名（.exe）应 400 且提示支持格式（§10.1）', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await api
       .post('/api/files/convert')
-      .attach('file', Buffer.from('MZ\x90\x00binary'), { filename: 'virus.exe' })
+      .attach('file', Buffer.from('MZ\x90\x00binary'), {
+        filename: 'virus.exe',
+      })
       .expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.error.message).toContain('格式暂不支持');
   });
 
   it('未附带 file 字段应 400', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/files/convert')
-      .expect(400);
+    const res = await api.post('/api/files/convert').expect(400);
     expect(res.body.error.message).toContain('未选择文件');
   });
 
   it('超过 15MB 应 400（multer 超限经 413 映射，§10.1）', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await api
       .post('/api/files/convert')
       .attach('file', Buffer.alloc(MAX_FILE_SIZE + 1, 0x41), {
         filename: 'big.md',
@@ -146,7 +151,7 @@ describe('Files API (e2e)', () => {
   });
 
   it('错误信封不泄露堆栈/内部路径（§9）', async () => {
-    const res = await request(app.getHttpServer())
+    const res = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('garbage'), { filename: 'x.pdf' })
       .expect(400);

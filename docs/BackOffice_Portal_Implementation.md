@@ -2,7 +2,8 @@
 
 > 单一事实来源：本文件描述 BackOffice Portal P0 的实现范围、分层与技术决策。
 > 需求来源：`docs/Learning_Guide_BackOffice_Portal_PRD_v1_1_EN_UK.md`（PRD v1.1）。
-> 分支：`feature/backoffice-portal`　目录：`backoffice/`
+> 2026-10-23：原 `feature/backoffice-portal` 分支上的独立 Next.js 应用（`backoffice/`）已并入 Admin 本体，
+> 与 KS（Knowledge）、AI Tutor 成为同一个应用：同一个 NestJS 服务端、同一个 Vite 前端、同一个数据库、同一套登录与权限。
 
 ## 1. 范围
 
@@ -10,45 +11,51 @@
 
 | PRD 编号 | 功能 | 实现位置 | 状态 |
 |---|---|---|---|
-| PORT-P01 | 员工登录（Email Check + 密码 + 会话） | `app/[locale]/sign-in`、`app/api/auth/{email-check,sign-in}` | 已实现 |
-| PORT-P02 | 激活链接设置初始密码 | `app/[locale]/activate`、`app/api/auth/activate` | 已实现 |
-| PORT-P03 | 忘记密码 / 重置密码 | `app/[locale]/{forgot-password,reset-password}`、`app/api/auth/*-password` | 已实现 |
-| PORT-P04 | 全局导航与外壳 | `components/AppShell.tsx`、`app/[locale]/(shell)/**` | 已实现 |
-| PORT-P05 | 员工账号列表（搜索/筛选/分页） | `app/[locale]/(shell)/settings/employee-account` | 已实现 |
-| PORT-P06 | 新建员工 + 发送激活邮件 | `app/api/admin/employees`（POST） | 已实现 |
-| PORT-P07 | 编辑员工 / 重置密码 / 重发激活 | `app/api/admin/employees/[employeeId]/**` | 已实现 |
-| PORT-P08 | 受保护管理员初始化 | `scripts/bootstrap-admin.mjs` + DB 触发器 | 已实现 |
-| 修改密码 | 登录后自查改密并强制重新登录 | `app/api/auth/change-password`、`AppShell` 员工菜单 | 已实现 |
-| RBAC | 六角色 × 8 菜单权限矩阵 | `modules/rbac/permissions.ts` + `modules/rbac/access.ts` | 已实现 |
-| i18n | en-GB / zh-CN 切换 | `messages/*.json`、`lib/i18n/*`、`middleware.ts` | 已实现 |
-| PORT-NAV-006 | 语言偏好跨登录保留 | `lib/localeCookie.ts`、`repositories/preferencesRepository.ts`、`app/api/preferences/locale` | 已实现 |
+| PORT-P01 | 员工登录（Email Check + 密码 + 会话） | `client/src/backoffice/pages/SignInPage.tsx`、`server/src/backoffice/nest/auth.controller.ts` | 已实现 |
+| PORT-P02 | 激活链接设置初始密码 | `pages/ActivatePage.tsx`、`POST /api/auth/activate` | 已实现 |
+| PORT-P03 | 忘记密码 / 重置密码 | `pages/{ForgotPassword,ResetPassword}Page.tsx`、`POST /api/auth/*-password` | 已实现 |
+| PORT-P04 | 全局导航与外壳 | `client/src/backoffice/components/AppShell.tsx`、`ShellRoute.tsx`、`client/src/App.tsx` 路由 | 已实现 |
+| PORT-P05 | 员工账号列表（搜索/筛选/分页） | `pages/EmployeeAccountPage.tsx`、`GET /api/admin/employees` | 已实现 |
+| PORT-P06 | 新建员工 + 发送激活邮件 | `POST /api/admin/employees` | 已实现 |
+| PORT-P07 | 编辑员工 / 重置密码 / 重发激活 | `PATCH /api/admin/employees/:id`、`POST .../{reset-password,resend-activation}` | 已实现 |
+| PORT-P08 | 受保护管理员初始化 | 启动时读 `BOOTSTRAP_ADMIN_EMAIL/PASSWORD`，或 `POST /api/auth/setup`；DB 触发器保护 | 已实现 |
+| 修改密码 | 登录后自查改密并强制重新登录 | `POST /api/auth/change-password`、`AppShell` 员工菜单 | 已实现 |
+| RBAC | 六角色 × 8 菜单权限矩阵 | `server/src/backoffice/modules/rbac/permissions.ts`（前端同名副本只管显示） | 已实现 |
+| 接口守卫 | 所有 `/api/**` 按登录与菜单权限放行 | `server/src/backoffice/nest/{route-access.ts,backoffice-access.guard.ts}` | 已实现 |
+| i18n | en-GB / zh-CN 切换 | `client/src/backoffice/messages/*.json`、路由前缀 `/:locale/...` | 已实现 |
+| PORT-NAV-006 | 语言偏好跨登录保留 | `lgbo_locale` Cookie + `employee_ui_preferences`、`POST /api/preferences/locale` | 已实现 |
 | PORT-ACT-003 | 过期 / 已使用链接区分 | `classifyTokenState` + `TOKEN_EXPIRED` / `TOKEN_ALREADY_USED` | 已实现 |
 
-## 2. 技术栈（与 LearningGuidePortal 对齐）
+Course 菜单目前只有落地页占位，等 Course 的 PRD 和 Figma 到位后再做。
 
-- Next.js 15 App Router，页面与 API 同仓库同部署单元
-- React 19 + TypeScript strict（含 `noUncheckedIndexedAccess`）
-- PostgreSQL，驱动 `pg`，迁移为 `db/migrations/*.sql` 顺序执行
+## 2. 技术栈（并入 Admin 后）
+
+- 服务端：NestJS（`server/`），BackOffice 业务放在 `server/src/backoffice/`，沿用原有分层：controller → services → repositories（`pg` 原生 SQL）
+- 表结构：Prisma Migrate（`server/prisma/migrations/20261023150000_backoffice_employees`），`schema.prisma` 同步声明模型
+- 前端：Vite + React 19（`client/`），`react-router-dom` 管路由；BackOffice 页面在 `client/src/backoffice/`，KS / AI Tutor 页面放进同一个外壳
 - 密码哈希：`node:crypto` scrypt（每账号独立盐），无外部依赖
-- 令牌：随机 32 字节，落库只存 HMAC-SHA256
+- 令牌：随机 32 字节，落库只存 HMAC-SHA256；HMAC 密钥取 `SESSION_SECRET`，未配置时首次启动生成并存入 `backoffice_settings`
 
-### 2.1 与 Admin 仓库既有规则的差异（已裁决项）
+### 2.1 接口权限（服务端唯一权威）
 
-| 冲突 | Admin 旧规则 | 本模块采用 | 理由 |
-|---|---|---|---|
-| 表结构管理 | Prisma Migrate | `db/migrations/*.sql` | 技术栈改为 Next.js + pg，Prisma 规则只适用于既有 `server/` |
-| 前端框架 | Vite + Ant Design（`client/`） | Next.js App Router | 与 Portal 一致；`client/` 不改造 |
-| 业务层 | NestJS 模块 | `modules/*/services` | 同一分层思想，宿主不同 |
+| 路径 | 要求 |
+|---|---|
+| `/api/health`、`/api/auth/{email-check,sign-in,sign-out,activate,forgot-password,reset-password,setup}` | 公开 |
+| `/api/user/**`（Portal 学员端调用） | 服务密钥 `X-API-Key`（原 `ApiKeyGuard`，不变） |
+| `/api/session`、`/api/preferences/**`、`/api/auth/change-password` | 已登录 |
+| `/api/ai/**` | AI Tutor 菜单可见 |
+| `/api/courses`、`/api/pages`、`/api/releases`、`/api/sync`、`/api/files`、`/api/tags` | Knowledge 菜单可见（课程列表与发布读取 AI Tutor 也可用） |
+| `/api/admin/**` 及任何未登记的接口 | 仅 Admin |
 
 ## 3. 分层与边界
 
 ```
-Route Handler → contracts 校验 → 会话/权限 → modules/*/services → repositories → PostgreSQL
+Controller → 输入校验 → 守卫（会话/权限） → modules/*/services → repositories → PostgreSQL
 ```
 
 硬约束：
 
-1. Route Handler **不写业务规则、不写 SQL**，只做解析/校验/取会话/调 service/返回信封
+1. Controller **不写业务规则、不写 SQL**，只做解析/校验/取会话/调 service/返回信封
 2. 业务规则只存在于 `modules/*/services`
 3. SQL 只存在于 `repositories/`
 4. 服务端是唯一权威：菜单可见性、员工账号页可见性、编辑范围均由服务端判定
@@ -104,7 +111,7 @@ Route Handler → contracts 校验 → 会话/权限 → modules/*/services → 
 |---|---|---|
 | 语言切换 | 胶囊显示当前语言短名（`EN` / `中`），点击切到另一种 | `components/LocaleSwitch.tsx`，同一交互 |
 | 登录页 | 深色背景图 + 居中白卡 + 邮箱优先两步 | `components/AuthLayout.tsx` + `[locale]/sign-in` |
-| 认证页背景 | `/portal/auth-library.jpg` | 已复制到 `backoffice/public/portal/auth-library.jpg` |
+| 认证页背景 | `/portal/auth-library.jpg` | 已复制到 `client/public/portal/auth-library.jpg` |
 | 返回链接 / 法律声明 | 「返回 Learning Guide Portal」+ 条款链接 | `AuthLayout` 的 `backHref` / `showLegal` |
 | 顶部栏 | 品牌 + 语言胶囊 + 账号操作 | `AppShell` 的 `.header`（PORT-NAV-001 logo 顺带落地） |
 
@@ -120,7 +127,7 @@ Route Handler → contracts 校验 → 会话/权限 → modules/*/services → 
 | 限制 | 影响 | 处置建议 |
 |---|---|---|
 | 限流为单实例内存实现 | 多实例部署时限流失效 | 上线前换共享存储（Redis/DB） |
-| 邮件投递只有 console adapter | 生产态返回 `NOT_CONFIGURED`，不会伪装成功 | 接入 SES/SMTP 后再验收邮件链路 |
+| 邮件投递只有 console adapter | 部署环境返回 `NOT_CONFIGURED`，不会伪装成功；非 PROD 时页面显示链接供手动转交 | 接入 SES/SMTP 后再验收邮件链路 |
 | PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐后台原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
 | Figma MCP 在本机未注入 agent 工具 | 无法读取设计上下文 | 见 `docs/AI_Collaboration_Log.md` 记录 |
 | 视觉以学员门户为基准，非后台原型稿 | 若后台有专属设计稿仍需再对齐 | 拿到后台设计稿后复核 |
@@ -142,42 +149,34 @@ Route Handler → contracts 校验 → 会话/权限 → modules/*/services → 
 | 发信限流 | 5 分钟内 5 次 / IP | `EMAIL_SEND_MAX_PER_WINDOW` |
 | 列表分页 | 默认 10，上限 100 | `EMPLOYEE_PAGE_SIZE_*` |
 
+## 6.2 部署配置（Admin DEV / SIT / PROD）
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | 首次部署建议 | 库里还没有员工时，启动自动创建受保护管理员；已有员工时忽略 |
+| `AUTH_TOKEN` | 建议 | 同时用于 `/api/user/**` 服务密钥和 `POST /api/auth/setup`（网页创建首个管理员）的校验；PROD 未配置时 setup 一律拒绝 |
+| `SESSION_SECRET` | 可选 | ≥32 字符；不配则首次启动生成并存库，多实例共用 |
+| `BACKOFFICE_APP_URL` | 可选 | 邮件链接的站点地址；不配则取请求来源（仅 localhost 与 `admin*.ilovelearningguide.com`），兜底 `https://admin.ilovelearningguide.com` |
+| `APP_ENV` | 已有 | 非 PROD 且邮件未发出时，接口把激活/重置链接返回给 Admin，页面显示供手动转交 |
+
+注意：开启后所有 KS / AI Tutor 页面和接口都需要登录。部署前先准备好首个管理员（上面两种方式任选一种）。
+
 ## 7. 验收方式
 
 ```bash
-cd backoffice
-npm run typecheck && npm run lint && npm run test:unit && npm run build
+cd server && npx prisma generate && npm run build && npm test && npm run test:e2e
+cd client && npx tsc -p tsconfig.app.json --noEmit && npm run lint && npm run build
 ```
 
-自动化测试覆盖（`tests/unit`，共 44 项）：
+自动化测试：
 
 | 文件 | 覆盖 |
 |---|---|
-| `access.test.ts` | 未登录 401 语义、非 Admin 403 语义、六角色菜单守卫 |
-| `verificationTokens.test.ts` | 令牌五态判定与优先级、错误码映射（PORT-ACT-003） |
-| `employee.test.ts` | 三态派生、登录资格、邮箱规范化、角色清单 |
-| `password.test.ts` | scrypt 往返、错误密码、盐唯一、畸形哈希不抛异常 |
-| `rateLimit.test.ts` | 阈值、`retryAfter`、按 key 隔离 |
-| `envelope.test.ts` | 信封形状、HTTP 状态映射、错误码全覆盖 |
+| `server/src/backoffice/tests/*.spec.ts` | 原独立应用的单元测试（权限矩阵、令牌五态、密码、限流、信封、员工派生状态）+ 接口路径权限表 `route-access.spec.ts` |
+| `server/test/backoffice.e2e-spec.ts` | 未登录 401、健康检查公开、`/api/user` 仍走服务密钥、六角色 × KS/AI/员工接口权限、员工全生命周期（创建→重复 409→未激活 403→激活→重复使用 410→登录→停用即吊销会话）、语言偏好、改密吊销会话、setup 在已有员工时拒绝、受保护管理员不可降级 |
+| `server/test/{ai,files,knowledge,tags}.e2e-spec.ts` | KS 原有 E2E，改为以 Admin 身份登录后调用 |
 
-HTTP 层实测（2026-10-22，本地 dev + 真实 PostgreSQL）：
-
-```
-GET  /                          → 307 跳 /en-GB
-GET  /en-GB/course（未登录）      → 307 跳登录
-GET  /api/admin/employees（未登录）→ 403
-email-check 管理员 / 未知邮箱      → eligible=true / false
-sign-in 错误密码 / 正确密码        → 401 / 200+Set-Cookie
-GET  /api/admin/employees（已登录）→ 200 真实数据
-创建重复邮箱                      → 409
-sign-out → 再访问受保护页          → 307（会话已吊销）
-过期激活令牌                      → 410 TOKEN_EXPIRED
-重复使用激活令牌                   → 410 TOKEN_ALREADY_USED
-偏好存 zh-CN 后重新登录            → 返回 zh-CN
-GET  /api/session                → landing=/en-GB/course
-```
-
-人工验收（浏览器操作由用户执行）：
+人工验收：
 
 1. 无会话访问 `/en-GB/course` → 跳转 sign-in
 2. 非 Admin 直接输入 `/en-GB/settings/employee-account` → 无权提示
@@ -185,4 +184,3 @@ GET  /api/session                → landing=/en-GB/course
 4. 停用某员工后其已有会话立即失效
 5. 点专用激活链接过期/已用 → 看到不同提示文案
 6. 切到中文后退出再登录 → 仍为中文
-
