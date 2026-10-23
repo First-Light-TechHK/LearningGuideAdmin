@@ -159,7 +159,9 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 | `BACKOFFICE_APP_URL` | 可选 | 邮件链接的站点地址；不配则取请求来源（仅 localhost 与 `admin*.ilovelearningguide.com`），兜底 `https://admin.ilovelearningguide.com` |
 | `APP_ENV` | 已有 | 非 PROD 且邮件未发出时，接口把激活/重置链接返回给 Admin，页面显示供手动转交 |
 
-注意：开启后所有 KS / AI Tutor 页面和接口都需要登录。部署前先准备好首个管理员（上面两种方式任选一种）。
+注意：开启后所有 KS / AI Tutor 页面和接口都需要登录。
+
+默认管理员（2026-10-23）：迁移 `20261023170000_backoffice_default_admin` 在库里还没有任何员工时，建受保护管理员 `admin@ilovelearningguide.com`。仓库只存 scrypt 哈希，初始密码另行交付；仓库公开，首次登录后须立即改密码。已有员工的库不受影响；`BOOTSTRAP_ADMIN_*` 与 `/api/auth/setup` 仍可用于其他环境。
 
 ## 7. 验收方式
 
