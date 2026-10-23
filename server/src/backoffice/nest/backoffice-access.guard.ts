@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { ApiKeyGuard } from '../../common/guards/api-key.guard';
 import { decideEmployeeAccountAccess } from '../modules/rbac/access';
-import { canViewMenu } from '../modules/rbac/permissions';
+import { isActionAllowed } from '../modules/rbac/permissions';
 import { resolveSession } from '../modules/user-authentication/services/session';
 import { backofficeError } from './errors';
 import { type BackofficeRequest, sessionToken } from './request-context';
@@ -39,11 +39,18 @@ export class BackofficeAccessGuard implements CanActivate {
       if (decideEmployeeAccountAccess(employee).allowed) return true;
       throw backofficeError('NOT_AUTHORISED', 'Admin only');
     }
-    if (access.menus.some((menu) => canViewMenu(employee.role, menu)))
+    // PRD §1.4：菜单可见之外，还要看该角色在此菜单的级别是否允许这种操作
+    if (
+      access.menus.some((menu) =>
+        isActionAllowed(employee.role, menu, access.action),
+      )
+    )
       return true;
     throw backofficeError(
       'NOT_AUTHORISED',
-      'This menu is not available for your role',
+      access.action === 'VIEW'
+        ? 'This menu is not available for your role'
+        : 'Your role can only view this menu',
     );
   }
 }

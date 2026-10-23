@@ -48,46 +48,93 @@ describe('route access classification', () => {
     });
   });
 
+  const menu = (menus: string[], action: string) => ({
+    kind: 'menu',
+    menus,
+    action,
+  });
+
   it('puts AI configuration behind the AI Tutor menu', () => {
-    assert.deepEqual(routeAccess('PUT', '/api/ai/config'), {
-      kind: 'menu',
-      menus: ['aiTutor'],
-    });
-    assert.deepEqual(routeAccess('POST', '/api/ai/chat-stream'), {
-      kind: 'menu',
-      menus: ['aiTutor'],
-    });
+    assert.deepEqual(
+      routeAccess('PUT', '/api/ai/config'),
+      menu(['aiTutor'], 'EDIT_EXISTING'),
+    );
+    assert.deepEqual(
+      routeAccess('POST', '/api/ai/chat-stream'),
+      menu(['aiTutor'], 'VIEW'),
+    );
+    assert.deepEqual(
+      routeAccess('PUT', '/api/ai/config/c1/online'),
+      menu(['aiTutor'], 'PUBLISH'),
+    );
+    assert.deepEqual(
+      routeAccess('PUT', '/api/ai/config/c1/active-release'),
+      menu(['aiTutor'], 'PUBLISH'),
+    );
+    assert.deepEqual(
+      routeAccess('POST', '/api/ai/config/c1/reset'),
+      menu(['aiTutor'], 'EDIT_EXISTING'),
+    );
   });
 
   it('shares the course and release reads the AI Tutor page needs', () => {
-    const shared = { kind: 'menu', menus: ['knowledge', 'aiTutor'] };
-    assert.deepEqual(routeAccess('GET', '/api/courses'), shared);
-    assert.deepEqual(routeAccess('GET', '/api/courses/c1/releases'), shared);
-    assert.deepEqual(routeAccess('GET', '/api/releases/r1'), shared);
-    assert.deepEqual(routeAccess('POST', '/api/courses/c1/set-live'), shared);
+    const shared = ['knowledge', 'aiTutor'];
+    assert.deepEqual(routeAccess('GET', '/api/courses'), menu(shared, 'VIEW'));
+    assert.deepEqual(
+      routeAccess('GET', '/api/courses/c1/releases'),
+      menu(shared, 'VIEW'),
+    );
+    assert.deepEqual(
+      routeAccess('GET', '/api/releases/r1'),
+      menu(shared, 'VIEW'),
+    );
+    assert.deepEqual(
+      routeAccess('POST', '/api/courses/c1/set-live'),
+      menu(shared, 'PUBLISH'),
+    );
   });
 
-  it('keeps every other knowledge endpoint behind the Knowledge menu', () => {
-    const knowledge = { kind: 'menu', menus: ['knowledge'] };
-    assert.deepEqual(routeAccess('GET', '/api/courses/c1'), knowledge);
-    assert.deepEqual(routeAccess('PUT', '/api/courses/c1'), knowledge);
-    assert.deepEqual(routeAccess('DELETE', '/api/releases/r1'), knowledge);
-    assert.deepEqual(routeAccess('POST', '/api/courses/c1/release'), knowledge);
-    assert.deepEqual(routeAccess('PUT', '/api/pages/p1'), knowledge);
-    assert.deepEqual(routeAccess('POST', '/api/sync/all'), knowledge);
-    assert.deepEqual(routeAccess('POST', '/api/files/convert'), knowledge);
-    assert.deepEqual(routeAccess('GET', '/api/tags'), knowledge);
+  it('keeps every other knowledge endpoint behind the Knowledge menu with its action', () => {
+    const k = ['knowledge'];
+    const cases: [string, string, string][] = [
+      ['GET', '/api/courses/c1', 'VIEW'],
+      ['POST', '/api/courses', 'CREATE'],
+      ['PUT', '/api/courses/c1', 'EDIT_EXISTING'],
+      ['DELETE', '/api/courses/c1', 'DELETE'],
+      ['POST', '/api/courses/c1/release', 'PUBLISH'],
+      ['POST', '/api/courses/c1/activate-release', 'PUBLISH'],
+      ['DELETE', '/api/releases/r1', 'DELETE'],
+      ['POST', '/api/courses/c1/pages', 'CREATE'],
+      ['PUT', '/api/courses/c1/pages/reorder', 'EDIT_EXISTING'],
+      ['PUT', '/api/pages/p1', 'EDIT_EXISTING'],
+      ['DELETE', '/api/pages/p1', 'DELETE'],
+      ['GET', '/api/sync/external-courses', 'VIEW'],
+      ['POST', '/api/sync/structure', 'CREATE'],
+      ['POST', '/api/sync/all', 'CREATE'],
+      ['POST', '/api/files/convert', 'EDIT_EXISTING'],
+      ['GET', '/api/tags', 'VIEW'],
+      ['POST', '/api/tags', 'CREATE'],
+      ['PUT', '/api/tags/t1', 'EDIT_EXISTING'],
+      ['DELETE', '/api/tags/t1', 'DELETE'],
+    ];
+    for (const [method, path, action] of cases) {
+      assert.deepEqual(
+        routeAccess(method, path),
+        menu(k, action),
+        `${method} ${path}`,
+      );
+    }
   });
 
   it('classifies upper-case paths like Express routes them (case-insensitive)', () => {
-    assert.deepEqual(routeAccess('GET', '/API/Courses'), {
-      kind: 'menu',
-      menus: ['knowledge', 'aiTutor'],
-    });
-    assert.deepEqual(routeAccess('POST', '/Api/Sync/all'), {
-      kind: 'menu',
-      menus: ['knowledge'],
-    });
+    assert.deepEqual(
+      routeAccess('GET', '/API/Courses'),
+      menu(['knowledge', 'aiTutor'], 'VIEW'),
+    );
+    assert.deepEqual(
+      routeAccess('POST', '/Api/Sync/all'),
+      menu(['knowledge'], 'CREATE'),
+    );
     assert.deepEqual(routeAccess('GET', '/API/USER/ai-tutors'), {
       kind: 'service',
     });

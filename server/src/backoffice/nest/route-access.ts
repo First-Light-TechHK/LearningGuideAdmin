@@ -1,8 +1,8 @@
-import type { MenuKey } from '../modules/rbac/permissions';
+import type { ActionKind, MenuKey } from '../modules/rbac/permissions';
 
 /**
- * 每个 /api 请求归哪一类、要哪个菜单：BackOffice 只做菜单级权限，
- * 菜单可见就能用该菜单背后的全部接口，不可见就一律拒绝。
+ * 每个 /api 请求归哪一类、要哪个菜单、算哪种操作。
+ * PRD §1.4：View 只读；Edit = View + 修改既有记录；Full = 新建、删除、发布等全部操作。
  */
 export type RouteAccess =
   | { kind: 'public' }
@@ -12,8 +12,8 @@ export type RouteAccess =
   | { kind: 'signedIn' }
   /** 员工账号管理：PRD §3.3 仅 Admin。 */
   | { kind: 'employeeAdmin' }
-  /** 任一菜单可见即可。 */
-  | { kind: 'menu'; menus: MenuKey[] };
+  /** 任一菜单在该角色下允许这种操作即可。 */
+  | { kind: 'menu'; menus: MenuKey[]; action: ActionKind };
 
 const PUBLIC_AUTH = new Set([
   'email-check',
@@ -38,6 +38,35 @@ function sharedWithAiTutor(method: string, segments: string[]): boolean {
   return method === 'GET' && first === 'releases' && segments.length === 2;
 }
 
+/**
+ * Knowledge / AI Tutor 接口的操作类型。GET 一律是查看；
+ * 未在此登记的写接口按 CREATE 处理（只有 Full 可用），避免新接口默认放开。
+ */
+function actionFor(method: string, segments: string[]): ActionKind {
+  if (method === 'GET' || method === 'HEAD') return 'VIEW';
+  const [first, second, third] = segments;
+  if (first === 'ai') {
+    // 后台测试对话不改任何数据，只读角色也可试用
+    if (second === 'chat-stream') return 'VIEW';
+    if (second === 'config') {
+      if (method === 'PUT' && segments.length === 2) return 'EDIT_EXISTING';
+      if (method === 'POST' && segments[3] === 'reset') return 'EDIT_EXISTING';
+      // 切换线上版本 / 上下线 = 发布
+      return 'PUBLISH';
+    }
+    return 'CREATE';
+  }
+  if (first === 'files' && second === 'convert') return 'EDIT_EXISTING';
+  if (first === 'sync') return 'CREATE';
+  if (first === 'courses' && segments.length === 3) {
+    if (['release', 'activate-release', 'set-live'].includes(third ?? ''))
+      return 'PUBLISH';
+  }
+  if (method === 'DELETE') return 'DELETE';
+  if (method === 'PUT' || method === 'PATCH') return 'EDIT_EXISTING';
+  return 'CREATE';
+}
+
 export function routeAccess(method: string, path: string): RouteAccess {
   // Express 路由默认不区分大小写（/API/courses 也会命中 /api/courses），
   // 这里同样按小写判定，否则大写路径会被当成非 /api 放行
@@ -58,13 +87,14 @@ export function routeAccess(method: string, path: string): RouteAccess {
   if (first === 'session' || first === 'preferences')
     return { kind: 'signedIn' };
   if (first === 'admin') return { kind: 'employeeAdmin' };
-  if (first === 'ai') return { kind: 'menu', menus: ['aiTutor'] };
+  const action = actionFor(verb, segments);
+  if (first === 'ai') return { kind: 'menu', menus: ['aiTutor'], action };
   if (sharedWithAiTutor(verb, segments))
-    return { kind: 'menu', menus: ['knowledge', 'aiTutor'] };
+    return { kind: 'menu', menus: ['knowledge', 'aiTutor'], action };
   if (
     ['courses', 'pages', 'releases', 'sync', 'files', 'tags'].includes(first)
   ) {
-    return { kind: 'menu', menus: ['knowledge'] };
+    return { kind: 'menu', menus: ['knowledge'], action };
   }
   // 新接口必须在这里登记菜单；未登记的只给 Admin，避免默认放开。
   return { kind: 'employeeAdmin' };

@@ -121,6 +121,44 @@ describe('BackOffice access (e2e)', () => {
     },
   );
 
+  // PRD §1.4：View 只读，写操作要 Edit/Full。守卫先于输入校验执行：
+  // 放行的角色拿到 400/404（请求体或数据不对），被拦的角色拿到 403
+  const writeMatrix: [string, boolean][] = [
+    ['ADMIN', true],
+    ['COURSE_CREATOR', false],
+    ['GRAPHIC_DESIGNER', false],
+    ['FINANCE', false],
+    ['OPERATION_ADMIN', false],
+    ['OPERATION_AI', true],
+  ];
+
+  it.each(writeMatrix)(
+    '%s may change Knowledge and AI Tutor data only with Full access (allowed=%s)',
+    async (role, allowed) => {
+      const agent = await signInAs(app, role);
+      const denied = (res: request.Response) => res.status === 403;
+      expect(denied(await agent.post('/api/tags').send({}))).toBe(!allowed);
+      expect(
+        denied(
+          await agent.delete(
+            '/api/courses/00000000-0000-0000-0000-000000000000',
+          ),
+        ),
+      ).toBe(!allowed);
+      expect(denied(await agent.put('/api/ai/config').send({}))).toBe(!allowed);
+      expect(
+        denied(
+          await agent.put('/api/ai/config/no-such-course/online').send({}),
+        ),
+      ).toBe(!allowed);
+      const forbidden = await agent.post('/api/sync/all').send({});
+      if (!allowed) {
+        expect(forbidden.status).toBe(403);
+        expect(forbidden.body.error.code).toBe('NOT_AUTHORISED');
+      }
+    },
+  );
+
   it('runs the full employee lifecycle: create, activate, sign in, deactivate', async () => {
     const admin = await signInAs(app, 'ADMIN');
     const previous = process.env.APP_ENV;
