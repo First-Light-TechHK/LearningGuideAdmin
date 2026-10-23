@@ -1,0 +1,32 @@
+{
+  "name": "backoffice-portal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3200",
+    "build": "next build",
+    "start": "next start -p 3200",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
+    "db:migrate": "node scripts/run-migrations.mjs",
+    "bootstrap:admin": "node scripts/bootstrap-admin.mjs"
+  },
+  "dependencies": {
+    "next": "15.5.27",
+    "pg": "^8.22.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.20.3",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "eslint": "^9.16.0",
+    "eslint-config-next": "^15.0.4",
+    "tsx": "^4.23.13",
+    "typescript": "^5.7.2"
+  }
+}
