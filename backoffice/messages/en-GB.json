@@ -179,11 +179,19 @@
     "hintEmailLocked": "A verified email address cannot be changed.",
     "bootstrapLocked": "The protected administrator account cannot be deactivated, demoted or deleted.",
     "results": {
-      "created": "Employee created. An activation email has been queued.",
+      "created": "Employee created. Activation email delivery result: {result}.",
       "updated": "Employee updated.",
+      "emailChanged": "Email updated. A new activation email delivery result: {result}.",
       "resetSent": "Password reset email delivery result: {result}.",
-      "resent": "A new activation email has been sent. The previous link is no longer valid."
+      "resent": "New activation email delivery result: {result}. The previous link is no longer valid."
     }
+  },
+  "delivery": {
+    "SENT": "sent",
+    "CONSOLE": "printed to the server log (development only)",
+    "FAILED": "failed to send — please retry",
+    "NOT_CONFIGURED": "not sent — email service is not configured",
+    "UNKNOWN": "unknown"
   },
   "roles": {
     "ADMIN": "Admin",

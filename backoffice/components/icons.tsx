@@ -1,6 +1,8 @@
 /**
- * 统一图标集：全部基于 16px 网格、currentColor 描边，
- * 避免混用 emoji 造成不同平台字形不一致（设计稿为线性图标）。
+ * 图标集。
+ * 侧栏 8 个菜单、折叠按钮、品牌帽、登录页输入框图标、弹窗关闭图标
+ * 全部直接取自 Figma 674:1186 的矢量节点（20/24/16 网格，fill 或 stroke 均为原始几何），
+ * 其余小控件（搜索、分页箭头、加号等）沿用 16px 网格描边图标。
  */
 
 type IconProps = {
@@ -8,14 +10,14 @@ type IconProps = {
   className?: string;
 };
 
-function svgProps(size: number, className?: string) {
+function strokeProps(size: number, className?: string, viewBox = "0 0 16 16", strokeWidth = 1.5) {
   return {
     width: size,
     height: size,
-    viewBox: "0 0 16 16",
+    viewBox,
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.5,
+    strokeWidth,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     className,
@@ -23,151 +25,189 @@ function svgProps(size: number, className?: string) {
   };
 }
 
-export function CourseIcon({ size = 16, className }: IconProps) {
+function fillProps(size: number, className?: string, viewBox = "0 0 20 20") {
+  return {
+    width: size,
+    height: size,
+    viewBox,
+    fill: "currentColor",
+    className,
+    "aria-hidden": true,
+  };
+}
+
+/* ------------------------- 侧栏菜单（Figma 761:236 原始矢量） ------------------------ */
+
+/** Course：book-line */
+export function CourseIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-      <path d="M2.5 6.5h11" />
+    <svg {...fillProps(size, className)}>
+      <path d="M2.5 15.4167V4.16667C2.5 2.78596 3.61929 1.66667 5 1.66667H16.6667C17.1269 1.66667 17.5 2.03977 17.5 2.5V17.5C17.5 17.9602 17.1269 18.3333 16.6667 18.3333H5.41667C3.80583 18.3333 2.5 17.0275 2.5 15.4167ZM15.8333 16.6667V14.1667H5.41667C4.72631 14.1667 4.16667 14.7263 4.16667 15.4167C4.16667 16.107 4.72631 16.6667 5.41667 16.6667H15.8333ZM4.16667 12.7807C4.54552 12.6007 4.96933 12.5 5.41667 12.5H15.8333V3.33333H5C4.53977 3.33333 4.16667 3.70643 4.16667 4.16667V12.7807Z" />
     </svg>
   );
 }
 
-export function KnowledgeIcon({ size = 16, className }: IconProps) {
+/** Knowledge：stack-line */
+export function KnowledgeIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <path d="M2.5 4.2 8 2.5l5.5 1.7-5.5 1.7z" />
-      <path d="M2.5 8 8 9.7 13.5 8" />
-      <path d="M2.5 11.3 8 13l5.5-1.7" />
+    <svg {...fillProps(size, className)}>
+      <path d="M16.7361 12.6666L17.7378 13.2677C17.9351 13.3861 17.9991 13.642 17.8808 13.8393C17.8455 13.898 17.7964 13.9471 17.7378 13.9823L10.4287 18.3677C10.1647 18.5261 9.83508 18.5261 9.57117 18.3677L2.26209 13.9823C2.06477 13.8638 2.00078 13.6079 2.11918 13.4106C2.15436 13.3519 2.20344 13.3028 2.26209 13.2677L3.26383 12.6666L9.99992 16.7083L16.7361 12.6666ZM16.7361 8.74992L17.7378 9.351C17.9351 9.46942 17.9991 9.72534 17.8808 9.92267C17.8455 9.98134 17.7964 10.0304 17.7378 10.0656L9.99992 14.7083L2.26209 10.0656C2.06477 9.94717 2.00078 9.69125 2.11918 9.49392C2.15436 9.43525 2.20344 9.38617 2.26209 9.351L3.26383 8.74992L9.99992 12.7916L16.7361 8.74992ZM10.4287 1.09054L17.7378 5.476C17.9351 5.59439 17.9991 5.85034 17.8808 6.04766C17.8455 6.10631 17.7964 6.15539 17.7378 6.19058L9.99992 10.8333L2.26209 6.19058C2.06477 6.07219 2.00078 5.81624 2.11918 5.61892C2.15436 5.56027 2.20344 5.51119 2.26209 5.476L9.57117 1.09054C9.83508 0.932203 10.1647 0.932203 10.4287 1.09054ZM9.99992 2.77694L4.90602 5.83329L9.99992 8.88967L15.0938 5.83329L9.99992 2.77694Z" />
     </svg>
   );
 }
 
-export function AiTutorIcon({ size = 16, className }: IconProps) {
+/** AI Tutor：loader-fill */
+export function AiTutorIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <path d="M8 2v2.2M8 11.8V14M2 8h2.2M11.8 8H14" />
-      <path d="m4.1 4.1 1.5 1.5M10.4 10.4l1.5 1.5M11.9 4.1l-1.5 1.5M5.6 10.4l-1.5 1.5" />
-      <circle cx="8" cy="8" r="1.6" />
+    <svg {...fillProps(size, className)}>
+      <path d="M9.99958 1.66667C10.4598 1.66667 10.8329 2.03977 10.8329 2.50001V5.00001C10.8329 5.46024 10.4598 5.83334 9.99958 5.83334C9.53933 5.83334 9.16625 5.46024 9.16625 5.00001V2.50001C9.16625 2.03977 9.53933 1.66667 9.99958 1.66667ZM9.99958 14.1667C10.4598 14.1667 10.8329 14.5398 10.8329 15V17.5C10.8329 17.9603 10.4598 18.3333 9.99958 18.3333C9.53933 18.3333 9.16625 17.9603 9.16625 17.5V15C9.16625 14.5398 9.53933 14.1667 9.99958 14.1667ZM17.2164 5.83334C17.4466 6.23191 17.31 6.74157 16.9114 6.97169L14.7463 8.22169C14.3477 8.45184 13.8381 8.31525 13.608 7.91667C13.3779 7.5181 13.5144 7.00844 13.913 6.77832L16.0781 5.52831C16.4767 5.2982 16.9863 5.43476 17.2164 5.83334ZM6.39112 12.0833C6.62124 12.4819 6.48467 12.9916 6.0861 13.2217L3.92104 14.4717C3.52246 14.7018 3.0128 14.5653 2.78268 14.1667C2.55257 13.7681 2.68912 13.2584 3.08771 13.0283L5.25277 11.7783C5.65134 11.5482 6.161 11.6848 6.39112 12.0833ZM17.2164 14.1667C16.9863 14.5653 16.4767 14.7018 16.0781 14.4717L13.913 13.2217C13.5144 12.9916 13.3779 12.4819 13.608 12.0833C13.8381 11.6848 14.3477 11.5482 14.7463 11.7783L16.9114 13.0283C17.31 13.2584 17.4466 13.7681 17.2164 14.1667ZM6.39112 7.91667C6.161 8.31525 5.65134 8.45184 5.25277 8.22169L3.08771 6.97169C2.68912 6.74157 2.55257 6.23191 2.78268 5.83334C3.0128 5.43476 3.52246 5.2982 3.92104 5.52831L6.0861 6.77832C6.48467 7.00844 6.62124 7.5181 6.39112 7.91667Z" />
     </svg>
   );
 }
 
-export function OrderIcon({ size = 16, className }: IconProps) {
+/** Order：booklet-line */
+export function OrderIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      {/* 展开的书 */}
-      <path d="M8 4.3C6.7 3.3 4.7 2.9 2.7 2.9v9.3c2 0 4 .4 5.3 1.4 1.3-1 3.3-1.4 5.3-1.4V2.9c-2 0-4 .4-5.3 1.4z" />
-      <path d="M8 4.3v9.3" />
+    <svg {...fillProps(size, className)}>
+      <path d="M16.6707 1.66667C17.589 1.66667 18.3333 2.41518 18.3333 3.32567V16.6743C18.3333 17.5906 17.5895 18.3333 16.6707 18.3333H3.33333V15H1.66667V13.3333H3.33333V10.8333H1.66667V9.16667H3.33333V6.66667H1.66667V5.00001H3.33333V1.66667H16.6707ZM6.66667 3.33334H5V16.6667H6.66667V3.33334ZM16.6667 3.33334H8.33333V16.6667H16.6667V3.33334Z" />
     </svg>
   );
 }
 
-export function ReportingIcon({ size = 16, className }: IconProps) {
+/** Reporting：dashboard-2-line */
+export function ReportingIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      {/* 带箭头的时钟（历史/报表） */}
-      <path d="M13.4 8a5.4 5.4 0 1 1-1.9-4.1" />
-      <path d="M13.4 2.2v2.2h-2.2" />
-      <path d="M8 5.4V8l1.9 1.2" />
+    <svg {...fillProps(size, className)}>
+      <path d="M10 1.66667C14.6023 1.66667 18.3333 5.39763 18.3333 10C18.3333 14.6023 14.6023 18.3333 10 18.3333C5.39762 18.3333 1.66667 14.6023 1.66667 10C1.66667 5.39763 5.39762 1.66667 10 1.66667ZM10 3.33334C6.3181 3.33334 3.33333 6.3181 3.33333 10C3.33333 13.6819 6.3181 16.6667 10 16.6667C13.6819 16.6667 16.6667 13.6819 16.6667 10C16.6667 6.3181 13.6819 3.33334 10 3.33334ZM10 4.16667C10.8483 4.16667 11.6543 4.34776 12.3816 4.67339L11.0795 5.97454C10.7352 5.88244 10.3733 5.83334 10 5.83334C7.69882 5.83334 5.83333 7.69882 5.83333 10C5.83333 11.1506 6.2997 12.1923 7.05372 12.9463L5.87521 14.1248L5.74537 13.9908C4.76631 12.9473 4.16667 11.5438 4.16667 10C4.16667 6.77835 6.77834 4.16667 10 4.16667ZM15.327 7.61927C15.6524 8.34625 15.8333 9.152 15.8333 10C15.8333 11.6108 15.1804 13.0692 14.1247 14.1248L12.9462 12.9463C13.7003 12.1923 14.1667 11.1506 14.1667 10C14.1667 9.62667 14.1176 9.26484 14.0255 8.92051L15.327 7.61927ZM13.5355 5.28596L14.7141 6.46447L11.6104 9.56917C11.6471 9.70659 11.6667 9.851 11.6667 10C11.6667 10.9205 10.9205 11.6667 10 11.6667C9.0795 11.6667 8.33333 10.9205 8.33333 10C8.33333 9.0795 9.0795 8.33334 10 8.33334C10.149 8.33334 10.2934 8.35292 10.4308 8.38959L13.5355 5.28596Z" />
     </svg>
   );
 }
 
-export function StudentIcon({ size = 16, className }: IconProps) {
+/** Student：user-settings-line */
+export function StudentIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <circle cx="6.2" cy="5.4" r="2.1" />
-      <path d="M2.4 13c0-2 1.7-3.5 3.8-3.5 1 0 1.9.4 2.6 1" />
-      <path d="M12.1 5.3a2 2 0 0 1 0 3.9" />
-      <path d="M11.6 10.6v3M10.1 12.1h3" />
+    <svg {...fillProps(size, className)}>
+      <path d="M10 11.6667V13.3333C7.23858 13.3333 5 15.5719 5 18.3333H3.33333C3.33333 14.6514 6.3181 11.6667 10 11.6667ZM10 10.8333C7.2375 10.8333 5 8.59584 5 5.83334C5 3.07084 7.2375 0.833344 10 0.833344C12.7625 0.833344 15 3.07084 15 5.83334C15 8.59584 12.7625 10.8333 10 10.8333ZM10 9.16668C11.8417 9.16668 13.3333 7.67501 13.3333 5.83334C13.3333 3.99168 11.8417 2.50001 10 2.50001C8.15833 2.50001 6.66667 3.99168 6.66667 5.83334C6.66667 7.67501 8.15833 9.16668 10 9.16668ZM12.1622 15.6763C12.1106 15.4593 12.0833 15.2328 12.0833 15C12.0833 14.7673 12.1106 14.5408 12.1621 14.3238L11.3357 13.8468L12.1691 12.4033L12.996 12.8808C13.3236 12.5709 13.723 12.3362 14.1667 12.2041V11.25H15.8333V12.2041C16.277 12.3362 16.6763 12.5709 17.0039 12.8808L17.8309 12.4033L18.6643 13.8467L17.8379 14.3238C17.8894 14.5408 17.9167 14.7673 17.9167 15C17.9167 15.2328 17.8894 15.4592 17.8379 15.6762L18.6643 16.1533L17.831 17.5967L17.004 17.1192C16.6764 17.4291 16.2771 17.6638 15.8334 17.7958V18.75H14.1667V17.7959C13.7231 17.6639 13.3237 17.4292 12.9961 17.1193L12.1692 17.5968L11.3357 16.1533L12.1622 15.6763ZM15 16.25C15.6903 16.25 16.25 15.6903 16.25 15C16.25 14.3097 15.6903 13.75 15 13.75C14.3097 13.75 13.75 14.3097 13.75 15C13.75 15.6903 14.3097 16.25 15 16.25Z" />
     </svg>
   );
 }
 
-export function HelpDeskIcon({ size = 16, className }: IconProps) {
+/** HelpDesk：book-read-line */
+export function HelpDeskIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <rect x="2.2" y="2.8" width="11.6" height="8.6" rx="1.8" />
-      <path d="M6.6 6.2 9.4 8l-2.8 1.8z" />
-      <path d="M5.6 14h4.8" />
+    <svg {...fillProps(size, className)}>
+      <path d="M1.66667 3.32783C1.66667 2.87063 2.04609 2.5 2.49317 2.5H17.5068C17.9633 2.5 18.3333 2.87079 18.3333 3.32783V16.6722C18.3333 17.1293 17.9539 17.5 17.5068 17.5H2.49317C2.03671 17.5 1.66667 17.1292 1.66667 16.6722V3.32783ZM9.16667 4.16667H3.33333V15.8333H9.16667V4.16667ZM10.8333 4.16667V15.8333H16.6667V4.16667H10.8333ZM11.6667 5.83333H15.8333V7.5H11.6667V5.83333ZM11.6667 8.33333H15.8333V10H11.6667V8.33333Z" />
     </svg>
   );
 }
 
-export function SettingsIcon({ size = 16, className }: IconProps) {
+/** Settings：settings-2-line */
+export function SettingsIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <circle cx="8" cy="8" r="2.1" />
-      <path d="M12.7 9.6a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 1 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9v.2a1.2 1.2 0 1 1-2.4 0v-.1a1 1 0 0 0-.7-.9 1 1 0 0 0-1.1.2l-.1.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H2.7a1.2 1.2 0 1 1 0-2.4h.1a1 1 0 0 0 .9-.7 1 1 0 0 0-.2-1.1l-.1-.1a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V2.7a1.2 1.2 0 1 1 2.4 0v.1a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1.2 1.2 0 1 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6h.2a1.2 1.2 0 1 1 0 2.4h-.1a1 1 0 0 0-.9.6z" />
+    <svg {...fillProps(size, className)}>
+      <path d="M7.23864 3.33339L9.41083 1.16123C9.73625 0.835784 10.2639 0.835784 10.5893 1.16123L12.7615 3.33339H15.8334C16.2937 3.33339 16.6668 3.70649 16.6668 4.16673V7.23863L18.8389 9.41083C19.1643 9.73624 19.1643 10.2639 18.8389 10.5893L16.6668 12.7615V15.8334C16.6668 16.2937 16.2937 16.6667 15.8334 16.6667H12.7615L10.5893 18.8389C10.2639 19.1643 9.73625 19.1643 9.41083 18.8389L7.23864 16.6667H4.16673C3.7065 16.6667 3.3334 16.2937 3.3334 15.8334V12.7615L1.16123 10.5893C0.835792 10.2639 0.835792 9.73624 1.16123 9.41083L3.3334 7.23863V4.16673C3.3334 3.70649 3.7065 3.33339 4.16673 3.33339H7.23864ZM5.00007 5.00006V7.92899L2.929 10.0001L5.00007 12.0712V15.0001H7.929L10.0001 17.0712L12.0712 15.0001H15.0001V12.0712L17.0712 10.0001L15.0001 7.92899V5.00006H12.0712L10.0001 2.92899L7.929 5.00006H5.00007ZM10.0001 13.3334C8.15912 13.3334 6.66673 11.841 6.66673 10.0001C6.66673 8.15911 8.15912 6.66673 10.0001 6.66673C11.841 6.66673 13.3334 8.15911 13.3334 10.0001C13.3334 11.841 11.841 13.3334 10.0001 13.3334ZM10.0001 11.6667C10.9206 11.6667 11.6668 10.9206 11.6668 10.0001C11.6668 9.07958 10.9206 8.33341 10.0001 8.33341C9.07958 8.33341 8.33342 9.07958 8.33342 10.0001C8.33342 10.9206 9.07958 11.6667 10.0001 11.6667Z" />
     </svg>
   );
 }
 
-export function KeyIcon({ size = 16, className }: IconProps) {
+/** 侧栏折叠：Collapse Sidebar / Left */
+export function PanelToggleIcon({ size = 24, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <circle cx="6.2" cy="9.8" r="2.6" />
-      <path d="m8.2 7.8 4.6-4.6M11 5l1.4 1.4M9.6 6.4l1.4 1.4" />
+    <svg {...strokeProps(size, className, "0 0 24 24", 1.6)}>
+      <path d="M5 4H19C20.1046 4 21 4.89543 21 6V18C21 19.1046 20.1046 20 19 20H5C3.89543 20 3 19.1046 3 18V6C3 4.89543 3.89543 4 5 4Z" />
+      <path d="M9 4V20M16 15L13 12L16 9M13 12H18" />
     </svg>
   );
 }
 
-export function SignOutIcon({ size = 16, className }: IconProps) {
+/* ------------------------------- 品牌 / 登录页 ------------------------------- */
+
+/** 顶栏 logo 内的学士帽（24 网格，白色描边） */
+export function GraduationCapIcon({ size = 24, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <path d="M6.4 13H4.2A1.4 1.4 0 0 1 2.8 11.6V4.4A1.4 1.4 0 0 1 4.2 3h2.2" />
-      <path d="M10.4 11 13.4 8l-3-3M13 8H6.6" />
+    <svg {...strokeProps(size, className, "0 0 24 24", 2)}>
+      <path d="M21.42 10.922C21.599 10.843 21.7509 10.7133 21.8569 10.5488C21.9629 10.3843 22.0183 10.1924 22.0163 9.99674C22.0143 9.80108 21.9549 9.61032 21.8456 9.44808C21.7362 9.28584 21.5816 9.15925 21.401 9.084L12.83 5.18C12.5694 5.06115 12.2864 4.99964 12 4.99964C11.7136 4.99964 11.4306 5.06115 11.17 5.18L2.6 9.08C2.42197 9.15797 2.27052 9.28613 2.16417 9.44881C2.05782 9.61149 2.00118 9.80164 2.00118 9.996C2.00118 10.1904 2.05782 10.3805 2.16417 10.5432C2.27052 10.7059 2.42197 10.834 2.6 10.912L11.17 14.82C11.4306 14.9388 11.7136 15.0004 12 15.0004C12.2864 15.0004 12.5694 14.9388 12.83 14.82L21.42 10.922Z" />
+      <path d="M22 10V16" />
+      <path d="M6 12.5V16C6 16.7956 6.63214 17.5587 7.75736 18.1213C8.88258 18.6839 10.4087 19 12 19C13.5913 19 15.1174 18.6839 16.2426 18.1213C17.3679 17.5587 18 16.7956 18 16V12.5" />
     </svg>
   );
 }
+
+export function BrandMark({ size = 42 }: { size?: number }) {
+  return (
+    <span className="brandMarkSvg" aria-hidden="true" style={{ width: size, height: size }}>
+      <GraduationCapIcon size={size * 0.57} className="brandMarkIcon" />
+    </span>
+  );
+}
+
+/** 登录页顶栏：设计稿为 ◇ 描边菱形 + 品牌名 */
+export function DiamondIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg {...strokeProps(size, className, "0 0 16 16", 1.6)}>
+      <path d="M8 1.9 14.1 8 8 14.1 1.9 8z" />
+    </svg>
+  );
+}
+
+/* -------------------------------- 登录页输入框 ------------------------------- */
 
 export function MailIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <rect x="2.2" y="3.6" width="11.6" height="8.8" rx="1.6" />
-      <path d="m2.8 4.8 4.5 3.2a1.3 1.3 0 0 0 1.4 0l4.5-3.2" />
+    <svg {...strokeProps(size, className, "0 0 16 16", 2)}>
+      <path d="M14.6672 4.66698L8.67275 8.48459C8.46933 8.60272 8.23827 8.66495 8.00303 8.66495C7.76778 8.66495 7.53673 8.60272 7.3333 8.48459L1.33282 4.66698M14.6672 4.66698V4.00038C14.6672 3.26407 14.0702 2.66718 13.3338 2.66718H2.66626C1.92983 2.66718 1.33282 3.26407 1.33282 4.00038V4.66698M14.6672 4.66698V11.9996C14.6672 12.7359 14.0702 13.3328 13.3338 13.3328H2.66626C1.92983 13.3328 1.33282 12.7359 1.33282 11.9996V4.66698" />
     </svg>
   );
 }
 
 export function LockIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <rect x="3.4" y="6.8" width="9.2" height="6.6" rx="1.6" />
-      <path d="M5.6 6.8V5.2a2.4 2.4 0 0 1 4.8 0v1.6" />
+    <svg {...strokeProps(size, className, "0 0 16 16", 2)}>
+      <path d="M4.66667 7.3333V4.66642C4.66667 3.7823 5.01786 2.93438 5.64298 2.30921C6.2681 1.68404 7.11595 1.33282 8 1.33282C8.88406 1.33282 9.7319 1.68404 10.357 2.30921C10.9821 2.93438 11.3333 3.7823 11.3333 4.66642V7.3333M4.66667 7.3333H3.33333C2.59695 7.3333 2 7.93031 2 8.66675V13.3338C2 14.0702 2.59695 14.6672 3.33333 14.6672H12.6667C13.403 14.6672 14 14.0702 14 13.3338V8.66675C14 7.93031 13.403 7.3333 12.6667 7.3333H11.3333M4.66667 7.3333H11.3333" />
     </svg>
   );
 }
 
 export function EyeIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <path d="M1.8 8s2.3-3.6 6.2-3.6S14.2 8 14.2 8s-2.3 3.6-6.2 3.6S1.8 8 1.8 8z" />
-      <circle cx="8" cy="8" r="1.7" />
+    <svg {...strokeProps(size, className, "0 0 16 16", 2)}>
+      <path d="M1.3745 8.23267C1.31893 8.08299 1.31893 7.91834 1.3745 7.76867C1.91563 6.45657 2.83417 5.33469 4.01368 4.54527C5.19318 3.75584 6.58052 3.33441 7.99983 3.33441C9.41913 3.33441 10.8065 3.75584 11.986 4.54527C13.1655 5.33469 14.084 6.45657 14.6252 7.76867C14.6807 7.91834 14.6807 8.08299 14.6252 8.23267C14.084 9.54476 13.1655 10.6666 11.986 11.4561C10.8065 12.2455 9.41913 12.6669 7.99983 12.6669C6.58052 12.6669 5.19318 12.2455 4.01368 11.4561C2.83417 10.6666 1.91563 9.54476 1.3745 8.23267ZM10.0001 8.00043C10.0001 9.105 9.10471 10.0004 8.00014 10.0004C6.89557 10.0004 6.00014 9.105 6.00014 8.00043C6.00014 6.89586 6.89557 6.00043 8.00014 6.00043C9.10471 6.00043 10.0001 6.89586 10.0001 8.00043Z" />
     </svg>
   );
 }
 
 export function EyeOffIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className, "0 0 16 16", 1.8)}>
       <path d="M6.4 4.6A6.6 6.6 0 0 1 8 4.4c3.9 0 6.2 3.6 6.2 3.6a11 11 0 0 1-1.9 2.3M4.3 5.9A11.2 11.2 0 0 0 1.8 8s2.3 3.6 6.2 3.6c.7 0 1.4-.1 2-.3" />
       <path d="M6.7 6.7a1.8 1.8 0 0 0 2.5 2.5M2.6 2.6l10.8 10.8" />
     </svg>
   );
 }
 
+/* ---------------------------------- 状态 / 提示 ---------------------------------- */
+
 export function CheckIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className, "0 0 16 16", 2)}>
       <path d="m3.4 8.4 3 3 6.2-6.6" />
+    </svg>
+  );
+}
+
+/** 设计稿登录页：不合格邮箱的感叹号标记 */
+export function AlertCircleIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...strokeProps(size, className)}>
+      <circle cx="8" cy="8" r="6.2" />
+      <path d="M8 4.8v3.8M8 11.1h.01" />
     </svg>
   );
 }
 
 export function SearchIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <circle cx="7.2" cy="7.2" r="4.2" />
       <path d="m10.4 10.4 3 3" />
     </svg>
@@ -176,7 +216,7 @@ export function SearchIcon({ size = 16, className }: IconProps) {
 
 export function ChevronDownIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <path d="m4.2 6.2 3.8 3.8 3.8-3.8" />
     </svg>
   );
@@ -184,7 +224,7 @@ export function ChevronDownIcon({ size = 16, className }: IconProps) {
 
 export function ChevronLeftIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <path d="M9.6 4.2 5.8 8l3.8 3.8" />
     </svg>
   );
@@ -192,7 +232,7 @@ export function ChevronLeftIcon({ size = 16, className }: IconProps) {
 
 export function ChevronRightIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <path d="M6.4 4.2 10.2 8l-3.8 3.8" />
     </svg>
   );
@@ -200,7 +240,7 @@ export function ChevronRightIcon({ size = 16, className }: IconProps) {
 
 export function PlusIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <path d="M8 3.4v9.2M3.4 8h9.2" />
     </svg>
   );
@@ -216,80 +256,46 @@ export function DotsIcon({ size = 16, className }: IconProps) {
   );
 }
 
+/** 弹窗关闭：设计稿 x-circle（描边 2，#64748B） */
+export function CloseCircleIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...strokeProps(size, className, "0 0 16 16", 2)}>
+      <path d="M10.0001 5.9998L7.99996 7.99996M7.99996 7.99996L5.9998 10.0001M7.99996 7.99996L5.9998 5.9998M7.99996 7.99996L10.0001 10.0001M14.6672 7.99996C14.6672 11.6822 11.6822 14.6672 7.99996 14.6672C4.31777 14.6672 1.33276 11.6822 1.33276 7.99996C1.33276 4.31777 4.31777 1.33276 7.99996 1.33276C11.6822 1.33276 14.6672 4.31777 14.6672 7.99996Z" />
+    </svg>
+  );
+}
+
 export function CloseIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" />
     </svg>
   );
 }
 
-export function PanelToggleIcon({ size = 16, className }: IconProps) {
+export function KeyIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
-      <rect x="2" y="2.6" width="12" height="10.8" rx="2" />
-      <path d="M6.4 2.6v10.8" />
-      <path d="M11.4 6.2 9.9 8l1.5 1.8" />
+    <svg {...strokeProps(size, className)}>
+      <circle cx="6.2" cy="9.8" r="2.6" />
+      <path d="m8.2 7.8 4.6-4.6M11 5l1.4 1.4M9.6 6.4l1.4 1.4" />
+    </svg>
+  );
+}
+
+export function SignOutIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...strokeProps(size, className)}>
+      <path d="M6.4 13H4.2A1.4 1.4 0 0 1 2.8 11.6V4.4A1.4 1.4 0 0 1 4.2 3h2.2" />
+      <path d="M10.4 11 13.4 8l-3-3M13 8H6.6" />
     </svg>
   );
 }
 
 export function ShieldIcon({ size = 16, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)}>
+    <svg {...strokeProps(size, className)}>
       <path d="M8 2.4 13 4v4c0 2.6-2 4.7-5 5.6-3-1-5-3-5-5.6V4z" />
       <path d="m5.9 8 1.5 1.5 2.7-2.9" />
     </svg>
-  );
-}
-
-export function DiamondIcon({ size = 20, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M8 1.6 14.4 8 8 14.4 1.6 8z" />
-    </svg>
-  );
-}
-
-export function GraduationCapIcon({ size = 20, className }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M12 3.5 22 8l-10 4.5L2 8z" />
-      <path d="M6 10.2v4.4c0 1.9 2.7 3.4 6 3.4s6-1.5 6-3.4v-4.4" />
-      <path d="M22 8v5" />
-    </svg>
-  );
-}
-
-export function BrandMark({ size = 42 }: { size?: number }) {
-  return (
-    <span className="brandMarkSvg" aria-hidden="true" style={{ width: size, height: size }}>
-      <svg
-        width={size * 0.6}
-        height={size * 0.6}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="#fff"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {/* 学士帽：设计稿顶栏 logo */}
-        <path d="M12 3.5 22 8l-10 4.5L2 8z" />
-        <path d="M6 10.2v4.4c0 1.9 2.7 3.4 6 3.4s6-1.5 6-3.4v-4.4" />
-        <path d="M22 8v5" />
-      </svg>
-    </span>
   );
 }

@@ -66,11 +66,34 @@ node scripts/figma-view-server.mjs   # http://localhost:4599/
 
 | 页面 | 落地要点 |
 |---|---|
-| 登录 `sign-in` | 64 顶栏 + 背景图 + 徽标/标题/副标题竖排 + 424 白卡；邮箱右侧绿色通过标记；忘记密码链接 13/500 |
-| 共享外壳 | 顶栏横跨整宽，侧栏在顶栏之下；8 个菜单 + 激活态；折叠按钮按设计位置；员工下拉含两条分隔线 |
+| 登录 `sign-in` | 64 顶栏 + 背景图 + 徽标/标题/副标题（424 宽区块内**居中对齐**，同 Figma textAlign=CENTER）+ 424 白卡；邮箱右侧绿色通过标记 / 红色感叹号；忘记密码链接 13/500 |
+| 共享外壳 | 顶栏横跨整宽，侧栏在顶栏之下；8 个菜单图标全部使用 Figma 原始矢量（book-line / stack-line / loader-fill / booklet-line / dashboard-2-line / user-settings-line / book-read-line / settings-2-line）；折叠按钮 24×24；员工下拉含两条分隔线；折叠状态按账号落库 |
 | 员工账号 | 标题区 + Add Employee（37 高）+ 搜索/角色/状态筛选 + 8 行表格 + 分页；操作列 ⋮ 菜单 160 宽 |
-| 新增 / 编辑员工 | 832 弹窗，Email/Role/Status 三段；Status 为 382 宽分段单选；底部 Cancel + Create/Save |
+| 新增 / 编辑员工 | 832 弹窗，关闭键为 Figma 的 x-circle（16 描边 2 #64748B，外套 32×32 #f8fafc 圆角 8）；Email/Role/Status 三段；Status 为 382 宽分段单选；底部 Cancel + Create/Save；邮件投递结果如实回显 |
 | 支付网关 / 通知配置 | 复用子导航 + 卡片规范 |
 | 忘记 / 重置密码、激活 | 复用登录页认证外壳 |
+
+## Figma 图标导出
+
+画板内的矢量图标通过 Figma REST API 导出为 SVG，保存在 `docs/design/figma/icons-*.svg`，
+对应关系：
+
+| 文件 | Figma 节点 |
+|---|---|
+| `icons-course.svg` | `book-line` |
+| `icons-knowledge.svg` | `stack-line` |
+| `icons-aiTutor.svg` | `loader-fill` |
+| `icons-order.svg` | `booklet-line` |
+| `icons-reporting.svg` | `dashboard-2-line` |
+| `icons-student.svg` | `user-settings-line` |
+| `icons-helpDesk.svg` | `book-read-line` |
+| `icons-settings.svg` | `settings-2-line` |
+| `icons-toggle.svg` | `Collapse Sidebar / Left` |
+| `icons-close.svg` / `icons-xcircle.svg` | 弹窗 `close-button` |
+| `icons-brandIcon.svg` | 顶栏 `Frame 41 / Icon` |
+| `icons-mail.svg` / `icons-lock.svg` / `icons-eye.svg` | 登录页输入框图标 |
+
+实现侧矢量的 path 数据直接复制自这些导出文件（`backoffice/components/icons.tsx`），
+颜色统一走 `currentColor`，激活态由 CSS 决定（#145cff）。
 
 实现截图放在 `docs/design/figma/impl/`，可与 `docs/design/figma/1-*.png` 直接叠看。

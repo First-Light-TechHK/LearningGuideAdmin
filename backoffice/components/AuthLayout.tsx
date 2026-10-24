@@ -39,7 +39,7 @@ export function AuthLayout({
       <main className="authBody">
         <div className="authIntro">
           <span className="authBadge">
-            <GraduationCapIcon size={20} />
+            <GraduationCapIcon size={22} />
             {messages.app.name}
           </span>
           <h1 className="authTitle">{title}</h1>

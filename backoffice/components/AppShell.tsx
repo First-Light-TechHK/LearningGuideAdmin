@@ -9,7 +9,7 @@ import { LocaleSwitch } from "@/components/LocaleSwitch";
 import {
   AiTutorIcon,
   BrandMark,
-  CloseIcon,
+  CloseCircleIcon,
   CourseIcon,
   HelpDeskIcon,
   KeyIcon,
@@ -61,21 +61,36 @@ export type ShellEmployee = {
 
 export function AppShell({
   employee,
+  initialCollapsed = false,
   children,
 }: {
   employee: ShellEmployee;
+  initialCollapsed?: boolean;
   children: React.ReactNode;
 }) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname() ?? `/${locale}/course`;
   const activeMenu = menuFromPathSegments(pathname.split("/").filter(Boolean).slice(1));
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
 
   const menus = visibleMenus(employee.role);
   const roleLabel = t(locale, `roles.${employee.role}`);
+
+  /** PORT-NAV-003：折叠状态按账号落库，失败不阻断交互。 */
+  function toggleSidebar() {
+    setCollapsed((current) => {
+      const next = !current;
+      void fetch("/api/preferences/sidebar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ state: next ? "collapsed" : "expanded" }),
+      }).catch(() => undefined);
+      return next;
+    });
+  }
 
   async function signOut() {
     await fetch("/api/auth/sign-out", { method: "POST" });
@@ -148,9 +163,9 @@ export function AppShell({
             className="sidebarToggle"
             aria-label={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
             title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
-            onClick={() => setCollapsed((value) => !value)}
+            onClick={toggleSidebar}
           >
-            <PanelToggleIcon size={18} />
+            <PanelToggleIcon size={24} />
           </button>
 
           {menus.map((menu) => {
@@ -229,7 +244,7 @@ function ChangePasswordDialog({ locale, onClose }: { locale: Locale; onClose: ()
             <p className="modalSubtitle">{t(locale, "changePassword.subtitle")}</p>
           </div>
           <button type="button" className="modalClose" onClick={onClose} aria-label={t(locale, "common.close")} title={t(locale, "common.close")}>
-            <CloseIcon size={16} />
+            <CloseCircleIcon size={16} />
           </button>
         </div>
 

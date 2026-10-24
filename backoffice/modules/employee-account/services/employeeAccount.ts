@@ -18,6 +18,7 @@ import { tryRecordAuditEvent } from "@/repositories/auditRepository";
 import * as employeeRepository from "@/repositories/employeeRepository";
 import * as sessionRepository from "@/repositories/sessionRepository";
 import {
+  isDelivered,
   sendActivationEmail as sendActivationEmailTo,
   sendPasswordResetEmail,
 } from "@/modules/notification/services/email";
@@ -153,7 +154,7 @@ export async function createEmployee(input: {
 }
 
 export type UpdateEmployeeOutcome =
-  | { ok: true; employee: EmployeeListItem }
+  | { ok: true; employee: EmployeeListItem; delivery?: string }
   | { ok: false; code: ErrorCode };
 
 /** PRD PORT-EDT-001~006。 */
@@ -247,18 +248,31 @@ export async function updateEmployee(input: {
     });
   }
 
+  let delivery: string | undefined;
+
   if (emailChanged && patch.loginEmail) {
     // PRD PORT-ACT-005 / BR-PORT-009：旧链接作废，向新地址重发激活邮件
     await revokeTokensForEmployee(updated.employeeId);
     const rawToken = await issueActivationToken(updated.employeeId);
-    await sendActivationEmailTo({
+    delivery = await sendActivationEmailTo({
       to: patch.loginEmail,
       link: activationLink(input.locale, rawToken),
       locale: input.locale,
     });
+
+    await tryRecordAuditEvent({
+      eventName: "employee_email_changed",
+      actorEmployeeId: input.actorEmployeeId,
+      targetEmployeeId: updated.employeeId,
+      action: "UPDATE_EMPLOYEE",
+      oldValue: existing.loginEmail,
+      newValue: patch.loginEmail,
+      result: isDelivered(delivery) ? "SUCCESS" : "FAILURE",
+      ipAddress: input.ipAddress,
+    });
   }
 
-  return { ok: true, employee: toListItem(updated) };
+  return { ok: true, employee: toListItem(updated), delivery };
 }
 
 export type AdminActionOutcome = { ok: true; delivery: string } | { ok: false; code: ErrorCode };

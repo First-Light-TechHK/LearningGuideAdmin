@@ -1,9 +1,14 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { currentEmployee } from "@/lib/currentSession";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
-import { canViewMenu, menuFromPathSegments } from "@/modules/rbac/permissions";
+import {
+  canViewMenu,
+  DEFAULT_LANDING_MENU,
+  menuFromPathSegments,
+  menuHref,
+} from "@/modules/rbac/permissions";
 
 const MENU_LABEL: Record<string, string> = {
   course: "nav.course",
@@ -28,19 +33,9 @@ export default async function ModulePlaceholderPage({
   const employee = await currentEmployee();
   if (!employee) notFound();
 
-  // PORT-NAV-004 / §15.3：直接输入 URL 也必须按权限拒绝
+  // §7.3 / §8.5：权限被收紧后直接输入 URL 也被拒绝，并送回 Course
   if (!canViewMenu(employee.role, menu)) {
-    return (
-      <section className="card cardGrow">
-        <h1 className="cardTitle">{t(safeLocale, "forbidden.title")}</h1>
-        <p className="cardBody">{t(safeLocale, "forbidden.description")}</p>
-        <p style={{ marginTop: 12 }}>
-          <a className="button buttonGhost" href={`/${safeLocale}/course`}>
-            {t(safeLocale, "forbidden.backToCourse")}
-          </a>
-        </p>
-      </section>
-    );
+    redirect(`${menuHref(safeLocale, DEFAULT_LANDING_MENU)}?denied=${menu}`);
   }
 
   return (

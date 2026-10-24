@@ -22,7 +22,9 @@
 | RBAC | 六角色 × 8 菜单权限矩阵 | `modules/rbac/permissions.ts` + `modules/rbac/access.ts` | 已实现 |
 | i18n | en-GB / zh-CN 切换 | `messages/*.json`、`lib/i18n/*`、`middleware.ts` | 已实现 |
 | PORT-NAV-006 | 语言偏好跨登录保留 | `lib/localeCookie.ts`、`repositories/preferencesRepository.ts`、`app/api/preferences/locale` | 已实现 |
+| PORT-NAV-003 | 侧栏折叠状态跨登录保留 | `app/api/preferences/sidebar` + `(shell)/layout.tsx` 读取 | 已实现 |
 | PORT-ACT-003 | 过期 / 已使用链接区分 | `classifyTokenState` + `TOKEN_EXPIRED` / `TOKEN_ALREADY_USED` | 已实现 |
+| 邮件投递 | SMTP → SES → DEV console 三级适配 | `modules/notification/services/email.ts` | 已实现 |
 
 ## 2. 技术栈（与 LearningGuidePortal 对齐）
 
@@ -79,6 +81,22 @@ Route Handler → contracts 校验 → 会话/权限 → modules/*/services → 
 - 登录失败、邮箱检查、重发邮件、改密均有限流（固定窗口内存实现）
 - 审计事件表带 CHECK 约束，禁止写入形如 `password=`/`token=` 的明文
 - 忘记密码对外始终返回同一结果，避免账号枚举
+- 写请求 CSRF：`middleware.ts` 校验 Origin/Host 一致性（SameSite=Lax 之外的第二道防线）
+- 员工账号相关 API 统一走 `modules/rbac/adminGuard.ts`：无会话 401、非 Admin 403 并记 `permission_denied`
+
+## 5.1 邮件投递
+
+`modules/notification/services/email.ts` 与 LearningGuidePortal `services/emailService.ts` 保持相同的取值约定：
+
+| 优先级 | 触发条件 | 行为 |
+|---|---|---|
+| 1 | `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` | nodemailer SMTP 投递（线上 163：`smtp.163.com:465`） |
+| 2 | 仅 `SES_FROM_EMAIL` | AWS SESv2（默认 `ap-southeast-1`，实例角色授权） |
+| 3 | 都没有 | DEV 打到服务端日志（`CONSOLE`）；其它环境返回 `NOT_CONFIGURED` |
+
+发件人按 `SMTP_FROM` → `SES_FROM_EMAIL` → `SMTP_USER` 回退。
+接口把真实投递结果（`SENT` / `CONSOLE` / `FAILED` / `NOT_CONFIGURED`）回显到列表页，
+不再出现「已加入发送队列」这类不实提示（PORT-ADM-002）。
 
 ## 5. 视觉基准
 

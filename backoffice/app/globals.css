@@ -73,6 +73,7 @@ p {
   border-radius: 10px;
   background: var(--lg-blue);
   flex: 0 0 auto;
+  color: var(--lg-white);
 }
 
 /* ----------------------------------- 应用外壳 -------------------------------- */
@@ -633,6 +634,15 @@ p {
   color: #d1d5db;
 }
 
+/* 浏览器自动填充会盖掉设计稿的白底；用内阴影保持卡片内的白底 */
+.inputShellInput:-webkit-autofill,
+.inputShellInput:-webkit-autofill:hover,
+.inputShellInput:-webkit-autofill:focus {
+  -webkit-text-fill-color: #374151;
+  -webkit-box-shadow: 0 0 0 1000px var(--lg-white) inset;
+  transition: background-color 600000s 0s;
+}
+
 .validMark {
   width: 20px;
   height: 20px;
@@ -642,6 +652,15 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
+}
+
+/* PORT-LOG-003：不合格员工邮箱显示感叹号 */
+.invalidMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lg-red);
   flex: 0 0 auto;
 }
 
@@ -765,7 +784,8 @@ p {
 .tableWrap {
   flex: 1;
   min-height: 0;
-  overflow-x: auto;
+  /* 行内操作菜单是绝对定位子元素，容器裁切会让菜单点不开 */
+  overflow: visible;
 }
 
 .table {
@@ -813,6 +833,8 @@ p {
 
 .table td:last-child {
   text-align: center;
+  /* 行内操作菜单需要溢出显示，否则会被单元格裁掉（点击 ⋮ 看起来没反应） */
+  overflow: visible;
 }
 
 .table tbody tr:hover {
@@ -1125,18 +1147,21 @@ p {
   font-weight: 700;
 }
 
+/* 设计稿 Above Card Content：标题与副标题在 424 宽区块内水平居中（textAlign=CENTER） */
 .authTitle {
   font-size: 36px;
   font-weight: 700;
   line-height: 1.22;
   color: #fff;
   letter-spacing: -0.02em;
+  text-align: center;
 }
 
 .authSubtitle {
   font-size: 14px;
   font-weight: 400;
   color: #fff;
+  text-align: center;
 }
 
 /* 设计稿：卡片 424×329，圆角 16，内距 36，投影 32/18% */
@@ -1203,6 +1228,20 @@ p {
 }
 
 /* ------------------------------ 响应式收口 ------------------------------ */
+
+/* 设计稿侧栏 280 / 子导航 276 / 内容卡片 1082 只在 >=1400 的桌面宽度成立；
+   更窄时先按比例收，避免表格与筛选条挤出可视区 */
+@media (max-width: 1400px) {
+  .sidebar {
+    width: 240px;
+    flex: 0 0 240px;
+  }
+
+  .subNav {
+    width: 240px;
+    flex: 0 0 240px;
+  }
+}
 
 @media (max-width: 1100px) {
   .sidebar,

@@ -5,6 +5,7 @@ import { tryRecordAuditEvent } from "@/repositories/auditRepository";
 import * as employeeRepository from "@/repositories/employeeRepository";
 import * as sessionRepository from "@/repositories/sessionRepository";
 import {
+  isDelivered,
   sendActivationEmail as sendActivationEmail_,
   sendPasswordChangedEmail as sendPasswordChanged,
   sendPasswordResetEmail as sendPasswordReset,
@@ -113,7 +114,7 @@ export async function requestPasswordReset(input: {
     targetEmployeeId: employee.employeeId,
     action: "SELF_SERVICE_RESET",
     newValue: result,
-    result: result === "SENT" ? "SUCCESS" : "FAILURE",
+    result: isDelivered(result) ? "SUCCESS" : "FAILURE",
     ipAddress: input.ipAddress,
   });
 
@@ -232,7 +233,7 @@ export async function reissueActivation(input: {
     targetEmployeeId: employee.employeeId,
     action: "RESEND_ACTIVATION",
     newValue: delivery,
-    result: delivery === "SENT" ? "SUCCESS" : "FAILURE",
+    result: isDelivered(delivery) ? "SUCCESS" : "FAILURE",
     ipAddress: input.ipAddress,
   });
 

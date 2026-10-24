@@ -13,7 +13,9 @@
     "bootstrap:admin": "node scripts/bootstrap-admin.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1156.0",
     "next": "15.5.27",
+    "nodemailer": "^10.2.1",
     "pg": "^8.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -21,6 +23,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@types/node": "^22.10.2",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.20.3",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",

@@ -1,4 +1,3 @@
-import { currentAdminEmployee } from "@/lib/currentSession";
 import { clientIp, jsonFail, jsonOk, readJson, readNumber, readString } from "@/lib/http";
 import { consume } from "@/lib/rateLimit";
 import { EMAIL_SEND_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES } from "@/lib/securityPolicy";
@@ -6,11 +5,12 @@ import {
   createEmployee,
   listEmployees,
 } from "@/modules/employee-account/services/employeeAccount";
+import { requireAdmin } from "@/modules/rbac/adminGuard";
 
 /** PORT-LST-001~005：员工列表（仅 Admin）。 */
 export async function GET(request: Request): Promise<Response> {
-  const admin = await currentAdminEmployee();
-  if (!admin) return jsonFail("NOT_AUTHORISED", "Admin only");
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
 
   try {
     const params = new URL(request.url).searchParams;
@@ -29,8 +29,9 @@ export async function GET(request: Request): Promise<Response> {
 
 /** PORT-NEW-001~004：新建员工并发送激活邮件（仅 Admin）。 */
 export async function POST(request: Request): Promise<Response> {
-  const admin = await currentAdminEmployee();
-  if (!admin) return jsonFail("NOT_AUTHORISED", "Admin only");
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+  const admin = guard.admin;
 
   const body = await readJson(request);
   if (!body) return jsonFail("INVALID_INPUT", "Malformed request body");

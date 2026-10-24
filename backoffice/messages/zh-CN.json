@@ -179,11 +179,19 @@
     "hintEmailLocked": "已验证的邮箱不可修改。",
     "bootstrapLocked": "受保护的管理员账号不可停用、降级或删除。",
     "results": {
-      "created": "员工已创建，激活邮件已加入发送队列。",
+      "created": "员工已创建，激活邮件发送结果：{result}。",
       "updated": "员工信息已更新。",
+      "emailChanged": "邮箱已更新，新的激活邮件发送结果：{result}。",
       "resetSent": "重置密码邮件发送结果：{result}。",
-      "resent": "新的激活邮件已发送，此前的链接立即失效。"
+      "resent": "新的激活邮件发送结果：{result}，此前的链接立即失效。"
     }
+  },
+  "delivery": {
+    "SENT": "成功",
+    "CONSOLE": "已输出到服务端日志（仅开发环境）",
+    "FAILED": "失败，请重试",
+    "NOT_CONFIGURED": "未发送（邮件服务未配置）",
+    "UNKNOWN": "未知"
   },
   "roles": {
     "ADMIN": "管理员",

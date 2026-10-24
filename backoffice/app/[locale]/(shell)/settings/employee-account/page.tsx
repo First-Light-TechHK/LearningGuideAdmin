@@ -17,6 +17,11 @@ export default async function EmployeeAccountPage({
       <section className="card cardGrow">
         <h1 className="cardTitle">{t(safeLocale, "forbidden.title")}</h1>
         <p className="cardBody">{t(safeLocale, "forbidden.description")}</p>
+        <p style={{ marginTop: 12 }}>
+          <a className="button buttonGhost" href={`/${safeLocale}/course`}>
+            {t(safeLocale, "forbidden.backToCourse")}
+          </a>
+        </p>
       </section>
     );
   }
