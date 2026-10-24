@@ -15,9 +15,19 @@ permissions:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Only the dev branch may deploy, and only into the Admin DEV environment.
+    # A manual run from another ref is allowed in, then rejected by the first
+    # step so the operator sees an explicit error instead of a silent skip.
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev')
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - name: Reject non-dev refs
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/dev'
+        run: |
+          echo "::error::Deploy DEV may only be dispatched from the dev branch (got ${{ github.ref }})."
+          exit 1
       - uses: actions/checkout@v4
       - name: Require the DEV service ARN
         env:
