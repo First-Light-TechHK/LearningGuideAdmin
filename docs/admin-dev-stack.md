@@ -15,12 +15,13 @@ Facts verified against AWS account 851987565851, ap-southeast-1.
 
 ## Routing
 
-- Default behavior → S3 bucket through OAC with `index.html` as root object. SPA routes are handled by the
-  CloudFront Function `admin-spa-router` (viewer-request rewrites extension-less paths to `/index.html`).
-  Do not reintroduce distribution-wide custom error responses: they also rewrote `/api/*` 404s into HTML 200,
-  so API clients could not tell a missing endpoint from a page.
-- `/api/*` → App Runner, caching disabled, `Managed-AllViewerExceptHostHeader`; an exact `/api` behavior
-  exists because `/api/*` does not match the bare prefix.
+- Single service: the NestJS app serves both the API and the built BackOffice UI
+  (`client/dist`, via `serveBackOfficeUi()` in `server/src/main.ts`). One App Runner service, one build,
+  one deploy; there is no separate frontend server and no S3-hosted SPA.
+- `/api/*` goes to the NestJS router; every other GET/HEAD returns `index.html` with `Cache-Control: no-cache`.
+  Hashed assets under `/assets/*` are immutable for 1 year.
+- CloudFront (optional edge) puts App Runner behind the alias; caching disabled, `Managed-AllViewerExceptHostHeader`.
+  The origin must stay the App Runner domain: the service returns 404 for unknown viewer hosts.
   The Host header must stay the App Runner domain: the service returns 404 for unknown viewer hosts,
   so do not switch this policy back to `Managed-AllViewer`.
 - The SPA calls `baseURL: '/api'`, so it works on any host CloudFront is reached through.
@@ -40,9 +41,9 @@ App Runner does not run StartCommand through a shell, so shell operators live in
 - ACM validation CNAME for `admin.ilovelearningguide.com` must be added by the DNS owner.
 - Add the alias + certificate to the distribution, upload the client build, then point the `admin` CNAME at `d5twyee4s494s.cloudfront.net`.
 
-## Publishing the SPA
+## Publishing
 
-App Runner builds only the API. After a client change run `scripts/publish-admin-spa.sh` (S3 sync + CloudFront invalidation).
+Nothing separate to publish: a push to `dev` rebuilds `client/dist` and `server/dist` in the same App Runner build.
 
 ## Continuous deploy
 
