@@ -55,8 +55,9 @@ export function AiTutorIcon({ size = 16, className }: IconProps) {
 export function OrderIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size, className)}>
-      <rect x="3.2" y="2.5" width="9.6" height="11" rx="1.6" />
-      <path d="M5.8 5.6h4.4M5.8 8h4.4M5.8 10.4h2.6" />
+      {/* 展开的书 */}
+      <path d="M8 4.3C6.7 3.3 4.7 2.9 2.7 2.9v9.3c2 0 4 .4 5.3 1.4 1.3-1 3.3-1.4 5.3-1.4V2.9c-2 0-4 .4-5.3 1.4z" />
+      <path d="M8 4.3v9.3" />
     </svg>
   );
 }
@@ -64,8 +65,10 @@ export function OrderIcon({ size = 16, className }: IconProps) {
 export function ReportingIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size, className)}>
-      <circle cx="8" cy="8" r="5.6" />
-      <path d="M8 4.6V8l2.4 1.6" />
+      {/* 带箭头的时钟（历史/报表） */}
+      <path d="M13.4 8a5.4 5.4 0 1 1-1.9-4.1" />
+      <path d="M13.4 2.2v2.2h-2.2" />
+      <path d="M8 5.4V8l1.9 1.2" />
     </svg>
   );
 }
@@ -73,9 +76,10 @@ export function ReportingIcon({ size = 16, className }: IconProps) {
 export function StudentIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size, className)}>
-      <circle cx="6" cy="5.6" r="2.1" />
-      <path d="M2.4 12.9c0-2 1.7-3.4 3.6-3.4s3.6 1.4 3.6 3.4" />
-      <path d="M10.8 4.1a2 2 0 0 1 0 3.9M12 12.9c0-1.4-.5-2.4-1.4-3" />
+      <circle cx="6.2" cy="5.4" r="2.1" />
+      <path d="M2.4 13c0-2 1.7-3.5 3.8-3.5 1 0 1.9.4 2.6 1" />
+      <path d="M12.1 5.3a2 2 0 0 1 0 3.9" />
+      <path d="M11.6 10.6v3M10.1 12.1h3" />
     </svg>
   );
 }
@@ -83,8 +87,9 @@ export function StudentIcon({ size = 16, className }: IconProps) {
 export function HelpDeskIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size, className)}>
-      <path d="M2.6 4.4a1.4 1.4 0 0 1 1.4-1.4h8a1.4 1.4 0 0 1 1.4 1.4v5a1.4 1.4 0 0 1-1.4 1.4H7.4L4.6 13v-2.2H4a1.4 1.4 0 0 1-1.4-1.4z" />
-      <path d="M6.2 6.6h3.6" />
+      <rect x="2.2" y="2.8" width="11.6" height="8.6" rx="1.8" />
+      <path d="M6.6 6.2 9.4 8l-2.8 1.8z" />
+      <path d="M5.6 14h4.8" />
     </svg>
   );
 }
@@ -240,8 +245,29 @@ export function ShieldIcon({ size = 16, className }: IconProps) {
 
 export function DiamondIcon({ size = 20, className }: IconProps) {
   return (
-    <svg {...svgProps(size, className)} strokeWidth={1.8}>
-      <path d="M8 1.8 14.2 8 8 14.2 1.8 8z" />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M8 1.6 14.4 8 8 14.4 1.6 8z" />
+    </svg>
+  );
+}
+
+export function GraduationCapIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 3.5 22 8l-10 4.5L2 8z" />
+      <path d="M6 10.2v4.4c0 1.9 2.7 3.4 6 3.4s6-1.5 6-3.4v-4.4" />
+      <path d="M22 8v5" />
     </svg>
   );
 }

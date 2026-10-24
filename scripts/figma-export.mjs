@@ -75,7 +75,7 @@ console.log(`画布 ${canvas.name}：${frames.length} 个画板`);
 // 2) 批量导出 PNG（scale=1 即设计稿原始尺寸）
 const ids = frames.map((frame) => frame.id).join(",");
 const images = await api(
-  `/v1/images/${FILE_KEY}?ids=${encodeURIComponent(ids)}&format=png&scale=1&use_absolute_bounds=true`
+  `/v1/images/${FILE_KEY}?ids=${encodeURIComponent(ids)}&format=png&scale=1`
 );
 
 if (images.err) console.error("部分画板导出失败:", images.err);

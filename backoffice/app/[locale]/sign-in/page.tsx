@@ -149,7 +149,7 @@ export default function SignInPage() {
           </div>
         </div>
 
-        <div className="field" style={{ marginBottom: 10 }}>
+        <div className="field">
           <label className="fieldLabel" htmlFor="sign-in-password">
             {t(locale, "signIn.passwordLabel")}
           </label>
@@ -185,6 +185,7 @@ export default function SignInPage() {
         </div>
 
         <div className="authFormFootnote">
+          {/* 设计稿：Remember / Forgot 行只有左对齐的忘记密码链接，行高 16 */}
           <a className="linkButton" href={`/${locale}/forgot-password`}>
             {t(locale, "signIn.forgotPassword")}
           </a>

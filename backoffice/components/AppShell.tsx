@@ -85,90 +85,91 @@ export function AppShell({
 
   return (
     <div className={collapsed ? "shell shellCollapsed" : "shell"}>
-      <nav className="sidebar" aria-label={t(locale, "app.subtitle")}>
-        <button
-          type="button"
-          className="sidebarToggle"
-          aria-label={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
-          title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
-          onClick={() => setCollapsed((value) => !value)}
-        >
-          <PanelToggleIcon size={18} />
-        </button>
+      {/* 设计稿：顶栏横跨整宽（logo 左距 20），侧栏位于顶栏之下 */}
+      <header className="header">
+        {/* PORT-NAV-001：共享顶部栏展示 logo 与产品名 */}
+        <a className="headerBrand" href={menuHref(locale, "course")}>
+          <BrandMark size={42} />
+          {t(locale, "app.name")}
+        </a>
 
-        {menus.map((menu) => {
-          const Icon = MENU_ICON[menu];
-          return (
-            <a
-              key={menu}
-              className={menu === activeMenu ? "navItem navItemActive" : "navItem"}
-              href={menuHref(locale, menu)}
-              title={t(locale, MENU_LABEL[menu])}
+        <div className="headerRight">
+          <LocaleSwitch persist />
+
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="employeeTrigger"
+              onClick={() => setMenuOpen((value) => !value)}
+              aria-expanded={menuOpen}
+              aria-label={t(locale, "shell.employeeMenu")}
             >
-              <span className="navIcon">
-                <Icon size={20} />
+              <span className="avatar" aria-hidden="true">
+                {employee.displayName.slice(0, 1).toUpperCase()}
               </span>
-              <span>{t(locale, MENU_LABEL[menu])}</span>
-            </a>
-          );
-        })}
-      </nav>
+              <span className="employeeMeta">
+                <span className="employeeName">{employee.displayName}</span>
+                <span className="employeeRole">{roleLabel}</span>
+              </span>
+            </button>
 
-      <div className="main">
-        <header className="header">
-          {/* PORT-NAV-001：共享顶部栏展示 logo 与产品名 */}
-          <span className="headerBrand">
-            <BrandMark size={42} />
-            {t(locale, "app.name")}
-          </span>
-
-          <div className="headerRight">
-            <LocaleSwitch persist />
-
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                className="employeeTrigger"
-                onClick={() => setMenuOpen((value) => !value)}
-                aria-expanded={menuOpen}
-                aria-label={t(locale, "shell.employeeMenu")}
-              >
-                <span className="avatar" aria-hidden="true">
-                  {employee.displayName.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="employeeMeta">
-                  <span className="employeeName">{employee.displayName}</span>
-                  <span className="employeeRole">{roleLabel}</span>
-                </span>
-              </button>
-
-              {menuOpen ? (
-                <div className="dropdown">
-                  {/* PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out */}
-                  <button
-                    type="button"
-                    className="dropdownItem"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setPasswordOpen(true);
-                    }}
-                  >
-                    <KeyIcon size={14} />
-                    {t(locale, "shell.changePassword")}
-                  </button>
-                  <button
-                    type="button"
-                    className="dropdownItem dropdownItemDanger"
-                    onClick={() => void signOut()}
-                  >
-                    <SignOutIcon size={14} />
-                    {t(locale, "shell.signOut")}
-                  </button>
-                </div>
-              ) : null}
-            </div>
+            {menuOpen ? (
+              <div className="dropdown">
+                {/* PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out */}
+                <button
+                  type="button"
+                  className="dropdownItem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setPasswordOpen(true);
+                  }}
+                >
+                  <KeyIcon size={14} />
+                  {t(locale, "shell.changePassword")}
+                </button>
+                <button
+                  type="button"
+                  className="dropdownItem"
+                  onClick={() => void signOut()}
+                >
+                  <SignOutIcon size={14} />
+                  {t(locale, "shell.signOut")}
+                </button>
+              </div>
+            ) : null}
           </div>
-        </header>
+        </div>
+      </header>
+
+      <div className="shellBody">
+        <nav className="sidebar" aria-label={t(locale, "app.subtitle")}>
+          <button
+            type="button"
+            className="sidebarToggle"
+            aria-label={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
+            title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
+            onClick={() => setCollapsed((value) => !value)}
+          >
+            <PanelToggleIcon size={18} />
+          </button>
+
+          {menus.map((menu) => {
+            const Icon = MENU_ICON[menu];
+            return (
+              <a
+                key={menu}
+                className={menu === activeMenu ? "navItem navItemActive" : "navItem"}
+                href={menuHref(locale, menu)}
+                title={t(locale, MENU_LABEL[menu])}
+              >
+                <span className="navIcon">
+                  <Icon size={20} />
+                </span>
+                <span>{t(locale, MENU_LABEL[menu])}</span>
+              </a>
+            );
+          })}
+        </nav>
 
         <main className="content">{children}</main>
       </div>
@@ -227,7 +228,7 @@ function ChangePasswordDialog({ locale, onClose }: { locale: Locale; onClose: ()
             <h2 className="modalTitle">{t(locale, "changePassword.title")}</h2>
             <p className="modalSubtitle">{t(locale, "changePassword.subtitle")}</p>
           </div>
-          <button type="button" className="modalClose" onClick={onClose} aria-label={t(locale, "common.cancel")}>
+          <button type="button" className="modalClose" onClick={onClose} aria-label={t(locale, "common.close")} title={t(locale, "common.close")}>
             <CloseIcon size={16} />
           </button>
         </div>

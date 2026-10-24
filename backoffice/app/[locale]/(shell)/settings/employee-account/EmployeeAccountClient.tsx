@@ -338,7 +338,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                             )
                           }
                         >
-                          <DotsIcon size={15} />
+                          <DotsIcon size={18} />
                         </button>
 
                         {openMenuId === employee.employeeId ? (
@@ -438,7 +438,8 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                 type="button"
                 className="modalClose"
                 onClick={() => setEditor(null)}
-                aria-label={t(locale, "common.cancel")}
+                aria-label={t(locale, "common.close")}
+                title={t(locale, "common.close")}
               >
                 <CloseIcon size={16} />
               </button>

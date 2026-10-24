@@ -1,7 +1,7 @@
 "use client";
 
 import { LocaleSwitch } from "@/components/LocaleSwitch";
-import { DiamondIcon } from "@/components/icons";
+import { DiamondIcon, GraduationCapIcon } from "@/components/icons";
 import { getMessages, t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 
@@ -37,13 +37,14 @@ export function AuthLayout({
       </div>
 
       <main className="authBody">
-        <span className="authBadge">
-          <DiamondIcon size={18} />
-          {messages.app.name}
-        </span>
-
-        <h1 className="authTitle">{title}</h1>
-        {subtitle ? <p className="authSubtitle">{subtitle}</p> : null}
+        <div className="authIntro">
+          <span className="authBadge">
+            <GraduationCapIcon size={20} />
+            {messages.app.name}
+          </span>
+          <h1 className="authTitle">{title}</h1>
+          {subtitle ? <p className="authSubtitle">{subtitle}</p> : null}
+        </div>
 
         <div className="authCard">{children}</div>
 
