@@ -9,7 +9,7 @@ import { LocaleSwitch } from "./LocaleSwitch";
 import {
   AiTutorIcon,
   BrandMark,
-  CloseIcon,
+  CloseCircleIcon,
   CourseIcon,
   HelpDeskIcon,
   KeyIcon,
@@ -30,7 +30,7 @@ import {
   visibleMenus,
   type MenuKey,
 } from "../rbac/permissions";
-import { boFetch } from "../lib/api";
+import { boFetch, postJson } from "../lib/api";
 
 const MENU_ICON: Record<MenuKey, (props: { size?: number }) => React.ReactElement> = {
   course: CourseIcon,
@@ -63,23 +63,35 @@ export type ShellEmployee = {
 export function AppShell({
   employee,
   workspace = false,
+  initialCollapsed = false,
   children,
 }: {
   employee: ShellEmployee;
   /** Knowledge / AI Tutor 工作区占满内容区 */
   workspace?: boolean;
+  /** PORT-NAV-003：登录后按账号偏好恢复折叠状态 */
+  initialCollapsed?: boolean;
   children: React.ReactNode;
 }) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname() ?? `/${locale}/course`;
   const activeMenu = menuFromPathSegments(pathname.split("/").filter(Boolean).slice(1));
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
 
   const menus = visibleMenus(employee.role);
   const roleLabel = t(locale, `roles.${employee.role}`);
+
+  /** PORT-NAV-003：折叠状态按账号落库，失败不阻断交互。 */
+  function toggleSidebar() {
+    const next = !collapsed;
+    setCollapsed(next);
+    void postJson("/api/preferences/sidebar", {
+      state: next ? "collapsed" : "expanded",
+    });
+  }
 
   async function signOut() {
     await boFetch("/api/auth/sign-out", { method: "POST" });
@@ -151,9 +163,9 @@ export function AppShell({
             className="sidebarToggle"
             aria-label={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
             title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
-            onClick={() => setCollapsed((value) => !value)}
+            onClick={toggleSidebar}
           >
-            <PanelToggleIcon size={18} />
+            <PanelToggleIcon size={24} />
           </button>
 
           {menus.map((menu) => {
@@ -204,17 +216,19 @@ function ChangePasswordDialog({ locale, onClose }: { locale: Locale; onClose: ()
 
     setSubmitting(true);
     try {
-      const response = await boFetch("/api/auth/change-password", {
+      const result = await boFetch("/api/auth/change-password", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ currentPassword, newPassword, confirmPassword, locale }),
       });
-      const payload = (await response.json()) as { success: boolean; error: ErrorCode | null };
+      const payload = (await result.json()) as {
+        success: boolean;
+        error: ErrorCode | null;
+      };
       if (!payload.success) {
         setErrorCode(payload.error ?? "INTERNAL_ERROR");
         return;
       }
-      // PORT-PWD-006：改密后必须重新登录
       router.replace(`/${locale}/sign-in`);
       router.refresh();
     } catch {
@@ -226,14 +240,20 @@ function ChangePasswordDialog({ locale, onClose }: { locale: Locale; onClose: ()
 
   return (
     <div className="modalBackdrop">
-      <form className="modal" onSubmit={submit} noValidate>
+      <form className="modal modalNarrow" onSubmit={submit} noValidate>
         <div className="modalHead">
           <div>
             <h2 className="modalTitle">{t(locale, "changePassword.title")}</h2>
             <p className="modalSubtitle">{t(locale, "changePassword.subtitle")}</p>
           </div>
-          <button type="button" className="modalClose" onClick={onClose} aria-label={t(locale, "common.cancel")}>
-            <CloseIcon size={16} />
+          <button
+            type="button"
+            className="modalClose"
+            onClick={onClose}
+            aria-label={t(locale, "common.close")}
+            title={t(locale, "common.close")}
+          >
+            <CloseCircleIcon size={16} />
           </button>
         </div>
 

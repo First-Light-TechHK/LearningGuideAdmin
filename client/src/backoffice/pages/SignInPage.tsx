@@ -3,7 +3,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ErrorCode } from "../contracts/envelope";
 import { AuthLayout } from "../components/AuthLayout";
-import { CheckIcon, EyeIcon, EyeOffIcon, LockIcon, MailIcon } from "../components/icons";
+import {
+  AlertCircleIcon,
+  CheckIcon,
+  EyeIcon,
+  EyeOffIcon,
+  LockIcon,
+  MailIcon,
+} from "../components/icons";
 import type { Locale } from "../lib/i18n/config";
 import { t } from "../lib/i18n/messages";
 import { useLocale } from "../lib/navigation";
@@ -123,7 +130,7 @@ export default function SignInPage() {
           </label>
           <div className="inputShell">
             <span className="inputShellIcon">
-              <MailIcon size={15} />
+              <MailIcon size={16} />
             </span>
             <input
               id="sign-in-email"
@@ -145,16 +152,21 @@ export default function SignInPage() {
                 <CheckIcon size={11} />
               </span>
             ) : null}
+            {emailState === "notEligible" ? (
+              <span className="invalidMark" title={t(locale, "signIn.invalidEmployee")}>
+                <AlertCircleIcon size={18} />
+              </span>
+            ) : null}
           </div>
         </div>
 
-        <div className="field" style={{ marginBottom: 10 }}>
+        <div className="field">
           <label className="fieldLabel" htmlFor="sign-in-password">
             {t(locale, "signIn.passwordLabel")}
           </label>
           <div className="inputShell">
             <span className="inputShellIcon">
-              <LockIcon size={15} />
+              <LockIcon size={16} />
             </span>
             <input
               id="sign-in-password"
@@ -178,12 +190,13 @@ export default function SignInPage() {
                 showPassword ? t(locale, "signIn.hidePassword") : t(locale, "signIn.showPassword")
               }
             >
-              {showPassword ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
+              {showPassword ? <EyeOffIcon size={16} /> : <EyeIcon size={16} />}
             </button>
           </div>
         </div>
 
         <div className="authFormFootnote">
+          {/* 设计稿：Remember / Forgot 行只有左对齐的忘记密码链接，行高 16 */}
           <a className="linkButton" href={`/${locale}/forgot-password`}>
             {t(locale, "signIn.forgotPassword")}
           </a>

@@ -79,6 +79,8 @@ export type SessionPayload = {
   settings: SettingsSubKey[];
   canManageEmployeeAccount: boolean;
   landingMenu: MenuKey;
+  /** PORT-NAV-003：按账号恢复侧栏折叠状态 */
+  sidebarState: 'expanded' | 'collapsed';
 };
 
 function limit(key: string, max: number): void {
@@ -255,10 +257,10 @@ export class BackofficeAuthController {
   }
 
   @Get('session')
-  session(
+  async session(
     @Req() request: BackofficeRequest,
     @Query('locale') requested?: string,
-  ): SessionPayload {
+  ): Promise<SessionPayload> {
     const employee = request.employee;
     if (!employee)
       throw backofficeError('INVALID_EMPLOYEE_ACCOUNT', 'Sign in required');
@@ -268,6 +270,10 @@ export class BackofficeAuthController {
       : isLocale(cookieLocale)
         ? cookieLocale
         : DEFAULT_LOCALE;
+    // PORT-NAV-003：折叠状态跨登录保留
+    const sidebarState = await preferencesRepository
+      .findSidebarState(employee.employeeId)
+      .catch(() => null);
     return {
       employee: {
         employeeId: employee.employeeId,
@@ -282,7 +288,25 @@ export class BackofficeAuthController {
       settings: visibleSettingsSubs(employee.role),
       canManageEmployeeAccount: canAccessEmployeeAccount(employee.role),
       landingMenu: DEFAULT_LANDING_MENU,
+      sidebarState: sidebarState === 'collapsed' ? 'collapsed' : 'expanded',
     };
+  }
+
+  /** PORT-NAV-003：折叠状态按账号落库。 */
+  @Post('preferences/sidebar')
+  @HttpCode(200)
+  async saveSidebarState(
+    @Req() request: BackofficeRequest,
+    @Body() raw: unknown,
+  ) {
+    const employee = request.employee;
+    if (!employee)
+      throw backofficeError('INVALID_EMPLOYEE_ACCOUNT', 'Sign in required');
+    const state = readString(asBody(raw), 'state');
+    if (state !== 'expanded' && state !== 'collapsed')
+      throw backofficeError('INVALID_INPUT', 'Unsupported sidebar state');
+    await preferencesRepository.upsertSidebarState(employee.employeeId, state);
+    return { state };
   }
 
   @Post('preferences/locale')

@@ -24,7 +24,9 @@
 | 接口守卫 | 所有 `/api/**` 按登录与菜单权限放行 | `server/src/backoffice/nest/{route-access.ts,backoffice-access.guard.ts}` | 已实现 |
 | i18n | en-GB / zh-CN 切换 | `client/src/backoffice/messages/*.json`、路由前缀 `/:locale/...` | 已实现 |
 | PORT-NAV-006 | 语言偏好跨登录保留 | `lgbo_locale` Cookie + `employee_ui_preferences`、`POST /api/preferences/locale` | 已实现 |
+| PORT-NAV-003 | 侧栏折叠状态跨登录保留 | `POST /api/preferences/sidebar` + `/api/session` 返回 `sidebarState` → `AppShell.initialCollapsed` | 已实现 |
 | PORT-ACT-003 | 过期 / 已使用链接区分 | `classifyTokenState` + `TOKEN_EXPIRED` / `TOKEN_ALREADY_USED` | 已实现 |
+| 邮件投递 | SMTP（163）→ SESv2 → DEV console 三级适配，参数与 LearningGuidePortal 一致 | `server/src/backoffice/modules/notification/services/email.ts` | 已实现 |
 
 Course 菜单目前只有落地页占位，等 Course 的 PRD 和 Figma 到位后再做。
 
@@ -86,6 +88,22 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 - 登录失败、邮箱检查、重发邮件、改密均有限流（固定窗口内存实现）
 - 审计事件表带 CHECK 约束，禁止写入形如 `password=`/`token=` 的明文
 - 忘记密码对外始终返回同一结果，避免账号枚举
+- 写请求 CSRF：会话 Cookie 为 SameSite=Lax，SPA 与接口同源（同一 Nest 服务），跨站写请求会被 Cookie 策略阻断
+- 员工账号相关 API 统一走全局 `BackofficeAccessGuard`（`nest/backoffice-access.guard.ts` + `nest/route-access.ts`）：无会话 401、非 Admin 403
+
+## 5.1 邮件投递
+
+`server/src/backoffice/modules/notification/services/email.ts` 与 LearningGuidePortal `services/emailService.ts` 保持相同的取值约定：
+
+| 优先级 | 触发条件 | 行为 |
+|---|---|---|
+| 1 | `SMTP_HOST` + `SMTP_USER` + `SMTP_PASS` | nodemailer SMTP 投递（线上 163：`smtp.163.com:465`） |
+| 2 | 仅 `SES_FROM_EMAIL` | AWS SESv2（默认 `ap-southeast-1`，实例角色授权） |
+| 3 | 都没有 | DEV 打到服务端日志；其它环境返回 `NOT_CONFIGURED` |
+
+发件人按 `SMTP_FROM` → `SES_FROM_EMAIL` → `SMTP_USER` 回退。投递异常返回 `FAILED`。
+接口把真实投递结果（`SENT` / `FAILED` / `NOT_CONFIGURED`）回显到列表页，
+不再出现「已加入发送队列」这类不实提示（PORT-ADM-002）；非 PROD 且未投递时额外返回 `manualLink` 供 Admin 手工转交。
 
 ## 5. 视觉基准
 
@@ -127,7 +145,7 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 | 限制 | 影响 | 处置建议 |
 |---|---|---|
 | 限流为单实例内存实现 | 多实例部署时限流失效 | 上线前换共享存储（Redis/DB） |
-| 邮件投递只有 console adapter | 部署环境返回 `NOT_CONFIGURED`，不会伪装成功；非 PROD 时页面显示链接供手动转交 | 接入 SES/SMTP 后再验收邮件链路 |
+| 邮件投递只有 console adapter | 部署环境返回 `NOT_CONFIGURED`，不会伪装成功；非 PROD 时页面显示链接供手动转交 | 部署环境配置 `SMTP_*`（163）后即可真实发信 |
 | PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐后台原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
 | Figma MCP 在本机未注入 agent 工具 | 无法读取设计上下文 | 见 `docs/AI_Collaboration_Log.md` 记录 |
 | 视觉以学员门户为基准，非后台原型稿 | 若后台有专属设计稿仍需再对齐 | 拿到后台设计稿后复核 |

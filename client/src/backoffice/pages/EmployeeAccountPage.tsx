@@ -12,7 +12,7 @@ import {
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
-  CloseIcon,
+  CloseCircleIcon,
   DotsIcon,
   PlusIcon,
   SearchIcon,
@@ -154,8 +154,17 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
 
       setManualLink(payload.data?.manualLink ?? null);
 
+      const delivery = payload.data?.delivery;
       setNotice(
-        isCreate ? t(locale, "employees.results.created") : t(locale, "employees.results.updated")
+        isCreate
+          ? t(locale, "employees.results.created", {
+              result: t(locale, `delivery.${delivery ?? "UNKNOWN"}`),
+            })
+          : delivery
+            ? t(locale, "employees.results.emailChanged", {
+                result: t(locale, `delivery.${delivery}`),
+              })
+            : t(locale, "employees.results.updated")
       );
       setEditor(null);
       await load();
@@ -191,10 +200,11 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       }
       setManualLink(payload.data?.manualLink ?? null);
       const delivery = payload.data?.delivery ?? "UNKNOWN";
+      const result = t(locale, `delivery.${delivery}`);
       setNotice(
         action === "reset-password"
-          ? t(locale, "employees.results.resetSent", { result: delivery })
-          : t(locale, "employees.results.resent")
+          ? t(locale, "employees.results.resetSent", { result })
+          : t(locale, "employees.results.resent", { result })
       );
       await load();
     } catch {
@@ -347,7 +357,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                             )
                           }
                         >
-                          <DotsIcon size={15} />
+                          <DotsIcon size={18} />
                         </button>
 
                         {openMenuId === employee.employeeId ? (
@@ -442,14 +452,14 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                     ? t(locale, "employees.newSubtitle")
                     : t(locale, "employees.editSubtitle")}
                 </p>
-              </div>
-              <button
+              </div>              <button
                 type="button"
                 className="modalClose"
                 onClick={() => setEditor(null)}
-                aria-label={t(locale, "common.cancel")}
+                aria-label={t(locale, "common.close")}
+                title={t(locale, "common.close")}
               >
-                <CloseIcon size={16} />
+                <CloseCircleIcon size={16} />
               </button>
             </div>
 

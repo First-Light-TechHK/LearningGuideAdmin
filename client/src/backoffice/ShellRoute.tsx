@@ -8,12 +8,12 @@ import { t } from './lib/i18n/messages'
 import { SESSION_CHANGED_EVENT, useLocale, usePathname } from './lib/navigation'
 import { menuFromPathSegments, type MenuKey } from './rbac/permissions'
 
-type SessionPayload = { employee: SessionEmployee }
+type SessionPayload = { employee: SessionEmployee; sidebarState?: 'expanded' | 'collapsed' }
 
 type SessionState =
   | { kind: 'loading' }
   | { kind: 'signedOut' }
-  | { kind: 'signedIn'; employee: SessionEmployee }
+  | { kind: 'signedIn'; employee: SessionEmployee; sidebarState: 'expanded' | 'collapsed' }
 
 const EmployeeContext = createContext<SessionEmployee | null>(null)
 
@@ -38,7 +38,15 @@ export function ShellRoute() {
 
   const load = useCallback(async () => {
     const result = await boRequest<SessionPayload>('/api/session')
-    setState(result.success ? { kind: 'signedIn', employee: result.data.employee } : { kind: 'signedOut' })
+    setState(
+      result.success
+        ? {
+            kind: 'signedIn',
+            employee: result.data.employee,
+            sidebarState: result.data.sidebarState === 'collapsed' ? 'collapsed' : 'expanded',
+          }
+        : { kind: 'signedOut' },
+    )
   }, [])
 
   useEffect(() => {
@@ -58,7 +66,11 @@ export function ShellRoute() {
   const menu = menuFromPathSegments(pathname.split('/').filter(Boolean).slice(1))
   return (
     <EmployeeContext.Provider value={state.employee}>
-      <AppShell employee={state.employee} workspace={menu !== null && WORKSPACE_MENUS.has(menu)}>
+      <AppShell
+        employee={state.employee}
+        workspace={menu !== null && WORKSPACE_MENUS.has(menu)}
+        initialCollapsed={state.sidebarState === 'collapsed'}
+      >
         <Outlet />
       </AppShell>
     </EmployeeContext.Provider>

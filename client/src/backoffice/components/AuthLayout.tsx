@@ -1,10 +1,11 @@
 import { LocaleSwitch } from "./LocaleSwitch";
-import { DiamondIcon } from "./icons";
+import { DiamondIcon, GraduationCapIcon } from "./icons";
 import { getMessages, t } from "../lib/i18n/messages";
 import { useLocale } from "../lib/navigation";
 
 /**
  * 认证页外壳，按设计稿：64px 白色品牌条 + 背景图 + 居中 logo 行 / 标题 / 副标题 + 白卡。
+ * 设计稿 771:551 的 Above Card Content 是 424 宽竖排（gap 10），标题与副标题 textAlign=CENTER。
  */
 export function AuthLayout({
   title,
@@ -35,13 +36,14 @@ export function AuthLayout({
       </div>
 
       <main className="authBody">
-        <span className="authBadge">
-          <DiamondIcon size={18} />
-          {messages.app.name}
-        </span>
-
-        <h1 className="authTitle">{title}</h1>
-        {subtitle ? <p className="authSubtitle">{subtitle}</p> : null}
+        <div className="authIntro">
+          <span className="authBadge">
+            <GraduationCapIcon size={22} />
+            {messages.app.name}
+          </span>
+          <h1 className="authTitle">{title}</h1>
+          {subtitle ? <p className="authSubtitle">{subtitle}</p> : null}
+        </div>
 
         <div className="authCard">{children}</div>
 

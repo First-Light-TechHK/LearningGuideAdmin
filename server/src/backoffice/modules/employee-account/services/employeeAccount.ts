@@ -21,6 +21,7 @@ import {
   manualLinkFor,
   sendActivationEmail as sendActivationEmailTo,
   sendPasswordResetEmail,
+  type EmailDeliveryResult,
 } from '../../notification/services/email';
 import {
   activationLink,
@@ -171,7 +172,8 @@ export async function createEmployee(input: {
 }
 
 export type UpdateEmployeeOutcome =
-  { ok: true; employee: EmployeeListItem } | { ok: false; code: ErrorCode };
+  | { ok: true; employee: EmployeeListItem; delivery?: string; manualLink?: string | null }
+  | { ok: false; code: ErrorCode };
 
 /** PRD PORT-EDT-001~006。 */
 export async function updateEmployee(input: {
@@ -270,15 +272,36 @@ export async function updateEmployee(input: {
     });
   }
 
+  let delivery: EmailDeliveryResult | undefined;
+
   if (emailChanged && patch.loginEmail) {
     // PRD PORT-ACT-005 / BR-PORT-009：旧链接作废，向新地址重发激活邮件
     await revokeTokensForEmployee(updated.employeeId);
     const rawToken = await issueActivationToken(updated.employeeId);
-    await sendActivationEmailTo({
+    const link = activationLink(input.appUrl, input.locale, rawToken);
+    delivery = await sendActivationEmailTo({
       to: patch.loginEmail,
-      link: activationLink(input.appUrl, input.locale, rawToken),
+      link,
       locale: input.locale,
     });
+
+    await tryRecordAuditEvent({
+      eventName: 'employee_email_changed',
+      actorEmployeeId: input.actorEmployeeId,
+      targetEmployeeId: updated.employeeId,
+      action: 'UPDATE_EMPLOYEE',
+      oldValue: existing.loginEmail,
+      newValue: patch.loginEmail,
+      result: delivery === 'SENT' ? 'SUCCESS' : 'FAILURE',
+      ipAddress: input.ipAddress,
+    });
+
+    return {
+      ok: true,
+      employee: toListItem(updated),
+      delivery,
+      manualLink: manualLinkFor(delivery, link),
+    };
   }
 
   return { ok: true, employee: toListItem(updated) };
