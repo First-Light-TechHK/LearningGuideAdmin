@@ -65,12 +65,32 @@ jobs:
           ARN: ${{ vars.ADMIN_DEV_APP_RUNNER_SERVICE_ARN }}
         run: |
           set -u
+          # App Runner rejects start-deployment unless the service is RUNNING,
+          # so wait for any in-flight operation to settle and retry the request.
+          for _ in $(seq 1 80); do
+            svc_status="$(aws apprunner describe-service --service-arn "$ARN" --query 'Service.Status' --output text)"
+            [ "$svc_status" = "RUNNING" ] && break
+            echo "service ${svc_status}; waiting for RUNNING"
+            sleep 15
+          done
+
           # start-deployment only accepts the request. Without polling, a build
           # that rolls back still shows a green workflow (this happened on
           # 2026-10-24: ROLLBACK_SUCCEEDED while the run reported success).
-          out="$(aws apprunner start-deployment --service-arn "$ARN" --output json)"
-          printf '%s\n' "$out"
-          op="$(printf '%s\n' "$out" | jq -r '.OperationId // empty')"
+          op=""
+          for _ in $(seq 1 10); do
+            if out="$(aws apprunner start-deployment --service-arn "$ARN" --output json 2>&1)"; then
+              printf '%s\n' "$out"
+              op="$(printf '%s\n' "$out" | jq -r '.OperationId // empty')"
+              [ -n "$op" ] && break
+            else
+              printf '%s\n' "$out"
+              case "$out" in
+                *InvalidRequestException*|*"isn't in RUNNING state"*) sleep 20 ;;
+                *) echo "::error::start-deployment failed"; exit 1 ;;
+              esac
+            fi
+          done
           if [ -z "$op" ]; then
             echo "::error::start-deployment returned no OperationId"
             exit 1
