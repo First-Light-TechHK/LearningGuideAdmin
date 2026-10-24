@@ -15,6 +15,19 @@ npm run bootstrap:admin        # 初始化受保护管理员
 npm run dev                    # http://localhost:3200
 ```
 
+## 邮件投递（激活 / 重置密码 / 改密通知）
+
+取值与 `LearningGuidePortal` 的 `services/emailService.ts` 一致，按顺序生效：
+
+1. **163 SMTP（线上默认）**——`SMTP_HOST=smtp.163.com`、`SMTP_PORT=465`、`SMTP_SECURE=1`、
+   `SMTP_USER=<邮箱>`、`SMTP_PASS=<授权码>`，可选 `SMTP_FROM`（留空回退 `SMTP_USER`）
+2. **AWS SESv2（备用）**——只配 `SES_FROM_EMAIL`，区域取 `AWS_REGION`（默认 `ap-southeast-1`），
+   凭据由实例角色提供
+3. **DEV 无配置**——邮件正文打到服务端日志（`[notification:console]`），接口返回 `CONSOLE`
+
+三者都没有且非 DEV 时接口返回 `NOT_CONFIGURED`，前端如实提示「未发送（邮件服务未配置）」，
+不会伪装成已发送（PORT-ADM-002）。`EMAIL_DELIVERY=discard|fail` 可用于联调。
+
 ## 脚本
 
 | 命令 | 作用 |
@@ -51,6 +64,8 @@ lib/                   env / db / http / 限流 / 安全策略 / 会话读取
 | PORT-P08 Bootstrap Admin | `scripts/bootstrap-admin.mjs` + 数据库触发器 |
 | RBAC 六角色矩阵 | `modules/rbac/permissions.ts` |
 | 会话与安全 | `modules/user-authentication/services/session.ts`, `lib/securityPolicy.ts` |
+| 邮件投递三级适配 | `modules/notification/services/email.ts` |
+| 侧栏折叠状态持久化 | `app/api/preferences/sidebar`, `app/[locale]/(shell)/layout.tsx` |
 
 ## 开发纪律
 
