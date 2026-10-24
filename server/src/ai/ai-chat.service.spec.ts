@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { PrismaKnowledgeClient } from '../ks/prisma-knowledge.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiChatLogger, type AiChatLogEntry } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
@@ -53,7 +54,7 @@ function setup(stream: StreamFn) {
   } as unknown as ProviderRegistry;
 
   const rateLimit = {
-    assertAllowed: jest.fn(),
+    assertAllowed: jest.fn().mockResolvedValue(undefined),
   } as unknown as RateLimitService;
 
   const chatLogger = {
@@ -61,7 +62,7 @@ function setup(stream: StreamFn) {
   } as unknown as AiChatLogger;
 
   const service = new AiChatService(
-    prisma,
+    new PrismaKnowledgeClient(prisma),
     configs,
     registry,
     rateLimit,
@@ -155,10 +156,9 @@ describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
   });
 
   it('课程不存在：日志记 error，releaseId 为空', async () => {
-    const { service, write, entryOf } = setup(async function* () {
+    const { service, write, entryOf, prisma } = setup(async function* () {
       yield '';
     });
-    const prisma = (service as unknown as { prisma: PrismaService }).prisma;
     (prisma.course.findUnique as jest.Mock).mockResolvedValueOnce(null);
     await expect(collect(service.streamChat(dto()))).rejects.toBeInstanceOf(
       NotFoundException,

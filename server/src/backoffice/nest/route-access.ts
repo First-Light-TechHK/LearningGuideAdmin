@@ -8,6 +8,8 @@ export type RouteAccess =
   | { kind: 'public' }
   /** Portal 学员端经服务间密钥调用（X-API-Key），不走员工会话。 */
   | { kind: 'service' }
+  /** KS 内部接口（/api/ks/**），只给 Agent 用：Bearer KS_SERVICE_TOKEN。 */
+  | { kind: 'internal' }
   /** 只要求登录（会话、改密、语言偏好）。 */
   | { kind: 'signedIn' }
   /** 员工账号管理：PRD §3.3 仅 Admin。 */
@@ -84,6 +86,7 @@ export function routeAccess(method: string, path: string): RouteAccess {
       : { kind: 'signedIn' };
   }
   if (first === 'user') return { kind: 'service' };
+  if (first === 'ks') return { kind: 'internal' };
   if (first === 'session' || first === 'preferences')
     return { kind: 'signedIn' };
   if (first === 'admin') return { kind: 'employeeAdmin' };

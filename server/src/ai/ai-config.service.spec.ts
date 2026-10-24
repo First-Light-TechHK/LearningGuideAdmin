@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AiConfigService } from './ai-config.service';
+import { PrismaKnowledgeClient } from '../ks/prisma-knowledge.client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 
@@ -27,6 +28,7 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       mockPrisma as unknown as PrismaService,
       mockCrypto as unknown as CryptoService,
       mockConfig as unknown as ConfigService,
+      new PrismaKnowledgeClient(mockPrisma as unknown as PrismaService),
     );
   });
 

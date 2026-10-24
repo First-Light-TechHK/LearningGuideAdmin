@@ -168,6 +168,16 @@ model AiChatSession {
   @@index([courseId, createdAt])
 }
 
+// AI 限流计数（2026-10-24）：多个 Agent 实例共用，见 src/ai/rate-limit.service.ts
+model AiRateLimitHit {
+  id    BigInt   @id @default(autoincrement())
+  key   String
+  hitAt DateTime @default(now()) @map("hit_at") @db.Timestamptz(6)
+
+  @@index([key, hitAt])
+  @@map("ai_rate_limit_hits")
+}
+
 // ==========================================
 // BackOffice 员工身份（PRD v1.1 §3、§11；表结构见 migration 20261023150000_backoffice_employees）
 // 业务读写走 src/backoffice/repositories 的原生 SQL（触发器与条件更新），这里只为 Prisma 声明表结构。

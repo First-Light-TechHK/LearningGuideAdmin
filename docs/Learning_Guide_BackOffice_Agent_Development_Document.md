@@ -208,6 +208,17 @@ model AiChatSession {
 
   @@index([courseId, createdAt])
 }
+
+// AI 对话限流计数（2026-10-24 新增；原为进程内存，多实例时各算各的）
+// 每次放行写一行；同一 key 用 pg_advisory_xact_lock 串行，滑动 60 秒窗口，被拒请求不计数
+model AiRateLimitHit {
+  id    BigInt   @id @default(autoincrement())
+  key   String   // "<courseId>" 或 "<courseId>::study-group"
+  hitAt DateTime @default(now()) @map("hit_at") @db.Timestamptz(6)
+
+  @@index([key, hitAt])
+  @@map("ai_rate_limit_hits")
+}
 ```
 
 ### 2.1 初始种子数据（Seed Data）

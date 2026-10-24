@@ -2,10 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  KNOWLEDGE_CLIENT,
+  type KnowledgeClient,
+} from '../ks/contract/knowledge-client';
 import { AiChatLogger, type AiChatStatus } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
@@ -85,7 +89,8 @@ function splitByHeadings(md: string): {
 @Injectable()
 export class AiChatService {
   constructor(
-    private readonly prisma: PrismaService,
+    // 课程与 Release 快照归 KS 所有，只经契约读取（docs/Engine_Split_Implementation.md）
+    @Inject(KNOWLEDGE_CLIENT) private readonly knowledge: KnowledgeClient,
     private readonly configs: AiConfigService,
     private readonly registry: ProviderRegistry,
     private readonly rateLimit: RateLimitService,
@@ -102,14 +107,7 @@ export class AiChatService {
       locale: null,
       channel: 'admin',
       resolve: async () => {
-        const course = await this.prisma.course.findUnique({
-          where: { id: dto.courseId },
-          select: {
-            id: true,
-            currentReleaseId: true,
-            aiTestReleaseId: true,
-          },
-        });
+        const course = await this.knowledge.getCourse(dto.courseId);
         if (!course) throw new NotFoundException('课程不存在');
         return {
           courseId: course.id,
@@ -134,14 +132,9 @@ export class AiChatService {
       channel: 'learner',
       quota: dto.channel ?? 'portal',
       resolve: async () => {
-        const course = await this.prisma.course.findFirst({
-          where: { externalId: dto.externalCourseId },
-          select: {
-            id: true,
-            currentReleaseId: true,
-            aiTutorOnline: true,
-          },
-        });
+        const course = await this.knowledge.getCourseByExternalId(
+          dto.externalCourseId,
+        );
         if (!course) throw new NotFoundException('课程不存在');
         if (!course.aiTutorOnline) {
           throw new ForbiddenException('该课程 AI 导师未开放');
@@ -182,7 +175,7 @@ export class AiChatService {
       const resolved = await input.resolve();
       courseId = resolved.courseId;
       releaseId = resolved.releaseId;
-      this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal');
+      await this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal');
 
       const [runtime, prompts, context] = await Promise.all([
         this.configs.resolveRuntime(courseId, releaseId, input.mode),
@@ -274,24 +267,14 @@ export class AiChatService {
         '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
       );
     }
-    const release = await this.prisma.release.findUnique({
-      where: { id: releaseId },
-      select: { snapshotData: true },
-    });
+    const release = await this.knowledge.getRelease(releaseId);
     if (!release) {
       throw new BadRequestException(
         '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
       );
     }
-    const snapshot = release.snapshotData as unknown as {
-      pages?: {
-        title: string;
-        contentMd?: string;
-        sectionTags?: Record<string, string[]>;
-      }[];
-    };
     const blocks: string[] = [];
-    for (const page of snapshot?.pages ?? []) {
+    for (const page of release.pages) {
       const content = page.contentMd?.trim();
       if (!content) continue;
       const sectionTags = page.sectionTags ?? {};

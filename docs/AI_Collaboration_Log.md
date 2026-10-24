@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-10-24 ｜ KS Engine / Agent Engine 拆分（可独立部署、独立扩容）
+
+- **任务（运维）**：Admin/Portal API、KS/Agent 引擎、数据层三份设计；两个系统深度联动但发版互不影响，KS 和 Agent 可独立扩容。
+- **用户拍板**：画完架构图自审后，对照 admin 上游最新情况直接实施。
+- **变更清单**：
+  - 新增 `APP_ROLES`（admin / agent / ks），同一镜像按角色挂模块；不设时全起，行为不变
+  - 新增 KS 契约 `src/ks/contract`，Agent 只经契约读 KS；同进程读库，拆开后经 `/api/ks/v1` + 服务令牌 + 3 秒超时
+  - KS 不可达时 Agent 返回 503 `KS_UNAVAILABLE`
+  - 限流从进程内存改到表 `ai_rate_limit_hits`（Prisma 迁移，空库可重放），多实例准确
+  - ESLint 锁模块边界；开发文档 §2 补表；新增 `docs/Engine_Split_Implementation.md`
+- **自测证据**：`tsc` 0 error；单测 162 通过 1 跳过；e2e 96 通过，2 条失败与改动前相同（`ai.e2e-spec` chat-stream 两条，基线即失败）；新增引擎拆分 e2e 4/4
+- **审查结论**：自审；新文件 eslint 0 error，改动的既有文件未新增 lint 错误
+- **Git**：分支 `feat/engine-split`（在 ccf1768 之上）
+- **下一步**：拆库与去跨域外键、分开部署、Portal 服务令牌、KS 检索（见实施说明 §8）
+
+---
+
 ## 2026-10-23 ｜ AI Tutor 进入时刷新 Release 列表（状态过期修复）
 
 - **任务（用户）**：在 Knowledge Pages 新建 Release 后，AI Tutor 仍停留在旧 Release 列表；切换 Course 再切回才更新。要求只修状态刷新。

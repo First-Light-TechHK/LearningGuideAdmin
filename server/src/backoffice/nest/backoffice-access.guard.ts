@@ -1,7 +1,14 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { ApiKeyGuard } from '../../common/guards/api-key.guard';
+import { serviceTokenAllows } from '../../common/guards/service-token';
+import { isDeployed } from '../lib/env';
 import { decideEmployeeAccountAccess } from '../modules/rbac/access';
 import { isActionAllowed } from '../modules/rbac/permissions';
 import { resolveSession } from '../modules/user-authentication/services/session';
@@ -17,7 +24,7 @@ import { routeAccess } from './route-access';
 export class BackofficeAccessGuard implements CanActivate {
   private readonly serviceGuard: ApiKeyGuard;
 
-  constructor(config: ConfigService) {
+  constructor(private readonly config: ConfigService) {
     this.serviceGuard = new ApiKeyGuard(config);
   }
 
@@ -28,6 +35,20 @@ export class BackofficeAccessGuard implements CanActivate {
     if (access.kind === 'public') return true;
     if (access.kind === 'service')
       return this.serviceGuard.canActivate(context);
+    if (access.kind === 'internal') {
+      if (
+        serviceTokenAllows(
+          request.headers.authorization,
+          this.config.get<string>('KS_SERVICE_TOKEN'),
+          isDeployed(),
+        )
+      )
+        return true;
+      throw new UnauthorizedException({
+        code: 'SERVICE_TOKEN_INVALID',
+        message: 'Service token required',
+      });
+    }
 
     const employee = await resolveSession(sessionToken(request));
     if (!employee)

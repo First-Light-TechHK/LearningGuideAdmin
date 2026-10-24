@@ -29,6 +29,16 @@ describe('route access classification', () => {
     });
   });
 
+  it('puts the KS internal API behind the service token, never a session', () => {
+    for (const path of [
+      '/api/ks/v1/courses',
+      '/api/ks/v1/releases/r1',
+      '/API/KS/v1/courses/c1/tutor-online',
+    ]) {
+      assert.deepEqual(routeAccess('GET', path), { kind: 'internal' }, path);
+    }
+  });
+
   it('needs only a session for session, preferences and change password', () => {
     assert.deepEqual(routeAccess('GET', '/api/session'), { kind: 'signedIn' });
     assert.deepEqual(routeAccess('POST', '/api/preferences/locale'), {
