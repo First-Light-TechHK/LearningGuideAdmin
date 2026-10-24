@@ -1,34 +1,28 @@
-# DEV deploy for admin.ilovelearningguide.com.
-# Requires repo variable ADMIN_DEV_APP_RUNNER_SERVICE_ARN; the workflow fails with
-# a clear message until the service is provisioned.
+# Deploy the Admin DEV environment (admin.ilovelearningguide.com).
+# Scope is deliberately narrow: a push to `dev` is the only trigger, and the
+# target is the single Admin DEV App Runner service. No other branch, tag or
+# manual ref can deploy. App Runner's own branch auto-deploy is disabled so
+# this workflow is the only publisher.
 name: Deploy DEV
 
 on:
-  workflow_run:
-    workflows: [CI]
+  push:
     branches: [dev]
-    types: [completed]
-  workflow_dispatch:
+
+concurrency:
+  group: admin-dev-deploy
+  cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
-    # Only the dev branch may deploy, and only into the Admin DEV environment.
-    # A manual run from another ref is allowed in, then rejected by the first
-    # step so the operator sees an explicit error instead of a silent skip.
-    if: >-
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev')
-      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - name: Reject non-dev refs
-        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/dev'
-        run: |
-          echo "::error::Deploy DEV may only be dispatched from the dev branch (got ${{ github.ref }})."
-          exit 1
       - uses: actions/checkout@v4
+
       - name: Require the DEV service ARN
         env:
           ARN: ${{ vars.ADMIN_DEV_APP_RUNNER_SERVICE_ARN }}
@@ -37,11 +31,35 @@ jobs:
             echo "::error::ADMIN_DEV_APP_RUNNER_SERVICE_ARN is not set. Provision the DEV App Runner service first."
             exit 1
           fi
+
+      - name: Wait for CI to pass on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          for _ in $(seq 1 90); do
+            conclusion="$(gh api "repos/$REPO/actions/runs?head_sha=$GITHUB_SHA&per_page=30" \
+              --jq '.workflow_runs[] | select(.name == "CI") | .conclusion' 2>/dev/null | head -1)"
+            case "${conclusion:-}" in
+              success) echo "CI passed for $GITHUB_SHA"; exit 0 ;;
+              failure|cancelled|timed_out|action_required)
+                echo "::error::CI on $GITHUB_SHA ended as $conclusion"
+                exit 1
+                ;;
+            esac
+            echo "CI not finished yet (${conclusion:-running}); waiting"
+            sleep 20
+          done
+          echo "::error::timed out waiting for CI on $GITHUB_SHA"
+          exit 1
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-southeast-1
+
       - name: Start App Runner deployment and wait for the result
         env:
           ARN: ${{ vars.ADMIN_DEV_APP_RUNNER_SERVICE_ARN }}
