@@ -23,20 +23,27 @@ export function LocaleSwitch({
   const [busy, setBusy] = useState(false);
 
   async function change() {
+    if (busy) return;
     setBusy(true);
-    const href = localeHref(pathname ?? `/${locale}/course`, target);
-    if (persist) {
-      try {
-        await boFetch("/api/preferences/locale", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ locale: target }),
-        });
-      } catch {
-        // 偏好落库失败不阻断切换：URL 与 Cookie 仍会更新
+    try {
+      const href = localeHref(pathname ?? `/${locale}/course`, target);
+      if (persist) {
+        try {
+          await boFetch("/api/preferences/locale", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ locale: target }),
+          });
+        } catch {
+          // 偏好落库失败不阻断切换：URL 与 Cookie 仍会更新
+        }
       }
+      router.push(href);
+    } finally {
+      // 切换语言只改变 :locale 参数，组件不会重新挂载；
+      // 必须手动复位，否则 busy 会一直是 true，按钮再也点不动。
+      setBusy(false);
     }
-    router.push(href);
   }
 
   return (
