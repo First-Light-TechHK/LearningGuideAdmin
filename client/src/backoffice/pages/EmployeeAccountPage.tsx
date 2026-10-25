@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ErrorCode } from "../contracts/envelope";
 import {
@@ -64,7 +65,15 @@ type EditorState =
       accountStatus: AccountStatus;
     };
 
+/** 行操作菜单改用 fixed 定位渲染到 body，避免被可滚动的表格容器裁切。 */
+type OpenMenu = {
+  employee: EmployeeListItem;
+  top: number;
+  left: number;
+};
+
 const EMPTY_FILTERS: Filters = { email: "", role: "", status: "" };
+const ROW_MENU_WIDTH = 160;
 
 function formatLastLogin(value: string | null, locale: Locale): string {
   if (!value) return "—";
@@ -95,7 +104,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   const [linkCopied, setLinkCopied] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -137,6 +146,23 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     void load();
   }, [load]);
 
+  // 表格/页面滚动或窗口变化时关闭行菜单，避免 fixed 菜单停在旧位置
+  useEffect(() => {
+    if (!openMenu) return;
+    const close = () => setOpenMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openMenu]);
+
   // PORT-LST-002：邮箱支持部分匹配，输入停 300ms 后自动查询
   function onEmailChange(value: string) {
     setFilters((current) => ({ ...current, email: value }));
@@ -161,6 +187,32 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     } catch {
       // 隐私模式下 localStorage 可能不可写，忽略即可
     }
+  }
+
+  function toggleRowMenu(
+    event: React.MouseEvent<HTMLButtonElement>,
+    employee: EmployeeListItem
+  ) {
+    if (openMenu?.employee.employeeId === employee.employeeId) {
+      setOpenMenu(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const itemCount = employee.displayStatus === "Pending" ? 3 : 2;
+    // .rowMenu: padding 4*2 + 32px/项 + 2px 间距
+    const menuHeight = 8 + itemCount * 32 + (itemCount - 1) * 2;
+    const margin = 8;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top =
+      spaceBelow >= menuHeight + margin
+        ? rect.bottom + margin
+        : Math.max(margin, rect.top - menuHeight - margin);
+    const left = Math.min(
+      Math.max(margin, rect.right - ROW_MENU_WIDTH),
+      window.innerWidth - ROW_MENU_WIDTH - margin
+    );
+    setOpenMenu({ employee, top, left });
   }
 
   async function submitEditor(event: React.FormEvent<HTMLFormElement>) {
@@ -232,7 +284,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     setNotice(null);
     setManualLink(null);
     setLinkCopied(false);
-    setOpenMenuId(null);
+    setOpenMenu(null);
     try {
       const response = await boFetch(`/api/admin/employees/${employee.employeeId}/${action}`, {
         method: "POST",
@@ -355,26 +407,43 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       </div>
 
       {errorCode ? <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div> : null}
-      {notice ? <div className="alert alertOk">{notice}</div> : null}
-      {manualLink ? (
-        <div className="alert alertInfo manualLinkAlert" data-testid="manual-link">
-          <div className="manualLinkBody">
-            <span>{t(locale, "employees.results.manualLink")}</span>
-            <span className="manualLinkValue" data-testid="manual-link-value">
-              {manualLink}
-            </span>
+      {notice || manualLink ? (
+        <div className="alert alertOk employeeStatus" data-testid="employee-status">
+          <div className="employeeStatusHead">
+            <span>{notice ?? t(locale, "employees.results.linkReady")}</span>
+            <button
+              type="button"
+              className="alertClose"
+              aria-label={t(locale, "common.close")}
+              title={t(locale, "common.close")}
+              onClick={() => {
+                setNotice(null);
+                setManualLink(null);
+                setLinkCopied(false);
+              }}
+            >
+              <CloseCircleIcon size={14} />
+            </button>
           </div>
-          <button
-            type="button"
-            className="button buttonGhost buttonSmall"
-            onClick={() => void copyManualLink()}
-          >
-            {t(locale, linkCopied ? "common.copied" : "common.copy")}
-          </button>
+          {manualLink ? (
+            <div className="manualLinkRow" data-testid="manual-link">
+              <span className="linkLabel">{t(locale, "employees.results.linkLabel")}</span>
+              <span className="manualLinkValue" data-testid="manual-link-value">
+                {manualLink}
+              </span>
+              <button
+                type="button"
+                className="button buttonGhost buttonSmall"
+                onClick={() => void copyManualLink()}
+              >
+                {t(locale, linkCopied ? "common.copied" : "common.copy")}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      <div className="tableWrap">
+      <div className="tableWrap" onScroll={() => setOpenMenu(null)}>
         <table className="table">
           <colgroup>
             {/* 设计稿列宽：300 / 180 / 140 / 240 / 158（内容宽 1018） */}
@@ -433,52 +502,12 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                           type="button"
                           className="iconButton"
                           aria-label={t(locale, "common.actions")}
-                          aria-expanded={openMenuId === employee.employeeId}
-                          onClick={() =>
-                            setOpenMenuId((current) =>
-                              current === employee.employeeId ? null : employee.employeeId
-                            )
-                          }
+                          aria-haspopup="menu"
+                          aria-expanded={openMenu?.employee.employeeId === employee.employeeId}
+                          onClick={(event) => toggleRowMenu(event, employee)}
                         >
                           <DotsIcon size={18} />
                         </button>
-
-                        {openMenuId === employee.employeeId ? (
-                          <div className="rowMenu">
-                            <button
-                              type="button"
-                              className="rowMenuItem"
-                              onClick={() => {
-                                setOpenMenuId(null);
-                                setEditor({
-                                  mode: "edit",
-                                  employee,
-                                  email: employee.loginEmail,
-                                  role: employee.role,
-                                  accountStatus: employee.accountStatus,
-                                });
-                              }}
-                            >
-                              {t(locale, "employees.actions.edit")}
-                            </button>
-                            <button
-                              type="button"
-                              className="rowMenuItem"
-                              onClick={() => void runAction(employee, "reset-password")}
-                            >
-                              {t(locale, "employees.actions.resetPassword")}
-                            </button>
-                            {employee.displayStatus === "Pending" ? (
-                              <button
-                                type="button"
-                                className="rowMenuItem"
-                                onClick={() => void runAction(employee, "resend-activation")}
-                              >
-                                {t(locale, "employees.actions.resendActivation")}
-                              </button>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -522,12 +551,13 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
           <span className="pager">
             <button
               type="button"
-              className="pagerButton pagerNav"
+              className="pagerButton"
               disabled={page <= 1}
+              aria-label={t(locale, "common.previous")}
+              title={t(locale, "common.previous")}
               onClick={() => setPage((value) => Math.max(1, value - 1))}
             >
               <ChevronLeftIcon size={14} />
-              {t(locale, "common.previous")}
             </button>
             {pageItems(page, totalPages).map((item, index) =>
               item === "gap" ? (
@@ -551,16 +581,72 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
             )}
             <button
               type="button"
-              className="pagerButton pagerNav"
+              className="pagerButton"
               disabled={page >= totalPages}
+              aria-label={t(locale, "common.next")}
+              title={t(locale, "common.next")}
               onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
             >
-              {t(locale, "common.next")}
               <ChevronRightIcon size={14} />
             </button>
           </span>
         </div>
       </div>
+
+      {openMenu
+        ? createPortal(
+            <>
+              <div
+                className="rowMenuBackdrop"
+                onClick={() => setOpenMenu(null)}
+                aria-hidden="true"
+              />
+              <div
+                className="rowMenu rowMenuFixed"
+                role="menu"
+                style={{ top: openMenu.top, left: openMenu.left }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="rowMenuItem"
+                  onClick={() => {
+                    const employee = openMenu.employee;
+                    setOpenMenu(null);
+                    setEditor({
+                      mode: "edit",
+                      employee,
+                      email: employee.loginEmail,
+                      role: employee.role,
+                      accountStatus: employee.accountStatus,
+                    });
+                  }}
+                >
+                  {t(locale, "employees.actions.edit")}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="rowMenuItem"
+                  onClick={() => void runAction(openMenu.employee, "reset-password")}
+                >
+                  {t(locale, "employees.actions.resetPassword")}
+                </button>
+                {openMenu.employee.displayStatus === "Pending" ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="rowMenuItem"
+                    onClick={() => void runAction(openMenu.employee, "resend-activation")}
+                  >
+                    {t(locale, "employees.actions.resendActivation")}
+                  </button>
+                ) : null}
+              </div>
+            </>,
+            document.body
+          )
+        : null}
 
       {editor ? (
         <div className="modalBackdrop">

@@ -185,7 +185,7 @@ Admin 触发的创建员工、修改未验证邮箱、重发激活、重置密�
 | 会话空闲超时 | 30 分钟 | `SESSION_IDLE_MINUTES` |
 | 登录限流 | 5 分钟内 10 次 / IP | `SIGN_IN_MAX_PER_WINDOW` |
 | 发信限流 | 5 分钟内 5 次 / IP | `EMAIL_SEND_MAX_PER_WINDOW` |
-| 列表分页 | UI 默认 8（设计稿），可选 8 / 10 / 20 / 50 / 100；服务端兜底上限 100 | `EMPLOYEE_PAGE_SIZE_*` |
+| 列表分页 | 参照 Ant Design Table：表格区域内部滚动、表头 sticky、分页固定卡片底部；UI 默认 8（设计稿），可选 8 / 10 / 20 / 50 / 100；服务端兜底上限 100 | `EMPLOYEE_PAGE_SIZE_*` |
 
 ## 6.2 部署配置（Admin DEV / SIT / PROD）
 

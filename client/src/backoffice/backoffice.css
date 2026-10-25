@@ -359,7 +359,9 @@ body {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  /* 桌面端由卡片内部的表格滚动，禁止外层出现横向/纵向滚动条 */
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 13px 10px 8px 12px;
   display: flex;
   gap: 12px;
@@ -383,14 +385,13 @@ body {
   min-height: 0;
 }
 
-/* 设计稿卡片高 852（视口 941 − 顶栏 68 − 上下留白 21） */
+/* 设计稿卡片高 852（视口 941 − 顶栏 68 − 上下留白 21）。
+   卡片固定占满内容区：表格在卡片内部滚动，分页固定在卡片底部，
+   不再随整页滚动漂到表格中间。 */
 .cardGrow {
   flex: 1;
   min-width: 0;
-  min-height: calc(100vh - 89px);
-  /* 窗口高度不足时让卡片随内容增高、由 .content 滚动；
-     若沿用 stretch，表格会溢出卡片并盖住分页和最后一行 */
-  align-self: flex-start;
+  min-height: 0;
 }
 
 .cardTitle {
@@ -434,7 +435,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: calc(100vh - 89px);
+  min-height: 0;
 }
 
 .subNavItem {
@@ -792,11 +793,26 @@ body {
 }
 
 .tableWrap {
-  /* 不参与压缩：表格始终保持自然高度，分页永远排在表格之后；
-     min-height:0 + flex:1 在矮窗口里会把表格压成 0 高并让分页盖住行 */
-  flex: 0 0 auto;
-  /* 行内操作菜单是绝对定位子元素，容器裁切会让菜单点不开 */
-  overflow: visible;
+  /* 主流后台表格模式：表格区域吃掉剩余高度并内部滚动，
+     分页条作为固定 footer 留在卡片底部 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.tableWrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tableWrap::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.tableWrap::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .table {
@@ -807,6 +823,9 @@ body {
 
 /* 设计稿 table-header：1018×50，底 #f6f8fa，圆角 6，文字 13/600 #64748b 垂直居中 */
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: #f6f8fa;
   color: var(--lg-muted);
   font-size: 13px;
@@ -816,6 +835,7 @@ body {
   padding: 0;
   white-space: nowrap;
   vertical-align: middle;
+  box-shadow: inset 0 -1px 0 var(--lg-line-soft);
 }
 
 .table th:first-child {
@@ -899,6 +919,21 @@ body {
   z-index: 50;
 }
 
+/* 菜单渲染到 body，使用 fixed 坐标，避免被可滚动表格裁切 */
+.rowMenuFixed {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: 200;
+}
+
+.rowMenuBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  background: transparent;
+}
+
 .rowMenuItem {
   border: 0;
   background: transparent;
@@ -918,7 +953,7 @@ body {
   background: #f5f8fc;
 }
 
-/* 设计稿 pagination：1018×30，贴卡片底部 */
+/* 固定 footer：贴在卡片底部，表格滚动时保持不动 */
 .pagination {
   display: flex;
   align-items: center;
@@ -926,8 +961,10 @@ body {
   gap: 12px;
   min-height: 30px;
   flex: 0 0 auto;
-  padding-top: 0;
-  margin-top: auto;
+  padding-top: 12px;
+  margin-top: 0;
+  border-top: 1px solid var(--lg-line-soft);
+  background: var(--lg-white);
   font-size: 13px;
   color: var(--lg-muted);
   flex-wrap: wrap;
@@ -978,13 +1015,6 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.pagerNav {
-  width: auto;
-  padding: 0 8px;
-  gap: 2px;
-  white-space: nowrap;
 }
 
 .pagerButton {
@@ -1052,28 +1082,68 @@ body {
   color: #1557db;
 }
 
-/* 邮件发出后仍保留的一次性链接：正文折行，复制按钮固定在右侧 */
-.manualLinkAlert {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.manualLinkBody {
-  flex: 1;
-  min-width: 0;
+/* 发送结果与一次性链接合并成一条紧凑状态栏，给表格留出高度；
+   链接单行横向滚动，复制按钮固定在右侧 */
+.employeeStatus {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+.employeeStatusHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alertClose {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-top: 1px;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.alertClose:hover {
+  opacity: 1;
+}
+
+.manualLinkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.linkLabel {
+  flex: 0 0 auto;
+  font-weight: 500;
+}
+
 .manualLinkValue {
-  display: block;
-  word-break: break-all;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
   user-select: all;
+  padding: 3px 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.manualLinkValue::-webkit-scrollbar {
+  height: 4px;
+}
+
+.manualLinkValue::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
 }
 
 .buttonSmall {
@@ -1379,7 +1449,49 @@ body {
   }
 
   .cardGrow {
+    flex: 0 0 auto;
+    height: auto;
     min-height: 0;
+  }
+
+  .tableWrap {
+    flex: 0 0 auto;
+    max-height: 60vh;
+  }
+}
+
+/* 矮窗口（例如 1024×473 的嵌入视图）压缩页面留白，给表格留出更多行 */
+@media (max-height: 700px) {
+  .cardGrow {
+    padding: 16px 20px 12px;
+  }
+
+  .pageHead {
+    margin-bottom: 14px;
+  }
+
+  .cardTitle {
+    font-size: 20px;
+  }
+
+  .cardSubtitle {
+    margin-top: 4px;
+  }
+
+  .filters {
+    margin-bottom: 8px;
+  }
+
+  .table th {
+    height: 42px;
+  }
+
+  .table td {
+    height: 44px;
+  }
+
+  .pagination {
+    padding-top: 8px;
   }
 }
 

@@ -165,11 +165,11 @@
     },
     "neverSignedIn": "—",
     "empty": "No employee accounts match the current search and filters.",
-    "showing": "Showing {from}–{to} of {total} employees",
-    "showingSingle": "Showing employee {from} of {total}",
-    "showingEmpty": "0 employees",
-    "pageSizeLabel": "Rows per page",
-    "pageOf": "Page {page} of {total}",
+    "showing": "{from}–{to} of {total}",
+    "showingSingle": "{from} of {total}",
+    "showingEmpty": "0 items",
+    "pageSizeLabel": "Rows/page",
+    "pageOf": "Page {page} / {total}",
     "pageNumber": "Page {page}",
     "actions": {
       "edit": "Edit",
@@ -191,7 +191,8 @@
       "emailChanged": "Email updated. A new activation email delivery result: {result}.",
       "resetSent": "Password reset email delivery result: {result}.",
       "resent": "New activation email delivery result: {result}. The previous link is no longer valid.",
-      "manualLink": "This is the same link as in the email. Copy it and hand it to the employee directly (single use):"
+      "linkReady": "One-time link generated.",
+      "linkLabel": "One-time link"
     }
   },
   "delivery": {

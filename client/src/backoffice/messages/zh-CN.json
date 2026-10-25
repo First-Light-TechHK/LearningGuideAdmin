@@ -165,11 +165,11 @@
     },
     "neverSignedIn": "—",
     "empty": "没有符合当前搜索与筛选条件的员工账号。",
-    "showing": "显示第 {from}–{to} 条，共 {total} 名员工",
-    "showingSingle": "显示第 {from} 条，共 {total} 名员工",
-    "showingEmpty": "共 0 名员工",
-    "pageSizeLabel": "每页条数",
-    "pageOf": "第 {page} 页，共 {total} 页",
+    "showing": "第 {from}–{to} 条 / 共 {total} 条",
+    "showingSingle": "第 {from} 条 / 共 {total} 条",
+    "showingEmpty": "共 0 条",
+    "pageSizeLabel": "每页",
+    "pageOf": "第 {page} / {total} 页",
     "pageNumber": "第 {page} 页",
     "actions": {
       "edit": "编辑",
@@ -191,7 +191,8 @@
       "emailChanged": "邮箱已更新，新的激活邮件发送结果：{result}。",
       "resetSent": "重置密码邮件发送结果：{result}。",
       "resent": "新的激活邮件发送结果：{result}，此前的链接立即失效。",
-      "manualLink": "以下链接与邮件中的链接相同，可直接复制转交给该员工（仅可使用一次）："
+      "linkReady": "一次性链接已生成。",
+      "linkLabel": "一次性链接"
     }
   },
   "delivery": {
