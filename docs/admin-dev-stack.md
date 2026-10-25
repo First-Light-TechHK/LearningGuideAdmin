@@ -53,3 +53,26 @@ Nothing separate to publish: a push to `dev` rebuilds `client/dist` and `server/
   `learning-guide-admin-ci`, whose only permission is `apprunner:StartDeployment`,
   `DescribeService` and `ListOperations` on the DEV service ARN.
 - Chain: push to `dev` → CI → Deploy DEV → App Runner source build → `/api/health`.
+
+## Email (BackOffice notifications)
+
+Adapter: `server/src/backoffice/modules/notification/services/email.ts` — SMTP when `SMTP_HOST` + `SMTP_USER` +
+`SMTP_PASS` are present, otherwise Amazon SES v2 (`SES_FROM_EMAIL`, region `ap-southeast-1`), otherwise the
+console adapter on DEV. Delivery failures return `FAILED`; on non-production the activation/reset link is
+handed back to the operator so a failed send never blocks onboarding.
+
+Current DEV configuration:
+
+- `SMTP_HOST=smtp.163.com`, `SMTP_PORT=465`, `SMTP_SECURE=1`, `SMTP_USER=learningguide@163.com`,
+  `SMTP_FROM=Learning Guide <learningguide@163.com>`, `SMTP_PASS` from `learning-guide/admin/dev/smtp_pass`.
+- `SES_FROM_EMAIL=learningguide@163.com` is set as the AWS fallback; the instance role has
+  `ses:SendEmail` on that identity.
+
+AWS SES state (2026-10-25): account is **in the sandbox** in every region, so SES can only deliver to
+verified addresses (`yongthelaoma@gmail.com`, `learningguide@163.com`). To use SES for real employees:
+
+1. Publish the three DKIM CNAMEs for `ilovelearningguide.com` (`<token>._domainkey` → `<token>.dkim.amazonses.com`).
+2. Request production access in the SES console (Account dashboard → Request production access).
+3. Then set `SES_FROM_EMAIL=no-reply@ilovelearningguide.com` and remove the SMTP variables.
+
+Until then SMTP is the working path; SES remains the target for production.
