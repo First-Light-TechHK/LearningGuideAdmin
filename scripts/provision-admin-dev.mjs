@@ -105,8 +105,26 @@ const source = {
         // StartCommand is not a shell: keep the operators inside the script.
         StartCommand: "sh ./start-admin.sh",
         Port: "3000",
-        RuntimeEnvironmentVariables: { NODE_ENV: "production", APP_ENV: "DEV", PORT: "3000" },
-        RuntimeEnvironmentSecrets: { DATABASE_URL: secretArns.DATABASE_URL, ADMIN_API_KEY: secretArns.ADMIN_API_KEY }
+        RuntimeEnvironmentVariables: {
+          NODE_ENV: "production",
+          APP_ENV: "DEV",
+          PORT: "3000",
+          AWS_REGION: region,
+          // Mail: SMTP wins when fully configured, otherwise SES v2 with this sender.
+          // SES starts in the sandbox; production access must be requested in AWS.
+          ...(process.env.SES_FROM_EMAIL ? { SES_FROM_EMAIL: process.env.SES_FROM_EMAIL } : {}),
+          ...(process.env.SMTP_HOST ? { SMTP_HOST: process.env.SMTP_HOST } : {}),
+          ...(process.env.SMTP_PORT ? { SMTP_PORT: process.env.SMTP_PORT } : {}),
+          ...(process.env.SMTP_SECURE ? { SMTP_SECURE: process.env.SMTP_SECURE } : {}),
+          ...(process.env.SMTP_USER ? { SMTP_USER: process.env.SMTP_USER } : {}),
+          ...(process.env.SMTP_FROM ? { SMTP_FROM: process.env.SMTP_FROM } : {})
+        },
+        RuntimeEnvironmentSecrets: {
+          DATABASE_URL: secretArns.DATABASE_URL,
+          ADMIN_API_KEY: secretArns.ADMIN_API_KEY,
+          // Optional: ARN of a secret holding the SMTP password.
+          ...(process.env.SMTP_PASS_SECRET_ARN ? { SMTP_PASS: process.env.SMTP_PASS_SECRET_ARN } : {})
+        }
       }
     }
   }
