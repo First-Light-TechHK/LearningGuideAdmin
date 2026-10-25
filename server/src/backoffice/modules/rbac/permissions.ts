@@ -47,7 +47,10 @@ export const ROLE_MATRIX: Record<
   },
   GRAPHIC_DESIGNER: {
     course: 'EDIT',
-    knowledge: 'VIEW',
+    // PRD §3.2 里 Course=Edit，但本应用只有 Knowledge 一个「课程内容编辑面」
+    // （Course 菜单为占位），故把 Course 的编辑能力落在 Knowledge 上（可改现有内容，
+    // 不能新建/删除/发布——由 isActionAllowed 的 EDIT_EXISTING 语义保证）。
+    knowledge: 'EDIT',
     aiTutor: 'VIEW',
     order: 'VIEW',
     reporting: 'VIEW',

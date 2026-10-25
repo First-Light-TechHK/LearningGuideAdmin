@@ -23,6 +23,7 @@ import {
   SettingsIndexPage,
 } from './backoffice/pages/ModulePages'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
+import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
 
 /**
@@ -124,7 +125,9 @@ function App() {
                 path="knowledge"
                 element={
                   <MenuGuard menu="knowledge">
-                    <KnowledgeWorkspace />
+                    <WorkspaceAccessProvider menu="knowledge">
+                      <KnowledgeWorkspace />
+                    </WorkspaceAccessProvider>
                   </MenuGuard>
                 }
               />
@@ -132,7 +135,9 @@ function App() {
                 path="ai-tutor"
                 element={
                   <MenuGuard menu="aiTutor">
-                    <AITutorWorkspace />
+                    <WorkspaceAccessProvider menu="aiTutor">
+                      <AITutorWorkspace />
+                    </WorkspaceAccessProvider>
                   </MenuGuard>
                 }
               />

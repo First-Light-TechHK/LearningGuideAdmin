@@ -63,6 +63,22 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 4. 服务端是唯一权威：菜单可见性、员工账号页可见性、编辑范围均由服务端判定
 5. 前端隐藏按钮不是安全边界
 
+### 3.1 角色权限（PRD §3.1–§3.3）实现与偏差
+
+- 权限矩阵单一事实来源：`server/src/backoffice/modules/rbac/permissions.ts` 的 `ROLE_MATRIX`，前端 `client/src/backoffice/rbac/permissions.ts` 为同名副本（只管显示）。API 授权由 `nest/{route-access,backoffice-access.guard}.ts` 逐请求按「菜单 + 动作（VIEW/EDIT_EXISTING/CREATE/DELETE/PUBLISH）」判定；前端路由由 `MenuGuard` 拦截 NONE 菜单。
+- 账号管理仅 Admin（§3.3）：子菜单 `visibleSettingsSubs` 对非 Admin 隐藏；直接 URL 由 `EmployeeAccountSettingsPage` 渲染 `ForbiddenCard`；API `/api/admin/**` 走 `employeeAdmin` 守卫（无会话 401 / 非 Admin 403）。
+- **UI 只读（§3.2「View=只读」+ §3.3「UI 与后端都要限制」）**：`client/src/backoffice/lib/workspaceAccess.tsx` 提供 `WorkspaceAccessProvider` / `useWorkspaceAccess`，按当前角色的菜单级别给出 `readOnly / canEdit / canCreate / canDelete / canPublish`。Knowledge 与 AI Tutor 工作区据此隐藏或禁用写操作：
+  - Knowledge：View 角色页面编辑器 `editable=false`、隐藏标题编辑与 section tag；新建页面/上传建页/删除（CREATE/DELETE）、同步（CREATE）、发布/切换版本（PUBLISH）、删除版本（DELETE）按级别隐藏。
+  - AI Tutor：View 角色配置输入只读、隐藏 Save/Reset（EDIT）；Online 开关与「管理所有 online」（PUBLISH）按级别禁用/隐藏；对话仍按 VIEW 可用。
+
+**已知偏差（与 PRD §3.1/§3.2 的口径差异，经产品确认按此实现）**
+
+| 项 | PRD 口径 | 本实现 | 说明 |
+|---|---|---|---|
+| Graphic Designer 的「Course=Edit」 | 仅 Course 可改既有内容 | Course 菜单为占位；把该编辑能力落到 **Knowledge=EDIT** | 本应用只有 Knowledge 一个「课程内容编辑面」；EDIT 仍不能新建/删除/发布，符合 §3.2 注释 |
+| Operation Admin 的「Course=Full」 | Course 全权 + 明确「无 Knowledge/AI Tutor」 | Knowledge 保持 **NONE**；Course=Full 暂无实体可行使 | 守住 §3.1/§3.3「完全隐藏 Knowledge」的硬规则；待 Course 独立 PRD/模块落地后单独授权 |
+| Settings 子项 | Full 含全部设置 | Payment Gateway / Notification Configuration 为占位（P0 范围） | 与 §2 范围一致，非本期实现内容 |
+
 ## 4. 关键业务规则落点
 
 | PRD 规则 | 落点 |

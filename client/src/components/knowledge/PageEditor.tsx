@@ -34,6 +34,7 @@ import {
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { TagManager } from './TagManager'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 
 /**
@@ -320,6 +321,8 @@ export function PageEditor() {
   const tocScrollTarget = useKnowledgeStore((s) => s.tocScrollTarget)
   const clearTocScrollTarget = useKnowledgeStore((s) => s.clearTocScrollTarget)
   const { message } = App.useApp()
+  /** PRD §3.2/§3.3：View 角色只读，Edit/Full 才可改既有内容 */
+  const access = useWorkspaceAccess()
 
   /** 最后一次加载进块编辑器的 md（用于判断是否需重载） */
   const lastLoadedMd = useRef<string>('')
@@ -668,7 +671,7 @@ export function PageEditor() {
           borderBottom: `1px solid ${tokens.color.border}`,
         }}
       >
-        {editingTitle ? (
+        {editingTitle && access.canEdit ? (
           <Input
             autoFocus
             style={{
@@ -711,24 +714,26 @@ export function PageEditor() {
             >
               {draft.title || '未命名页面'}
             </div>
-            <Button
-              type="text"
-              aria-label="编辑标题"
-              title="编辑标题"
-              icon={<EditOutlined style={{ fontSize: 16 }} />}
-              onClick={() => {
-                titleBeforeEdit.current = draft.title
-                setEditingTitle(true)
-              }}
-              // 对齐 Figma：20×20 容器包 16×16 铅笔图标
-              style={{
-                width: 20,
-                height: 20,
-                minWidth: 20,
-                padding: 0,
-                color: tokens.color.text.tertiary,
-              }}
-            />
+            {access.canEdit && (
+              <Button
+                type="text"
+                aria-label="编辑标题"
+                title="编辑标题"
+                icon={<EditOutlined style={{ fontSize: 16 }} />}
+                onClick={() => {
+                  titleBeforeEdit.current = draft.title
+                  setEditingTitle(true)
+                }}
+                // 对齐 Figma：20×20 容器包 16×16 铅笔图标
+                style={{
+                  width: 20,
+                  height: 20,
+                  minWidth: 20,
+                  padding: 0,
+                  color: tokens.color.text.tertiary,
+                }}
+              />
+            )}
           </>
         )}
         {save.text && (
@@ -760,16 +765,18 @@ export function PageEditor() {
         }}
       >
         <Dropdown
-          menu={{ items: contextMenu, onClick: onContextMenuClick }}
+          menu={{ items: access.canEdit ? contextMenu : [], onClick: onContextMenuClick }}
           trigger={['contextMenu']}
+          disabled={!access.canEdit}
         >
           <div style={{ minHeight: '100%' }}>
             <BlockNoteView
               editor={editor}
               theme="light"
-              formattingToolbar
+              editable={access.canEdit}
+              formattingToolbar={access.canEdit}
               slashMenu={false}
-              sideMenu
+              sideMenu={access.canEdit}
               linkToolbar
               tableHandles
               onChange={onContentChange}
@@ -789,7 +796,8 @@ export function PageEditor() {
             zIndex: 5,
           }}
         >
-          {headingKeys.map((key) => (
+          {access.canEdit &&
+            headingKeys.map((key) => (
             <div
               key={key}
               ref={(el) => {

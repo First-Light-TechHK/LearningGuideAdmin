@@ -46,6 +46,24 @@ describe('action level', () => {
       isActionAllowed('GRAPHIC_DESIGNER', 'course', 'PUBLISH'),
       false,
     );
+    // 课程内容编辑面在 Knowledge：Edit 能力同样落在 Knowledge 上
+    assert.equal(
+      isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'EDIT_EXISTING'),
+      true,
+    );
+    assert.equal(isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'VIEW'), true);
+    assert.equal(
+      isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'CREATE'),
+      false,
+    );
+    assert.equal(
+      isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'DELETE'),
+      false,
+    );
+    assert.equal(
+      isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'PUBLISH'),
+      false,
+    );
   });
 
   it('gives Course Creator view-only on Course', () => {
