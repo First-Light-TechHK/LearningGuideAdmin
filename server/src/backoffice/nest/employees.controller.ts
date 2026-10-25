@@ -115,7 +115,12 @@ export class BackofficeEmployeesController {
       ipAddress: clientIp(request),
     });
     if (!outcome.ok) throw backofficeError(outcome.code, 'Update rejected');
-    return { employee: outcome.employee };
+    // 邮箱变更时会重发激活邮件：把投递结果与可手工转交的链接一并返回
+    return {
+      employee: outcome.employee,
+      delivery: outcome.delivery,
+      manualLink: outcome.manualLink,
+    };
   }
 
   @Post(':employeeId/reset-password')

@@ -1,19 +1,17 @@
 import { createTransport } from 'nodemailer';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
-import { isDeclaredNonProd, isDevRuntime } from '../../../lib/env';
+import { isDevRuntime } from '../../../lib/env';
 
 export type EmailDeliveryResult = 'SENT' | 'FAILED' | 'NOT_CONFIGURED';
 
 /**
- * 非生产环境没有接入邮件服务时，把一次性链接交给发起操作的 Admin 手工转交，
- * 否则 DEV/SIT 上新建的员工永远无法激活。生产环境（含漏配 APP_ENV）绝不返回链接。
+ * Admin 触发的激活/重置操作始终把一次性链接回传给页面：
+ * 邮件正常发出时也保留，方便 Admin 直接复制转交（员工邮箱收不到时也能完成激活/重置）。
+ * 链接本身仍是单次使用、带有效期的；自助「忘记密码」不经过这里，因此不会暴露链接。
  */
-export function manualLinkFor(
-  delivery: EmailDeliveryResult,
-  link: string,
-): string | null {
-  return delivery !== 'SENT' && isDeclaredNonProd() ? link : null;
+export function manualLinkFor(link: string): string {
+  return link;
 }
 
 export type EmailMessage = {

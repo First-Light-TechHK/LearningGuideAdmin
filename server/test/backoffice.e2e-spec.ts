@@ -245,6 +245,42 @@ describe('BackOffice access (e2e)', () => {
     expect(inactive.body.error.code).toBe('ACCOUNT_NOT_ACTIVE');
   });
 
+  it('keeps the one-time link after the email was delivered', async () => {
+    const admin = await signInAs(app, 'ADMIN');
+    const previous = process.env.EMAIL_DELIVERY;
+    process.env.EMAIL_DELIVERY = 'discard';
+    try {
+      const created = await admin
+        .post('/api/admin/employees')
+        .send({
+          email: 'bo-e2e-sent@example.com',
+          role: 'FINANCE',
+          locale: 'en-GB',
+        })
+        .expect(200);
+      expect(created.body.data.delivery).toBe('SENT');
+      expect(created.body.data.manualLink).toContain(
+        '/en-GB/activate?token=',
+      );
+
+      const reset = await admin
+        .post(
+          `/api/admin/employees/${created.body.data.employee.employeeId}/reset-password`,
+        )
+        .send({ locale: 'en-GB' })
+        .expect(200);
+      expect(reset.body.data.delivery).toBe('SENT');
+      expect(reset.body.data.manualLink).toContain(
+        '/en-GB/reset-password?token=',
+      );
+    } finally {
+      process.env.EMAIL_DELIVERY = previous;
+      await query(
+        `DELETE FROM employees WHERE login_email = 'bo-e2e-sent@example.com'`,
+      );
+    }
+  });
+
   it('keeps the language preference across sign-ins (PORT-NAV-006)', async () => {
     const email = await ensureEmployee('bo-e2e-locale@example.com', 'FINANCE');
     const first = request.agent(server());

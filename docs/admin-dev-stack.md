@@ -54,12 +54,27 @@ Nothing separate to publish: a push to `dev` rebuilds `client/dist` and `server/
   `DescribeService` and `ListOperations` on the DEV service ARN.
 - Chain: push to `dev` → CI → Deploy DEV → App Runner source build → `/api/health`.
 
+## Environment files
+
+The merged Admin app (NestJS `server/` + Vite `client/`) reads configuration from:
+
+- Local development: `server/.env` (copy from `server/.env.example`). The Vite client has no env file; it proxies
+  `/api` to `http://localhost:3000`.
+- Deployed DEV: App Runner `RuntimeEnvironmentVariables` plus Secrets Manager ARNs, written by
+  `scripts/provision-admin-dev.mjs`.
+
+`backoffice/.env.local` is a leftover from the retired standalone Next.js prototype (`backoffice/`, port 3200).
+It is gitignored, is not read by the merged app, and can be deleted. It contains only
+`DATABASE_URL`, `SESSION_SECRET`, `APP_ENV`, `NEXT_PUBLIC_APP_URL`, `BOOTSTRAP_ADMIN_*` and an empty
+`SES_FROM_EMAIL` — no SMTP settings.
+
 ## Email (BackOffice notifications)
 
 Adapter: `server/src/backoffice/modules/notification/services/email.ts` — SMTP when `SMTP_HOST` + `SMTP_USER` +
 `SMTP_PASS` are present, otherwise Amazon SES v2 (`SES_FROM_EMAIL`, region `ap-southeast-1`), otherwise the
-console adapter on DEV. Delivery failures return `FAILED`; on non-production the activation/reset link is
-handed back to the operator so a failed send never blocks onboarding.
+console adapter on DEV. Delivery failures return `FAILED`. Admin-triggered create / resend / reset calls always
+hand the single-use activation or reset link back to the operator (even when the email was sent), so the page can
+offer a copy button when the recipient cannot open the mailbox.
 
 Current DEV configuration:
 

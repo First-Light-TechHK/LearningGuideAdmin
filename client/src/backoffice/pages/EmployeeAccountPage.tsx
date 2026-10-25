@@ -21,8 +21,36 @@ import type { Locale } from "../lib/i18n/config";
 import { t } from "../lib/i18n/messages";
 import { boFetch } from "../lib/api";
 
-/** 设计稿默认一页 8 行。 */
-const PAGE_SIZE = 8;
+/** 设计稿默认一页 8 行；服务端上限 100（EMPLOYEE_PAGE_SIZE_MAX）。 */
+const DEFAULT_PAGE_SIZE = 8;
+const PAGE_SIZE_OPTIONS = [8, 10, 20, 50, 100] as const;
+const PAGE_SIZE_STORAGE_KEY = "lgbo_employee_page_size";
+
+function initialPageSize(): number {
+  if (typeof window === "undefined") return DEFAULT_PAGE_SIZE;
+  try {
+    const saved = Number(window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+    return (PAGE_SIZE_OPTIONS as readonly number[]).includes(saved)
+      ? saved
+      : DEFAULT_PAGE_SIZE;
+  } catch {
+    return DEFAULT_PAGE_SIZE;
+  }
+}
+
+/** 页码按钮最多 7 个，超出时用省略号收口（与常见后台分页一致）。 */
+function pageItems(current: number, total: number): Array<number | "gap"> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+  if (current <= 4) {
+    return [1, 2, 3, 4, 5, "gap", total];
+  }
+  if (current >= total - 3) {
+    return [1, "gap", total - 4, total - 3, total - 2, total - 1, total];
+  }
+  return [1, "gap", current - 1, current, current + 1, "gap", total];
+}
 
 type Filters = { email: string; role: string; status: string };
 
@@ -57,22 +85,25 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(initialPageSize);
   const [data, setData] = useState<EmployeeListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorCode, setErrorCode] = useState<ErrorCode | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // 邮件未发出时（非生产环境未配置邮件服务），服务端返回链接，由管理员手动转交
+  // 邮件发出后仍保留一次性链接，Admin 可直接复制转交（无需进入员工邮箱）
   const [manualLink, setManualLink] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErrorCode(null);
     try {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (appliedFilters.email.trim() !== "") params.set("email", appliedFilters.email.trim());
       if (appliedFilters.role !== "") params.set("role", appliedFilters.role);
       if (appliedFilters.status !== "") params.set("status", appliedFilters.status);
@@ -87,13 +118,20 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
         setErrorCode(payload.error ?? "INTERNAL_ERROR");
         return;
       }
+
+      // 筛选/删除后总数变少时，把越界的页码拉回最后一页，避免停在空白页
+      const lastPage = Math.max(1, Math.ceil(payload.data.total / payload.data.pageSize));
+      if (page > lastPage) {
+        setPage(lastPage);
+        return;
+      }
       setData(payload.data);
     } catch {
       setErrorCode("INTERNAL_ERROR");
     } finally {
       setLoading(false);
     }
-  }, [appliedFilters, page]);
+  }, [appliedFilters, page, pageSize]);
 
   useEffect(() => {
     void load();
@@ -113,6 +151,16 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     setFilters((current) => ({ ...current, [key]: value }));
     setPage(1);
     setAppliedFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function onPageSizeChange(value: number) {
+    setPageSize(value);
+    setPage(1);
+    try {
+      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(value));
+    } catch {
+      // 隐私模式下 localStorage 可能不可写，忽略即可
+    }
   }
 
   async function submitEditor(event: React.FormEvent<HTMLFormElement>) {
@@ -153,6 +201,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       }
 
       setManualLink(payload.data?.manualLink ?? null);
+      setLinkCopied(false);
 
       const delivery = payload.data?.delivery;
       setNotice(
@@ -182,6 +231,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     setErrorCode(null);
     setNotice(null);
     setManualLink(null);
+    setLinkCopied(false);
     setOpenMenuId(null);
     try {
       const response = await boFetch(`/api/admin/employees/${employee.employeeId}/${action}`, {
@@ -199,6 +249,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
         return;
       }
       setManualLink(payload.data?.manualLink ?? null);
+      setLinkCopied(false);
       const delivery = payload.data?.delivery ?? "UNKNOWN";
       const result = t(locale, `delivery.${delivery}`);
       setNotice(
@@ -209,6 +260,27 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       await load();
     } catch {
       setErrorCode("INTERNAL_ERROR");
+    }
+  }
+
+  async function copyManualLink() {
+    if (!manualLink) return;
+    try {
+      await navigator.clipboard.writeText(manualLink);
+      setLinkCopied(true);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // 浏览器拒绝剪贴板权限时退化为选中链接文本，Admin 可自行 Ctrl/Cmd+C
+      const node = document.querySelector('[data-testid="manual-link-value"]');
+      if (node) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      setLinkCopied(false);
     }
   }
 
@@ -285,9 +357,20 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       {errorCode ? <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div> : null}
       {notice ? <div className="alert alertOk">{notice}</div> : null}
       {manualLink ? (
-        <div className="alert alertInfo" data-testid="manual-link">
-          {t(locale, "employees.results.manualLink")}{" "}
-          <span style={{ userSelect: "all", wordBreak: "break-all" }}>{manualLink}</span>
+        <div className="alert alertInfo manualLinkAlert" data-testid="manual-link">
+          <div className="manualLinkBody">
+            <span>{t(locale, "employees.results.manualLink")}</span>
+            <span className="manualLinkValue" data-testid="manual-link-value">
+              {manualLink}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="button buttonGhost buttonSmall"
+            onClick={() => void copyManualLink()}
+          >
+            {t(locale, linkCopied ? "common.copied" : "common.copy")}
+          </button>
         </div>
       ) : null}
 
@@ -406,35 +489,77 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       </div>
 
       <div className="pagination">
-        <span>{t(locale, "employees.showing", { from, to, total: data?.total ?? 0 })}</span>
-        <span className="pager">
-          <button
-            type="button"
-            className="pagerButton"
-            disabled={page <= 1}
-            aria-label={t(locale, "common.previous")}
-            onClick={() => setPage((value) => Math.max(1, value - 1))}
-          >
-            <ChevronLeftIcon size={14} />
-          </button>
-          <button
-            type="button"
-            className="pagerButton pagerCurrent"
-            aria-current="page"
-            onClick={() => setPage((value) => Math.min(totalPages, value))}
-          >
-            {page}
-          </button>
-          <button
-            type="button"
-            className="pagerButton"
-            disabled={page >= totalPages}
-            aria-label={t(locale, "common.next")}
-            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-          >
-            <ChevronRightIcon size={14} />
-          </button>
+        <span className="paginationSummary">
+          {!data
+            ? t(locale, "common.loading")
+            : data.total === 0
+              ? t(locale, "employees.showingEmpty")
+              : from === to
+                ? t(locale, "employees.showingSingle", { from, total: data.total })
+                : t(locale, "employees.showing", { from, to, total: data.total })}
         </span>
+        <div className="paginationControls">
+          <label className="pageSizeLabel">
+            {t(locale, "employees.pageSizeLabel")}
+            <select
+              className="pageSizeSelect"
+              value={pageSize}
+              onChange={(event) => onPageSizeChange(Number(event.target.value))}
+              aria-label={t(locale, "employees.pageSizeLabel")}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <span className="pageOf">
+            {t(locale, "employees.pageOf", { page, total: totalPages })}
+          </span>
+
+          <span className="pager">
+            <button
+              type="button"
+              className="pagerButton pagerNav"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
+              <ChevronLeftIcon size={14} />
+              {t(locale, "common.previous")}
+            </button>
+            {pageItems(page, totalPages).map((item, index) =>
+              item === "gap" ? (
+                <span key={`gap-${index}`} className="pagerGap" aria-hidden="true">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={item}
+                  type="button"
+                  className={
+                    item === page ? "pagerButton pagerCurrent" : "pagerButton"
+                  }
+                  aria-current={item === page ? "page" : undefined}
+                  aria-label={t(locale, "employees.pageNumber", { page: item })}
+                  onClick={() => setPage(item)}
+                >
+                  {item}
+                </button>
+              )
+            )}
+            <button
+              type="button"
+              className="pagerButton pagerNav"
+              disabled={page >= totalPages}
+              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+            >
+              {t(locale, "common.next")}
+              <ChevronRightIcon size={14} />
+            </button>
+          </span>
+        </div>
       </div>
 
       {editor ? (

@@ -248,7 +248,7 @@ export async function reissueActivation(input: {
   ipAddress: string | null;
   actorEmployeeId: string;
 }): Promise<
-  | { ok: true; delivery: string; manualLink: string | null }
+  | { ok: true; delivery: string; manualLink: string }
   | { ok: false; code: ErrorCode }
 > {
   const employee = await employeeRepository.findById(input.employeeId);
@@ -274,5 +274,5 @@ export async function reissueActivation(input: {
     ipAddress: input.ipAddress,
   });
 
-  return { ok: true, delivery, manualLink: manualLinkFor(delivery, link) };
+  return { ok: true, delivery, manualLink: manualLinkFor(link) };
 }

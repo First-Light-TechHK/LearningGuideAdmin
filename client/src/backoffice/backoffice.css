@@ -388,6 +388,9 @@ body {
   flex: 1;
   min-width: 0;
   min-height: calc(100vh - 89px);
+  /* 窗口高度不足时让卡片随内容增高、由 .content 滚动；
+     若沿用 stretch，表格会溢出卡片并盖住分页和最后一行 */
+  align-self: flex-start;
 }
 
 .cardTitle {
@@ -789,8 +792,9 @@ body {
 }
 
 .tableWrap {
-  flex: 1;
-  min-height: 0;
+  /* 不参与压缩：表格始终保持自然高度，分页永远排在表格之后；
+     min-height:0 + flex:1 在矮窗口里会把表格压成 0 高并让分页盖住行 */
+  flex: 0 0 auto;
   /* 行内操作菜单是绝对定位子元素，容器裁切会让菜单点不开 */
   overflow: visible;
 }
@@ -920,17 +924,67 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 30px;
+  min-height: 30px;
+  flex: 0 0 auto;
   padding-top: 0;
   margin-top: auto;
   font-size: 13px;
   color: var(--lg-muted);
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.paginationSummary {
+  white-space: nowrap;
+}
+
+.paginationControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.pageSizeLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pageSizeSelect {
+  height: 30px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 6px;
+  background: var(--lg-white);
+  padding: 0 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--lg-slate-soft);
+}
+
+.pageSizeSelect:focus {
+  outline: none;
+  border-color: var(--lg-blue);
+}
+
+.pageOf {
+  white-space: nowrap;
 }
 
 .pager {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.pagerNav {
+  width: auto;
+  padding: 0 8px;
+  gap: 2px;
+  white-space: nowrap;
 }
 
 .pagerButton {
@@ -964,6 +1018,13 @@ body {
   font-weight: 600;
 }
 
+.pagerGap {
+  width: 20px;
+  text-align: center;
+  color: var(--lg-faint);
+  user-select: none;
+}
+
 /* ----------------------------------- 提示 ----------------------------------- */
 
 .alert {
@@ -989,6 +1050,36 @@ body {
   background: var(--lg-blue-tint);
   border: 1px solid #dbeafe;
   color: #1557db;
+}
+
+/* 邮件发出后仍保留的一次性链接：正文折行，复制按钮固定在右侧 */
+.manualLinkAlert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.manualLinkBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manualLinkValue {
+  display: block;
+  word-break: break-all;
+  user-select: all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.buttonSmall {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
 }
 
 /* ----------------------------------- 弹窗 ----------------------------------- */

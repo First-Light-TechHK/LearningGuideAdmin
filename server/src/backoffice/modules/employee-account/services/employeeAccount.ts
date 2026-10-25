@@ -109,7 +109,7 @@ export type CreateEmployeeOutcome =
       ok: true;
       employee: EmployeeListItem;
       delivery: string;
-      manualLink: string | null;
+      manualLink: string;
     }
   | { ok: false; code: ErrorCode };
 
@@ -167,12 +167,12 @@ export async function createEmployee(input: {
     ok: true,
     employee: toListItem(created),
     delivery,
-    manualLink: manualLinkFor(delivery, link),
+    manualLink: manualLinkFor(link),
   };
 }
 
 export type UpdateEmployeeOutcome =
-  | { ok: true; employee: EmployeeListItem; delivery?: string; manualLink?: string | null }
+  | { ok: true; employee: EmployeeListItem; delivery?: string; manualLink?: string }
   | { ok: false; code: ErrorCode };
 
 /** PRD PORT-EDT-001~006。 */
@@ -300,7 +300,7 @@ export async function updateEmployee(input: {
       ok: true,
       employee: toListItem(updated),
       delivery,
-      manualLink: manualLinkFor(delivery, link),
+      manualLink: manualLinkFor(link),
     };
   }
 
@@ -308,7 +308,7 @@ export async function updateEmployee(input: {
 }
 
 export type AdminActionOutcome =
-  | { ok: true; delivery: string; manualLink: string | null }
+  | { ok: true; delivery: string; manualLink: string }
   | { ok: false; code: ErrorCode };
 
 /** PRD PORT-ADM-002：直接发送，并把真实投递结果返回给调用方。 */
@@ -340,5 +340,5 @@ export async function sendAdminPasswordReset(input: {
     ipAddress: input.ipAddress,
   });
 
-  return { ok: true, delivery, manualLink: manualLinkFor(delivery, link) };
+  return { ok: true, delivery, manualLink: manualLinkFor(link) };
 }

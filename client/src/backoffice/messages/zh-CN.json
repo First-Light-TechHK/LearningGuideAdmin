@@ -20,6 +20,8 @@
     "next": "下一页",
     "required": "必填",
     "close": "关闭",
+    "copy": "复制链接",
+    "copied": "已复制",
     "language": "语言"
   },
   "nav": {
@@ -164,6 +166,11 @@
     "neverSignedIn": "—",
     "empty": "没有符合当前搜索与筛选条件的员工账号。",
     "showing": "显示第 {from}–{to} 条，共 {total} 名员工",
+    "showingSingle": "显示第 {from} 条，共 {total} 名员工",
+    "showingEmpty": "共 0 名员工",
+    "pageSizeLabel": "每页条数",
+    "pageOf": "第 {page} 页，共 {total} 页",
+    "pageNumber": "第 {page} 页",
     "actions": {
       "edit": "编辑",
       "resetPassword": "重置密码",
@@ -184,7 +191,7 @@
       "emailChanged": "邮箱已更新，新的激活邮件发送结果：{result}。",
       "resetSent": "重置密码邮件发送结果：{result}。",
       "resent": "新的激活邮件发送结果：{result}，此前的链接立即失效。",
-      "manualLink": "邮件未发出（当前环境未配置邮件服务），请把以下链接手动发给该员工："
+      "manualLink": "以下链接与邮件中的链接相同，可直接复制转交给该员工（仅可使用一次）："
     }
   },
   "delivery": {

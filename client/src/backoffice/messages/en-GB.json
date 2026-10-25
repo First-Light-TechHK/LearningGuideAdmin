@@ -20,6 +20,8 @@
     "next": "Next",
     "required": "Required",
     "close": "Close",
+    "copy": "Copy link",
+    "copied": "Copied",
     "language": "Language"
   },
   "nav": {
@@ -164,6 +166,11 @@
     "neverSignedIn": "—",
     "empty": "No employee accounts match the current search and filters.",
     "showing": "Showing {from}–{to} of {total} employees",
+    "showingSingle": "Showing employee {from} of {total}",
+    "showingEmpty": "0 employees",
+    "pageSizeLabel": "Rows per page",
+    "pageOf": "Page {page} of {total}",
+    "pageNumber": "Page {page}",
     "actions": {
       "edit": "Edit",
       "resetPassword": "Reset Password",
@@ -183,8 +190,8 @@
       "updated": "Employee updated.",
       "emailChanged": "Email updated. A new activation email delivery result: {result}.",
       "resetSent": "Password reset email delivery result: {result}.",
-      "resent": "A new activation email has been sent. The previous link is no longer valid.",
-      "manualLink": "The email was not sent (email is not configured in this environment). Send this link to the employee manually:"
+      "resent": "New activation email delivery result: {result}. The previous link is no longer valid.",
+      "manualLink": "This is the same link as in the email. Copy it and hand it to the employee directly (single use):"
     }
   },
   "delivery": {

@@ -119,7 +119,11 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 
 发件人按 `SMTP_FROM` → `SES_FROM_EMAIL` → `SMTP_USER` 回退。投递异常返回 `FAILED`。
 接口把真实投递结果（`SENT` / `FAILED` / `NOT_CONFIGURED`）回显到列表页，
-不再出现「已加入发送队列」这类不实提示（PORT-ADM-002）；非 PROD 且未投递时额外返回 `manualLink` 供 Admin 手工转交。
+不再出现「已加入发送队列」这类不实提示（PORT-ADM-002）。
+
+Admin 触发的创建员工、修改未验证邮箱、重发激活、重置密码，接口都会在 `manualLink` 返回本次生成的一次性链接；
+**邮件发送成功时也保留**，页面显示链接并提供复制按钮，员工邮箱收不到时可绕过邮箱完成激活/重置。
+链接仍受单次使用与有效期约束；自助「忘记密码」接口不返回链接，避免未登录请求获得令牌。
 
 ## 5. 视觉基准
 
@@ -161,7 +165,7 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 | 限制 | 影响 | 处置建议 |
 |---|---|---|
 | 限流为单实例内存实现 | 多实例部署时限流失效 | 上线前换共享存储（Redis/DB） |
-| 邮件投递只有 console adapter | 部署环境返回 `NOT_CONFIGURED`，不会伪装成功；非 PROD 时页面显示链接供手动转交 | 部署环境配置 `SMTP_*`（163）后即可真实发信 |
+| 未配置邮件服务时只有 console adapter | 部署环境返回 `NOT_CONFIGURED`，不会伪装成功；页面同时保留一次性链接供手动转交 | 部署环境配置 `SMTP_*`（163）后即可真实发信 |
 | PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐后台原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
 | Figma MCP 在本机未注入 agent 工具 | 无法读取设计上下文 | 见 `docs/AI_Collaboration_Log.md` 记录 |
 | 视觉以学员门户为基准，非后台原型稿 | 若后台有专属设计稿仍需再对齐 | 拿到后台设计稿后复核 |
@@ -181,7 +185,7 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 | 会话空闲超时 | 30 分钟 | `SESSION_IDLE_MINUTES` |
 | 登录限流 | 5 分钟内 10 次 / IP | `SIGN_IN_MAX_PER_WINDOW` |
 | 发信限流 | 5 分钟内 5 次 / IP | `EMAIL_SEND_MAX_PER_WINDOW` |
-| 列表分页 | 默认 10，上限 100 | `EMPLOYEE_PAGE_SIZE_*` |
+| 列表分页 | UI 默认 8（设计稿），可选 8 / 10 / 20 / 50 / 100；服务端兜底上限 100 | `EMPLOYEE_PAGE_SIZE_*` |
 
 ## 6.2 部署配置（Admin DEV / SIT / PROD）
 
@@ -191,7 +195,7 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 | `AUTH_TOKEN` | 建议 | 同时用于 `/api/user/**` 服务密钥和 `POST /api/auth/setup`（网页创建首个管理员）的校验；PROD 未配置时 setup 一律拒绝 |
 | `SESSION_SECRET` | 可选 | ≥32 字符；不配则首次启动生成并存库，多实例共用 |
 | `BACKOFFICE_APP_URL` | 可选 | 邮件链接的站点地址；不配则取请求来源（仅 localhost 与 `admin*.ilovelearningguide.com`），兜底 `https://admin.ilovelearningguide.com` |
-| `APP_ENV` | 已有 | 非 PROD 且邮件未发出时，接口把激活/重置链接返回给 Admin，页面显示供手动转交 |
+| `APP_ENV` | 已有 | 标识 DEV / SIT / PROD。Admin 触发的邮件操作始终回传一次性激活/重置链接（邮件发送成功也保留），页面显示供手动转交 |
 
 注意：开启后所有 KS / AI Tutor 页面和接口都需要登录。
 
