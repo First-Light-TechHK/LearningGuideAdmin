@@ -39,8 +39,12 @@ export class BackofficeAccessGuard implements CanActivate {
       if (
         serviceTokenAllows(
           request.headers.authorization,
-          this.config.get<string>('KS_SERVICE_TOKEN'),
+          // Portal 的 KS_TUTOR_API_KEY 必须等于这里接受的值：优先显式的
+          // KS_SERVICE_TOKEN，未配置时退回 AUTH_TOKEN，避免两套令牌并存。
+          this.config.get<string>('KS_SERVICE_TOKEN')?.trim() ||
+            this.config.get<string>('AUTH_TOKEN'),
           isDeployed(),
+          request.headers['x-api-key'],
         )
       )
         return true;
