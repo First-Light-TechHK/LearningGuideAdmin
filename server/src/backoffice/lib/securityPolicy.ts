@@ -5,7 +5,7 @@
 export const ACTIVATION_TOKEN_HOURS = 48;
 export const RESET_TOKEN_HOURS = 2;
 
-export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
 
 export const SESSION_IDLE_MINUTES = 30;

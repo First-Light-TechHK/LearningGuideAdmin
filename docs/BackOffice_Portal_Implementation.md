@@ -178,7 +178,7 @@ Admin 触发的创建员工、修改未验证邮箱、重发激活、重置密�
 
 | 参数 | 取值 | 位置 |
 |---|---|---|
-| 密码长度 | 12–128 字符 | `lib/securityPolicy.ts` |
+| 密码长度 | 8–128 字符 | `lib/securityPolicy.ts` |
 | 激活令牌有效期 | 48 小时（PRD 强制） | `ACTIVATION_TOKEN_HOURS` |
 | 重置令牌有效期 | 2 小时 | `RESET_TOKEN_HOURS` |
 | 会话绝对超时 | 12 小时 | `SESSION_MAX_HOURS` |

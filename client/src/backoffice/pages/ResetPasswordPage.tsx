@@ -137,6 +137,7 @@ export default function ResetPasswordPage() {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
+          <span className="fieldHint">{t(locale, "passwordRule.hint")}</span>
         </div>
 
         <div className="field" style={{ marginBottom: 14 }}>

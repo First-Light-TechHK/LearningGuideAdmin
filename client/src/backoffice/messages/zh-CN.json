@@ -3,6 +3,9 @@
     "name": "Learning Guide BackOffice",
     "subtitle": "后台管理门户"
   },
+  "passwordRule": {
+    "hint": "密码长度需为 8 到 128 个字符，无其他复杂度要求。"
+  },
   "common": {
     "loading": "加载中…",
     "save": "保存",

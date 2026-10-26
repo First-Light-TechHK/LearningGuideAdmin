@@ -3,6 +3,9 @@
     "name": "Learning Guide BackOffice",
     "subtitle": "BackOffice Administration Portal"
   },
+  "passwordRule": {
+    "hint": "Use 8 to 128 characters. No other complexity requirements."
+  },
   "common": {
     "loading": "Loading…",
     "save": "Save",
