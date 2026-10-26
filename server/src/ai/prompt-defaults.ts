@@ -6,7 +6,8 @@ import { load } from 'js-yaml';
  * 默认 Prompt / Welcome 文件源（2026-10-23）。
  * - `prompts/lecture.md`、`prompts/socratic.md`：默认 System Prompt
  * - `prompts/welcome.yaml`：两种模式 × 两种语言的默认欢迎语
- * 修改文件后运行 `npm run prompts:sync` 同步到 PromptTemplate。
+ * 这些文件同时是运行时兜底：库中缺默认模板行时直接使用文件值（2026-10-26，不写库）。
+ * 如需把文件内容写入 PromptTemplate，运行 `npm run prompts:sync`。
  */
 export type PromptMode = 'LECTURE' | 'SOCRATIC';
 export type PromptLocale = 'zh-CN' | 'en-GB';
