@@ -4,6 +4,7 @@
 Learning Guide BackOffice —— 结构化课程知识库管理系统（Knowledge System + AI Tutor）。
 开发基准：`docs/Learning_Guide_BackOffice_Agent_Development_Document.md`
 （以文档头声明的版本为准，当前 v1.0）。
+架构基准：`docs/System_Architecture_4_Components.md`（四组件、两入口、全角色；组件职责边界、角色 × 功能矩阵、数据归属、接口契约）。
 
 ## 用户裁决优先（强制）
 - 所有方案性建议（选型、设计、流程变更）必须经用户同意后执行，或按用户明确指示修改
@@ -24,7 +25,7 @@ Learning Guide BackOffice —— 结构化课程知识库管理系统（Knowledg
 
 ## 开发纪律（每个开发会话）
 
-1. 开工前：读开发文档相关章节 + 项目记忆 + README，确认本次任务范围；涉及文档 §12 待确认事项先请用户裁决
+1. 开工前：读开发文档相关章节 + 架构文档（涉及跨组件边界、权限、数据归属时必读）+ 项目记忆 + README，确认本次任务范围；涉及开发文档 §12 待确认事项或架构文档「现状差距/验收」的，先请用户裁决
 2. TodoWrite 跟踪；LLM 接入走策略模式适配器，禁止厂商硬编码
 3. .env / API key / 令牌永不入库、不入对话、不入文档；API 密钥绝不出现在前端代码
 4. 所有 AI 请求必须经后端代理（`/api/ai/chat-stream`），严禁前端直连 LLM API
