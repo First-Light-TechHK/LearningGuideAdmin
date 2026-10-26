@@ -94,8 +94,31 @@ model Release {
 
   // 反向关联：该 Release 对应的 AI 配置（2026-10-20 按 Release 一份）
   aiConfigs CourseAiConfig[]
+  // 反向关联：该 Release 的知识库向量分块（RAG，2026-10-26 新增）
+  knowledgeChunks KnowledgeChunk[]
 
   @@index([courseId, createdAt])
+}
+
+// ==========================================
+// RAG 知识库向量分块（2026-10-26 新增）
+// 发布 Release 时异步分块 + embedding，对话时按向量相似度检索
+// ==========================================
+model KnowledgeChunk {
+  id          String   @id @default(uuid())
+  releaseId   String
+  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  pageId      String?   // 原 Page ID（追溯用）
+  pageTitle   String    // 页面标题（引用展示用）
+  heading     String?   // 所属 H1-H6 标题（引用展示用）
+  content     String   @db.Text   // 分块纯文本
+  embedding   Unsupported("vector(1536)")  // pgvector 1536 维（text-embedding-3-small）
+  sortOrder   Int       // 页面内顺序
+  tokenCount  Int       // token 估算（上下文预算用）
+  createdAt   DateTime  @default(now())
+
+  @@index([releaseId])
+  @@index([releaseId, sortOrder])
 }
 
 // ==========================================

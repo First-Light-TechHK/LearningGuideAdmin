@@ -11,6 +11,7 @@ import { SyncModule } from './sync/sync.module';
 import { FilesModule } from './files/files.module';
 import { AiModule } from './ai/ai.module';
 import { TagsModule } from './tags/tags.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -38,6 +39,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     AiModule,
     // 全局 Tag 词库（§3.3.3 方案 B、§5.1.6）
     TagsModule,
+    // Knowledge RAG 模块（2026-10-26 新增：分块、索引、向量检索）
+    KnowledgeModule,
   ],
   controllers: [AppController],
   providers: [

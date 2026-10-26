@@ -8,6 +8,7 @@ import { AiChatLogger, type AiChatLogEntry } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
+import { EmbeddingService } from './embedding/embedding.service';
 import type { LlmStreamOptions } from './providers/llm-provider.interface';
 import { ProviderRegistry } from './providers/provider.registry';
 import { RateLimitService } from './rate-limit.service';
@@ -34,6 +35,7 @@ function setup(stream: StreamFn) {
         snapshotData: { pages: [] },
       }),
     },
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
   } as unknown as PrismaService;
 
   const configs = {
@@ -60,12 +62,18 @@ function setup(stream: StreamFn) {
     write: jest.fn().mockResolvedValue(undefined),
   } as unknown as AiChatLogger;
 
+  const embedding = {
+    embedQuery: jest.fn().mockResolvedValue(new Array(1536).fill(0)),
+    embedTexts: jest.fn().mockResolvedValue([]),
+  } as unknown as EmbeddingService;
+
   const service = new AiChatService(
     prisma,
     configs,
     registry,
     rateLimit,
     chatLogger,
+    embedding,
   );
   const write = chatLogger.write as jest.MockedFunction<AiChatLogger['write']>;
   const entryOf = (): AiChatLogEntry =>

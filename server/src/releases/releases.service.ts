@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { IndexingService } from '../knowledge/indexing.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
 
@@ -22,7 +23,10 @@ interface SnapshotData {
 /** 发布与版本（开发文档 §5.1.3、§3.4；纯快照发布 + 历史版本可切换/删除） */
 @Injectable()
 export class ReleasesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly indexing: IndexingService,
+  ) {}
 
   /**
    * 发布 Course 快照（**纯快照**，§3.4.3；2026-10-20 改拍）：
@@ -34,7 +38,7 @@ export class ReleasesService {
    * versionTag 格式: "CourseName_YYYYMMDDHHmm"。
    */
   async publish(courseId: string, dto: CreateReleaseDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const course = await tx.course.findUnique({
         where: { id: courseId },
         include: {
@@ -71,6 +75,12 @@ export class ReleasesService {
       });
       return created;
     });
+
+    // 2026-10-26 新增：异步构建向量索引（RAG），不阻塞发布响应
+    void this.indexing.indexRelease(created.id).catch(() => {
+      /* IndexingService 内部已兜底日志；此处防 unhandled rejection */
+    });
+    return created;
   }
 
   /**

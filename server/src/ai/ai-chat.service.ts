@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AiChatLogger, type AiChatStatus } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
+import { EmbeddingService } from './embedding/embedding.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmMessage } from './providers/llm-provider.interface';
@@ -28,53 +29,10 @@ const LOCALE_INSTRUCTION: Record<'en-GB' | 'zh-CN', string> = {
 /** 多轮上下文最多携带的历史条数（防 token 膨胀） */
 const MAX_HISTORY = 10;
 
-/** heading 文本转 slug（与 sync.service.ts / PageEditor.tsx 保持一致） */
-function slugify(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .trim()
-      // 保留 Unicode 字母/数字（含中文），仅去掉标点符号等特殊字符；
-      // 之前用 \w 会把中文全部清空，导致多个中文 heading 生成相同 key（h2-）而碰撞。
-      .replace(/[^\p{L}\p{N}\s-]/gu, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-  );
-}
-
-/** 生成带层级前缀的 heading key：`h{n}-{slug}`（与 sync.service.ts 一致） */
-function headingKey(level: number, text: string): string {
-  return `h${level}-${slugify(text)}`;
-}
-
-/**
- * 按 H1-H6 切分 Markdown。
- * 每段记录 heading 文本、层级、以及该段原始行（含后续低层级内容，直到下一同级或更高级标题）。
- * 首段 heading 为空（前置内容）。
- */
-function splitByHeadings(md: string): {
-  heading: string;
-  level: number;
-  body: string;
-}[] {
-  const lines = md.split('\n');
-  const sections: { heading: string; level: number; body: string[] }[] = [
-    { heading: '', level: 0, body: [] },
-  ];
-  for (const line of lines) {
-    const m = line.match(/^(#{1,6})\s+(.+?)\s*$/);
-    if (m) {
-      sections.push({ heading: m[2], level: m[1].length, body: [] });
-    } else {
-      sections[sections.length - 1].body.push(line);
-    }
-  }
-  return sections.map((s) => ({
-    heading: s.heading,
-    level: s.level,
-    body: s.body.join('\n').trim(),
-  }));
-}
+/** RAG 检索参数（2026-10-26 新增，对齐系统设计 §9.4） */
+const RETRIEVAL_TOP_K = 6;
+const RETRIEVAL_SCORE_THRESHOLD = 0.35;
+const CONTEXT_TOKEN_BUDGET = 8000;
 
 /**
  * AI 对话编排（§4.4.2）：限流 → 加载配置 → 聚合知识库上下文 →
@@ -90,6 +48,7 @@ export class AiChatService {
     private readonly registry: ProviderRegistry,
     private readonly rateLimit: RateLimitService,
     private readonly chatLogger: AiChatLogger,
+    private readonly embedding: EmbeddingService,
   ) {}
 
   /** 后台测试对话：读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId） */
@@ -187,7 +146,7 @@ export class AiChatService {
       const [runtime, prompts, context] = await Promise.all([
         this.configs.resolveRuntime(courseId, releaseId, input.mode),
         this.configs.resolvePrompts(courseId, releaseId, input.mode),
-        this.buildContext(releaseId),
+        this.buildContext(releaseId, input.message),
       ]);
       providerName = runtime.provider;
       model = runtime.model;
@@ -263,55 +222,68 @@ export class AiChatService {
   }
 
   /**
-   * 知识库上下文聚合（§4.4.2 第 3 步，2026-10-15 拍板改 §4.3.3；2026-10-20 按 Release 维度）：
-   * 读「测试所选 Release」（Course.aiTestReleaseId ?? currentReleaseId）指向的 Release 快照，
-   * 不再读实时草稿——创建 Release 后未再次发布的编辑不影响 AI。快照本身已在发布时过滤 STALE 节点
-   * （§3.4.3），此处无需再过滤。未发布过的课程直接报错交用户在 Knowledge Releases 页创建版本。
+   * RAG 检索上下文（2026-10-26 改造，替代原全文塞入方案）：
+   * 1. 对用户问题生成 embedding
+   * 2. 在 Release 的 KnowledgeChunk 中做余弦相似度检索（topK=6，阈值=0.35）
+   * 3. 按 token 预算（8k）拼接检索结果，带 [Source: ...] 引用标记
+   *
+   * 若检索 0 结果或该 Release 未建索引，返回空上下文（模型回退到通用解释）。
    */
-  private async buildContext(releaseId: string | null): Promise<string> {
+  private async buildContext(
+    releaseId: string | null,
+    query: string,
+  ): Promise<string> {
     if (!releaseId) {
       throw new BadRequestException(
         '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
       );
     }
-    const release = await this.prisma.release.findUnique({
-      where: { id: releaseId },
-      select: { snapshotData: true },
-    });
-    if (!release) {
-      throw new BadRequestException(
-        '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
-      );
+
+    // 生成 query embedding
+    const queryVec = await this.embedding.embedQuery(query);
+    const vecStr = `[${queryVec.join(',')}]`;
+
+    // 向量检索（余弦相似度）
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{
+        pageTitle: string;
+        heading: string | null;
+        content: string;
+        score: number;
+        tokenCount: number;
+      }>
+    >(
+      `
+      SELECT "pageTitle", "heading", "content",
+             1 - (embedding <=> $1::vector(1536)) AS score,
+             "tokenCount"
+      FROM "KnowledgeChunk"
+      WHERE "releaseId" = $2
+      ORDER BY embedding <=> $1::vector(1536)
+      LIMIT $3
+    `,
+      vecStr,
+      releaseId,
+      RETRIEVAL_TOP_K,
+    );
+
+    // 过滤低于阈值的结果
+    const relevant = rows.filter((r) => r.score >= RETRIEVAL_SCORE_THRESHOLD);
+
+    if (relevant.length === 0) {
+      return '';
     }
-    const snapshot = release.snapshotData as unknown as {
-      pages?: {
-        title: string;
-        contentMd?: string;
-        sectionTags?: Record<string, string[]>;
-      }[];
-    };
+
+    // 按 token 预算拼接，超出时按 score 从高到低截断
     const blocks: string[] = [];
-    for (const page of snapshot?.pages ?? []) {
-      const content = page.contentMd?.trim();
-      if (!content) continue;
-      const sectionTags = page.sectionTags ?? {};
-      // 按 H1-H6 切分段落，每段前拼接该 heading 的 sectionTags（AI 语义标注，§3.3.3）
-      const sections = splitByHeadings(content);
-      const rendered = sections
-        .map(({ heading, level, body }) => {
-          const tags = heading
-            ? sectionTags[headingKey(level, heading)]
-            : undefined;
-          const tagLine = tags?.length ? `[TAGS: ${tags.join(', ')}]\n` : '';
-          const hashes = '#'.repeat(level);
-          return heading
-            ? `${tagLine}${hashes} ${heading}\n${body}`.trim()
-            : `${tagLine}${body}`.trim();
-        })
-        .filter(Boolean)
-        .join('\n\n');
-      blocks.push(`## ${page.title}\n${rendered}`);
+    let totalTokens = 0;
+    for (const r of relevant) {
+      if (totalTokens + r.tokenCount > CONTEXT_TOKEN_BUDGET) break;
+      const source = r.heading ? `${r.pageTitle} - ${r.heading}` : r.pageTitle;
+      blocks.push(`[Source: ${source}]\n${r.content}`);
+      totalTokens += r.tokenCount;
     }
+
     return blocks.join('\n\n');
   }
 }

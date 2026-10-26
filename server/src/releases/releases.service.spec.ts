@@ -26,10 +26,17 @@ describe('ReleasesService', () => {
   };
 
   let service: ReleasesService;
+  let mockIndexing: { indexRelease: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new ReleasesService(mockPrisma as unknown as PrismaService);
+    mockIndexing = {
+      indexRelease: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new ReleasesService(
+      mockPrisma as unknown as PrismaService,
+      mockIndexing as never,
+    );
   });
 
   it('publish：快照应含 pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmm，纯快照不改 Live 指针，且置 editingReleaseId（§3.4.3）', async () => {
