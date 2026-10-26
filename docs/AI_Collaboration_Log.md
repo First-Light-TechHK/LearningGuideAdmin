@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-26 ｜ 课程同步数据源改为 KS 内置课程 ID 映射表（删除 Portal 目录拉取）
+
+- **任务（用户）**：不再由 KS 运行时向 Portal 获取课程 ID；直接按当前 courseID 映射一份到 KS，KS 通过这份映射执行同步。原因：后期课程主数据归 BackOffice，KS 只需 courseID 即可；同时删除原先 KS 向 Portal 获取课程数据的实现。
+- **用户拍板**：① 映射表只收录 Portal 真实 4 门课 ID（`epicureanism` / `stoicism` / `quintus-horatius-flaccus` / `modeling-life`）；② **同步目的不变**——仍同步课程标题 + lesson 结构化同步，当前无 lesson 数据故为空，不改变同步原有语义，只要课程能一一对应即可。
+- **变更清单**：
+  - 新增 `server/src/sync/course-registry.ts`：内置 courseID → 标题映射表（4 门），后续 BackOffice 接管时替换此数据源
+  - 新增 `server/src/sync/catalogue-source.service.ts`：本地数据源，替代 `PortalSourceService`
+  - 删除 `server/src/sync/portal-source.service.ts` 与 `portal-source.service.spec.ts`
+  - `server/src/sync/sync.service.ts`：DI 改为 `CatalogueSourceService`；`listExternalCourses()` 改为「映射表课程 ∪ 本地带 externalId 的课程」，避免映射表外的本地课程从侧栏消失；映射表外课程执行同步返回 `unchanged: true`（不再 404）
+  - `server/src/sync/sync.module.ts`、`sync.controller.ts`：provider 与注释同步
+  - `server/.env.example`：删除 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`
+  - `server/test/knowledge.e2e-spec.ts`：`overrideProvider(CatalogueSourceService)` 注入带 lesson 的假数据源，继续覆盖标题同步 + 课时建页算法
+  - 新增 `catalogue-source.service.spec.ts`、`sync.service.spec.ts` 单元测试
+  - 前端文案去掉 Portal 口径：`SyncButtons.tsx`（按钮「同步课程标题」）、`Sidebar.tsx`（「同步目标（课程 ID）」）、`knowledgeStore.ts`
+  - 设计文档 §3.2.2 / §5.1.4 / §10 环境变量同步改拍说明
+- **自测证据**：`tsc --noEmit` 0 error；`jest` 28 套件 / 174 用例全部通过（新增 sync 相关 10 用例）；`server`/`client` 构建均成功
+- **审查结论**：待 test_agent 验证
+- **下一步**：用户手动冒烟（侧栏选课 → 同步 → 新课程 `modeling-life` 是否建出）
+
+---
+
 ## 2026-10-26 ｜ 密码规则改为 8–128 字符并在激活/重置页展示规则提示
 
 - **任务（用户）**：密码长度调整为 8 到 128 个字符；仅做长度校验，不做大小写、数字、特殊字符等复杂度要求；在激活或重置设置密码的页面给出密码规则提示。

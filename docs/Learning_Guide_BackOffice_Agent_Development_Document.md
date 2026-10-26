@@ -290,14 +290,18 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 > **2026-10-16 扁平化改拍**：外部源仍为 Course→Lesson→Page 三级，本地为 Course→Page 两级。同步时将外部一个 Lesson 映射为本地一个 Page（contentMd = `# {Lesson.title}` + 各外部 Page 以 `# {Page.title}` 为 H1 拼接）。
 >
 > **2026-10-22 改拍（Portal 对接，仅标题同步）**：外部源从 Mock fixture 切换为 LearningGuidePortal 已发布课程目录（`GET /api/integration/catalogue`，服务间 `X-API-Key`）。本期**只同步课程标题与 lesson（Page）标题，不读写课程正文**；本地已有 `contentMd` 保持不变。课程匹配键 `Course.externalId = Portal course.slug`，页面匹配键 `Page.externalId = Portal lesson.id`（同日新增字段）。
+>
+> **2026-10-26 改拍（课程 ID 内置映射表）**：课程主数据后续归 BackOffice，KS 只需按 **courseID** 建立对应关系，因此**取消运行时向 Portal 拉取课程目录**（删除 `portal-source.service.ts` 与 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`）。同步数据源改由 KS 内置映射表 `server/src/sync/course-registry.ts` 提供：`externalId` 即 courseID，`title` 供建课与标题同步，当前无 lesson 结构化数据（`lessons` 恒为空）。**同步目的与算法完全不变**（仍为课程标题 + 课时标题同步，正文不动）。后续 BackOffice 提供课程接口时，只替换映射表数据源，`SyncService` 无需改动。
+>
+> 选择器口径：`GET /api/sync/external-courses` 返回「映射表课程 ∪ 本地带 `externalId` 的课程」，映射表外的本地课程仍可选中，避免侧栏丢失入口；对映射表外课程执行同步返回 `unchanged: true`（无可同步项）。
 
-**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出 Portal 已发布课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时同步按钮禁用。原「新建课程」入口**彻底移除**——课程身份由 Portal 同步。
+**同步目标选取**：Sidebar 顶部为**课程选择器**（下拉列出映射表课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时同步按钮禁用。原「新建课程」入口**彻底移除**——课程身份由映射表的 courseID 决定。
 
 **按钮**：
 
 | 按钮 | 接口 | 行为 |
 |------|------|------|
-| 从 Portal 同步标题 | POST /api/sync/structure `{ externalId }` | 同步课程标题 + 课时标题（Page.title），不写入/覆盖正文 |
+| 同步课程标题 | POST /api/sync/structure `{ externalId }` | 同步课程标题 + 课时标题（Page.title），不写入/覆盖正文 |
 
 > `POST /api/sync/all` 保留路由但返回 400 `CONTENT_SYNC_DISABLED`；2026-10-22 起正文同步禁用，只允许标题同步。
 
@@ -305,18 +309,19 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 
 | 情形 | 行为 |
 |------|------|
-| 课程在本地不存在 | 新建 Course（title = Portal title，externalId = Portal slug） |
+| 课程在本地不存在 | 新建 Course（title = 映射表 title，externalId = courseID） |
 | 课程已存在 | 仅当标题不同时更新 Course.title |
 | Page 按 `Page.externalId` 命中 | 仅当标题不同时更新 Page.title，正文完全不动 |
 | Page 未命中但标题相同 | 回填 `Page.externalId`，并按需更新标题 |
-| 本地无该 lesson | 新增空 Page（contentMd = ''，sortOrder 按 Portal 顺序） |
-| Portal 删除 lesson | 本期不标记 STALE，避免误伤本地正文；后续内容同步阶段再处理 |
+| 本地无该 lesson | 新增空 Page（contentMd = ''，sortOrder 按映射表顺序） |
+| 映射表无该 lesson | 本期不标记 STALE，避免误伤本地正文；后续内容同步阶段再处理 |
+| 课程不在映射表但本地存在 | 视为本地独有课程：返回 `unchanged: true`，不建课不报错 |
 
 **STALE（灰度失效）节点**：外部内容阶段保留原有语义；本期标题同步不产生新的 STALE 节点。
 
-**响应**：`{ created, updated, staleMarked, unchanged }` 变更摘要。
+**响应**：`{ created, courseCreated, updated, staleMarked, unchanged }` 变更摘要（`created` = 新建 Page 数，`courseCreated` = 新建 Course 数；2026-10-26 新增 `courseCreated`，避免首次导入无 lesson 的课程时误报「无变更」）。
 
-> **外部源实现**：`server/src/sync/portal-source.service.ts`。需要 `PORTAL_API_BASE_URL` 与 `PORTAL_API_TOKEN`；Portal 未配置 Token 时接口返回 503，避免课程目录裸奔。e2e 通过 `overrideProvider(PortalSourceService)` 注入假数据源。
+> **数据源实现**：`server/src/sync/course-registry.ts`（内置 courseID → 标题映射表）+ `server/src/sync/catalogue-source.service.ts`（数据源服务）。**不再需要任何 Portal 目录接口配置**；e2e 通过 `overrideProvider(CatalogueSourceService)` 注入带 lesson 结构的假数据源，继续覆盖标题同步与课时建页算法。
 
 #### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
@@ -719,11 +724,11 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/sync/external-courses | 列出 Portal 已发布课程（含同步状态：未同步/已同步/有更新），供选择器 |
+| GET | /api/sync/external-courses | 列出同步目标课程（映射表课程 ∪ 本地带 externalId 的课程，含同步状态：未同步/已同步/有更新），供选择器 |
 | POST | /api/sync/structure | 同步课程标题 + 课时标题，body `{ externalId }`；正文不动 |
 | POST | /api/sync/all | 正文同步已禁用（2026-10-22）：返回 400 `CONTENT_SYNC_DISABLED` |
 
-> 同步语义详见 §3.2.2。外部源为 Portal `GET /api/integration/catalogue`，需要 `PORTAL_API_BASE_URL` + `PORTAL_API_TOKEN`（服务间 `X-API-Key`）。DEV 下 Portal 的 `localhost` 属于 admin host，middleware 已显式放行 `/api/integration/`；若返回 3xx，KS 会提示检查地址与中间件配置。
+> 同步语义详见 §3.2.2。2026-10-26 起数据源为 KS 内置课程 ID 映射表（`server/src/sync/course-registry.ts`），**不再需要 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`**，也不再运行时访问 Portal 目录接口。
 
 #### 5.1.5 文件上传（2026-10-15 新增；同日按 §3.2.3 弹窗设计改为仅转换不建页）
 
@@ -1007,9 +1012,7 @@ AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
 # DEEPSEEK_API_KEY="xxx"
 # ANTHROPIC_API_KEY="xxx"
 
-# Portal 课程目录同步（2026-10-22 新增，仅服务间调用）
-PORTAL_API_BASE_URL="http://localhost:3011"
-PORTAL_API_TOKEN="shared-service-token"
+# 课程同步（2026-10-26 改拍：数据源为 KS 内置课程 ID 映射表，无需配置）
 
 # 服务间鉴权（可选；开启后所有 /api 请求需带 X-API-Key）
 AUTH_ENABLED=false

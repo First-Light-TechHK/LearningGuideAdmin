@@ -74,6 +74,8 @@ export interface ExternalCourseStatus {
 
 export interface SyncSummary {
   created: number
+  /** 2026-10-26 新增：新建的课程数（映射表课程首次导入时无 lesson，需单独计数） */
+  courseCreated: number
   /** 2026-10-22 标题同步新增：更新过的标题数（课程标题 + 课时标题） */
   updated: number
   staleMarked: number

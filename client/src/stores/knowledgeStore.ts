@@ -211,7 +211,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
 
   async runSync(mode) {
     const { selectedExternalId } = get()
-    if (!selectedExternalId) throw new Error('未选择外部课程')
+    if (!selectedExternalId) throw new Error('未选择同步目标')
     set({ syncing: true })
     try {
       const summary =

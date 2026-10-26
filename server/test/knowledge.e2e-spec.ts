@@ -5,9 +5,13 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/common/app-setup';
 import { signInAs } from './helpers/employee-session';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { PortalSourceService } from '../src/sync/portal-source.service';
+import { CatalogueSourceService } from '../src/sync/catalogue-source.service';
 
-/** 假 Portal 数据源：只提供课程/课时标题结构（Phase 1 不传内容），避免 e2e 依赖真实 Portal */
+/**
+ * 假同步数据源（2026-10-26）：同步数据源已改为 KS 内置课程 ID 映射表，
+ * e2e 通过覆盖 `CatalogueSourceService` 注入带 lesson 结构的假课程，
+ * 以继续覆盖「标题同步 + 课时建页」算法，同时不依赖任何外部服务。
+ */
 const PORTAL_COURSES = [
   {
     externalId: 'ext-quantum-001',
@@ -27,7 +31,7 @@ const PORTAL_COURSES = [
     ],
   },
 ];
-const fakePortalSource = {
+const fakeCatalogueSource = {
   listCourses: async () => PORTAL_COURSES,
   getCourse: async (externalId: string) =>
     PORTAL_COURSES.find((c) => c.externalId === externalId),
@@ -46,8 +50,8 @@ describe('Knowledge API (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      .overrideProvider(PortalSourceService)
-      .useValue(fakePortalSource)
+      .overrideProvider(CatalogueSourceService)
+      .useValue(fakeCatalogueSource)
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);
