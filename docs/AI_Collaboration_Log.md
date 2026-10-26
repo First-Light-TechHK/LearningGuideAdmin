@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-10-26 ｜ 密码规则改为 8–128 字符并在激活/重置页展示规则提示
+
+- **任务（用户）**：密码长度调整为 8 到 128 个字符；仅做长度校验，不做大小写、数字、特殊字符等复杂度要求；在激活或重置设置密码的页面给出密码规则提示。
+- **用户拍板**：直接按上述口径实施，完成后直接提交并推送到目标分支（`dev`）。
+- **变更清单**：
+  - `server/src/backoffice/lib/securityPolicy.ts`：`PASSWORD_MIN_LENGTH` 12 → 8（`PASSWORD_MAX_LENGTH` 保持 128）；`isPasswordAcceptable` 仍只校验长度
+  - `client/src/backoffice/messages/en-GB.json` / `zh-CN.json`：新增 `passwordRule.hint` 文案
+  - `client/src/backoffice/pages/ActivatePage.tsx`、`ResetPasswordPage.tsx`：在「新密码」输入框下以 `fieldHint` 展示规则提示
+  - `docs/BackOffice_Portal_Implementation.md` §6.1：密码长度参数同步为 8–128
+- **自测证据**：`server` / `client` 分别 `npx tsc --noEmit` 均 0 error；`jest src/backoffice/tests/password.spec.ts src/backoffice/tests/envelope.spec.ts` 10/10 通过；两份语言包 JSON 解析通过
+- **审查结论**：改动为单常量 + 文案 + 提示渲染；UI 由用户手动验收
+- **Git**：`dev` 已推送提交「feat(backoffice): adjust password rule to 8-128 chars and show rule hint」（本机到 github.com:443 直连超时，改用 GitHub API 写入同一 tree/提交内容）
+- **下一步**：无
+
+---
+
 ## 2026-10-24 ｜ KS Engine / Agent Engine 拆分（可独立部署、独立扩容）
 
 - **任务（运维）**：Admin/Portal API、KS/Agent 引擎、数据层三份设计；两个系统深度联动但发版互不影响，KS 和 Agent 可独立扩容。
