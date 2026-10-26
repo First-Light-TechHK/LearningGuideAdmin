@@ -60,6 +60,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-southeast-1
 
+      # App Runner source deployments keep the service configuration, so the
+      # tutor's LLM key and encryption key belong here, not in server/.env.
+      # Secret values stay in Secrets Manager; only ARNs are written. Run as
+      # soon as either ARN exists so a half-configured pair fails loudly.
+      - name: Ensure AI Tutor runtime secrets
+        if: vars.OPENROUTER_API_KEY_SECRET_ARN != '' || vars.AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN != ''
+        env:
+          APP_RUNNER_SERVICE_ARN: ${{ vars.ADMIN_DEV_APP_RUNNER_SERVICE_ARN }}
+          OPENROUTER_API_KEY_SECRET_ARN: ${{ vars.OPENROUTER_API_KEY_SECRET_ARN }}
+          AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN: ${{ vars.AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN }}
+          AI_AVAILABLE_MODELS: ${{ vars.AI_AVAILABLE_MODELS }}
+        run: node scripts/configure-admin-dev-env.mjs
+
       - name: Start App Runner deployment and wait for the result
         env:
           ARN: ${{ vars.ADMIN_DEV_APP_RUNNER_SERVICE_ARN }}

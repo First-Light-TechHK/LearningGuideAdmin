@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CourseAiConfig, PromptTemplate } from '@prisma/client';
+import { CourseAiConfig } from '@prisma/client';
 import {
   KNOWLEDGE_CLIENT,
   type KnowledgeClient,
@@ -15,7 +15,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 import { SaveAiConfigDto } from './dto/save-config.dto';
-import { defaultWelcome } from './prompt-defaults';
+import {
+  DEFAULT_PROMPTS,
+  defaultWelcome,
+  promptTemplateSeeds,
+  type PromptMode,
+} from './prompt-defaults';
 
 /** 单模式的 AI 配置视图（2026-10-20 二次改拍：System Prompt / Welcome / Model 按模式分开） */
 export interface AiModeView {
@@ -69,6 +74,19 @@ export interface ResolvedPrompts {
   welcomeMsg: string;
 }
 
+/**
+ * 默认 PromptTemplate 视图（2026-10-26）。
+ * 库中缺少某模式默认行时由 `src/ai/prompts/` 文件默认值合成，**不写库**，
+ * 保证云端空库（未执行 `prompts:sync`）时后台配置页与对话都不空白。
+ */
+export interface PromptTemplateView {
+  id: string;
+  mode: PromptMode;
+  systemPrompt: string;
+  welcomeMsg: string;
+  isDefault: boolean;
+}
+
 /** 学员端欢迎语语言（默认模板按语言从 src/ai/prompts/welcome.yaml 取） */
 export type WelcomeLocale = 'zh-CN' | 'en-GB';
 
@@ -78,6 +96,11 @@ interface CourseRef {
   currentReleaseId: string | null;
   aiTestReleaseId: string | null;
   aiTutorOnline: boolean;
+}
+
+/** PromptTemplate.mode 在库中是自由字符串（§2），仅这两个值参与默认模板 */
+function toPromptMode(mode: string): PromptMode | null {
+  return mode === 'LECTURE' || mode === 'SOCRATIC' ? mode : null;
 }
 
 @Injectable()
@@ -103,11 +126,47 @@ export class AiConfigService {
     return list.length > 0 ? list : ['openai/gpt-4o-mini'];
   }
 
-  async listPrompts(): Promise<PromptTemplate[]> {
-    return this.prisma.promptTemplate.findMany({
+  /**
+   * 默认模板列表：库中已有的优先，缺失的模式按文件默认值合成（2026-10-26，只读不写库）。
+   * 库内某字段为空串时同样按文件默认值补齐，避免后台仍显示空白。
+   * 合成行使用 `lecture-default` / `socratic-default` 固定 id，与 seed / prompts:sync 一致。
+   */
+  async listPrompts(): Promise<PromptTemplateView[]> {
+    const rows = await this.prisma.promptTemplate.findMany({
       where: { isDefault: true },
       orderBy: { mode: 'asc' },
     });
+    // 过滤非法 mode，并收窄类型（库列为 String）
+    const stored = rows.flatMap((row) => {
+      const mode = toPromptMode(row.mode);
+      return mode ? [{ ...row, mode }] : [];
+    });
+    const seeds = new Map(
+      promptTemplateSeeds().map((seed) => [seed.mode, seed]),
+    );
+    const views = stored.map((row) => {
+      const seed = seeds.get(row.mode);
+      return {
+        id: row.id,
+        mode: row.mode,
+        systemPrompt: row.systemPrompt || seed?.systemPrompt || '',
+        welcomeMsg: row.welcomeMsg || seed?.welcomeMsg || '',
+        isDefault: row.isDefault,
+      };
+    });
+    const storedModes = new Set(stored.map((row) => row.mode));
+    const fallbacks = promptTemplateSeeds()
+      .filter((seed) => !storedModes.has(seed.mode))
+      .map(({ id, mode, systemPrompt, welcomeMsg, isDefault }) => ({
+        id,
+        mode,
+        systemPrompt,
+        welcomeMsg,
+        isDefault,
+      }));
+    return [...views, ...fallbacks].sort((a, b) =>
+      a.mode.localeCompare(b.mode),
+    );
   }
 
   /** §5.2：获取某 Course 的 AI 配置（作用于「测试所选 Release」；无配置行时返回默认视图） */
@@ -345,9 +404,15 @@ export class AiConfigService {
       mode === 'LECTURE' ? cfg?.lectureSystemPrompt : cfg?.socraticSystemPrompt;
     const customWelcome =
       mode === 'LECTURE' ? cfg?.lectureWelcomeMsg : cfg?.socraticWelcomeMsg;
+    // 库中无模板时回退 `src/ai/prompts/` 文件默认值（2026-10-26）：
+    // 云端空库未跑 `prompts:sync` 时，对话仍拿到完整教学 System Prompt，而不是空串。
     return {
-      systemPrompt: customPrompt || template?.systemPrompt || '',
-      welcomeMsg: customWelcome || template?.welcomeMsg || '',
+      systemPrompt:
+        customPrompt ||
+        template?.systemPrompt ||
+        DEFAULT_PROMPTS[mode].systemPrompt,
+      welcomeMsg:
+        customWelcome || template?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
     };
   }
 

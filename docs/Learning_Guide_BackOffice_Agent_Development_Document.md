@@ -223,7 +223,7 @@ model AiRateLimitHit {
 
 ### 2.1 初始种子数据（Seed Data）
 
-初始化数据库后，必须插入以下默认数据：
+初始化数据库后，必须插入以下默认数据（**例外：PromptTemplate 允许省略，2026-10-26 起运行时按 `src/ai/prompts/` 文件兜底**）：
 
 **PromptTemplate 默认数据（2026-10-23 起改为独立文件源）：**
 
@@ -232,6 +232,7 @@ model AiRateLimitHit {
 - 同步命令：`npm run prompts:sync`（upsert `lecture-default` / `socratic-default`，不触碰课程级覆盖）
 - 落库口径：`PromptTemplate.welcomeMsg` 存 `zh-CN` 供后台展示；学员端 welcome 按 `locale` 读取文件对应语言
 - 欢迎语口径：课程已在进入 AI Tutor 前选定，默认文案不再提示“请选择一个课程”
+- **运行时兜底（2026-10-26）**：应用启动**不写库**；库中缺少某模式默认行时，`GET /api/ai/prompts` 与对话提示词解析直接回退上述文件默认值（`src/ai/prompts/`），因此空库 / 云端未执行 `prompts:sync` 时后台不再出现空白 Prompt。`npm run prompts:sync` 仍保留为“主动把文件内容写入数据库”的手段。
 
 ---
 
@@ -525,7 +526,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 #### 4.2.4 Reset 按钮
 
 - 点击后，清空**当前所选模式**的自定义输入（只重置 Lecture / Socratic 中当前这一个）
-- System Prompt / Welcome Message 恢复为**该模式**的默认 PromptTemplate（PromptTemplate 表 load isDefault=true 的记录）；LLM Model 回退默认模型
+- System Prompt / Welcome Message 恢复为**该模式**的默认 PromptTemplate（PromptTemplate 表 load isDefault=true 的记录；**2026-10-26：库中无该模式默认行时回退 `src/ai/prompts/` 文件默认值**）；LLM Model 回退默认模型
 - 接口带 `mode`：`POST /api/ai/config/:courseId/reset`（body `{ mode }`；§5.2）
 
 #### 4.2.5 Save 按钮
@@ -659,7 +660,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 2. **加载配置**：根据 courseId + 测试所选 Release 获取对应的 CourseAiConfig（2026-10-20 按 Release 维度），解析 LLM 提供商和模型（apiKey 字段经 AES-256-GCM 解密后仅在内存中使用，环境变量 `AI_CONFIG_ENCRYPTION_KEY`，2026-10-14 拍板）
 3. **加载知识库上下文**：读取 **`Course.aiTestReleaseId`（为空回退 `currentReleaseId`）** 指向 Release 的 `snapshotData.pages`，按 H1-H6 section 切分 contentMd，每段拼接对应 `sectionTags`（如有），聚合为带语义标注的课程资料
 4. **组装 Prompt**：
-   - 获取对应模式的 PromptTemplate（优先自定义，其次默认）
+   - 获取对应模式的 PromptTemplate（**2026-10-26 完整优先级：课程自定义 > 课程绑定模板 > 库内默认模板 > `src/ai/prompts/` 文件默认值**）
    - 拼接：`System Prompt` + `[CONTEXT_START]` + 课程资料 + `[CONTEXT_END]` + 用户消息
    - 2026-10-22 起不再追加固定苏格拉底指令：默认 Socratic 模板（MixSocratic v8）已包含完整教学规则，运行时仅按学员 `locale` 追加语言指令。
 5. **代理转发**：经 Provider 适配器（策略模式，首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）调用实际 API（流式）
@@ -784,7 +785,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 |------|------|------|
 | POST | /api/ai/chat-stream | 流式 AI 对话（SSE 响应）；后端按该 Course 的**测试所选 Release** 解析知识库快照 |
 | GET | /api/ai/models | 获取可用的 LLM 模型列表（数据源 `AI_AVAILABLE_MODELS` env） |
-| GET | /api/ai/prompts | 获取 PromptTemplate 列表 |
+| GET | /api/ai/prompts | 获取默认 PromptTemplate 列表（仅 `isDefault=true`；**2026-10-26：库中缺失的模式按 `src/ai/prompts/` 文件默认值合成返回**，只读不写库；字段 `id` / `mode` / `systemPrompt` / `welcomeMsg` / `isDefault`） |
 | PUT | /api/ai/config | 保存某（课程 × 测试所选 Release × **模式**）的 AI 配置（body 含 `mode`，只写该模式的三项值 + 共享 llmProvider/llmBaseUrl/apiKey） |
 | GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文；含 `releaseId`/`releaseTag`/`isLive` 用于对话头部展示；含 `online` 用户侧开放状态；System Prompt / Welcome / Model **按模式分组**返回，见上方 `AiConfigView`） |
 | POST | /api/ai/config/:courseId/reset | 重置测试所选 Release 的**当前模式**（body `{ mode }`）配置为默认 |

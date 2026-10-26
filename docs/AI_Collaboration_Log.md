@@ -5,6 +5,22 @@
 
 ---
 
+## 2026-10-26 ｜ 默认 Prompt / Welcome 改为运行时文件兜底（方案 B，云端空库不再空白）
+
+- **任务（用户）**：云端 App Runner 空库，生产镜像 `npm ci --omit=dev` 不含 ts-node，无法执行 `npm run prompts:sync`；导致 `GET /api/ai/prompts` 返回空、后台 AI Tutor 的 System Prompt / Welcome 两栏空白、对话 System Prompt 为空串。用户拍板按「方案 B：运行时只读兜底，不写库」修复。
+- **用户拍板**：① 采用方案 B（应用启动不写库、不覆盖库内已有默认模板）；② 保留 `npm run prompts:sync` 作为主动落库手段；③ 先改设计文档再改实现（项目规则）。
+- **变更清单**：
+  - `server/src/ai/ai-config.service.ts`：新增 `PromptTemplateView`；`listPrompts()` 库内 `isDefault` 行优先，对缺失模式及空串字段按 `src/ai/prompts/` 文件默认值补齐（合成行沿用 `lecture-default` / `socratic-default` id），并用 `toPromptMode()` 过滤非法 mode；`resolvePrompts()` 的 System Prompt / Welcome 增加文件兜底（`DEFAULT_PROMPTS` / `defaultWelcome(mode,'zh-CN')`）。读路径无任何 `promptTemplate` 写操作。
+  - `server/src/ai/ai-config.service.spec.ts`：新增 6 条用例（空库合成两条、部分缺行只补缺失模式、空串字段补齐、非法 mode 过滤、空库 resolvePrompts 回退文件、课程绑定模板 id 失效回退文件）。
+  - `server/src/ai/prompt-defaults.ts`：注释说明这些文件同时是运行时兜底。
+  - 设计文档 §2.1（Seed 例外说明）、§4.2.4（Reset 兜底）、§4.4.2 第 4 步（完整优先级链）、§5.2 接口表（`/api/ai/prompts` 合成口径）同步更新。
+- **自测证据**：`npm test -- --runInBand` **28 套件 / 180 用例全部通过**；`npm run build` 0 error；`dist/ai/prompts`（lecture.md / socratic.md / welcome.yaml）存在，生产镜像具备文件兜底能力；未新增依赖、无密钥变更；优先级保持「课程自定义 > 绑定模板 > 库内默认模板 > 文件默认」。
+- **审查结论**：test_agent 通过；Review Agent **APPROVE**（无 Blocking）。Non-blocking 已处理：mode 断言改为 `toPromptMode` 收窄、空串默认行补齐、换行格式；保留项：绑定模板 id 失效补 `findFirst`（外键 `ON DELETE SET NULL`，现网不可达）、e2e 内容断言（需 Postgres 测试库）、合成 id 不可回写（当前无绑定接口）。
+- **Git**：未提交（等用户确认后按需推送分支）。
+- **下一步**：用户手动冒烟——云端空库 `GET /api/ai/prompts` 返回两条非空默认模板；后台配置页 Lecture/Socratic 均有默认 System Prompt / Welcome；测试对话正常；学员端欢迎语不受影响。
+
+---
+
 ## 2026-10-26 ｜ 课程同步数据源改为 KS 内置课程 ID 映射表（删除 Portal 目录拉取）
 
 - **任务（用户）**：不再由 KS 运行时向 Portal 获取课程 ID；直接按当前 courseID 映射一份到 KS，KS 通过这份映射执行同步。原因：后期课程主数据归 BackOffice，KS 只需 courseID 即可；同时删除原先 KS 向 Portal 获取课程数据的实现。

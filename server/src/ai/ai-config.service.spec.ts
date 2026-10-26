@@ -4,6 +4,7 @@ import { AiConfigService } from './ai-config.service';
 import type { KnowledgeClient } from '../ks/contract/knowledge-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
+import { DEFAULT_PROMPTS } from './prompt-defaults';
 
 /**
  * AiConfigService 单元测试（§4.2.6 / §5.2，2026-10-20 按 Release 维度改拍）：
@@ -14,7 +15,7 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     course: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     courseAiConfig: { findUnique: jest.fn(), upsert: jest.fn() },
     release: { findUnique: jest.fn() },
-    promptTemplate: { findUnique: jest.fn(), findFirst: jest.fn() },
+    promptTemplate: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
   };
   const mockCrypto = { encrypt: jest.fn(), decrypt: jest.fn() };
   const mockConfig = { get: jest.fn() };
@@ -369,6 +370,87 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     expect(lecture).toEqual({ systemPrompt: 'cust-L', welcomeMsg: 'wel-L' });
     const socratic = await service.resolvePrompts('c1', 'r1', 'SOCRATIC');
     expect(socratic).toEqual({ systemPrompt: 'tpl-S', welcomeMsg: 'tpl-SW' });
+  });
+
+  it('listPrompts：库中无默认行时按文件默认值合成（只读不写库）', async () => {
+    mockPrisma.promptTemplate.findMany.mockResolvedValue([]);
+    const list = await service.listPrompts();
+    expect(list.map((t) => t.id)).toEqual([
+      'lecture-default',
+      'socratic-default',
+    ]);
+    expect(list[0].systemPrompt).toBe(DEFAULT_PROMPTS.LECTURE.systemPrompt);
+    expect(list[0].welcomeMsg).toBe(DEFAULT_PROMPTS.LECTURE.welcome['zh-CN']);
+    expect(list[1].systemPrompt).toBe(DEFAULT_PROMPTS.SOCRATIC.systemPrompt);
+  });
+
+  it('listPrompts：库中已有某模式默认行时保留库值，只补缺失模式', async () => {
+    mockPrisma.promptTemplate.findMany.mockResolvedValue([
+      {
+        id: 'lecture-default',
+        mode: 'LECTURE',
+        systemPrompt: 'DB-L',
+        welcomeMsg: 'DB-LW',
+        isDefault: true,
+      },
+    ]);
+    const list = await service.listPrompts();
+    expect(list.map((t) => t.id)).toEqual([
+      'lecture-default',
+      'socratic-default',
+    ]);
+    expect(list[0].systemPrompt).toBe('DB-L');
+    expect(list[0].welcomeMsg).toBe('DB-LW');
+    expect(list[1].systemPrompt).toBe(DEFAULT_PROMPTS.SOCRATIC.systemPrompt);
+  });
+
+  it('listPrompts：库内默认行字段为空串时仍按文件默认值补齐', async () => {
+    mockPrisma.promptTemplate.findMany.mockResolvedValue([
+      {
+        id: 'lecture-default',
+        mode: 'LECTURE',
+        systemPrompt: '',
+        welcomeMsg: '',
+        isDefault: true,
+      },
+    ]);
+    const list = await service.listPrompts();
+    expect(list[0].systemPrompt).toBe(DEFAULT_PROMPTS.LECTURE.systemPrompt);
+    expect(list[0].welcomeMsg).toBe(DEFAULT_PROMPTS.LECTURE.welcome['zh-CN']);
+  });
+
+  it('listPrompts：忽略非法 mode 的库行', async () => {
+    mockPrisma.promptTemplate.findMany.mockResolvedValue([
+      {
+        id: 'legacy',
+        mode: 'legacy',
+        systemPrompt: 'X',
+        welcomeMsg: 'X',
+        isDefault: true,
+      },
+    ]);
+    const list = await service.listPrompts();
+    expect(list.map((t) => t.mode)).toEqual(['LECTURE', 'SOCRATIC']);
+  });
+
+  it('resolvePrompts：库中无模板时回退文件默认值（云端空库不空白）', async () => {
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue(null);
+    mockPrisma.promptTemplate.findFirst.mockResolvedValue(null);
+    const view = await service.resolvePrompts('c1', 'r1', 'LECTURE');
+    expect(view.systemPrompt).toBe(DEFAULT_PROMPTS.LECTURE.systemPrompt);
+    expect(view.welcomeMsg).toBe(DEFAULT_PROMPTS.LECTURE.welcome['zh-CN']);
+  });
+
+  it('resolvePrompts：课程绑定的模板 id 已失效时回退文件默认值', async () => {
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      lectureModeId: 'missing-template',
+      lectureSystemPrompt: null,
+      lectureWelcomeMsg: null,
+    });
+    mockPrisma.promptTemplate.findUnique.mockResolvedValue(null);
+    const view = await service.resolvePrompts('c1', 'r1', 'LECTURE');
+    expect(view.systemPrompt).toBe(DEFAULT_PROMPTS.LECTURE.systemPrompt);
+    expect(view.welcomeMsg).toBe(DEFAULT_PROMPTS.LECTURE.welcome['zh-CN']);
   });
 
   it('resolveLearnerWelcome：按 externalId 返回两种模式生效的 welcome（自定义优先、模板兜底）', async () => {
