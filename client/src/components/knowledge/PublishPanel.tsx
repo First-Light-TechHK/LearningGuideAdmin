@@ -4,6 +4,7 @@ import type { ColumnsType } from '../ui'
 import { knowledgeApi, type ReleaseSummary } from '../../api/knowledge'
 import { CloseIcon } from '../icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 
 /**
@@ -20,6 +21,8 @@ import { tokens } from '../../theme/tokens'
  */
 export function PublishPanel() {
   const { message, modal } = App.useApp()
+  /** PRD §3.2/§3.3：发布/切换版本是 PUBLISH、删除版本是 DELETE；View/Edit 不显示 */
+  const access = useWorkspaceAccess()
   const courses = useKnowledgeStore((s) => s.courses)
   const afterActivateRelease = useKnowledgeStore((s) => s.afterActivateRelease)
   const [latest, setLatest] = useState<Record<string, ReleaseSummary[]>>({})
@@ -129,11 +132,14 @@ export function PublishPanel() {
     {
       title: 'Action',
       key: 'action',
-      render: (_, record) => (
-        <Button type="primary" size="small" onClick={() => setPublishCourse(record.id)}>
-          Create Release
-        </Button>
-      ),
+      render: (_, record) =>
+        access.canPublish ? (
+          <Button type="primary" size="small" onClick={() => setPublishCourse(record.id)}>
+            Create Release
+          </Button>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        ),
     },
   ]
 
@@ -182,7 +188,7 @@ export function PublishPanel() {
                     {new Date(r.createdAt).toLocaleString('zh-CN')}
                   </Typography.Text>
                   {/* editing 版本不可再「切换到此版本」（2026-10-20 三次改拍） */}
-                  {historyCourse && !r.isEditing && (
+                  {access.canPublish && historyCourse && !r.isEditing && (
                     <Button
                       size="small"
                       style={{ marginLeft: tokens.spacing.sm }}
@@ -196,7 +202,7 @@ export function PublishPanel() {
                   </div>
                 </div>
                 {/* Live / 后台测试所选版本受保护，不显示删除 ×（2026-10-20 双保护） */}
-                {!protectedVersion && (
+                {access.canDelete && !protectedVersion && (
                   <Button
                     type="text"
                     size="small"

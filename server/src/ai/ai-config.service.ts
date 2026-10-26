@@ -2,11 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CourseAiConfig, PromptTemplate } from '@prisma/client';
+import {
+  KNOWLEDGE_CLIENT,
+  type KnowledgeClient,
+} from '../ks/contract/knowledge-client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 import { SaveAiConfigDto } from './dto/save-config.dto';
@@ -81,6 +86,8 @@ export class AiConfigService {
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
     private readonly config: ConfigService,
+    // 课程与 Release 归 KS 所有，只经契约读写（docs/Engine_Split_Implementation.md）
+    @Inject(KNOWLEDGE_CLIENT) private readonly knowledge: KnowledgeClient,
   ) {}
 
   defaultModel(): string {
@@ -204,24 +211,12 @@ export class AiConfigService {
     courseId: string,
     releaseId: string,
   ): Promise<AiConfigView> {
-    const course = await this.ensureCourse(courseId);
-    const release = await this.prisma.release.findUnique({
-      where: { id: releaseId },
-      select: { id: true, courseId: true },
-    });
+    await this.ensureCourse(courseId);
+    const release = await this.knowledge.getReleaseMeta(releaseId);
     if (!release || release.courseId !== courseId) {
       throw new NotFoundException('发布版本不存在或不属于该课程');
     }
-    const updated = await this.prisma.course.update({
-      where: { id: courseId },
-      data: { aiTestReleaseId: releaseId },
-      select: {
-        id: true,
-        currentReleaseId: true,
-        aiTestReleaseId: true,
-        aiTutorOnline: true,
-      },
-    });
+    const updated = await this.knowledge.setTestRelease(courseId, releaseId);
     const cfg = await this.prisma.courseAiConfig.findUnique({
       where: { courseId_releaseId: { courseId, releaseId } },
     });
@@ -233,17 +228,8 @@ export class AiConfigService {
    * 写 Course.aiTutorOnline（2026-10-20 由 CourseAiConfig.online 搬移而来）。
    */
   async setOnline(courseId: string, online: boolean): Promise<AiConfigView> {
-    const course = await this.ensureCourse(courseId);
-    const updated = await this.prisma.course.update({
-      where: { id: courseId },
-      data: { aiTutorOnline: online },
-      select: {
-        id: true,
-        currentReleaseId: true,
-        aiTestReleaseId: true,
-        aiTutorOnline: true,
-      },
-    });
+    await this.ensureCourse(courseId);
+    const updated = await this.knowledge.setTutorOnline(courseId, online);
     const releaseId = this.testReleaseIdOf(updated);
     const cfg = releaseId
       ? await this.prisma.courseAiConfig.findUnique({
@@ -255,10 +241,7 @@ export class AiConfigService {
 
   /** §4.2.6/§5.2：列出全部 AI Tutor（Course）及其 Online 状态（读 Course.aiTutorOnline） */
   async listTutors(): Promise<AiTutorListView[]> {
-    const courses = await this.prisma.course.findMany({
-      select: { id: true, title: true, aiTutorOnline: true },
-      orderBy: { title: 'asc' },
-    });
+    const courses = await this.knowledge.listCourses();
     return courses.map((c) => ({
       courseId: c.id,
       title: c.title,
@@ -272,17 +255,7 @@ export class AiConfigService {
    * Portal 依据 `available` 决定是否展示入口。不做缓存，开关切换后立即生效。
    */
   async listOnlineTutorsForUser(): Promise<LearnerTutorView[]> {
-    const courses = await this.prisma.course.findMany({
-      where: { externalId: { not: null } },
-      select: {
-        id: true,
-        title: true,
-        externalId: true,
-        currentReleaseId: true,
-        aiTutorOnline: true,
-      },
-      orderBy: { title: 'asc' },
-    });
+    const courses = await this.knowledge.listCourses({ mappedOnly: true });
 
     return courses.map((course) => ({
       externalId: course.externalId as string,
@@ -301,14 +274,7 @@ export class AiConfigService {
     externalId: string,
     locale: WelcomeLocale = 'zh-CN',
   ): Promise<{ lecture: string; socratic: string }> {
-    const course = await this.prisma.course.findFirst({
-      where: { externalId },
-      select: {
-        id: true,
-        currentReleaseId: true,
-        aiTutorOnline: true,
-      },
-    });
+    const course = await this.knowledge.getCourseByExternalId(externalId);
     if (!course) throw new NotFoundException('课程不存在');
     if (!course.aiTutorOnline) {
       throw new ForbiddenException('该课程 AI 导师未开放');
@@ -444,10 +410,7 @@ export class AiConfigService {
   ): Promise<AiConfigView> {
     let releaseTag: string | null = null;
     if (releaseId) {
-      const release = await this.prisma.release.findUnique({
-        where: { id: releaseId },
-        select: { versionTag: true },
-      });
+      const release = await this.knowledge.getReleaseMeta(releaseId);
       releaseTag = release?.versionTag ?? null;
     }
     return {
@@ -473,15 +436,7 @@ export class AiConfigService {
   }
 
   private async ensureCourse(courseId: string): Promise<CourseRef> {
-    const found = await this.prisma.course.findUnique({
-      where: { id: courseId },
-      select: {
-        id: true,
-        currentReleaseId: true,
-        aiTestReleaseId: true,
-        aiTutorOnline: true,
-      },
-    });
+    const found = await this.knowledge.getCourse(courseId);
     if (!found) throw new NotFoundException('课程不存在');
     return found;
   }

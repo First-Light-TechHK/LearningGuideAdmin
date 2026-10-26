@@ -24,26 +24,26 @@ model User {
 
 // 第一层：课程 (Course)
 model Course {
-  id            String   @id @default(uuid())
-  title         String
-  description   String?
-  externalId    String? // 对应外部同步源的 ID
-  structureJson Json? // 存储树形目录的原始结构，用于快速渲染
+  id               String   @id @default(uuid())
+  title            String
+  description      String?
+  externalId       String? // 对应外部同步源的 ID
+  structureJson    Json? // 存储树形目录的原始结构，用于快速渲染
   // 上线版本指针（§3.4.3/§4.3.3）：用户侧 AI Tutor 读此 Release 快照；普通标量列，不建 Prisma 外键关系
   currentReleaseId String?
   // 后台「测试所选 Release」（2026-10-20 新增）：AI Tutor 后台测试对话读此 Release 快照；null 时回退 currentReleaseId
-  aiTestReleaseId String?
+  aiTestReleaseId  String?
   // 当前编辑版本指针（2026-10-20 二次改拍）：新建 Release 或「切换到此版本」后指向该 Release；历史弹窗 editing 标识来源；普通标量列，不建 Prisma 外键关系
   editingReleaseId String?
   // 课程级 Online 开关（2026-10-20 由 CourseAiConfig.online 搬移而来）：该课程 AI Tutor 是否对用户侧开放
-  aiTutorOnline Boolean @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  aiTutorOnline    Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  pages    Page[]
-  releases Release[]
+  pages          Page[]
+  releases       Release[]
   // 每个 Release 各一份 AI 配置（2026-10-20 由一对一改为按 Release 一对多）
-  aiConfigs CourseAiConfig[]
+  aiConfigs      CourseAiConfig[]
   // 反向关联：users 为隐式多对多，migrate 时生成联接表 _CourseToUser
   users          User[]
   aiChatSessions AiChatSession[]
@@ -51,13 +51,13 @@ model Course {
 
 // 第二层：页面/内容 (Page)（2026-10-16 扁平化：原 Lesson → Page 合并）
 model Page {
-  id          String  @id @default(uuid())
+  id          String    @id @default(uuid())
   courseId    String
-  course      Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  course      Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   // Portal lesson.id（2026-10-22 新增）：标题同步的稳定匹配键；此前同步的页面可为空
   externalId  String?
   title       String // 原 Lesson 标题（md 文件标题）
-  contentMd   String  @db.Text // 合并后的 Markdown：各原 Page 以 `# {Page标题}` 为 H1 拼接（Lesson.title 不入内容）
+  contentMd   String    @db.Text // 合并后的 Markdown：各原 Page 以 `# {Page标题}` 为 H1 拼接（Lesson.title 不入内容）
   sectionTags Json? // H1-H6 级标签映射：{ "h{n}-slug": ["tag1"] }（2026-10-16：移除页面级 tags）
   sortOrder   Int
   syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
@@ -144,9 +144,9 @@ model PromptTemplate {
 
 // 课程 + 发布版本 专属的 AI 配置（2026-10-20 改拍：由「每课程一份」→「每个 Release 一份」）
 model CourseAiConfig {
-  id       String @id @default(uuid())
-  courseId String
-  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  id        String  @id @default(uuid())
+  courseId  String
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
   releaseId String
   release   Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
@@ -164,11 +164,11 @@ model CourseAiConfig {
   socraticWelcomeMsg   String? @db.Text
 
   // LLM 配置（llmProvider / llmBaseUrl / apiKey 课程级共享；model 按模式，null 回退 AI_AVAILABLE_MODELS[0]）
-  llmProvider  String // 如: "openrouter"
-  lectureModel String?
+  llmProvider   String // 如: "openrouter"
+  lectureModel  String?
   socraticModel String?
-  llmBaseUrl   String? // 可选的自定义 Base URL
-  apiKey       String? // 加密存储
+  llmBaseUrl    String? // 可选的自定义 Base URL
+  apiKey        String? // 加密存储
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -176,6 +176,7 @@ model CourseAiConfig {
   // 每个 Release 至多一份配置（2026-10-20 改拍；原 `courseId @unique` 已移除）
   @@unique([courseId, releaseId])
 }
+
 // 注：课程级 Online 开关已移至 Course.aiTutorOnline（2026-10-20）；无该 Release 的配置行时按模板默认值运行。
 
 // AI 对话记录（后台调试用）
@@ -188,4 +189,115 @@ model AiChatSession {
   createdAt DateTime @default(now())
 
   @@index([courseId, createdAt])
+}
+
+// AI 限流计数（2026-10-24）：多个 Agent 实例共用，见 src/ai/rate-limit.service.ts
+model AiRateLimitHit {
+  id    BigInt   @id @default(autoincrement())
+  key   String
+  hitAt DateTime @default(now()) @map("hit_at") @db.Timestamptz(6)
+
+  @@index([key, hitAt])
+  @@map("ai_rate_limit_hits")
+}
+
+// ==========================================
+// BackOffice 员工身份（PRD v1.1 §3、§11；表结构见 migration 20261023150000_backoffice_employees）
+// 业务读写走 src/backoffice/repositories 的原生 SQL（触发器与条件更新），这里只为 Prisma 声明表结构。
+// ==========================================
+
+model Employee {
+  employeeId        String    @id @default(dbgenerated("gen_random_uuid()")) @map("employee_id") @db.Uuid
+  loginEmail        String    @unique @map("login_email")
+  role              String
+  accountStatus     String    @default("ACTIVE") @map("account_status")
+  emailVerification String    @default("PENDING_VERIFICATION") @map("email_verification")
+  emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  passwordHash      String?   @map("password_hash")
+  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz(6)
+  isBootstrapAdmin  Boolean   @default(false) @map("is_bootstrap_admin")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  sessions     EmployeeSession[]
+  tokens       VerificationToken[]
+  preferences  EmployeeUiPreference?
+  actorEvents  AuditEvent[]          @relation("AuditActor")
+  targetEvents AuditEvent[]          @relation("AuditTarget")
+
+  @@index([role], map: "employees_role_idx")
+  @@index([accountStatus, emailVerification], map: "employees_status_idx")
+  @@map("employees")
+}
+
+model EmployeeSession {
+  sessionId  String    @id @default(dbgenerated("gen_random_uuid()")) @map("session_id") @db.Uuid
+  employeeId String    @map("employee_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  ipAddress  String?   @map("ip_address")
+  userAgent  String?   @map("user_agent")
+
+  employee Employee @relation(fields: [employeeId], references: [employeeId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("employee_sessions")
+}
+
+model VerificationToken {
+  tokenId    String    @id @default(dbgenerated("gen_random_uuid()")) @map("token_id") @db.Uuid
+  employeeId String    @map("employee_id") @db.Uuid
+  purpose    String
+  tokenHash  String    @unique @map("token_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [employeeId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([employeeId, purpose], map: "verification_tokens_employee_idx")
+  @@map("verification_tokens")
+}
+
+model AuditEvent {
+  eventId          BigInt   @id @default(autoincrement()) @map("event_id")
+  eventName        String   @map("event_name")
+  actorEmployeeId  String?  @map("actor_employee_id") @db.Uuid
+  targetEmployeeId String?  @map("target_employee_id") @db.Uuid
+  action           String
+  oldValue         String?  @map("old_value")
+  newValue         String?  @map("new_value")
+  result           String
+  ipAddress        String?  @map("ip_address")
+  requestId        String?  @map("request_id")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor  Employee? @relation("AuditActor", fields: [actorEmployeeId], references: [employeeId], onDelete: SetNull, onUpdate: NoAction)
+  target Employee? @relation("AuditTarget", fields: [targetEmployeeId], references: [employeeId], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([targetEmployeeId, createdAt(sort: Desc)], map: "audit_events_target_idx")
+  @@index([eventName, createdAt(sort: Desc)], map: "audit_events_name_idx")
+  @@map("audit_events")
+}
+
+model EmployeeUiPreference {
+  employeeId   String   @id @map("employee_id") @db.Uuid
+  locale       String   @default("en-GB")
+  sidebarState String   @default("expanded") @map("sidebar_state")
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [employeeId], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("employee_ui_preferences")
+}
+
+model BackofficeSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("backoffice_settings")
 }

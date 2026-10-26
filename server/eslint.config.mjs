@@ -32,4 +32,52 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  // 三域边界（docs/Engine_Split_Implementation.md）：Agent、KS、BackOffice 互不 import 实现，
+  // Agent 读 KS 只能经 src/ks/contract。组装只在 app.module.ts 做；单测可跨域造数据。
+  {
+    files: ['src/ai/**/*.ts'],
+    ignores: ['**/*.spec.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            regex: '(^|/)(courses|pages|releases|sync|tags|files|backoffice)(/|$)',
+            message: 'Agent 不能 import KS 或 BackOffice 的实现',
+          },
+          {
+            regex: '(^|/)ks/(?!contract/)',
+            message: 'Agent 读 KS 只能经 src/ks/contract',
+          },
+        ],
+      }],
+    },
+  },
+  {
+    files: ['src/{courses,pages,releases,sync,tags,files,ks}/**/*.ts'],
+    ignores: ['**/*.spec.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            regex: '(^|/)(ai|backoffice)(/|$)',
+            message: 'KS 不能 import Agent 或 BackOffice 的实现',
+          },
+        ],
+      }],
+    },
+  },
+  {
+    files: ['src/backoffice/**/*.ts'],
+    ignores: ['**/*.spec.ts', 'src/backoffice/tests/**'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            regex: '(^|/)(ai|ks|courses|pages|releases|sync|tags|files)(/|$)',
+            message: 'BackOffice 不能 import Agent 或 KS 的实现',
+          },
+        ],
+      }],
+    },
+  },
 );

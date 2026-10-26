@@ -2,6 +2,7 @@ import { Tag, AutoComplete, Button, Space, Popover } from '../ui'
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 
 interface TagManagerProps {
   tags: string[]
@@ -65,6 +66,7 @@ function ColorPalette({
  * - 已添加的 tag 左侧色点可点击改色
  */
 export function TagManager({ tags, onChange, compact }: TagManagerProps) {
+  const access = useWorkspaceAccess()
   const tagLibrary = useKnowledgeStore((s) => s.tags)
   const tagsLoading = useKnowledgeStore((s) => s.tagsLoading)
   const loadTags = useKnowledgeStore((s) => s.loadTags)
@@ -237,14 +239,16 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
                       {opt.value}
                     </span>
                   </div>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CloseOutlined style={{ fontSize: 10 }} />}
-                    style={{ padding: 0, width: 16, height: 16, minWidth: 0, flexShrink: 0 }}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={(e) => void handleDelete(opt.value, e)}
-                  />
+                  {access.canDelete && (
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CloseOutlined style={{ fontSize: 10 }} />}
+                      style={{ padding: 0, width: 16, height: 16, minWidth: 0, flexShrink: 0 }}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => void handleDelete(opt.value, e)}
+                    />
+                  )}
                 </div>
                 )
               }}

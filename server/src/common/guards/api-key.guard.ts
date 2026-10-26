@@ -27,13 +27,17 @@ export class ApiKeyGuard implements CanActivate {
   }
 
   canActivate(context: ExecutionContext): boolean {
+    const request = context
+      .switchToHttp()
+      .getRequest<Request & { headers: Record<string, string | string[] | undefined> }>();
+    // App Runner 健康检查不带 X-API-Key，必须在鉴权之前放行。
+    if (request.path === '/api/health') {
+      return true;
+    }
     if (this.config.get<string>('AUTH_ENABLED') !== 'true') {
       return true;
     }
     const expected = this.config.get<string>('AUTH_TOKEN');
-    const request = context
-      .switchToHttp()
-      .getRequest<Request & { headers: Record<string, string | string[] | undefined> }>();
     const provided = request.headers['x-api-key'];
     if (!expected || provided !== expected) {
       throw new UnauthorizedException('未授权访问');

@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { UploadDocumentModal } from './UploadDocumentModal'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 import { PageFileIcon } from '../icons'
 
@@ -44,6 +45,8 @@ function parseHeadings(contentMd: string): HeadingInfo[] {
  */
 export function CourseTree({ keyword }: { keyword: string }) {
   const { message, modal } = App.useApp()
+  /** PRD §3.2/§3.3：新建/删除是 CREATE/DELETE 级写操作，View/Edit 角色不显示 */
+  const access = useWorkspaceAccess()
   const courses = useKnowledgeStore((s) => s.courses)
   const details = useKnowledgeStore((s) => s.details)
   const selectedPageId = useKnowledgeStore((s) => s.selectedPageId)
@@ -106,8 +109,8 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   const kw = keyword.trim().toLowerCase()
 
-  /** 拖拽排序启用条件：无搜索过滤（过滤后可见顺序不完整，不能据此排序）*/
-  const dragEnabled = !kw
+  /** 拖拽排序启用条件：无搜索过滤（过滤后可见顺序不完整，不能据此排序）；View 角色只读，不允许排序 */
+  const dragEnabled = !kw && access.canEdit
   /** 当前课程全部 Page 顺序（不受搜索过滤影响，用于计算拖拽后的新顺序） */
   const pageOrder = useMemo(
     () =>
@@ -301,6 +304,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
     if (!ops) return null
     if (ops.heading) return null // heading 节点无菜单
     if (ops.pageId) {
+      if (!access.canDelete) return null
       return {
         items: [{ key: 'del-page', label: '删除页面', danger: true }],
         onClick: ({ key }: { key: string }) => {
@@ -309,12 +313,17 @@ export function CourseTree({ keyword }: { keyword: string }) {
         },
       }
     }
+    const courseItems: { key: string; label: string; danger?: boolean }[] = []
+    if (access.canCreate) {
+      courseItems.push({ key: 'new-page', label: '新建页面' })
+      courseItems.push({ key: 'upload', label: '上传文档建页' })
+    }
+    if (access.canDelete) {
+      courseItems.push({ key: 'del-course', label: '删除课程', danger: true })
+    }
+    if (courseItems.length === 0) return null
     return {
-      items: [
-        { key: 'new-page', label: '新建页面' },
-        { key: 'upload', label: '上传文档建页' },
-        { key: 'del-course', label: '删除课程', danger: true },
-      ],
+      items: courseItems,
       onClick: ({ key }: { key: string }) => {
         if (key === 'new-page') openCreate(ops.courseId)
         if (key === 'upload') openUpload(ops.courseId, node.title as string)

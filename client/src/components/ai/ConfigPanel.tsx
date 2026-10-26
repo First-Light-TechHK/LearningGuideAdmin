@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { App, Button, Card, Divider, Input, Popconfirm, Select, Space, Switch, Typography } from '../ui'
 import { useAiStore } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 
 const { Text } = Typography
@@ -37,6 +38,8 @@ const extraStyle: React.CSSProperties = {
  */
 export function ConfigPanel() {
   const { message } = App.useApp()
+  /** PRD §3.2/§3.3：配置保存/重置是 EDIT，Online 上下线是 PUBLISH；View 角色只读 */
+  const access = useWorkspaceAccess()
   const models = useAiStore((s) => s.models)
   const courses = useAiStore((s) => s.courses)
   const selectedCourseId = useAiStore((s) => s.selectedCourseId)
@@ -146,7 +149,7 @@ export function ConfigPanel() {
               <Switch
                 size="small"
                 checked={config?.online ?? false}
-                disabled={!selectedCourseId}
+                disabled={!access.canPublish || !selectedCourseId}
                 onChange={(v) => void onOnlineChange(v)}
               />
             </span>
@@ -159,16 +162,20 @@ export function ConfigPanel() {
               style={{ minWidth: 150, flexShrink: 0, marginLeft: 'auto' }}
               onChange={(v) => void onChangeCourse(v)}
               options={courses.map((c) => ({ value: c.id, label: c.title }))}
-              // 下拉面板底部追加「管理所有 online」链接（§4.2.6）
+              // 下拉面板底部追加「管理所有 online」链接（§4.2.6）；View/Edit 角色不显示
               popupRender={(menu) => (
                 <>
                   {menu}
-                  <Divider style={{ margin: `${tokens.spacing.xs}px 0` }} />
-                  <div style={{ padding: `0 ${tokens.spacing.sm}px ${tokens.spacing.xs}px` }}>
-                    <Button type="link" style={{ padding: 0, height: 'auto' }} onClick={onManageOnline}>
-                      <span style={{ textDecoration: 'underline' }}>管理所有 online</span>
-                    </Button>
-                  </div>
+                  {access.canPublish && (
+                    <>
+                      <Divider style={{ margin: `${tokens.spacing.xs}px 0` }} />
+                      <div style={{ padding: `0 ${tokens.spacing.sm}px ${tokens.spacing.xs}px` }}>
+                        <Button type="link" style={{ padding: 0, height: 'auto' }} onClick={onManageOnline}>
+                          <span style={{ textDecoration: 'underline' }}>管理所有 online</span>
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             />
@@ -193,6 +200,7 @@ export function ConfigPanel() {
           <div style={labelStyle}>System Prompt</div>
           <Input.TextArea
             value={form.systemPrompt}
+            readOnly={!access.canEdit}
             onChange={(e) => patchForm({ systemPrompt: e.target.value })}
             style={{
               fontFamily: 'monospace',
@@ -209,6 +217,7 @@ export function ConfigPanel() {
           <div style={labelStyle}>Welcome Message</div>
           <Input.TextArea
             value={form.welcomeMsg}
+            readOnly={!access.canEdit}
             onChange={(e) => patchForm({ welcomeMsg: e.target.value })}
             style={{ flex: 1, minHeight: 0, resize: 'none' }}
           />
@@ -220,6 +229,7 @@ export function ConfigPanel() {
           <Select
             value={form.llmModel || undefined}
             placeholder="选择模型"
+            disabled={!access.canEdit}
             onChange={(v) => patchForm({ llmModel: v })}
             options={models.map((m) => ({ value: m, label: m }))}
             style={{ width: '100%' }}
@@ -227,34 +237,36 @@ export function ConfigPanel() {
         </div>
       </Card>
 
-      {/* 底部操作栏（2026-10-20 脱离卡片，位于卡片下方）：Reset 蓝色下划线文字链接（左）；Unsaved changes + Save 靠右（§4.2.5） */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexShrink: 0,
-          padding: `0 ${tokens.spacing.xs}px`,
-        }}
-      >
-        <Popconfirm
-          title="重置为默认模板？"
-          description="将清除当前模式（Lecture / Socratic）的自定义 Prompt / Model 覆盖"
-          okText="重置"
-          cancelText="取消"
-          onConfirm={onReset}
+      {/* 底部操作栏（2026-10-20 脱离卡片，位于卡片下方）：Reset 蓝色下划线文字链接（左）；Unsaved changes + Save 靠右（§4.2.5）。View 角色只读，不显示 */}
+      {access.canEdit && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexShrink: 0,
+            padding: `0 ${tokens.spacing.xs}px`,
+          }}
         >
-          <Button type="link" style={{ padding: 0, height: 'auto' }}>
-            <span style={{ textDecoration: 'underline' }}>Reset</span>
-          </Button>
-        </Popconfirm>
-        <Space size={tokens.spacing.lg}>
-          {dirty && <Text type="warning">Unsaved changes</Text>}
-          <Button type="primary" loading={saving} onClick={() => void onSave()}>
-            Save Configuration
-          </Button>
-        </Space>
-      </div>
+          <Popconfirm
+            title="重置为默认模板？"
+            description="将清除当前模式（Lecture / Socratic）的自定义 Prompt / Model 覆盖"
+            okText="重置"
+            cancelText="取消"
+            onConfirm={onReset}
+          >
+            <Button type="link" style={{ padding: 0, height: 'auto' }}>
+              <span style={{ textDecoration: 'underline' }}>Reset</span>
+            </Button>
+          </Popconfirm>
+          <Space size={tokens.spacing.lg}>
+            {dirty && <Text type="warning">Unsaved changes</Text>}
+            <Button type="primary" loading={saving} onClick={() => void onSave()}>
+              Save Configuration
+            </Button>
+          </Space>
+        </div>
+      )}
     </div>
   )
 }

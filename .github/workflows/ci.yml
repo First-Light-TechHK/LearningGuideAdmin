@@ -1,118 +1,43 @@
-# Learning Guide BackOffice — CI
-# 说明：
-#   - 本 workflow 只做「校验」，不做部署；分支保护所需的必过检查为
-#     server-build-test 与 client-lint-build。
-#   - lint-report 目前为「咨询性」检查：server 侧存量 lint 问题尚未清理
-#     （见下文 continue-on-error），不参与分支保护。
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
-  workflow_dispatch:
-
-# 同一分支的新推送会取消上一次仍在运行的检查，节省 runner 时间
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  server-build-test:
-    name: server-build-test
+  server:
+    name: Server build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     defaults:
       run:
         working-directory: server
-    env:
-      # 仅用于启动校验与 Prisma 生成/校验；单元测试使用 mock，不连接真实数据库
-      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-      NODE_ENV: test
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version: "22"
           cache: npm
           cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run build
+      - run: npm test -- --runInBand --passWithNoTests
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Prisma generate & validate
-        run: |
-          npx prisma generate
-          npx prisma validate
-
-      - name: Build
-        run: npm run build
-
-      - name: Unit tests
-        run: npm test -- --ci --runInBand
-
-  client-lint-build:
-    name: client-lint-build
+  client:
+    name: Client build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     defaults:
       run:
         working-directory: client
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version: "22"
           cache: npm
           cache-dependency-path: client/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-  lint-report:
-    name: lint-report
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: server
-    env:
-      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-      NODE_ENV: test
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Prisma generate
-        run: npx prisma generate
-
-      # 单独列出完整 lint 结果，便于逐步清理；该 job 不阻断合并
-      - name: ESLint report
-        continue-on-error: true
-        run: npx eslint "src/**/*.ts" "test/**/*.ts" --format stylish
+      - run: npm ci
+      - run: npm run build

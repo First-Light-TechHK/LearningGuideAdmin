@@ -2,13 +2,16 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import {
+  KNOWLEDGE_CLIENT,
+  type KnowledgeClient,
+} from '../ks/contract/knowledge-client';
 import { AiChatLogger, type AiChatStatus } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
-import { EmbeddingService } from './embedding/embedding.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmMessage } from './providers/llm-provider.interface';
@@ -29,9 +32,7 @@ const LOCALE_INSTRUCTION: Record<'en-GB' | 'zh-CN', string> = {
 /** 多轮上下文最多携带的历史条数（防 token 膨胀） */
 const MAX_HISTORY = 10;
 
-/** RAG 检索参数（2026-10-26 新增，对齐系统设计 §9.4） */
-const RETRIEVAL_TOP_K = 6;
-const RETRIEVAL_SCORE_THRESHOLD = 0.35;
+/** RAG 上下文 token 预算（对齐系统设计 §9.4） */
 const CONTEXT_TOKEN_BUDGET = 8000;
 
 /**
@@ -43,12 +44,12 @@ const CONTEXT_TOKEN_BUDGET = 8000;
 @Injectable()
 export class AiChatService {
   constructor(
-    private readonly prisma: PrismaService,
+    // 课程与 Release 快照归 KS 所有，只经契约读取（docs/Engine_Split_Implementation.md）
+    @Inject(KNOWLEDGE_CLIENT) private readonly knowledge: KnowledgeClient,
     private readonly configs: AiConfigService,
     private readonly registry: ProviderRegistry,
     private readonly rateLimit: RateLimitService,
     private readonly chatLogger: AiChatLogger,
-    private readonly embedding: EmbeddingService,
   ) {}
 
   /** 后台测试对话：读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId） */
@@ -61,14 +62,7 @@ export class AiChatService {
       locale: null,
       channel: 'admin',
       resolve: async () => {
-        const course = await this.prisma.course.findUnique({
-          where: { id: dto.courseId },
-          select: {
-            id: true,
-            currentReleaseId: true,
-            aiTestReleaseId: true,
-          },
-        });
+        const course = await this.knowledge.getCourse(dto.courseId);
         if (!course) throw new NotFoundException('课程不存在');
         return {
           courseId: course.id,
@@ -93,14 +87,9 @@ export class AiChatService {
       channel: 'learner',
       quota: dto.channel ?? 'portal',
       resolve: async () => {
-        const course = await this.prisma.course.findFirst({
-          where: { externalId: dto.externalCourseId },
-          select: {
-            id: true,
-            currentReleaseId: true,
-            aiTutorOnline: true,
-          },
-        });
+        const course = await this.knowledge.getCourseByExternalId(
+          dto.externalCourseId,
+        );
         if (!course) throw new NotFoundException('课程不存在');
         if (!course.aiTutorOnline) {
           throw new ForbiddenException('该课程 AI 导师未开放');
@@ -141,7 +130,7 @@ export class AiChatService {
       const resolved = await input.resolve();
       courseId = resolved.courseId;
       releaseId = resolved.releaseId;
-      this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal');
+      await this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal');
 
       const [runtime, prompts, context] = await Promise.all([
         this.configs.resolveRuntime(courseId, releaseId, input.mode),
@@ -222,12 +211,11 @@ export class AiChatService {
   }
 
   /**
-   * RAG 检索上下文（2026-10-26 改造，替代原全文塞入方案）：
-   * 1. 对用户问题生成 embedding
-   * 2. 在 Release 的 KnowledgeChunk 中做余弦相似度检索（topK=6，阈值=0.35）
-   * 3. 按 token 预算（8k）拼接检索结果，带 [Source: ...] 引用标记
-   *
-   * 若检索 0 结果或该 Release 未建索引，返回空上下文（模型回退到通用解释）。
+   * RAG 检索上下文（2026-10-26 改造）：
+   * 通过 KnowledgeClient 契约向 KS 请求向量检索结果，不直接访问 KS 表。
+   * KS 侧对 query 生成 embedding，在 release 的 KnowledgeChunk 中做余弦相似度检索。
+   * 返回的 chunks 按 token 预算拼接，带 [Source: ...] 引用标记。
+   * 检索 0 结果时返回空字符串，模型回退到通用解释。
    */
   private async buildContext(
     releaseId: string | null,
@@ -239,45 +227,15 @@ export class AiChatService {
       );
     }
 
-    // 生成 query embedding
-    const queryVec = await this.embedding.embedQuery(query);
-    const vecStr = `[${queryVec.join(',')}]`;
-
-    // 向量检索（余弦相似度）
-    const rows = await this.prisma.$queryRawUnsafe<
-      Array<{
-        pageTitle: string;
-        heading: string | null;
-        content: string;
-        score: number;
-        tokenCount: number;
-      }>
-    >(
-      `
-      SELECT "pageTitle", "heading", "content",
-             1 - (embedding <=> $1::vector(1536)) AS score,
-             "tokenCount"
-      FROM "KnowledgeChunk"
-      WHERE "releaseId" = $2
-      ORDER BY embedding <=> $1::vector(1536)
-      LIMIT $3
-    `,
-      vecStr,
-      releaseId,
-      RETRIEVAL_TOP_K,
-    );
-
-    // 过滤低于阈值的结果
-    const relevant = rows.filter((r) => r.score >= RETRIEVAL_SCORE_THRESHOLD);
-
-    if (relevant.length === 0) {
+    const chunks = await this.knowledge.retrieveChunks(releaseId, query);
+    if (chunks.length === 0) {
       return '';
     }
 
     // 按 token 预算拼接，超出时按 score 从高到低截断
     const blocks: string[] = [];
     let totalTokens = 0;
-    for (const r of relevant) {
+    for (const r of chunks) {
       if (totalTokens + r.tokenCount > CONTEXT_TOKEN_BUDGET) break;
       const source = r.heading ? `${r.pageTitle} - ${r.heading}` : r.pageTitle;
       blocks.push(`[Source: ${source}]\n${r.content}`);

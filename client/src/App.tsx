@@ -1,16 +1,30 @@
 import { useState } from 'react'
 import { App as AntApp, ConfigProvider } from 'antd'
+import enGB from 'antd/locale/en_GB'
 import zhCN from 'antd/locale/zh_CN'
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { MainLayout } from './components/layout/MainLayout'
-import type { ModuleKey } from './components/layout/ModuleNav'
 import { Sidebar } from './components/layout/Sidebar'
-import {
-  KnowledgeTabBar,
-  type KnowledgeTabKey,
-} from './components/knowledge/KnowledgeTabBar'
+import { KnowledgeTabBar, type KnowledgeTabKey } from './components/knowledge/KnowledgeTabBar'
 import { KnowledgeSystem } from './pages/KnowledgeSystem'
 import { AITutor, AITutorTopBar } from './pages/AITutor'
 import { tokens } from './theme/tokens'
+import { ShellRoute } from './backoffice/ShellRoute'
+import ActivatePage from './backoffice/pages/ActivatePage'
+import ForgotPasswordPage from './backoffice/pages/ForgotPasswordPage'
+import ResetPasswordPage from './backoffice/pages/ResetPasswordPage'
+import SignInPage from './backoffice/pages/SignInPage'
+import {
+  CoursePage,
+  EmployeeAccountSettingsPage,
+  MenuGuard,
+  PlaceholderPage,
+  SettingsEntryPage,
+  SettingsIndexPage,
+} from './backoffice/pages/ModulePages'
+import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
+import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
+import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
 
 /**
  * 全局主题（对齐 Figma 设计库 2026-10-16；内容面板统一 2026-10-19）：
@@ -45,36 +59,106 @@ const themeConfig = {
   },
 }
 
-function App() {
-  const [activeModule, setActiveModule] = useState<ModuleKey>('knowledge')
+/** Knowledge 工作区：整宽 Tab 栏；课程树仅在 "Knowledge Pages" Tab 显示 */
+function KnowledgeWorkspace() {
   const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTabKey>('pages')
-
   return (
-    <ConfigProvider locale={zhCN} theme={themeConfig}>
+    <MainLayout
+      topBar={<KnowledgeTabBar active={knowledgeTab} onChange={setKnowledgeTab} />}
+      sidebar={knowledgeTab === 'pages' ? <Sidebar /> : undefined}
+    >
+      <KnowledgeSystem tab={knowledgeTab} />
+    </MainLayout>
+  )
+}
+
+/** AI Tutor 工作区：与 Knowledge 展示方式一致的课程标题栏（2026-10-20） */
+function AITutorWorkspace() {
+  return (
+    <MainLayout topBar={<AITutorTopBar />}>
+      <AITutor />
+    </MainLayout>
+  )
+}
+
+/** antd 内置文案跟随地址栏语言（/en-GB/... 或 /zh-CN/...） */
+function useAntdLocale() {
+  const segment = useLocation().pathname.split('/')[1]
+  return segment === 'zh-CN' ? zhCN : enGB
+}
+
+const LANDING = menuHref(DEFAULT_LOCALE, DEFAULT_LANDING_MENU)
+
+/** 第一段不是语言（如旧书签 /knowledge）时补上默认语言，否则会被当成语言参数 */
+function LocaleGate() {
+  const { locale } = useParams<{ locale: string }>()
+  const { pathname, search } = useLocation()
+  if (isLocale(locale)) return <Outlet />
+  return <Navigate to={`/${DEFAULT_LOCALE}${pathname}${search}`} replace />
+}
+
+/** 未带语言前缀的地址补上默认语言 */
+function LocaleFallback() {
+  const { pathname, search } = useLocation()
+  const [, first] = pathname.split('/')
+  if (isLocale(first)) return <Navigate to={`/${first}/course`} replace />
+  return (
+    <Navigate to={pathname === '/' ? LANDING : `/${DEFAULT_LOCALE}${pathname}${search}`} replace />
+  )
+}
+
+function App() {
+  return (
+    <ConfigProvider locale={useAntdLocale()} theme={themeConfig}>
       {/* App 包裹层：提供 message/modal 上下文（§3.2.2 全量同步警告弹框等） */}
       <AntApp>
-        <MainLayout
-          activeModule={activeModule}
-          onModuleChange={setActiveModule}
-          topBar={
-            // Knowledge：整宽 Tab 栏；AI Tutor：与之展示方式一致的课程标题栏（2026-10-20）
-            activeModule === 'knowledge' ? (
-              <KnowledgeTabBar active={knowledgeTab} onChange={setKnowledgeTab} />
-            ) : (
-              <AITutorTopBar />
-            )
-          }
-          sidebar={
-            // 课程树边栏仅在 "Knowledge Pages" Tab 显示；"Releases" Tab 下隐藏（保留最左侧模块导航列）
-            activeModule === 'knowledge' && knowledgeTab === 'pages' ? <Sidebar /> : undefined
-          }
-        >
-          {activeModule === 'knowledge' ? (
-            <KnowledgeSystem tab={knowledgeTab} />
-          ) : (
-            <AITutor />
-          )}
-        </MainLayout>
+        <Routes>
+          <Route path="/:locale" element={<LocaleGate />}>
+            <Route path="sign-in" element={<SignInPage />} />
+            <Route path="activate" element={<ActivatePage />} />
+            <Route path="forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="reset-password" element={<ResetPasswordPage />} />
+            <Route element={<ShellRoute />}>
+              <Route index element={<Navigate to="course" replace />} />
+              <Route path="course" element={<CoursePage />} />
+              <Route
+                path="knowledge"
+                element={
+                  <MenuGuard menu="knowledge">
+                    <WorkspaceAccessProvider menu="knowledge">
+                      <KnowledgeWorkspace />
+                    </WorkspaceAccessProvider>
+                  </MenuGuard>
+                }
+              />
+              <Route
+                path="ai-tutor"
+                element={
+                  <MenuGuard menu="aiTutor">
+                    <WorkspaceAccessProvider menu="aiTutor">
+                      <AITutorWorkspace />
+                    </WorkspaceAccessProvider>
+                  </MenuGuard>
+                }
+              />
+              <Route path="order" element={<PlaceholderPage menu="order" />} />
+              <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
+              <Route path="student" element={<PlaceholderPage menu="student" />} />
+              <Route path="help-desk" element={<PlaceholderPage menu="helpDesk" />} />
+              <Route path="settings" element={<SettingsIndexPage />} />
+              <Route path="settings/employee-account" element={<EmployeeAccountSettingsPage />} />
+              <Route
+                path="settings/payment-gateway"
+                element={<SettingsEntryPage section="paymentGateway" />}
+              />
+              <Route
+                path="settings/notification-configuration"
+                element={<SettingsEntryPage section="notificationConfiguration" />}
+              />
+            </Route>
+          </Route>
+          <Route path="*" element={<LocaleFallback />} />
+        </Routes>
       </AntApp>
     </ConfigProvider>
   )

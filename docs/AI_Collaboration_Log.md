@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-10-26 ｜ 密码规则改为 8–128 字符并在激活/重置页展示规则提示
+
+- **任务（用户）**：密码长度调整为 8 到 128 个字符；仅做长度校验，不做大小写、数字、特殊字符等复杂度要求；在激活或重置设置密码的页面给出密码规则提示。
+- **用户拍板**：直接按上述口径实施，完成后直接提交并推送到目标分支（`dev`）。
+- **变更清单**：
+  - `server/src/backoffice/lib/securityPolicy.ts`：`PASSWORD_MIN_LENGTH` 12 → 8（`PASSWORD_MAX_LENGTH` 保持 128）；`isPasswordAcceptable` 仍只校验长度
+  - `client/src/backoffice/messages/en-GB.json` / `zh-CN.json`：新增 `passwordRule.hint` 文案
+  - `client/src/backoffice/pages/ActivatePage.tsx`、`ResetPasswordPage.tsx`：在「新密码」输入框下以 `fieldHint` 展示规则提示
+  - `docs/BackOffice_Portal_Implementation.md` §6.1：密码长度参数同步为 8–128
+- **自测证据**：`server` / `client` 分别 `npx tsc --noEmit` 均 0 error；`jest src/backoffice/tests/password.spec.ts src/backoffice/tests/envelope.spec.ts` 10/10 通过；两份语言包 JSON 解析通过
+- **审查结论**：改动为单常量 + 文案 + 提示渲染；UI 由用户手动验收
+- **Git**：`dev` 已推送提交「feat(backoffice): adjust password rule to 8-128 chars and show rule hint」（本机到 github.com:443 直连超时，改用 GitHub API 写入同一 tree/提交内容）
+- **下一步**：无
+
+---
+
+## 2026-10-24 ｜ KS Engine / Agent Engine 拆分（可独立部署、独立扩容）
+
+- **任务（运维）**：Admin/Portal API、KS/Agent 引擎、数据层三份设计；两个系统深度联动但发版互不影响，KS 和 Agent 可独立扩容。
+- **用户拍板**：画完架构图自审后，对照 admin 上游最新情况直接实施。
+- **变更清单**：
+  - 新增 `APP_ROLES`（admin / agent / ks），同一镜像按角色挂模块；不设时全起，行为不变
+  - 新增 KS 契约 `src/ks/contract`，Agent 只经契约读 KS；同进程读库，拆开后经 `/api/ks/v1` + 服务令牌 + 3 秒超时
+  - KS 不可达时 Agent 返回 503 `KS_UNAVAILABLE`
+  - 限流从进程内存改到表 `ai_rate_limit_hits`（Prisma 迁移，空库可重放），多实例准确
+  - ESLint 锁模块边界；开发文档 §2 补表；新增 `docs/Engine_Split_Implementation.md`
+- **自测证据**：`tsc` 0 error；单测 162 通过 1 跳过；e2e 96 通过，2 条失败与改动前相同（`ai.e2e-spec` chat-stream 两条，基线即失败）；新增引擎拆分 e2e 4/4
+- **审查结论**：自审；新文件 eslint 0 error，改动的既有文件未新增 lint 错误
+- **Git**：分支 `feat/engine-split`（在 ccf1768 之上）
+- **下一步**：拆库与去跨域外键、分开部署、Portal 服务令牌、KS 检索（见实施说明 §8）
+
+---
+
 ## 2026-10-23 ｜ AI Tutor 进入时刷新 Release 列表（状态过期修复）
 
 - **任务（用户）**：在 Knowledge Pages 新建 Release 后，AI Tutor 仍停留在旧 Release 列表；切换 Course 再切回才更新。要求只修状态刷新。
@@ -884,3 +917,144 @@
 - **验证**：grep 确认无 Docker/Monorepo 残留；仓库最终 6 文件
 - **Git**：main 提交 `0a76321` 已推送（直连被重置，走代理 127.0.0.1:18081 成功）
 - **下一步**：Phase 1（已完成，见上条）
+
+---
+
+## 2026-10-22 ~ BackOffice Portal P0 首个版本（Next.js 全新应用）
+
+- **任务**：按 `docs/Learning_Guide_BackOffice_Portal_PRD_v1_1_EN_UK.md` 全新开发 BackOffice Portal P0，覆盖登录、激活、忘记/重置/改密、全局导航、员工账号管理、Bootstrap Admin、RBAC 与中英双语
+- **用户拍板**：① 分支 `feature/backoffice-portal`；② 新应用目录 `backoffice/`；③ 技术栈 Next.js 15 App Router + React 19 + TS strict + PostgreSQL(pg)；④ `client/`、`server/` 一律不改（"不要改纯 node.js 的"按最保守处理）；⑤ 实现基准文档新建 `docs/BackOffice_Portal_Implementation.md`；⑥ 暂时忽略 Figma，按 PRD 原型图描述实现
+- **变更清单**：
+  - 新增 `backoffice/`：Next.js 应用（页面 + API 同仓），含 `components/`、`contracts/`、`modules/`、`repositories/`、`db/migrations/`、`messages/`、`lib/`、`scripts/`、`tests/`
+  - 新增 `docs/BackOffice_Portal_Implementation.md`：范围映射、分层边界、规则落点、已知限制、验收步骤
+  - 新增 `backoffice/db/migrations/0001_backoffice_portal.sql`：employees / employee_sessions / verification_tokens / audit_events / employee_ui_preferences + bootstrap 保护触发器
+  - 修改 `.gitignore`：补 `.next/`、`out/`、`next-env.d.ts`
+- **关键决策**：
+  - 数据库迁移采用 `db/migrations/*.sql` 顺序执行（与 Next.js + pg 栈一致）；Admin 旧规则里的 Prisma Migrate 仅适用于既有 `server/`，差异记录在实现基准 §2.1；若领导要求改 Prisma，只需重做 `repositories/` + `db/` 两层
+  - 密码哈希用 `node:crypto` scrypt（每账号独立盐），零外部依赖
+  - 会话令牌与一次性令牌落库只存 HMAC；一次性令牌用条件更新实现"并发只有一个成功"
+  - 忘记密码对外返回一致结果，避免账号枚举
+  - 邮件投递未配置 provider 时返回 `NOT_CONFIGURED`，不把未投递报成成功
+- **Figma 相关结论（供后续复用）**：
+  - 官方 Remote MCP 已在 Cursor 连接成功（`Local: Connected`，43 tools / 122 resources）
+  - 但 agent 会话拿不到 figma 工具 schema，真实调用返回 `ToolUnavailable: the figma MCP server exposes 0 tools to this agent turn`（见 `docs/design/674-1186.metadata.error.json`）
+  - 同机 Origin MCP 的 32 个工具同样缺失，判定为 Cursor 侧工具注入问题，与文件权限无关
+  - 另一限制：本环境无法读取磁盘 `.png`（`Read` 报 `.png file not supported`），但**对话中粘贴的截图可以读取**
+  - 可行替代：① Figma REST API + PAT（返回纯 JSON，可完整解析）；② 用户截图贴进对话
+- **自测证据**：`npx tsc --noEmit` 通过；`npm run lint` 0 warning；`npm run test:unit` 19/19 通过；`npm run build` 成功（22 条路由）
+- **待办**：`docs/design/*.json` 为排障产物，交付前清理或加入 `.gitignore`；`backoffice/.env.local` 需按 `.env.example` 补齐后执行 `npm run db:migrate` + `bootstrap:admin`
+
+
+---
+
+## 2026-10-22 ~ BackOffice Portal P0 修复审查 Blocking（B1~B4）
+
+- **任务**：修复自查审查中列出的 4 个 Blocking，并保证无回归；随后本地跑通并落库验证
+- **用户拍板**：① 修复 B1~B4；② 先在本地跑起来（已执行迁移与 bootstrap）；③ 提交并推送 `feature/backoffice-portal`
+- **变更清单**：
+  - B2（PORT-ACT-003）：新增 `TOKEN_EXPIRED` / `TOKEN_ALREADY_USED` 错误码（410），
+    `verificationTokens.ts` 抽出纯函数 `classifyTokenState` / `tokenStateToErrorCode`；
+    Activate / Reset 页面按错误码显示专用面板（过期 / 已使用 / 无效）
+  - B1（PORT-NAV-006）：新增 `lib/localeCookie.ts`、`lib/localePreference.ts`、
+    `repositories/preferencesRepository.ts`、`app/api/preferences/locale`；
+    middleware 按 URL 同步 Cookie；登录时读账号偏好并回写 Cookie，前端按返回的 locale 落地
+  - B3：`/api/session` 不再从 `pathname` 解析 locale，改为 `?locale=` 显式参数 → Cookie 偏好 → 默认语言
+  - B4：新增 `modules/rbac/access.ts`（纯判定），路由与测试共用；
+    新增 4 个测试文件：access / verificationTokens / rateLimit / envelope
+  - 其他：`package.json` dev/start 固定端口 3200（本机 3000 被 NestJS 占用）
+- **本地运行环境**：复用现有 PostgreSQL 16（`learning_guide_db`），
+  首次真实执行 `db:migrate` 与 `bootstrap:admin`，生成 `.env.local`（已被 .gitignore 忽略）
+- **自测证据**：
+  - `npx tsc --noEmit` 0 error；`npm run lint` 0 warning；`npm run test:unit` **44/44 通过**；`npm run build` 成功（23 路由）
+  - HTTP 层 24 项实测：未登录 307/403、错密码 401、正确登录 200+Set-Cookie、
+    重复邮箱 409、登出后会话失效、过期令牌 410 `TOKEN_EXPIRED`、重复令牌 410 `TOKEN_ALREADY_USED`、
+    偏好存 zh-CN 后重新登录返回 zh-CN、`/api/session` landing 正常
+- **仍未覆盖**：`client/`、`server/` 零改动；无 CSRF 令牌；限流仍为单实例内存；
+  邮件仍为 console adapter；顶部栏缺 logo；迁移脚本无回滚（只做前向）
+
+
+---
+
+## 2026-10-23 ~ 视觉对齐学员门户（ilovelearningguide.com/zh-CN/portal）
+
+- **用户要求**：页面风格与共享功能（中英文切换、登录等）需与
+  `https://www.ilovelearningguide.com/zh-CN/portal` 保持一致
+- **取基准方式**：抓取该站生产 CSS，直接采用其设计变量（未凭感觉配色）
+  - `--color-primary:#0b63f6`、`--color-primary-hover:#0757d8`、`--color-primary-soft:#eaf2ff`
+  - `--color-text-main:#0b1437`、`--color-text-muted:#5d6880`、`--color-border:#d9e2f1`、`--color-page-bg:#f8fafe`
+  - 字体 `Inter, ui-sans-serif, system-ui…`；控件圆角 8px / 卡片 12px
+- **共享组件对齐**：
+  - 语言切换：改为胶囊显示当前语言短名（`EN` / `中`），点击切另一种（与其行为一致）
+  - 登录页：深色背景图 + 居中白卡（`min(448px,100%)`）+ 邮箱优先两步 + 返回门户链接 + 法律声明
+  - 认证背景图 `/portal/auth-library.jpg` 已复制到 `backoffice/public/portal/`
+  - 应用外壳改为浅色主题（侧栏 `#eef1f6`），顶部栏补品牌位（PORT-NAV-001 logo 顺带落地）
+- **有意差异**：不复制「创建账号 / Google / 微信登录 / 开始学习」，BackOffice 仅员工账号
+- **自测**：`tsc` 0 error、`eslint` 0 warning、单元测试 44/44、`next build` 成功；
+  HTTP 实测 `/en-GB/sign-in` 与 `/zh-CN/sign-in` 均 200，语言胶囊分别渲染 `EN` / `中`，
+  背景图 `/portal/auth-library.jpg` 200（1,083,702 bytes）
+
+
+---
+
+## 2026-10-23 ~ 按 PRD 修正导航结构 + 修复登录页显示问题
+
+- **用户反馈**：①「继续」「显示密码」按钮文字被换行；②登录后的功能菜单与 PRD 不一致
+- **定位**：登录页报错为 React 补水告警（`A tree hydrated but some attributes…`），
+  由输入框 `autoFocus` 导致 SSR 输出 `autofocus` 属性、客户端属性不一致
+- **导航修正（对照 PRD 原文）**：
+  - PORT-NAV-002：八个一级菜单顺序 Course/Knowledge/AI Tutor/Order/Reporting/Student/HelpDesk/Settings —— 原本已合规
+  - §8.5 + §2 范围说明：Settings 应有**子导航**（Employee Account / Payment Gateway /
+    Notification Configuration），原实现把「员工账号」放进员工下拉，缺子导航
+  - PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out —— 已移除多余项
+  - §3.3 / PORT-LST-001：Employee Account 仅 Admin 可见，非 Admin 连子菜单都不显示
+- **改动**
+  - `modules/rbac/permissions.ts`：新增 `SETTINGS_SUB_ORDER` / `settingsSubHref` / `visibleSettingsSubs`
+  - `components/AppShell.tsx`：Settings 变为可展开分组，子项高亮；下拉只留两项
+  - 新增 `settings/page.tsx`（落到首个可见子项）、`settings/payment-gateway`、`settings/notification-configuration`
+  - `globals.css`：`.button` 加 `white-space: nowrap`、`.inputRow` 内输入框自适应、新增子导航样式
+  - `sign-in/page.tsx`：`autoFocus` → `ref + useEffect`
+- **验证**：`tsc` 0 error、`eslint` 0 warning、单元测试 47/47、`next build` 成功；
+  HTTP 实测 `/zh-CN/settings` → 307 → `/settings/employee-account`，三个子页面均 200；
+  SSR 侧栏顺序断言为「课程→知识库→AI 导师→订单→报表→学生→服务台→设置→员工账号→支付网关→通知配置」
+
+
+---
+
+## 2026-10-23 ~ 按 BackOffice 设计稿（6 张图）重做界面
+
+- **输入**：用户提供 PRD 对应设计稿截图：Menu & Role、Login、Employee Account、Employee Account add、Employee Account Edit
+- **设计还原要点**
+  - 顶栏：白底 56px 高的品牌条（蓝色圆角 logo + Learning Guide BackOffice）、右侧语言控件「EN ⌄」、头像 + 姓名/角色两行、员工下拉（Change Password / Sign Out，带图标）
+  - 侧栏：白底 186px，8 个线性图标 + 文案，当前项浅蓝底蓝字，顶部折叠按钮
+  - Settings：二级导航从「侧栏内嵌套」改为设计稿的**内容区左侧一列**（Employee Account / Payment Gateway / Notification Configuration）
+  - 员工账号页：标题 + 副标题 + 右上「+ Add Employee」；搜索框带放大镜、All Roles / All Status 下拉；表格表头灰底、状态圆点（绿/琥珀/灰）、行尾 ⋮ 菜单（Edit / Reset Password / Pending 追加 Resend Activation）；页脚「显示第 1–8 条，共 8 名员工」+ ‹ 1 › 分页
+  - 弹窗：标题 + 副标题 + 右上关闭；邮箱说明文案（新建=将发送激活邮件 / 已激活=不可修改）；Status 改为 Active/Inactive 分段卡片选择；按钮文案 Create Employee / Save Changes
+  - 登录页：改为**单页表单**（邮箱 + 密码同屏），输入框内嵌 mail / lock 图标，邮箱校验通过显示绿色对勾，密码右侧眼睛切换，左对齐 Forgot password?，整宽 Sign in 按钮；移除两步式与法律条款块
+- **新增文件**：`components/icons.tsx`（线性图标集）、`components/SettingsSubNav.tsx`
+- **重写文件**：`app/globals.css`（按设计稿重建令牌与组件样式）、`components/AppShell.tsx`、`components/AuthLayout.tsx`、`components/LocaleSwitch.tsx`、登录页、员工账号客户端
+- **验证**：`tsc` 0 error、`eslint` 0 warning、单测 47/47、`next build` 通过；
+  SSR 断言：侧栏 8 项、设置子导航 3 项、标题/搜索/表格/分页/文案均渲染
+
+
+---
+
+## 2026-10-23 ~ 接入 Figma 元数据，界面数值对齐设计稿
+
+- **读取链路**：Figma 链接直接抓取 403、内置浏览器需登录、figma MCP 未完成鉴权（0 tools）→ 改用用户提供的 Personal Access Token 调 REST API
+- **新增脚本**
+  - `scripts/figma-export.mjs`：拉取 `674:1186` 节点树 + 导出 6 个画板 PNG（scale=1）到 `docs/design/figma/`
+  - `scripts/figma-spec.mjs`：把节点树压成规格表（几何/填充/圆角/自动布局/字体）
+  - `scripts/figma-view-server.mjs`：本地静态服务，便于按 1:1 裁剪查看设计图
+  - `scripts/figma-preview.mjs`：抓取已登录页面 SSR HTML 并内联 CSS，供离线比对（产物已 gitignore）
+- **依据设计稿修正的关键数值**（此前实现整体偏小）
+  - 画布底色 `#f7fafc`；主色 `#1d6bff`；次级文字 `#64748b`；表格文字 `#334155`
+  - 顶栏 56→**68**，logo 26→**42**（学士帽图形），品牌字号 15→**20px/700**，语言控件 13→**20px**
+  - 侧栏 186→**280**，菜单项高度 50、内距 16、图标 20、文字 **15px**
+  - 设置子导航 186→**276**，项高 50、激活底色 `#e7eeff`
+  - 主卡片 **1082 宽**、圆角 12、内距 28/32；标题 **22px/700 #1e293b**
+  - 搜索框 494×34、下拉 250×34（原 150）
+  - 表格表头高 50（`#f6f8fa`）、行节奏 51px、列宽 300/180/140/240/158
+  - 弹窗 512→**832** 宽，输入框 38→**44**，Status 分段高 44，关闭键改为浅底方块
+  - 登录卡片 358→**424** 宽、内距 36、圆角 16、输入框 42、标题 36px
+- **验证**：tsc 0 error、eslint 0 warning、单测 47/47、`next build` 通过；CDP 实测（1672 视口）逐项比对 header 68 / sidebar 280 / nav 50 / subnav 276 / card 1082×852 / th 50 / td 51 全部一致
+

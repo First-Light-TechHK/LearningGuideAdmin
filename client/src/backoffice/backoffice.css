@@ -1,0 +1,1505 @@
+:root {
+  /* 全部取自 Figma 674:1186 各画板的真实数值（画板宽 1672） */
+  --lg-blue: #1d6bff;
+  --lg-blue-dark: #1557db;
+  --lg-blue-soft: #e7eeff; /* 设置子导航激活底 */
+  --lg-nav-active: #e8f0ff; /* 主导航激活底（设计稿为 #1d6bff 10% 叠加白） */
+  --lg-blue-tint: #eff6ff;
+  --lg-blue-stroke: #3b82f6;
+  --lg-ink: #0f172a;
+  --lg-heading: #1e293b;
+  --lg-slate: #334155;
+  --lg-slate-soft: #475569;
+  --lg-muted: #64748b;
+  --lg-faint: #94a3b8;
+  --lg-grey-text: #909090;
+  --lg-line: #e4e7ec;
+  --lg-line-soft: #e2e8f0;
+  --lg-canvas: #f7fafc;
+  --lg-panel: #f9fbfe;
+  --lg-white: #ffffff;
+  --lg-green: #22c55e;
+  --lg-amber: #eab308;
+  --lg-grey: #94a3b8;
+  --lg-red: #dc2626;
+  --lg-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --lg-shadow-md: 0 8px 20px rgba(15, 23, 42, 0.1);
+  --lg-shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: Inter, "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  background: var(--lg-canvas);
+  color: var(--lg-ink);
+  font-size: 14px;
+  /* 设计稿文本行高比例 ≈1.23（13px→16、15px→18、22px→27） */
+  line-height: 1.25;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 只作用于 BackOffice 自己的外壳、卡片与认证页，不影响 Knowledge / AI Tutor 工作区里的 Markdown 排版 */
+:where(.authPage, .header, .sidebar, .subNav, .card, .modalBackdrop) a {
+  color: var(--lg-blue);
+  text-decoration: none;
+}
+
+:where(.authPage, .header, .sidebar, .subNav, .card, .modalBackdrop) a:hover {
+  text-decoration: underline;
+}
+
+:where(.authPage, .header, .sidebar, .subNav, .card, .modalBackdrop) :where(h1, h2, h3, p) {
+  margin: 0;
+}
+
+/* ---------------------------------- 品牌标识 --------------------------------- */
+
+.brandMarkSvg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--lg-blue);
+  flex: 0 0 auto;
+  color: var(--lg-white);
+}
+
+/* ----------------------------------- 应用外壳 -------------------------------- */
+
+/* Figma 1017:2：顶栏通栏 68px，下方左侧菜单 280px（右侧 1px 分隔线）+ 内容区 */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--lg-canvas);
+}
+
+/* 顶栏下方的一行：侧栏 + 内容区 */
+.shellBody {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 280px;
+  flex: 0 0 280px;
+  background: var(--lg-white);
+  /* 设计稿 Line 59：侧栏右缘 1px，黑色 10%；长菜单可滚动 */
+  border-right: 1px solid var(--lg-line);
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.1);
+  /* 设计稿：首项菜单顶边距侧栏顶 23 */
+  overflow-y: auto;
+  padding: 23px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+
+/* 折叠按钮：设计稿 rel(244,76) → 侧栏内 top 8，24×24，图标描边 #6b7280 */
+.sidebarToggle {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  color: #6b7280;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.sidebarToggle:hover {
+  background: #eef1f6;
+  color: var(--lg-slate-soft);
+}
+
+/* 设计稿：图标 rel x=24、文字 x=56 → 左内距 12 + 图标 20 + 间距 12 */
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 50px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: #000;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.navItem:hover {
+  background: #f4f7fb;
+  text-decoration: none;
+  color: #000;
+}
+
+/* 激活态：底 #1d6bff 10%，文字/图标 #1d6bff 600（设计稿 Rectangle 10 + Settings） */
+.navItemActive,
+.navItemActive:hover {
+  background: var(--lg-nav-active);
+  color: var(--lg-blue);
+  font-weight: 600;
+}
+
+.navIcon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: #000;
+}
+
+.navItemActive .navIcon {
+  color: #145cff;
+}
+
+.shellCollapsed .sidebar {
+  width: 72px;
+  flex-basis: 72px;
+  align-items: center;
+  padding: 23px 8px 16px;
+}
+
+.shellCollapsed .navItem {
+  justify-content: center;
+  padding: 0;
+}
+
+.shellCollapsed .navItem span {
+  display: none;
+}
+
+.shellCollapsed .sidebarToggle {
+  position: static;
+  margin: 0 0 6px;
+}
+.header {
+  height: 68px;
+  flex: 0 0 68px;
+  background: var(--lg-white);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  /* 设计稿：logo 左距 20，右侧员工块结束于 1592（右距 80） */
+  padding: 0 80px 0 20px;
+}
+
+.headerBrand {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #000;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.headerBrand:hover {
+  text-decoration: none;
+}
+
+/* 设计稿：语言 1455..1493，头像 1523 → 间距 30 */
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+}
+
+.localeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  border-radius: 6px;
+  color: #111827;
+  font-size: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.localeButton:hover {
+  background: #f2f5f9;
+}
+
+.employeeTrigger {
+  display: inline-flex;
+  align-items: center;
+  /* 设计稿：头像 1523..1555，姓名 1559 → 间距 4 */
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.employeeTrigger:hover {
+  background: #f4f7fb;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e8f1ff;
+  color: var(--lg-blue);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.employeeMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.employeeName {
+  font-size: 14px;
+  font-weight: 600;
+  color: #000;
+  line-height: 1.1;
+}
+
+/* 设计稿：11/400 #000，图层不透明度 40% */
+.employeeRole {
+  font-size: 11px;
+  font-weight: 400;
+  color: #000;
+  opacity: 0.4;
+  line-height: 1.1;
+}
+
+/* 设计稿 profile-menu：220 宽、圆角 12、描边 #e5e7eb、双层投影 */
+.dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  width: 220px;
+  background: var(--lg-white);
+  border-radius: 12px;
+  box-shadow:
+    0 16px 32px rgba(15, 23, 42, 0.12),
+    0 4px 8px rgba(15, 23, 42, 0.06);
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+}
+
+/* 设计稿里下拉首行与行间各有一条 1px #e5e7eb 分隔线 */
+.dropdown > * + * {
+  border-top: 1px solid #e5e7eb;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 400;
+  color: #374151;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.dropdownItem svg {
+  color: #6b7280;
+}
+
+.dropdownItem:hover {
+  background: #f5f8fc;
+  text-decoration: none;
+}
+
+/* 设计稿：内容区把卡片放在 rel(580,81)，即左距 12（侧栏后）、顶距 13、右距 10、底距 8 */
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* 桌面端由卡片内部的表格滚动，禁止外层出现横向/纵向滚动条 */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 13px 10px 8px 12px;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+/* Knowledge / AI Tutor 工作区自带工具栏与面板，占满内容区，不再叠一层内边距 */
+.contentWorkspace {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ----------------------------------- 内容卡片 -------------------------------- */
+
+.card {
+  background: var(--lg-white);
+  border-radius: 12px;
+  padding: 28px 32px 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 设计稿卡片高 852（视口 941 − 顶栏 68 − 上下留白 21）。
+   卡片固定占满内容区：表格在卡片内部滚动，分页固定在卡片底部，
+   不再随整页滚动漂到表格中间。 */
+.cardGrow {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cardTitle {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.22;
+  color: var(--lg-heading);
+  letter-spacing: -0.01em;
+}
+
+.cardSubtitle {
+  font-size: 13px;
+  color: var(--lg-muted);
+  margin-top: 6px;
+  line-height: 1.23;
+}
+
+.cardBody {
+  font-size: 14px;
+  color: var(--lg-muted);
+  margin-top: 10px;
+}
+
+.pageHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  /* 设计稿：副标题底 rel 158 → 筛选条 rel 185，间距 27 */
+  margin-bottom: 27px;
+}
+
+/* ------------------------------ 设置子导航（设计稿 Rectangle 9 / Menu List） --------------- */
+
+.subNav {
+  width: 276px;
+  flex: 0 0 276px;
+  background: var(--lg-white);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.subNavItem {
+  display: flex;
+  align-items: center;
+  height: 50px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--lg-grey-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subNavItem:hover {
+  background: #f4f7fb;
+  text-decoration: none;
+  color: var(--lg-slate-soft);
+}
+
+/* 激活态：底 #e7eeff，文字黑色 600 */
+.subNavItemActive,
+.subNavItemActive:hover {
+  background: var(--lg-blue-soft);
+  color: #000;
+  font-weight: 600;
+}
+
+/* ----------------------------------- 控件 ----------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--lg-blue);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.button:hover {
+  background: var(--lg-blue-dark);
+  text-decoration: none;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.buttonGhost {
+  background: var(--lg-white);
+  border-color: var(--lg-line-soft);
+  color: var(--lg-slate-soft);
+}
+
+.buttonGhost:hover {
+  background: #f7f9fc;
+}
+
+.buttonCompact {
+  height: 37px;
+  padding: 0 18px;
+}
+
+.buttonBlock {
+  width: 100%;
+  height: 42px;
+  font-size: 15px;
+}
+
+.iconButton {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lg-faint);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.iconButton:hover {
+  background: #f2f5f9;
+  color: var(--lg-slate-soft);
+}
+
+.linkButton {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--lg-blue);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+/* ----------------------------------- 表单 ----------------------------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lg-slate);
+}
+
+.fieldInput,
+.fieldSelect {
+  height: 44px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: var(--lg-white);
+  padding: 0 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--lg-slate-soft);
+  width: 100%;
+}
+
+.fieldInput::placeholder {
+  color: var(--lg-faint);
+}
+
+.fieldInput:focus,
+.fieldSelect:focus {
+  outline: none;
+  border-color: var(--lg-blue);
+  box-shadow: 0 0 0 3px rgba(29, 107, 255, 0.12);
+}
+
+.fieldInput:disabled,
+.fieldSelect:disabled {
+  background: #f8fafc;
+  color: var(--lg-muted);
+}
+
+.fieldHint {
+  font-size: 12px;
+  color: var(--lg-muted);
+  line-height: 1.25;
+}
+
+.inputShell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  /* 设计稿登录卡片输入框描边 #d1d5db */
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: var(--lg-white);
+  padding: 0 12px;
+}
+
+.inputShell:focus-within {
+  border-color: var(--lg-blue);
+  box-shadow: 0 0 0 3px rgba(29, 107, 255, 0.12);
+}
+
+.inputShellIcon {
+  display: inline-flex;
+  color: #9ca3af;
+  flex: 0 0 auto;
+}
+
+.inputShellInput {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  font-family: inherit;
+  color: #374151;
+}
+
+.inputShellInput:focus {
+  outline: none;
+}
+
+.inputShellInput::placeholder {
+  color: #d1d5db;
+}
+
+/* 浏览器自动填充会盖掉设计稿的白底；用内阴影保持卡片内的白底 */
+.inputShellInput:-webkit-autofill,
+.inputShellInput:-webkit-autofill:hover,
+.inputShellInput:-webkit-autofill:focus {
+  -webkit-text-fill-color: #374151;
+  -webkit-box-shadow: 0 0 0 1000px var(--lg-white) inset;
+  transition: background-color 600000s 0s;
+}
+
+.validMark {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--lg-green);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+/* PORT-LOG-003：不合格员工邮箱显示感叹号 */
+.invalidMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lg-red);
+  flex: 0 0 auto;
+}
+
+/* 分段单选（Status: Active / Inactive）—— 设计稿 382×44，内距 14，间距 8 */
+.segmented {
+  display: flex;
+  gap: 12px;
+}
+
+.segment {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: var(--lg-white);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--lg-slate-soft);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.segment:hover {
+  border-color: #cfd8e5;
+}
+
+/* 选中：底 #eff6ff、描边 #3b82f6、文字 #1d6bff 600 */
+.segmentSelected,
+.segmentSelected:hover {
+  border-color: var(--lg-blue-stroke);
+  background: var(--lg-blue-tint);
+  color: var(--lg-blue);
+  font-weight: 600;
+}
+
+/* 设计稿状态点为实心 8×8（无内圈） */
+.segmentDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 0;
+  flex: 0 0 auto;
+}
+
+.segmentDotActive {
+  background: var(--lg-green);
+}
+
+.segmentDotInactive {
+  background: var(--lg-grey);
+}
+
+/* ----------------------------------- 表格 ----------------------------------- */
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* 设计稿：筛选条底 rel 219 → 表头 rel 233，间距 14 */
+  margin-bottom: 14px;
+}
+
+.searchField {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: var(--lg-white);
+  padding: 0 12px;
+  color: var(--lg-faint);
+}
+
+.searchField:focus-within {
+  border-color: var(--lg-blue);
+}
+
+.searchField input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--lg-slate-soft);
+}
+
+.searchField input::placeholder {
+  color: var(--lg-faint);
+}
+
+.searchField input:focus {
+  outline: none;
+}
+
+.filterSelect {
+  height: 34px;
+  width: 250px;
+  flex: 0 0 250px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: var(--lg-white);
+  padding: 0 10px 0 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--lg-slate-soft);
+}
+
+.filterSelect:focus {
+  outline: none;
+  border-color: var(--lg-blue);
+}
+
+.tableWrap {
+  /* 主流后台表格模式：表格区域吃掉剩余高度并内部滚动，
+     分页条作为固定 footer 留在卡片底部 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.tableWrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tableWrap::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.tableWrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* 设计稿 table-header：1018×50，底 #f6f8fa，圆角 6，文字 13/600 #64748b 垂直居中 */
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f6f8fa;
+  color: var(--lg-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  height: 50px;
+  padding: 0;
+  white-space: nowrap;
+  vertical-align: middle;
+  box-shadow: inset 0 -1px 0 var(--lg-line-soft);
+}
+
+.table th:first-child {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+
+.table th:last-child {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  text-align: center;
+}
+
+/* 设计稿行节奏 51 = 行内容 50 + 1px 分隔线 */
+.table td {
+  height: 50px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--lg-slate);
+  border-bottom: 1px solid var(--lg-line-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.table td:last-child {
+  text-align: center;
+  /* 行内操作菜单需要溢出显示，否则会被单元格裁掉（点击 ⋮ 看起来没反应） */
+  overflow: visible;
+}
+
+.table tbody tr:hover {
+  background: #fafcff;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.dotActive {
+  background: var(--lg-green);
+}
+
+.dotPending {
+  background: #eab308;
+}
+
+.dotInactive {
+  background: var(--lg-grey);
+}
+
+.rowMenuWrap {
+  position: relative;
+  display: inline-block;
+}
+
+/* 设计稿 action-menu：160 宽、圆角 8、描边 #e2e8f0、内距 4、行高 32 */
+.rowMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 160px;
+  background: var(--lg-white);
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  box-shadow: var(--lg-shadow-md);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 50;
+}
+
+/* 菜单渲染到 body，使用 fixed 坐标，避免被可滚动表格裁切 */
+.rowMenuFixed {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: 200;
+}
+
+.rowMenuBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  background: transparent;
+}
+
+.rowMenuItem {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--lg-slate);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rowMenuItem:hover {
+  background: #f5f8fc;
+}
+
+/* 固定 footer：贴在卡片底部，表格滚动时保持不动 */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding-top: 12px;
+  margin-top: 0;
+  border-top: 1px solid var(--lg-line-soft);
+  background: var(--lg-white);
+  font-size: 13px;
+  color: var(--lg-muted);
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.paginationSummary {
+  white-space: nowrap;
+}
+
+.paginationControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.pageSizeLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pageSizeSelect {
+  height: 30px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 6px;
+  background: var(--lg-white);
+  padding: 0 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--lg-slate-soft);
+}
+
+.pageSizeSelect:focus {
+  outline: none;
+  border-color: var(--lg-blue);
+}
+
+.pageOf {
+  white-space: nowrap;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagerButton {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lg-muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.pagerButton:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.pagerButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagerCurrent {
+  background: var(--lg-blue-tint);
+  color: var(--lg-blue);
+  font-weight: 600;
+}
+
+.pagerGap {
+  width: 20px;
+  text-align: center;
+  color: var(--lg-faint);
+  user-select: none;
+}
+
+/* ----------------------------------- 提示 ----------------------------------- */
+
+.alert {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.alertError {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.alertOk {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+}
+
+.alertInfo {
+  background: var(--lg-blue-tint);
+  border: 1px solid #dbeafe;
+  color: #1557db;
+}
+
+/* 发送结果与一次性链接合并成一条紧凑状态栏，给表格留出高度；
+   链接单行横向滚动，复制按钮固定在右侧 */
+.employeeStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.employeeStatusHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alertClose {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin-top: 1px;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.alertClose:hover {
+  opacity: 1;
+}
+
+.manualLinkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.linkLabel {
+  flex: 0 0 auto;
+  font-weight: 500;
+}
+
+.manualLinkValue {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  user-select: all;
+  padding: 3px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.manualLinkValue::-webkit-scrollbar {
+  height: 4px;
+}
+
+.manualLinkValue::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+
+.buttonSmall {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* ----------------------------------- 弹窗 ----------------------------------- */
+
+/* 设计稿 modal-overlay：#0f172a 45% */
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  /* 设计稿弹窗顶距视口 180 */
+  padding: 180px 20px 40px;
+  z-index: 100;
+  overflow-y: auto;
+}
+
+/* 设计稿 new-employee-modal：832×487，圆角 12，双层投影 */
+.modal {
+  width: 100%;
+  max-width: 832px;
+  background: var(--lg-white);
+  border-radius: 12px;
+  box-shadow:
+    0 24px 24px rgba(15, 23, 42, 0.08),
+    0 2px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+/* 设计稿 modal-header：832×88，内距 24/28/20/28，下缘 1px #e2e8f0 */
+.modalHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid var(--lg-line-soft);
+}
+
+.modalTitle {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--lg-heading);
+}
+
+.modalSubtitle {
+  font-size: 13px;
+  color: var(--lg-muted);
+  margin-top: 4px;
+  line-height: 1.23;
+}
+
+.modalBody {
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.modalBody .field {
+  margin-bottom: 0;
+  gap: 8px;
+}
+
+.modalBody .fieldLabel {
+  font-weight: 600;
+}
+
+/* 设计稿 modal-footer：832×84，内距 20/28/24/28，上缘 1px #e2e8f0 */
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 28px 24px;
+  border-top: 1px solid var(--lg-line-soft);
+}
+
+.modalHint {
+  font-size: 12px;
+  color: var(--lg-muted);
+}
+
+/* 设计稿 close-button：32×32，底 #f8fafc，描边 #e2e8f0，圆角 8 */
+.modalClose {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--lg-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.modalClose:hover {
+  background: #e6ebf2;
+  color: var(--lg-slate);
+}
+
+/* ---------------------------------- 登录页 ---------------------------------- */
+
+.authPage {
+  min-height: 100vh;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.authPageHeader {
+  height: 64px;
+  flex: 0 0 64px;
+  background: var(--lg-white);
+  border-bottom: 1px solid var(--lg-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px 0 28px;
+}
+
+/* 设计稿：品牌 22/700 #111827，菱形图标与文字间距 12 */
+.authBrand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* 设计稿：背景图区 1600×976，内容顶距 96px、水平居中 */
+.authBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 96px 20px 64px;
+  background: #0b1220 url("/portal/auth-library.jpg") 50% 50% / cover no-repeat;
+}
+
+/* 设计稿：Above Card Content 424 宽、内部间距 10 */
+.authIntro {
+  width: 100%;
+  max-width: 424px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 设计稿：Logo Row 居中，图标 18 + 间距 8 + 文字 17/700 */
+.authBadge {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* 设计稿 Above Card Content：标题与副标题在 424 宽区块内水平居中（textAlign=CENTER） */
+.authTitle {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.22;
+  color: #fff;
+  letter-spacing: -0.02em;
+  text-align: center;
+}
+
+.authSubtitle {
+  font-size: 14px;
+  font-weight: 400;
+  color: #fff;
+  text-align: center;
+}
+
+/* 设计稿：卡片 424×329，圆角 16，内距 36，投影 32/18% */
+.authCard {
+  width: 100%;
+  max-width: 424px;
+  margin-top: 67px;
+  background: var(--lg-white);
+  border-radius: 16px;
+  box-shadow: 0 22px 32px rgba(15, 23, 42, 0.18);
+  padding: 36px;
+}
+
+/* 设计稿 Card Content：纵向间距 18 */
+.authCard > form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.authCard .field {
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.authCard .fieldLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.authFooterLink {
+  margin-top: 18px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.authFooterLink a {
+  color: #fff;
+  text-decoration: underline;
+}
+
+/* 设计稿 Remember/Forgot 行：352×16，链接 13/500 #1d6bff */
+.authFormFootnote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 16px;
+  margin: 0;
+}
+
+.authLegal {
+  margin-top: 14px;
+  max-width: 424px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.authLegal a {
+  color: rgba(255, 255, 255, 0.88);
+  text-decoration: underline;
+}
+
+/* ------------------------------ 响应式收口 ------------------------------ */
+
+/* 设计稿侧栏 280 / 子导航 276 / 内容卡片 1082 只在 >=1400 的桌面宽度成立；
+   更窄时先按比例收，避免表格与筛选条挤出可视区 */
+@media (max-width: 1400px) {
+  .sidebar {
+    width: 240px;
+    flex: 0 0 240px;
+  }
+
+  .subNav {
+    width: 240px;
+    flex: 0 0 240px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .sidebar,
+  .subNav {
+    width: 220px;
+    flex-basis: 220px;
+  }
+
+  .navItem {
+    font-size: 14px;
+    height: 46px;
+    padding: 0 12px;
+  }
+
+  .subNavItem {
+    font-size: 14px;
+    height: 46px;
+  }
+
+  .filterSelect {
+    width: 170px;
+    flex-basis: 170px;
+  }
+}
+
+@media (max-width: 900px) {
+  .content {
+    flex-direction: column;
+  }
+
+  .subNav {
+    width: 100%;
+    flex-basis: auto;
+    min-height: 0;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .cardGrow {
+    flex: 0 0 auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .tableWrap {
+    flex: 0 0 auto;
+    max-height: 60vh;
+  }
+}
+
+/* 矮窗口（例如 1024×473 的嵌入视图）压缩页面留白，给表格留出更多行 */
+@media (max-height: 700px) {
+  .cardGrow {
+    padding: 16px 20px 12px;
+  }
+
+  .pageHead {
+    margin-bottom: 14px;
+  }
+
+  .cardTitle {
+    font-size: 20px;
+  }
+
+  .cardSubtitle {
+    margin-top: 4px;
+  }
+
+  .filters {
+    margin-bottom: 8px;
+  }
+
+  .table th {
+    height: 42px;
+  }
+
+  .table td {
+    height: 44px;
+  }
+
+  .pagination {
+    padding-top: 8px;
+  }
+}
+
+/* 外壳读取会话期间的占位 */
+.shellLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--lg-muted);
+}

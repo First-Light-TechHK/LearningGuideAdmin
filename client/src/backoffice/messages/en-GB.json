@@ -1,0 +1,238 @@
+{
+  "app": {
+    "name": "Learning Guide BackOffice",
+    "subtitle": "BackOffice Administration Portal"
+  },
+  "passwordRule": {
+    "hint": "Use 8 to 128 characters. No other complexity requirements."
+  },
+  "common": {
+    "loading": "Loading…",
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "close": "Close",
+    "create": "Create",
+    "creating": "Creating…",
+    "edit": "Edit",
+    "search": "Search",
+    "reset": "Reset",
+    "back": "Back",
+    "actions": "Actions",
+    "previous": "Previous",
+    "next": "Next",
+    "required": "Required",
+    "close": "Close",
+    "copy": "Copy link",
+    "copied": "Copied",
+    "language": "Language"
+  },
+  "nav": {
+    "course": "Course",
+    "knowledge": "Knowledge",
+    "aiTutor": "AI Tutor",
+    "order": "Order",
+    "reporting": "Reporting",
+    "student": "Student",
+    "helpDesk": "HelpDesk",
+    "settings": "Settings",
+    "employeeAccount": "Employee Account",
+    "paymentGateway": "Payment Gateway",
+    "notificationConfiguration": "Notification Configuration",
+    "toggleSidebar": "Toggle sidebar"
+  },
+  "settings": {
+    "paymentGatewayTitle": "Payment Gateway",
+    "paymentGatewayBody": "This configuration is an entry point only in P0; its parameters are defined by a separate PRD.",
+    "notificationConfigurationTitle": "Notification Configuration",
+    "notificationConfigurationBody": "This configuration is an entry point only in P0; email templates are currently fixed on the server."
+  },
+  "auth": {
+    "legalPrefix": "By continuing you agree to the",
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "backToPortal": "Back to Learning Guide Portal"
+  },
+  "signIn": {
+    "title": "Sign in",
+    "subtitle": "For internal employees only; no external registration.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "name@example.com",
+    "emailStepSubtitle": "Enter your employee email to continue.",
+    "continue": "Continue",
+    "changeEmail": "Use a different email",
+    "portalBack": "Back to Learning Guide Portal",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "forgotPassword": "Forgot password?",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "checking": "Checking email…",
+    "validEmployee": "Employee account recognised.",
+    "invalidEmployee": "Invalid employee account. Self-registration is not available. Please contact the Learning Guide administrator.",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
+  },
+  "activate": {
+    "title": "Set your password",
+    "subtitle": "This link can be used once and expires 48 hours after it was sent.",
+    "passwordLabel": "New password",
+    "confirmLabel": "Confirm new password",
+    "submit": "Set password and activate",
+    "submitting": "Activating…",
+    "successTitle": "Your account is activated",
+    "successBody": "You can now sign in with your email and the password you just set.",
+    "missingToken": "This link is incomplete. Please use the link from your activation email.",
+    "expiredTitle": "Activation link expired",
+    "expiredBody": "Activation links are valid for 48 hours. Please contact the Learning Guide administrator for a new one.",
+    "invalidTitle": "Invalid or already used link",
+    "invalidBody": "This activation link has already been used or has been replaced. Please ask an administrator to resend the activation email.",
+    "goSignIn": "Go to sign in"
+  },
+  "forgot": {
+    "title": "Forgot password",
+    "subtitle": "Enter your employee email. If the account is active and verified, we will send a reset link.",
+    "submit": "Send reset link",
+    "submitting": "Sending…",
+    "sent": "If that email belongs to an active employee account, a reset link has been sent."
+  },
+  "reset": {
+    "title": "Reset your password",
+    "subtitle": "Choose a new password. The link can be used once.",
+    "passwordLabel": "New password",
+    "confirmLabel": "Confirm new password",
+    "submit": "Reset password",
+    "submitting": "Resetting…",
+    "successTitle": "Password updated",
+    "successBody": "Your password has been reset. Please sign in with the new password.",
+    "invalidTitle": "Invalid or expired reset link",
+    "invalidBody": "This reset link has already been used or has not been recognised. Please request a new one.",
+    "expiredTitle": "Reset link expired",
+    "expiredBody": "Reset links are valid for 2 hours. Please request a new one.",
+    "usedTitle": "Reset link already used",
+    "usedBody": "This reset link has already been used. Please request a new one."
+  },
+  "changePassword": {
+    "title": "Change Password",
+    "subtitle": "Enter your current password and choose a new one.",
+    "currentLabel": "Current password",
+    "newLabel": "New password",
+    "confirmLabel": "Confirm new password",
+    "submit": "Change password",
+    "submitting": "Changing…",
+    "success": "Your password has been changed. Please sign in again.",
+    "mismatch": "The two new passwords do not match."
+  },
+  "shell": {
+    "employeeMenu": "Employee menu",
+    "changePassword": "Change Password",
+    "signOut": "Sign Out",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
+    "role": "Role",
+    "settingsSection": "Settings"
+  },
+  "course": {
+    "title": "Course",
+    "description": "This is the default landing page after sign-in. Course business functions are defined in a separate PRD."
+  },
+  "placeholder": {
+    "title": "{menu}",
+    "description": "This module is outside BackOffice Portal P0. Its business functions are defined in a separate PRD."
+  },
+  "forbidden": {
+    "title": "Access denied",
+    "description": "You do not have permission to access this page.",
+    "backToCourse": "Back to Course"
+  },
+  "employees": {
+    "title": "Employee Account",
+    "subtitle": "Manage backoffice employee accounts, roles and access permissions.",
+    "addEmployee": "Add Employee",
+    "createAction": "Create Employee",
+    "saveAction": "Save Changes",
+    "searchPlaceholder": "Search by email...",
+    "allRoles": "All Roles",
+    "allStatus": "All Status",
+    "rolePlaceholder": "Select role",
+    "newSubtitle": "Create a new employee account and assign their role and status.",
+    "editSubtitle": "Update this employee's role and status.",
+    "hintActivation": "An activation email will be sent to this email address. Once activated, the email address cannot be changed.",
+    "hintEmailVerified": "This email address has been activated and cannot be changed.",
+    "columns": {
+      "email": "Login Email",
+      "role": "Role",
+      "status": "Status",
+      "lastLogin": "Last Login",
+      "actions": "Actions"
+    },
+    "neverSignedIn": "—",
+    "empty": "No employee accounts match the current search and filters.",
+    "showing": "{from}–{to} of {total}",
+    "showingSingle": "{from} of {total}",
+    "showingEmpty": "0 items",
+    "pageSizeLabel": "Rows/page",
+    "pageOf": "Page {page} / {total}",
+    "pageNumber": "Page {page}",
+    "actions": {
+      "edit": "Edit",
+      "resetPassword": "Reset Password",
+      "resendActivation": "Resend Activation"
+    },
+    "newTitle": "New Employee",
+    "editTitle": "Edit Employee",
+    "fields": {
+      "email": "Email",
+      "role": "Role",
+      "status": "Status"
+    },
+    "hintEmailLocked": "A verified email address cannot be changed.",
+    "bootstrapLocked": "The protected administrator account cannot be deactivated, demoted or deleted.",
+    "results": {
+      "created": "Employee created. Activation email delivery result: {result}.",
+      "updated": "Employee updated.",
+      "emailChanged": "Email updated. A new activation email delivery result: {result}.",
+      "resetSent": "Password reset email delivery result: {result}.",
+      "resent": "New activation email delivery result: {result}. The previous link is no longer valid.",
+      "linkReady": "One-time link generated.",
+      "linkLabel": "One-time link"
+    }
+  },
+  "delivery": {
+    "SENT": "sent",
+    "CONSOLE": "printed to the server log (development only)",
+    "FAILED": "failed to send — please retry",
+    "NOT_CONFIGURED": "not sent — email service is not configured",
+    "UNKNOWN": "unknown"
+  },
+  "roles": {
+    "ADMIN": "Admin",
+    "COURSE_CREATOR": "Course Creator",
+    "GRAPHIC_DESIGNER": "Graphic Designer",
+    "FINANCE": "Finance",
+    "OPERATION_ADMIN": "Operation Admin",
+    "OPERATION_AI": "Operation AI"
+  },
+  "status": {
+    "Active": "Active",
+    "Pending": "Pending",
+    "Inactive": "Inactive"
+  },
+  "errors": {
+    "INVALID_INPUT": "Please check the information you entered.",
+    "INVALID_EMPLOYEE_ACCOUNT": "Invalid employee account. Self-registration is not available. Please contact the Learning Guide administrator.",
+    "INVALID_CREDENTIALS": "The email or password is incorrect.",
+    "ACCOUNT_NOT_ACTIVE": "This account is inactive. Please contact the Learning Guide administrator.",
+    "EMAIL_NOT_VERIFIED": "This account has not been activated yet. Please use the activation email or contact an administrator.",
+    "NOT_AUTHORISED": "You do not have permission to perform this action.",
+    "RATE_LIMITED": "Too many attempts. Please wait a moment and try again.",
+    "PROTECTED_ADMIN_ACCOUNT": "This administrator account is protected.",
+    "INVALID_TOKEN": "This link is invalid, expired or has already been used.",
+    "TOKEN_EXPIRED": "This link has expired. Please ask an administrator for a new one.",
+    "TOKEN_ALREADY_USED": "This link has already been used. Please ask an administrator for a new one.",
+    "DUPLICATE_EMAIL": "Employee email already exists.",
+    "PASSWORD_TOO_WEAK": "The password does not meet the minimum requirements.",
+    "PASSWORD_MISMATCH": "The two passwords do not match.",
+    "INTERNAL_ERROR": "Something went wrong. Please try again."
+  }
+}
