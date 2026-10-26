@@ -4,6 +4,7 @@
 // Operator-only. Never prints secret values. Run without --apply for a dry run.
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { assertSecretArn } from "./apprunner-env.mjs";
 
 const region = process.env.REGION || "ap-southeast-1";
 const apply = process.argv.includes("--apply");
@@ -110,6 +111,7 @@ const source = {
           APP_ENV: "DEV",
           PORT: "3000",
           AWS_REGION: region,
+          ...(process.env.AI_AVAILABLE_MODELS ? { AI_AVAILABLE_MODELS: process.env.AI_AVAILABLE_MODELS } : {}),
           // Mail: SMTP wins when fully configured, otherwise SES v2 with this sender.
           // SES starts in the sandbox; production access must be requested in AWS.
           ...(process.env.SES_FROM_EMAIL ? { SES_FROM_EMAIL: process.env.SES_FROM_EMAIL } : {}),
@@ -122,6 +124,12 @@ const source = {
         RuntimeEnvironmentSecrets: {
           DATABASE_URL: secretArns.DATABASE_URL,
           ADMIN_API_KEY: secretArns.ADMIN_API_KEY,
+          // The tutor needs a real LLM key, and course-level keys are encrypted.
+          // Pre-create these secrets and pass their ARNs; never pass values.
+          // Re-running without them drops the keys until the next deploy merges
+          // them back (configure-admin-dev-env.mjs).
+          ...(process.env.OPENROUTER_API_KEY_SECRET_ARN ? { OPENROUTER_API_KEY: assertSecretArn(process.env.OPENROUTER_API_KEY_SECRET_ARN, "OPENROUTER_API_KEY_SECRET_ARN") } : {}),
+          ...(process.env.AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN ? { AI_CONFIG_ENCRYPTION_KEY: assertSecretArn(process.env.AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN, "AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN") } : {}),
           // Optional: ARN of a secret holding the SMTP password.
           ...(process.env.SMTP_PASS_SECRET_ARN ? { SMTP_PASS: process.env.SMTP_PASS_SECRET_ARN } : {})
         }

@@ -25,6 +25,7 @@ jobs:
       - run: npx prisma generate
       - run: npm run build
       - run: npm test -- --runInBand --passWithNoTests
+      - run: npm run test:scripts
 
   client:
     name: Client build
