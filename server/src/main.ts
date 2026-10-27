@@ -5,7 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { createAppModule } from './app.module';
-import { parseAppRoles } from './app-roles';
+import { learnerApiOpenWarning, parseAppRoles } from './app-roles';
 import { configureApp } from './common/app-setup';
 
 /**
@@ -57,6 +57,9 @@ async function bootstrap() {
     createAppModule(roles),
   );
   Logger.log(`启动角色：${roles.join(', ')}`, 'Bootstrap');
+  // 不改行为、不阻止启动：只把漏配醒目地写进日志，便于上线检查发现
+  const openLearnerApi = learnerApiOpenWarning(process.env, roles);
+  if (openLearnerApi) Logger.error(openLearnerApi, 'Bootstrap');
   // App Runner 前有一层代理：只信任最近一跳的 X-Forwarded-For，限流与审计用的 IP 不可被客户端伪造
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
   // /api 全局前缀 + 输入校验（§5.1、§9.3），与 e2e 共用同一设置

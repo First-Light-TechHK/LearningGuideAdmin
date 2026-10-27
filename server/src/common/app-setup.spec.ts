@@ -1,5 +1,9 @@
-import { INestApplication } from '@nestjs/common';
-import { JSON_BODY_LIMIT, configureApp } from './app-setup';
+import { BadRequestException, INestApplication } from '@nestjs/common';
+import {
+  INVALID_JSON_MESSAGE,
+  JSON_BODY_LIMIT,
+  configureApp,
+} from './app-setup';
 
 describe('configureApp（§5.1 全局前缀 / §9.3 输入校验 / §10.1 Import 请求体上限）', () => {
   interface FakeApp {
@@ -37,5 +41,31 @@ describe('configureApp（§5.1 全局前缀 / §9.3 输入校验 / §10.1 Import
     expect(() =>
       configureApp(app as unknown as INestApplication),
     ).not.toThrow();
+  });
+
+  it('JSON 语法错误换成通用提示，其它错误原样往下传', () => {
+    const use = jest.fn<void, [(...args: unknown[]) => void]>();
+    const app = { ...createApp(), use };
+    configureApp(app as unknown as INestApplication);
+    const handler = use.mock.calls[0][0];
+    expect(handler.length).toBe(4); // Express 按参数个数识别错误中间件
+    const next = jest.fn<void, [unknown]>();
+    handler(
+      Object.assign(
+        new SyntaxError('Unexpected token b in JSON at position 1'),
+        {
+          type: 'entity.parse.failed',
+        },
+      ),
+      {},
+      {},
+      next,
+    );
+    const mapped = next.mock.calls[0][0] as BadRequestException;
+    expect(mapped).toBeInstanceOf(BadRequestException);
+    expect(mapped.message).toBe(INVALID_JSON_MESSAGE);
+    const other = new Error('boom');
+    handler(other, {}, {}, next);
+    expect(next).toHaveBeenLastCalledWith(other);
   });
 });
