@@ -412,6 +412,33 @@ describe('AI API (e2e)', () => {
     await prisma.release.delete({ where: { id: release2Id } });
   });
 
+  it('重复提交发布（连点 / 重试）只生成一个 Release（QA 2026-10-27 幂等）', async () => {
+    const dupCourse = await prisma.course.create({
+      data: { title: 'AI-E2E重复发布课' },
+    });
+    await prisma.page.create({
+      data: {
+        courseId: dupCourse.id,
+        title: 'Lesson 1',
+        contentMd: '# Lesson 1',
+        sectionTags: { 'h1-lesson-1': ['intro'] },
+        sortOrder: 1,
+      },
+    });
+    const publish = (revisionNotes: string) =>
+      api.post(`/api/courses/${dupCourse.id}/release`).send({ revisionNotes });
+    const [first, second] = await Promise.all([publish('DUP'), publish('DUP')]);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.body.data.id).toBe(first.body.data.id);
+    // 说明不同则是一次新的发布
+    expect((await publish('DUP-2')).status).toBe(201);
+    const count = await prisma.release.count({
+      where: { courseId: dupCourse.id },
+    });
+    expect(count).toBe(2);
+  });
+
   it('AI 配置按 Release 维度隔离：切换 Release 回显各自保存的配置（§4.2.5/§4.3.1，2026-10-20）', async () => {
     // 独立课程，避免污染共享夹具
     const isoCourse = await prisma.course.create({

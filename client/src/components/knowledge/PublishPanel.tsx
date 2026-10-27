@@ -46,7 +46,8 @@ export function PublishPanel() {
   }, [loadReleases])
 
   const doPublish = async () => {
-    if (!publishCourse || !notes.trim()) return
+    // 发布中再次触发（回车、连点）直接忽略，服务端另有重复提交保护
+    if (!publishCourse || !notes.trim() || publishing) return
     setPublishing(true)
     try {
       await knowledgeApi.publish(publishCourse, notes.trim())

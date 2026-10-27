@@ -10,6 +10,24 @@ import { IndexingService } from '../knowledge/indexing.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
 
+/** 重复发布判定窗口：窗口内同说明、同快照的第二次提交视为重试（QA 2026-10-27 幂等） */
+const PUBLISH_DEDUPE_WINDOW_MS = 60_000;
+
+/** 键排序后的 JSON：jsonb 读回时键顺序会变，比较快照不能直接 JSON.stringify */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const body = entries.map(
+      ([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`,
+    );
+    return `{${body.join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
 /** CourseAiConfig 中随 Release 复制的列（不含 id / releaseId / 时间戳） */
 const AI_CONFIG_COPY_FIELDS = {
   lectureModeId: true,
@@ -54,7 +72,9 @@ export class ReleasesService {
    * versionTag 格式: "CourseName_YYYYMMDDHHmm"。
    */
   async publish(courseId: string, dto: CreateReleaseDto) {
-    const created = await this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      // 同一课程的发布串行执行，下面的重复判断才可靠（QA 2026-10-27 幂等）
+      await lockCourseRow(tx, courseId);
       const course = await tx.course.findUnique({
         where: { id: courseId },
         include: {
@@ -75,6 +95,20 @@ export class ReleasesService {
           sectionTags: page.sectionTags,
         })),
       };
+      // 幂等：重复提交（连点、超时重试）在短时间内带来同样的说明和同样的快照时，
+      // 返回刚发布的那个版本，不再生成第二个 Release
+      const latest = await tx.release.findFirst({
+        where: { courseId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (
+        latest &&
+        latest.revisionNotes === dto.revisionNotes &&
+        Date.now() - latest.createdAt.getTime() < PUBLISH_DEDUPE_WINDOW_MS &&
+        stableJson(latest.snapshotData) === stableJson(snapshotData)
+      ) {
+        return { created: latest, duplicate: true };
+      }
       // 仅写入快照，不更新 currentReleaseId（纯快照，2026-10-20 改拍）
       const created = await tx.release.create({
         data: {
@@ -89,7 +123,9 @@ export class ReleasesService {
       const sourceReleaseId = course.currentReleaseId ?? course.aiTestReleaseId;
       if (sourceReleaseId) {
         const source = await tx.courseAiConfig.findUnique({
-          where: { courseId_releaseId: { courseId, releaseId: sourceReleaseId } },
+          where: {
+            courseId_releaseId: { courseId, releaseId: sourceReleaseId },
+          },
           select: AI_CONFIG_COPY_FIELDS,
         });
         if (source) {
@@ -108,8 +144,10 @@ export class ReleasesService {
           ...(sourceReleaseId ? {} : { aiTestReleaseId: created.id }),
         },
       });
-      return created;
+      return { created, duplicate: false };
     });
+    const { created, duplicate } = outcome;
+    if (duplicate) return created;
 
     // 2026-10-26 新增：异步构建向量索引（RAG），不阻塞发布响应
     void this.indexing.indexRelease(created.id).catch(() => {
@@ -268,7 +306,9 @@ export class ReleasesService {
         throw new ConflictException('该版本为上线版本（Live），不可删除');
       }
       if (course?.aiTestReleaseId === release.id) {
-        throw new ConflictException('该版本为 AI Tutor 后台测试所选版本，不可删除');
+        throw new ConflictException(
+          '该版本为 AI Tutor 后台测试所选版本，不可删除',
+        );
       }
       await tx.release.delete({ where: { id: release.id } });
       // 清空当前编辑版本指针（若被删版本即 editing 版本）

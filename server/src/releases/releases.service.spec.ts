@@ -15,6 +15,7 @@ describe('ReleasesService', () => {
     release: {
       create: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       delete: jest.fn(),
     },
     page: { deleteMany: jest.fn(), create: jest.fn() },
@@ -110,6 +111,43 @@ describe('ReleasesService', () => {
     expect(mockTx.$executeRaw).toHaveBeenCalledTimes(1);
     await service.remove('r1');
     expect(mockTx.$executeRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('publish：短时间内同说明、同快照的重复提交返回刚发布的版本（幂等）', async () => {
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      title: 'Course',
+      currentReleaseId: 'r1',
+      aiTestReleaseId: 'r1',
+      pages: [{ id: 'p1', title: 'L1', contentMd: 'x', sectionTags: [] }],
+    });
+    // jsonb 读回后的键顺序与写入时不同
+    const previous = {
+      id: 'r2',
+      courseId: 'c1',
+      revisionNotes: 'v2',
+      createdAt: new Date(),
+      snapshotData: {
+        pages: [{ sectionTags: [], contentMd: 'x', title: 'L1', id: 'p1' }],
+      },
+    };
+    mockTx.release.findFirst.mockResolvedValue(previous);
+
+    const result = await service.publish('c1', { revisionNotes: 'v2' });
+
+    expect(result).toBe(previous);
+    expect(mockTx.$executeRaw).toHaveBeenCalled();
+    expect(mockTx.release.create).not.toHaveBeenCalled();
+    expect(mockTx.course.update).not.toHaveBeenCalled();
+    expect(mockIndexing.indexRelease).not.toHaveBeenCalled();
+
+    mockTx.release.findFirst.mockResolvedValue({
+      ...previous,
+      revisionNotes: 'other',
+    });
+    mockTx.release.create.mockResolvedValue({ id: 'r3' });
+    await service.publish('c1', { revisionNotes: 'v2' });
+    expect(mockTx.release.create).toHaveBeenCalledTimes(1);
   });
 
   it('publish：课程不存在时 404', async () => {
