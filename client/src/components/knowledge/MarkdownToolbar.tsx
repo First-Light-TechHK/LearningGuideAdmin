@@ -160,6 +160,13 @@ export function MarkdownToolbar({ view, disabled }: Props) {
           false,
           () => view && insertSnippet(view, '[文字](https://)', { select: { from: 1, to: 3 } }),
         )}
+        {btn(
+          '图片',
+          '插入外链图片 ![说明](图片 URL)',
+          false,
+          // 编辑器换成 Markdown 后保留「外链 URL 插图」入口（BUG-0224）；选中 URL 占位便于直接粘贴
+          () => view && insertSnippet(view, '![图片](https://)', { block: true, select: { from: 6, to: 14 } }),
+        )}
       </Space>
       <Space size={2}>
         {btn('•', '无序列表', active.bullet, () => view && toggleLinePrefix(view, () => '- ', /^(\s*)([-*+])(\s)/))}

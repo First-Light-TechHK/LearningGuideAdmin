@@ -142,9 +142,19 @@ export class ImageWidget extends WidgetType {
     const wrap = document.createElement(this.block ? 'div' : 'span')
     wrap.className = this.block ? 'cm-md-image-block' : 'cm-md-image-inline'
     const img = document.createElement('img')
+    // 外链图片常有防盗链（按 Referer 拒绝），不带 Referer 请求（BUG-0224）
+    img.referrerPolicy = 'no-referrer'
     img.src = this.src
     img.alt = this.alt
     img.loading = 'lazy'
+    // 加载失败：不显示浏览器的破图图标，改为明确的失败提示 + 链接，便于作者检查地址
+    img.addEventListener('error', () => {
+      const failed = document.createElement('span')
+      failed.className = 'cm-md-image-failed'
+      failed.textContent = `图片加载失败：${this.src}`
+      failed.title = this.src
+      img.replaceWith(failed)
+    })
     wrap.appendChild(img)
     if (this.alt) {
       const caption = document.createElement('span')
@@ -319,7 +329,7 @@ export function renderInline(text: string): string {
           const url = parseDestination(text.slice(close + 2, pend))
           const src = safeUrl(url)
           if (src) {
-            out += `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" />`
+            out += `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" referrerpolicy="no-referrer" />`
           } else {
             out += escapeHtml(`![${alt}](${url})`)
           }
