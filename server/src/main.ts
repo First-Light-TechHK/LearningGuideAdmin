@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { createAppModule } from './app.module';
 import { parseAppRoles } from './app-roles';
 import { configureApp } from './common/app-setup';
@@ -21,15 +21,30 @@ function serveBackOfficeUi(app: NestExpressApplication) {
     Logger.warn(`未找到前端构建产物：${clientDir}，仅提供 API`, 'Bootstrap');
     return;
   }
-  // 带 hash 的静态资源可长期缓存；入口 HTML 必须每次回源。
+  // 带 hash 的静态资源可长期缓存；入口 HTML 必须每次回源，且不落任何缓存（浏览器与 CDN）。
   app.useStaticAssets(clientDir, {
     index: false,
     maxAge: 31_536_000_000,
     immutable: true,
+    setHeaders: (res: any, filePath: string) => {
+      if (basename(filePath) === 'index.html') {
+        res.setHeader(
+          'Cache-Control',
+          'no-store, no-cache, must-revalidate, proxy-revalidate',
+        );
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+    },
   });
   const express = app.getHttpAdapter().getInstance();
   express.get(/^\/(?!api(?:\/|$)|health$).*/, (_req, res: any) => {
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(indexFile);
   });
   Logger.log(`前端由本服务提供：${clientDir}`, 'Bootstrap');
