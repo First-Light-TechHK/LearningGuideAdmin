@@ -11,13 +11,18 @@ export const PASSWORD_MAX_LENGTH = 128;
 export const SESSION_IDLE_MINUTES = 30;
 export const SESSION_MAX_HOURS = 12;
 
-export const EMAIL_CHECK_MAX_PER_WINDOW = 20;
+/** 登录页输入邮箱时防抖调用，一次输入就会打好几次，额度放宽 */
+export const EMAIL_CHECK_MAX_PER_WINDOW = 60;
+export const TOKEN_STATUS_MAX_PER_WINDOW = 30;
 export const SIGN_IN_MAX_PER_WINDOW = 10;
 export const EMAIL_SEND_MAX_PER_WINDOW = 5;
+/** 管理员在账号管理里发信（新增 / 重发激活 / 重置），按操作者计数 */
+export const ADMIN_EMAIL_SEND_MAX_PER_WINDOW = 20;
 export const RATE_LIMIT_WINDOW_MINUTES = 5;
 
 export const EMPLOYEE_PAGE_SIZE_DEFAULT = 10;
 export const EMPLOYEE_PAGE_SIZE_MAX = 100;
+export const EMPLOYEE_PAGE_MAX = 10_000;
 
 export function isPasswordAcceptable(plain: string): boolean {
   return (

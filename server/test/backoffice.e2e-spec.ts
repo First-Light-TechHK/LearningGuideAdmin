@@ -12,6 +12,10 @@ import {
   resetRateLimits,
   signInAs,
 } from './helpers/employee-session';
+import {
+  issueActivationToken,
+  issueResetToken,
+} from '../src/backoffice/modules/user-authentication/services/verificationTokens';
 
 /**
  * BackOffice 员工登录与菜单级权限（PRD v1.1 §3.2 / §3.3 / §15.3）：
@@ -68,19 +72,72 @@ describe('BackOffice access (e2e)', () => {
       .expect(429);
   });
 
-  it('limits sign-in attempts per account across addresses', async () => {
-    for (let i = 0; i < 10; i += 1) {
-      resetIpBuckets();
-      await request(server())
-        .post('/api/auth/sign-in')
-        .send({ email: 'Target@Example.com', password: 'wrong-password' })
-        .expect(401);
-    }
-    resetIpBuckets();
+  it('does not let failures from another address lock an employee out', async () => {
+    const email = await ensureEmployee('bo-e2e-victim@example.com', 'FINANCE');
+    // 攻击者在别的 IP 上把这个邮箱的失败次数打满
+    globalThis.__lgboRateBuckets?.set(`sign-in-pair:203.0.113.9:${email}`, {
+      count: 99,
+      resetsAt: Date.now() + 60_000,
+    });
     await request(server())
       .post('/api/auth/sign-in')
-      .send({ email: 'target@example.com', password: 'wrong-password' })
-      .expect(429);
+      .send({ email, password: E2E_PASSWORD })
+      .expect(200);
+  });
+
+  it('counts only failed sign-ins, and a success clears the account window', async () => {
+    const email = await ensureEmployee('bo-e2e-often@example.com', 'FINANCE');
+    for (let i = 0; i < 12; i += 1) {
+      await request(server())
+        .post('/api/auth/sign-in')
+        .send({ email, password: E2E_PASSWORD })
+        .expect(200);
+    }
+    for (let i = 0; i < 9; i += 1) {
+      await request(server())
+        .post('/api/auth/sign-in')
+        .send({ email, password: 'wrong-password' })
+        .expect(401);
+    }
+    await request(server())
+      .post('/api/auth/sign-in')
+      .send({ email, password: E2E_PASSWORD })
+      .expect(200);
+    resetIpBuckets();
+    for (let i = 0; i < 9; i += 1) {
+      await request(server())
+        .post('/api/auth/sign-in')
+        .send({ email, password: 'wrong-password' })
+        .expect(401);
+    }
+    await request(server())
+      .post('/api/auth/sign-in')
+      .send({ email, password: E2E_PASSWORD })
+      .expect(200);
+  });
+
+  it('answers a wrong password and an unknown email the same way, and hides status until the password is right', async () => {
+    const unknown = await request(server())
+      .post('/api/auth/sign-in')
+      .send({ email: 'bo-e2e-nobody@example.com', password: 'whatever-pass' })
+      .expect(401);
+    expect(unknown.body.error.code).toBe('INVALID_CREDENTIALS');
+
+    const email = await ensureEmployee('bo-e2e-off@example.com', 'FINANCE');
+    await query(
+      `UPDATE employees SET account_status = 'INACTIVE' WHERE login_email = $1`,
+      [email],
+    );
+    const wrong = await request(server())
+      .post('/api/auth/sign-in')
+      .send({ email, password: 'wrong-password' })
+      .expect(401);
+    expect(wrong.body.error.code).toBe('INVALID_CREDENTIALS');
+    const right = await request(server())
+      .post('/api/auth/sign-in')
+      .send({ email, password: E2E_PASSWORD })
+      .expect(403);
+    expect(right.body.error.code).toBe('ACCOUNT_NOT_ACTIVE');
   });
 
   it('leaves the Portal learner API on the service key, not on employee sessions', async () => {
@@ -196,12 +253,12 @@ describe('BackOffice access (e2e)', () => {
       .expect(409);
     expect(duplicate.body.error.code).toBe('DUPLICATE_EMAIL');
 
-    // Pending 账号不能登录
+    // Pending 账号还没有密码，不能登录（与密码错误同码）
     const pending = await request(server())
       .post('/api/auth/sign-in')
       .send({ email: 'bo-e2e-new@example.com', password: 'whatever-password' })
-      .expect(403);
-    expect(pending.body.error.code).toBe('EMAIL_NOT_VERIFIED');
+      .expect(401);
+    expect(pending.body.error.code).toBe('INVALID_CREDENTIALS');
 
     const token = decodeURIComponent(
       new URL(link).searchParams.get('token') ?? '',
@@ -259,9 +316,7 @@ describe('BackOffice access (e2e)', () => {
         })
         .expect(200);
       expect(created.body.data.delivery).toBe('SENT');
-      expect(created.body.data.manualLink).toContain(
-        '/en-GB/activate?token=',
-      );
+      expect(created.body.data.manualLink).toContain('/en-GB/activate?token=');
 
       const reset = await admin
         .post(
@@ -269,10 +324,9 @@ describe('BackOffice access (e2e)', () => {
         )
         .send({ locale: 'en-GB' })
         .expect(200);
+      // 还没激活的账号：重置改为重发激活邮件
       expect(reset.body.data.delivery).toBe('SENT');
-      expect(reset.body.data.manualLink).toContain(
-        '/en-GB/reset-password?token=',
-      );
+      expect(reset.body.data.manualLink).toContain('/en-GB/activate?token=');
     } finally {
       process.env.EMAIL_DELIVERY = previous;
       await query(
@@ -383,5 +437,205 @@ describe('BackOffice access (e2e)', () => {
     await query(
       `ALTER TABLE employees ENABLE TRIGGER employees_guard_bootstrap_admin`,
     );
+  });
+
+  describe('one-time links', () => {
+    const tokenOf = (link: string) =>
+      decodeURIComponent(new URL(link).searchParams.get('token') ?? '');
+
+    async function createPending(email: string) {
+      const admin = await signInAs(app, 'ADMIN');
+      const previous = process.env.APP_ENV;
+      process.env.APP_ENV = 'SIT';
+      try {
+        const created = await admin
+          .post('/api/admin/employees')
+          .send({ email, role: 'FINANCE', locale: 'en-GB' })
+          .expect(200);
+        return {
+          admin,
+          employeeId: created.body.data.employee.employeeId as string,
+          activation: tokenOf(created.body.data.manualLink),
+        };
+      } finally {
+        process.env.APP_ENV = previous;
+      }
+    }
+
+    const status = async (token: string, purpose: string) =>
+      (
+        await request(server())
+          .get('/api/auth/token-status')
+          .query({ token, purpose })
+          .expect(200)
+      ).body.data.status;
+
+    it('voids the activation link once a reset link has set the password', async () => {
+      const { employeeId, activation } = await createPending(
+        'bo-e2e-link1@example.com',
+      );
+      // 旧版本里 Admin 对 Pending 账号点重置会签发重置令牌：直接签一个模拟
+      const reset = await issueResetToken(employeeId);
+      await request(server())
+        .post('/api/auth/reset-password')
+        .send({
+          token: reset,
+          password: 'reset-pass-123',
+          confirmPassword: 'reset-pass-123',
+        })
+        .expect(200);
+      expect(await status(activation, 'activation')).toBe('used');
+      const replay = await request(server())
+        .post('/api/auth/activate')
+        .send({
+          token: activation,
+          password: 'attacker-pass',
+          confirmPassword: 'attacker-pass',
+        })
+        .expect(410);
+      expect(replay.body.error.code).toBe('TOKEN_ALREADY_USED');
+      await request(server())
+        .post('/api/auth/sign-in')
+        .send({ email: 'bo-e2e-link1@example.com', password: 'attacker-pass' })
+        .expect(401);
+    });
+
+    it('refuses an activation link for an account that is already verified', async () => {
+      await ensureEmployee('bo-e2e-link2@example.com', 'FINANCE');
+      const rows = await query<{ employee_id: string }>(
+        `SELECT employee_id FROM employees WHERE login_email = 'bo-e2e-link2@example.com'`,
+      );
+      const stale = await issueActivationToken(rows[0].employee_id);
+      expect(await status(stale, 'activation')).toBe('used');
+      await request(server())
+        .post('/api/auth/activate')
+        .send({
+          token: stale,
+          password: 'other-pass-123',
+          confirmPassword: 'other-pass-123',
+        })
+        .expect(410);
+    });
+
+    it('sends a fresh activation instead of a reset for a pending account', async () => {
+      const { admin, employeeId, activation } = await createPending(
+        'bo-e2e-link3@example.com',
+      );
+      const previous = process.env.APP_ENV;
+      process.env.APP_ENV = 'SIT';
+      let fresh: string;
+      try {
+        const res = await admin
+          .post(`/api/admin/employees/${employeeId}/reset-password`)
+          .send({ locale: 'en-GB' })
+          .expect(200);
+        expect(res.body.data.manualLink).toContain('/en-GB/activate?token=');
+        fresh = tokenOf(res.body.data.manualLink);
+      } finally {
+        process.env.APP_ENV = previous;
+      }
+      expect(await status(activation, 'activation')).toBe('used');
+      expect(await status(fresh, 'activation')).toBe('usable');
+      await request(server())
+        .post('/api/auth/activate')
+        .send({
+          token: fresh,
+          password: 'fresh-pass-123',
+          confirmPassword: 'fresh-pass-123',
+        })
+        .expect(200);
+      expect(await status(fresh, 'activation')).toBe('used');
+    });
+
+    it('reports expired and unknown links without revealing the account', async () => {
+      const { activation } = await createPending('bo-e2e-link4@example.com');
+      await query(
+        `UPDATE verification_tokens SET expires_at = now() - interval '1 minute'
+          WHERE employee_id = (SELECT employee_id FROM employees WHERE login_email = 'bo-e2e-link4@example.com')`,
+      );
+      const res = await request(server())
+        .get('/api/auth/token-status')
+        .query({ token: activation, purpose: 'activation' })
+        .expect(200);
+      expect(res.body.data).toEqual({ status: 'expired' });
+      expect(await status('not-a-real-token', 'reset')).toBe('invalid');
+      expect(await status(activation, 'reset')).toBe('invalid');
+      await request(server())
+        .get('/api/auth/token-status')
+        .query({ token: activation, purpose: 'other' })
+        .expect(400);
+    });
+  });
+
+  it('refuses a new password that equals the current one', async () => {
+    const email = await ensureEmployee('bo-e2e-same@example.com', 'FINANCE');
+    const agent = request.agent(server());
+    await agent
+      .post('/api/auth/sign-in')
+      .send({ email, password: E2E_PASSWORD })
+      .expect(200);
+    const res = await agent
+      .post('/api/auth/change-password')
+      .send({
+        currentPassword: E2E_PASSWORD,
+        newPassword: E2E_PASSWORD,
+        confirmPassword: E2E_PASSWORD,
+      })
+      .expect(400);
+    expect(res.body.error.code).toBe('PASSWORD_SAME_AS_CURRENT');
+    await agent.get('/api/session').expect(200);
+  });
+
+  it('matches % and _ literally in the email search and clamps huge pages', async () => {
+    await ensureEmployee('bo-e2e-under_score@example.com', 'FINANCE');
+    await ensureEmployee('bo-e2e-plain@example.com', 'FINANCE');
+    const admin = await signInAs(app, 'ADMIN');
+    const res = await admin
+      .get('/api/admin/employees')
+      .query({ email: '_score' })
+      .expect(200);
+    const emails = res.body.data.items.map(
+      (item: { loginEmail: string }) => item.loginEmail,
+    );
+    expect(emails).toEqual(['bo-e2e-under_score@example.com']);
+    const all = await admin
+      .get('/api/admin/employees')
+      .query({ email: '%' })
+      .expect(200);
+    expect(all.body.data.total).toBe(0);
+    await admin
+      .get('/api/admin/employees')
+      .query({ page: '1e300' })
+      .expect(200);
+    await admin
+      .get('/api/admin/employees')
+      .query({ pageSize: 'Infinity' })
+      .expect(200);
+  });
+
+  it('limits admin emails per administrator, not per office address', async () => {
+    const admin = await signInAs(app, 'ADMIN');
+    const previous = process.env.EMAIL_DELIVERY;
+    process.env.EMAIL_DELIVERY = 'discard';
+    try {
+      for (let i = 0; i < 8; i += 1) {
+        await admin
+          .post('/api/admin/employees')
+          .send({ email: `bo-e2e-bulk${i}@example.com`, role: 'FINANCE' })
+          .expect(200);
+      }
+    } finally {
+      process.env.EMAIL_DELIVERY = previous;
+    }
+  });
+
+  it('does not echo JSON parser details or advertise the framework', async () => {
+    const res = await request(server())
+      .post('/api/auth/sign-in')
+      .set('Content-Type', 'application/json')
+      .send('{bad json')
+      .expect(400);
+    expect(JSON.stringify(res.body)).not.toMatch(/position|column/i);
+    expect(res.headers['x-powered-by']).toBeUndefined();
   });
 });

@@ -24,6 +24,7 @@ const PUBLIC_AUTH = new Set([
   'activate',
   'forgot-password',
   'reset-password',
+  'token-status',
   'setup',
 ]);
 
