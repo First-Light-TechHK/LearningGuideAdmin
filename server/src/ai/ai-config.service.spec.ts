@@ -185,22 +185,22 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     mockPrisma.courseAiConfig.findUnique.mockResolvedValue(null);
     mockPrisma.courseAiConfig.upsert.mockResolvedValue({
       lectureSystemPrompt: 'L', socraticSystemPrompt: null, assessmentSystemPrompt: null,
-      welcomeMsg: 'W', model: 'm-lect', llmProvider: 'openrouter', apiKey: null,
+      welcomeMsg: 'W', model: 'deepseek/deepseek-v4.1-flash', llmProvider: 'openrouter', apiKey: null,
     });
     mockKnowledge.getReleaseMeta.mockResolvedValue({ id: 'r1', courseId: 'c1', versionTag: 'v1' });
     const view = await service.saveConfig({
       courseId: 'c1', mode: 'LECTURE', llmProvider: 'openrouter',
-      llmModel: 'm-lect', systemPrompt: 'L', welcomeMsg: 'W',
+      llmModel: 'deepseek/deepseek-v4.1-flash', systemPrompt: 'L', welcomeMsg: 'W',
     });
     const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
     expect(upsertArgs.update).toEqual({
-      llmProvider: 'openrouter', apiKey: null,
-      welcomeMsg: 'W', model: 'm-lect',
+      llmProvider: 'openrouter',
+      welcomeMsg: 'W', model: 'deepseek/deepseek-v4.1-flash',
       lectureSystemPrompt: 'L',
     });
     expect(upsertArgs.update).not.toHaveProperty('socraticSystemPrompt');
     expect(upsertArgs.update).not.toHaveProperty('assessmentSystemPrompt');
-    expect(view.model).toBe('m-lect');
+    expect(view.model).toBe('deepseek/deepseek-v4.1-flash');
     expect(view.welcomeMsg).toBe('W');
   });
 
@@ -212,21 +212,73 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     mockPrisma.courseAiConfig.findUnique.mockResolvedValue(null);
     mockPrisma.courseAiConfig.upsert.mockResolvedValue({
       lectureSystemPrompt: null, socraticSystemPrompt: null, assessmentSystemPrompt: 'A',
-      welcomeMsg: 'W', model: 'm', llmProvider: 'openrouter', apiKey: null,
+      welcomeMsg: 'W', model: 'deepseek/deepseek-v4.1-flash', llmProvider: 'openrouter', apiKey: null,
     });
     mockKnowledge.getReleaseMeta.mockResolvedValue({ id: 'r1', courseId: 'c1', versionTag: 'v1' });
     await service.saveConfig({
       courseId: 'c1', mode: 'ASSESSMENT', llmProvider: 'openrouter',
-      llmModel: 'm', systemPrompt: 'A', welcomeMsg: 'W',
+      llmModel: 'deepseek/deepseek-v4.1-flash', systemPrompt: 'A', welcomeMsg: 'W',
     });
     const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
     expect(upsertArgs.update).toEqual({
-      llmProvider: 'openrouter', apiKey: null,
-      welcomeMsg: 'W', model: 'm',
+      llmProvider: 'openrouter',
+      welcomeMsg: 'W', model: 'deepseek/deepseek-v4.1-flash',
       assessmentSystemPrompt: 'A',
     });
     expect(upsertArgs.update).not.toHaveProperty('lectureSystemPrompt');
     expect(upsertArgs.update).not.toHaveProperty('socraticSystemPrompt');
+  });
+
+  it('saveConfig：模型不在 AI_AVAILABLE_MODELS 内应 400（QA A10）', async () => {
+    mockKnowledge.getCourse.mockResolvedValue({
+      id: 'c1', title: '课程', externalId: null,
+      currentReleaseId: 'r1', aiTestReleaseId: null, aiTutorOnline: false,
+    });
+    await expect(
+      service.saveConfig({ courseId: 'c1', mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'anthropic/expensive' }),
+    ).rejects.toThrow(BadRequestException);
+    expect(mockPrisma.courseAiConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  it('saveConfig：未传 apiKey 时不读旧值、不写 apiKey 列（QA A11）', async () => {
+    mockKnowledge.getCourse.mockResolvedValue({
+      id: 'c1', title: '课程', externalId: null,
+      currentReleaseId: 'r1', aiTestReleaseId: null, aiTutorOnline: false,
+    });
+    mockPrisma.courseAiConfig.upsert.mockResolvedValue({ model: 'deepseek/deepseek-v4.1-flash', llmProvider: 'openrouter', apiKey: 'enc' });
+    await service.saveConfig({ courseId: 'c1', mode: 'SOCRATIC', llmProvider: 'openrouter', llmModel: 'deepseek/deepseek-v4.1-flash' });
+    expect(mockPrisma.courseAiConfig.findUnique).not.toHaveBeenCalled();
+    const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+    expect(upsertArgs.update).not.toHaveProperty('apiKey');
+    expect(upsertArgs.update).not.toHaveProperty('welcomeMsg');
+  });
+
+  it('saveConfig：带 releaseId 时写入该 Release，而不是测试所选 Release（QA A5）', async () => {
+    mockKnowledge.getCourse.mockResolvedValue({
+      id: 'c1', title: '课程', externalId: null,
+      currentReleaseId: 'r1', aiTestReleaseId: 'r2', aiTutorOnline: false,
+    });
+    mockKnowledge.getReleaseMeta.mockResolvedValue({ id: 'r3', courseId: 'c1', versionTag: 'v3' });
+    mockPrisma.courseAiConfig.upsert.mockResolvedValue({ model: 'deepseek/deepseek-v4.1-flash', llmProvider: 'openrouter' });
+    const view = await service.saveConfig({
+      courseId: 'c1', releaseId: 'r3', mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'deepseek/deepseek-v4.1-flash',
+    });
+    expect(mockPrisma.courseAiConfig.upsert.mock.calls[0][0].where).toEqual({
+      courseId_releaseId: { courseId: 'c1', releaseId: 'r3' },
+    });
+    expect(view.releaseId).toBe('r3');
+  });
+
+  it('saveConfig：releaseId 不属于该课程应 404（QA A5）', async () => {
+    mockKnowledge.getCourse.mockResolvedValue({
+      id: 'c1', title: '课程', externalId: null,
+      currentReleaseId: 'r1', aiTestReleaseId: null, aiTutorOnline: false,
+    });
+    mockKnowledge.getReleaseMeta.mockResolvedValue({ id: 'rx', courseId: 'other', versionTag: 'vx' });
+    await expect(
+      service.saveConfig({ courseId: 'c1', releaseId: 'rx', mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'deepseek/deepseek-v4.1-flash' }),
+    ).rejects.toThrow(NotFoundException);
+    expect(mockPrisma.courseAiConfig.upsert).not.toHaveBeenCalled();
   });
 
   it('resetConfig：只清空该模式 System Prompt（不动共享 Welcome/Model）', async () => {

@@ -194,14 +194,10 @@ export class AiConfigService {
    */
   async saveConfig(dto: SaveAiConfigDto): Promise<AiConfigView> {
     const course = await this.ensureCourse(dto.courseId);
-    const releaseId = this.requireReleaseId(course);
-    const existing = await this.prisma.courseAiConfig.findUnique({
-      where: { courseId_releaseId: { courseId: dto.courseId, releaseId } },
-    });
-
-    let apiKeyField = existing?.apiKey ?? null;
-    if (dto.apiKey !== undefined) {
-      apiKeyField = dto.apiKey === '' ? null : this.crypto.encrypt(dto.apiKey);
+    const releaseId = await this.targetReleaseId(course, dto.releaseId);
+    // 模型只能从 AI_AVAILABLE_MODELS 里选（QA 2026-10-27 A10）
+    if (!this.availableModels().includes(dto.llmModel)) {
+      throw new BadRequestException(`不支持的 LLM 模型：${dto.llmModel}`);
     }
 
     // System Prompt 按 mode 写入；Welcome / Model 写入共享列
@@ -210,11 +206,14 @@ export class AiConfigService {
     else if (dto.mode === 'SOCRATIC') systemPromptField.socraticSystemPrompt = dto.systemPrompt || null;
     else if (dto.mode === 'ASSESSMENT') systemPromptField.assessmentSystemPrompt = dto.systemPrompt || null;
 
+    // 省略的字段不写，由数据库保留原值：不再先读后写，避免并发保存把 apiKey 覆盖回旧值（QA 2026-10-27 A11）
     const data = {
       llmProvider: dto.llmProvider,
-      apiKey: apiKeyField,
-      welcomeMsg: dto.welcomeMsg !== undefined ? (dto.welcomeMsg || null) : existing?.welcomeMsg ?? null,
       model: dto.llmModel,
+      ...(dto.apiKey !== undefined
+        ? { apiKey: dto.apiKey === '' ? null : this.crypto.encrypt(dto.apiKey) }
+        : {}),
+      ...(dto.welcomeMsg !== undefined ? { welcomeMsg: dto.welcomeMsg || null } : {}),
       ...systemPromptField,
     };
     const cfg = await this.prisma.courseAiConfig.upsert({
@@ -232,9 +231,10 @@ export class AiConfigService {
   async resetConfig(
     courseId: string,
     mode: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT',
+    requestedReleaseId?: string,
   ): Promise<AiConfigView> {
     const course = await this.ensureCourse(courseId);
-    const releaseId = this.requireReleaseId(course);
+    const releaseId = await this.targetReleaseId(course, requestedReleaseId);
     const systemPromptField: Record<string, null> = {};
     const modeIdField: Record<string, null> = {};
     if (mode === 'LECTURE') {
@@ -459,6 +459,23 @@ export class AiConfigService {
       );
     }
     return releaseId;
+  }
+
+  /**
+   * 保存 / 重置写入的 Release：请求带了 releaseId 就以它为准（必须属于该课程），
+   * 否则沿用「测试所选 Release」。前端传入当前看到的版本，避免别人刚切换了测试版本时
+   * 配置写进另一个 Release（QA 2026-10-27 A5）。
+   */
+  private async targetReleaseId(
+    course: CourseRef,
+    requested: string | undefined,
+  ): Promise<string> {
+    if (!requested) return this.requireReleaseId(course);
+    const release = await this.knowledge.getReleaseMeta(requested);
+    if (!release || release.courseId !== course.id) {
+      throw new NotFoundException('发布版本不存在或不属于该课程');
+    }
+    return requested;
   }
 
   private async toView(

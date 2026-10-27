@@ -11,6 +11,11 @@ export class SaveAiConfigDto {
   @IsUUID()
   courseId!: string;
 
+  /** 要写入的 Release（可选）：带了就写这一份，省略时写「测试所选 Release」 */
+  @IsOptional()
+  @IsUUID()
+  releaseId?: string;
+
   /** 当前保存的模式：只写该模式的 System Prompt */
   @IsIn(['LECTURE', 'SOCRATIC', 'ASSESSMENT'])
   mode!: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT';
