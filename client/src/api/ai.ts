@@ -59,6 +59,8 @@ export const aiApi = {
   /** 保存配置（§4.2.5；2026-10-27：System Prompt 按 mode 写入；Welcome / Model 写入课程级共享列） */
   saveConfig: (data: {
     courseId: string
+    /** 写入的 Release：传当前界面上看到的版本，避免他人刚切换测试版本时写错版本 */
+    releaseId?: string
     mode: AiMode
     llmProvider: string
     systemPrompt?: string
