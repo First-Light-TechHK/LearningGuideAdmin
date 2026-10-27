@@ -9,6 +9,7 @@ import { tokens } from '../../theme/tokens'
 /**
  * 左侧边栏（§3.1/§3.2.2）：课程选择器 + 目录树 + 搜索框 + 底部 Sync 按钮。
  * 同步目标选中即切换（2026-10-15 改：锁定/解锁机制移除），树只显示目标对应本地课程；
+ * 未选目标时树默认展示全部课件（BUG-0227，2026-10-27），清空选择即回到全部视图；
  * 本地课程由同步产生，不提供手动新建课程入口（用户拍板：新建课程彻底移除）。
  * 2026-10-16 去掉下拉项的同步状态 Tag（已同步/未同步/有更新）。
  * 2026-10-26 同步数据源改为 KS 内置课程 ID 映射表，下拉项即映射表课程 + 本地独有课程。
@@ -37,9 +38,12 @@ export function Sidebar() {
         </Typography.Text>
         <Select
           style={{ width: '100%', marginTop: tokens.spacing.xs }}
-          placeholder="选择课程作为同步目标"
+          placeholder="全部课件（选择课程作为同步目标）"
           value={selectedExternalId ?? undefined}
           onSelect={(v: string) => void selectExternal(v)}
+          // 清空目标回到全部课件视图（BUG-0227）
+          allowClear
+          onClear={() => void selectExternal(null)}
           options={externalCourses.map((e) => ({
             value: e.externalId,
             label: e.title,

@@ -86,8 +86,38 @@ export function CourseTree({ keyword }: { keyword: string }) {
     )
   }, [externalCourses, selectedExternalId])
 
+  /** 未选同步目标时默认展示全部课件（BUG-0227）；选了目标则只显示该目标对应的本地课程 */
+  const showAll = !selectedExternalId
+  const visibleCourseIds = useMemo(
+    () =>
+      showAll
+        ? courses.map((c) => c.id)
+        : visibleCourseId
+          ? [visibleCourseId]
+          : [],
+    [courses, showAll, visibleCourseId],
+  )
+  const courseKeys = useMemo(
+    () => visibleCourseIds.map((id) => `course:${id}`),
+    [visibleCourseIds],
+  )
+
+  // 全部课件视图：课程节点全部展开，并补拉尚未加载的课程详情
+  useEffect(() => {
+    if (!showAll) return
+    setExpandedKeys((prev) => [
+      ...courseKeys,
+      ...prev.filter((k) => !String(k).startsWith('course:')),
+    ])
+    const st = useKnowledgeStore.getState()
+    for (const id of visibleCourseIds) {
+      if (!st.details[id]) void st.refreshDetail(id)
+    }
+  }, [showAll, courseKeys, visibleCourseIds])
+
   // 目标课程变化：自动展开 + 加载详情 + 恢复上次编辑页
   useEffect(() => {
+    if (showAll) return
     if (!visibleCourseId) {
       setExpandedKeys([])
       return
@@ -105,12 +135,13 @@ export function CourseTree({ keyword }: { keyword: string }) {
         await st.selectPage(visibleCourseId, last)
       }
     })()
-  }, [visibleCourseId])
+  }, [showAll, visibleCourseId])
 
   const kw = keyword.trim().toLowerCase()
 
-  /** 拖拽排序启用条件：无搜索过滤（过滤后可见顺序不完整，不能据此排序）；View 角色只读，不允许排序 */
-  const dragEnabled = !kw && access.canEdit
+  /** 拖拽排序启用条件：无搜索过滤（过滤后可见顺序不完整，不能据此排序）；View 角色只读，不允许排序；
+   *  全部课件视图不排序（排序按单个课程计算） */
+  const dragEnabled = !kw && access.canEdit && !!visibleCourseId
   /** 当前课程全部 Page 顺序（不受搜索过滤影响，用于计算拖拽后的新顺序） */
   const pageOrder = useMemo(
     () =>
@@ -122,7 +153,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   const treeData = useMemo<TreeDataNode[]>(() => {
     return courses
-      .filter((course) => course.id === visibleCourseId)
+      .filter((course) => visibleCourseIds.includes(course.id))
       .map((course) => {
         const detail = details[course.id]
         const pages = (detail?.pages ?? []).flatMap((p) => {
@@ -165,7 +196,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
         }
       })
       .filter(Boolean) as TreeDataNode[]
-  }, [courses, details, kw, visibleCourseId])
+  }, [courses, details, kw, visibleCourseIds])
 
   // 搜索时自动展开命中分支
   useEffect(() => {
@@ -222,9 +253,8 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   const handleExpand = (keys: React.Key[]) => {
     // course 节点始终保持展开
-    const courseKey = `course:${visibleCourseId}`
-    const filtered = keys.filter((k) => String(k) !== courseKey)
-    setExpandedKeys([courseKey, ...filtered])
+    const filtered = keys.filter((k) => !courseKeys.includes(String(k)))
+    setExpandedKeys([...courseKeys, ...filtered])
   }
 
   /** 拖拽落点判定：指针位于行的上半→插到目标之前，下半→之后 */
@@ -333,14 +363,14 @@ export function CourseTree({ keyword }: { keyword: string }) {
     }
   }
 
-  if (!selectedExternalId) {
+  if (showAll && courses.length === 0) {
     return (
       <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
-        请在上方选择同步目标
+        暂无课件，请在上方选择同步目标后 Sync
       </span>
     )
   }
-  if (!visibleCourseId) {
+  if (!showAll && !visibleCourseId) {
     return (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}

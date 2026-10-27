@@ -58,7 +58,8 @@ interface KnowledgeState {
   refreshDetail: (courseId: string) => Promise<void>
 
   loadExternalCourses: () => Promise<void>
-  selectExternal: (externalId: string) => Promise<void>
+  /** 切换同步目标；传 null 回到「全部课件」视图（BUG-0227） */
+  selectExternal: (externalId: string | null) => Promise<void>
   runSync: (mode: 'structure' | 'all') => Promise<SyncSummary>
 
   /** 弹窗 Import（§3.2.3 两步流程）：以转换预览内容建页 → 刷新树并选中新页 */
