@@ -391,7 +391,8 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   },
 
   async createPage(courseId, title) {
-    await knowledgeApi.createPage(courseId, { title, contentMd: `# ${title}\n` })
+    // 标题单独显示在编辑器上方，正文从空白开始，不再把标题复制成正文首行 H1（BUG-0222）
+    await knowledgeApi.createPage(courseId, { title, contentMd: '' })
     await get().refreshDetail(courseId)
   },
 
