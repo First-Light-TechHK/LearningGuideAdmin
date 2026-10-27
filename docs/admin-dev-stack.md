@@ -18,7 +18,7 @@ Facts verified against AWS account 851987565851, ap-southeast-1.
 - Single service: the NestJS app serves both the API and the built BackOffice UI
   (`client/dist`, via `serveBackOfficeUi()` in `server/src/main.ts`). One App Runner service, one build,
   one deploy; there is no separate frontend server and no S3-hosted SPA.
-- `/api/*` goes to the NestJS router; every other GET/HEAD returns `index.html` with `Cache-Control: no-cache`.
+- `/api/*` goes to the NestJS router; every other GET/HEAD returns `index.html` with `Cache-Control: no-store, no-cache, must-revalidate` (including a direct request to `/index.html`).
   Hashed assets under `/assets/*` are immutable for 1 year.
 - CloudFront (optional edge) puts App Runner behind the alias; caching disabled, `Managed-AllViewerExceptHostHeader`.
   The origin must stay the App Runner domain: the service returns 404 for unknown viewer hosts.
