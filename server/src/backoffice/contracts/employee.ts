@@ -50,7 +50,9 @@ export function normaliseEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// 本地部分不以点开头/结尾、不含连续点；域名每段字母数字（可含中间连字符），顶级域至少两位字母
+const EMAIL_PATTERN =
+  /^(?!\.)(?!.*\.\.)[^\s@]+(?<!\.)@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 export function isValidEmail(raw: string): boolean {
   const value = normaliseEmail(raw);
