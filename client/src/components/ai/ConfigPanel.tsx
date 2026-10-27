@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { App, Button, Card, Divider, Input, Popconfirm, Select, Space, Switch, Typography } from '../ui'
+import { App, Button, Card, Divider, Input, Popconfirm, Segmented, Select, Space, Switch, Typography } from '../ui'
 import { useAiStore } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
@@ -44,6 +44,8 @@ export function ConfigPanel() {
   const courses = useAiStore((s) => s.courses)
   const selectedCourseId = useAiStore((s) => s.selectedCourseId)
   const config = useAiStore((s) => s.config)
+  const editMode = useAiStore((s) => s.editMode)
+  const setEditMode = useAiStore((s) => s.setEditMode)
   const selectCourse = useAiStore((s) => s.selectCourse)
   const form = useAiStore((s) => s.form)
   const saving = useAiStore((s) => s.saving)
@@ -78,6 +80,12 @@ export function ConfigPanel() {
   const onChangeCourse = async (v: string) => {
     if (!(await guard())) return
     await selectCourse(v)
+  }
+
+  /** 切换编辑模式（Lecture / Socratic / Assessment）前先过未保存提醒 */
+  const onEditModeChange = async (v: string) => {
+    if (!(await guard())) return
+    setEditMode(v as 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT')
   }
 
   const onReset = async () => {
@@ -195,6 +203,20 @@ export function ConfigPanel() {
           },
         }}
       >
+        {/* 模式切换（2026-10-27 新增）：Lecture / Socratic / Assessment，决定下方 System Prompt 编辑的是哪个模式 */}
+        <div style={{ marginBottom: tokens.spacing.md, flexShrink: 0 }}>
+          <Segmented
+            block
+            value={editMode}
+            onChange={(v) => void onEditModeChange(v as string)}
+            options={[
+              { label: 'Lecture', value: 'LECTURE' },
+              { label: 'Socratic', value: 'SOCRATIC' },
+              { label: 'Assessment', value: 'ASSESSMENT' },
+            ]}
+          />
+        </div>
+
         {/* System Prompt：占剩余空间的 70%，超出文本框可滚动 */}
         <div style={{ ...sectionStyle, flex: '7 1 0', marginBottom: tokens.spacing.md }}>
           <div style={labelStyle}>System Prompt</div>
@@ -209,7 +231,7 @@ export function ConfigPanel() {
               resize: 'none',
             }}
           />
-          <div style={extraStyle}>切换右侧模式时自动载入对应模板/自定义值</div>
+          <div style={extraStyle}>当前编辑 {editMode} 模式的 System Prompt；Welcome / Model 为课程级共享</div>
         </div>
 
         {/* Welcome Message：占剩余空间的 30%，超出可滚动 */}
@@ -250,7 +272,7 @@ export function ConfigPanel() {
         >
           <Popconfirm
             title="重置为默认模板？"
-            description="将清除当前模式（Lecture / Socratic）的自定义 Prompt / Model 覆盖"
+            description={`将清除当前 ${editMode} 模式的自定义 System Prompt 覆盖（Welcome / Model 不受影响）`}
             okText="重置"
             cancelText="取消"
             onConfirm={onReset}

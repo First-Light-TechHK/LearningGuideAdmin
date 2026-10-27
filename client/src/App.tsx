@@ -25,6 +25,7 @@ import {
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 /**
  * 全局主题（对齐 Figma 设计库 2026-10-16；内容面板统一 2026-10-19）：
@@ -112,7 +113,9 @@ function App() {
     <ConfigProvider locale={useAntdLocale()} theme={themeConfig}>
       {/* App 包裹层：提供 message/modal 上下文（§3.2.2 全量同步警告弹框等） */}
       <AntApp>
-        <Routes>
+        {/* 全局错误边界：捕获渲染异常，避免整个应用白屏 */}
+        <ErrorBoundary>
+          <Routes>
           <Route path="/:locale" element={<LocaleGate />}>
             <Route path="sign-in" element={<SignInPage />} />
             <Route path="activate" element={<ActivatePage />} />
@@ -158,7 +161,8 @@ function App() {
             </Route>
           </Route>
           <Route path="*" element={<LocaleFallback />} />
-        </Routes>
+          </Routes>
+        </ErrorBoundary>
       </AntApp>
     </ConfigProvider>
   )

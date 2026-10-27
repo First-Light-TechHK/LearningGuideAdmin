@@ -3,15 +3,12 @@ import { notifySessionChanged } from '../backoffice/lib/navigation'
 
 /** AI Tutor 接口封装（§5.2；chat-stream 为 SSE，在 aiStore 中经 fetch 处理） */
 
-export type AiMode = 'LECTURE' | 'SOCRATIC'
+export type AiMode = 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT'
 
-/** 单模式的 AI 配置（§4.2.1–§4.2.3，2026-10-20 二次改拍按模式分开） */
+/** 单模式的 AI 配置（2026-10-27：仅含 System Prompt；Welcome / Model 已提升为课程级共享） */
 export interface AiModeView {
-  /** 自定义覆盖值（null = 未自定义，前端回退该模式模板默认值） */
+  /** 该模式自定义 System Prompt 覆盖值（null = 未自定义，前端回退该模式模板默认值） */
   systemPrompt: string | null
-  welcomeMsg: string | null
-  /** 该模式生效模型（自定义 ?? AI_AVAILABLE_MODELS[0]） */
-  model: string
 }
 
 export interface AiConfigView {
@@ -26,10 +23,16 @@ export interface AiConfigView {
   hasApiKey: boolean
   /** 是否对用户侧开放（课程级，§4.2.6） */
   online: boolean
-  /** Lecture 模式配置 */
+  /** 课程级统一 Welcome Message（2026-10-27 起不再按模式区分） */
+  welcomeMsg: string | null
+  /** 课程级统一 LLM Model（2026-10-27 起不再按模式区分） */
+  model: string
+  /** Lecture 模式 System Prompt */
   lecture: AiModeView
-  /** Socratic 模式配置 */
+  /** Socratic 模式 System Prompt */
   socratic: AiModeView
+  /** Assessment 模式 System Prompt（2026-10-27 新增；仅配置，不参与学员端对话） */
+  assessment: AiModeView
 }
 
 export interface PromptTemplate {
@@ -53,7 +56,7 @@ export const aiApi = {
     http.get<PromptTemplate[]>('/ai/prompts').then((r) => r.data),
   getConfig: (courseId: string) =>
     http.get<AiConfigView>(`/ai/config/${courseId}`).then((r) => r.data),
-  /** 保存配置（§4.2.5；2026-10-20 二次改拍：带 mode，只写该模式的三项值） */
+  /** 保存配置（§4.2.5；2026-10-27：System Prompt 按 mode 写入；Welcome / Model 写入课程级共享列） */
   saveConfig: (data: {
     courseId: string
     mode: AiMode
@@ -62,7 +65,7 @@ export const aiApi = {
     welcomeMsg?: string
     llmModel: string
   }) => http.put<AiConfigView>('/ai/config', data).then((r) => r.data),
-  /** 重置为默认模板（§4.2.4；2026-10-20 二次改拍：带 mode，只重置该模式） */
+  /** 重置为默认模板（§4.2.4；2026-10-27：只重置该模式的 System Prompt，不动共享 Welcome / Model） */
   resetConfig: (courseId: string, mode: AiMode) =>
     http
       .post<AiConfigView>(`/ai/config/${courseId}/reset`, { mode })

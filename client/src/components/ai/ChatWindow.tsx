@@ -185,7 +185,6 @@ export function ChatWindow() {
   const setMode = useAiStore((s) => s.setMode)
   const newChat = useAiStore((s) => s.newChat)
   const send = useAiStore((s) => s.send)
-  const guard = useUnsavedGuard()
 
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -202,10 +201,12 @@ export function ChatWindow() {
     await send(text)
   }
 
-  /** 切换模式前先过未保存提醒（§4.3.6）：保存成功才切换，取消则丢弃改动后切换 */
-  const onModeChange = async (v: string) => {
-    if (!(await guard())) return
-    await setMode(v as 'LECTURE' | 'SOCRATIC')
+  /**
+   * 切换对话模式（2026-10-27）：只切换提示词注入，不重置当前聊天会话，
+   * 也不触碰左侧配置表单（无需未保存提醒）。
+   */
+  const onModeChange = (v: string) => {
+    setMode(v as 'LECTURE' | 'SOCRATIC')
   }
 
   return (
@@ -220,7 +221,7 @@ export function ChatWindow() {
           <Segmented
             className="ai-mode-segmented"
             value={mode}
-            onChange={(v) => void onModeChange(v as string)}
+            onChange={(v) => onModeChange(v as string)}
             options={[
               { label: 'Lecture', value: 'LECTURE' },
               { label: 'Socratic', value: 'SOCRATIC' },

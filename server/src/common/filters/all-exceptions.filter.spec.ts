@@ -13,8 +13,9 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
   let mockHost: ArgumentsHost;
 
   beforeEach(() => {
-    // 屏蔽测试中的错误日志输出
+    // 屏蔽测试中的错误/警告日志输出
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     mockResponse = {
       status: jest.fn().mockReturnThis(),
       json: jest.fn(),
@@ -64,6 +65,32 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
     expect(mockResponse.status).toHaveBeenCalledWith(404);
     const error = getBody().error as { code: string };
     expect(error.code).toBe('NOT_FOUND');
+  });
+
+  it('4xx 客户端异常应使用 warn 级别日志，不应输出 error（会话过期/越权属正常业务）', () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+    const errorSpy = jest.spyOn(Logger.prototype, 'error');
+    filter.catch(new BadRequestException('参数校验失败'), mockHost);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[400] 参数校验失败'));
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('body-parser entity.too.large 应映射为 400 + VALIDATION_ERROR（不再误报 500）', () => {
+    // Express body-parser 超限错误：普通 Error + type/status，不是 HttpException
+    const payloadError = Object.assign(new Error('request entity too large'), {
+      type: 'entity.too.large',
+      status: 413,
+    });
+    filter.catch(payloadError, mockHost);
+    expect(mockResponse.status).toHaveBeenCalledWith(400);
+    expect(getBody()).toEqual({
+      success: false,
+      data: null,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: '请求内容过大，请拆分文档后重试',
+      },
+    });
   });
 
   it('Prisma P2002 应映射为 409 + CONFLICT 且不泄露 meta', () => {
