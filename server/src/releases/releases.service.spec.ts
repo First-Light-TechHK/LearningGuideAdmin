@@ -9,7 +9,9 @@ import { PrismaService } from '../prisma/prisma.service';
  */
 describe('ReleasesService', () => {
   const mockTx = {
+    $executeRaw: jest.fn(),
     course: { findUnique: jest.fn(), update: jest.fn() },
+    courseAiConfig: { findUnique: jest.fn(), create: jest.fn() },
     release: {
       create: jest.fn(),
       findUnique: jest.fn(),
@@ -62,15 +64,52 @@ describe('ReleasesService', () => {
       ],
     });
     expect(result.revisionNotes).toBe('首发');
-    // 纯快照：不改动 currentReleaseId；但置当前编辑版本指针 = 新 Release（2026-10-20 三次改拍）
+    // 纯快照：不改动 currentReleaseId；但置当前编辑版本指针 = 新 Release（2026-10-20 三次改拍）；
+    // 课程尚无测试 / Live 版本时，首个 Release 同时成为测试所选版本（QA A6）
     expect(mockTx.course.update).toHaveBeenCalledWith({
       where: { id: 'c1' },
-      data: { editingReleaseId: 'r1' },
+      data: { editingReleaseId: 'r1', aiTestReleaseId: 'r1' },
     });
+    expect(mockTx.courseAiConfig.create).not.toHaveBeenCalled();
     // 快照仅收录 SYNCED 节点：事务内查询条件应带 syncState 过滤
     const courseQuery = mockTx.course.findUnique.mock
       .calls[0][0] as Record<string, never>;
     expect(JSON.stringify(courseQuery)).toContain('SYNCED');
+  });
+
+  it('publish：沿用 Live 版本的 AI 配置，且不改动已有测试所选版本（QA A3/A6）', async () => {
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      title: '数学基础',
+      currentReleaseId: 'live',
+      aiTestReleaseId: 'test',
+      pages: [],
+    });
+    mockTx.release.create.mockResolvedValue({ id: 'r9' });
+    const source = { lectureSystemPrompt: 'L', welcomeMsg: 'W', model: 'm', llmProvider: 'openrouter' };
+    mockTx.courseAiConfig.findUnique.mockResolvedValue(source);
+
+    await service.publish('c1', { revisionNotes: 'v2' });
+
+    expect(mockTx.courseAiConfig.findUnique.mock.calls[0][0].where).toEqual({
+      courseId_releaseId: { courseId: 'c1', releaseId: 'live' },
+    });
+    expect(mockTx.courseAiConfig.create).toHaveBeenCalledWith({
+      data: { ...source, courseId: 'c1', releaseId: 'r9' },
+    });
+    expect(mockTx.course.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { editingReleaseId: 'r9' },
+    });
+  });
+
+  it('setLive / remove：校验前先锁 Course 行（QA A7）', async () => {
+    mockTx.course.findUnique.mockResolvedValue({ id: 'c1', currentReleaseId: null, aiTestReleaseId: null });
+    mockTx.release.findUnique.mockResolvedValue({ id: 'r1', courseId: 'c1', versionTag: 'v1' });
+    await service.setLive('c1', { releaseId: 'r1' });
+    expect(mockTx.$executeRaw).toHaveBeenCalledTimes(1);
+    await service.remove('r1');
+    expect(mockTx.$executeRaw).toHaveBeenCalledTimes(2);
   });
 
   it('publish：课程不存在时 404', async () => {
