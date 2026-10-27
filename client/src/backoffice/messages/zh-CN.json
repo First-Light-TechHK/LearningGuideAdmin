@@ -25,7 +25,9 @@
     "close": "关闭",
     "copy": "复制链接",
     "copied": "已复制",
-    "language": "语言"
+    "language": "语言",
+    "retry": "重试",
+    "sessionUnavailable": "暂时无法连接服务器确认登录状态，请检查网络后重试。"
   },
   "nav": {
     "course": "课程",
@@ -233,6 +235,7 @@
     "DUPLICATE_EMAIL": "该员工邮箱已存在。",
     "PASSWORD_TOO_WEAK": "密码未满足最低强度要求。",
     "PASSWORD_MISMATCH": "两次输入的密码不一致。",
+    "PASSWORD_SAME_AS_CURRENT": "新密码不能与当前密码相同。",
     "INTERNAL_ERROR": "系统出现异常，请重试。"
   }
 }

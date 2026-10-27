@@ -25,7 +25,9 @@
     "close": "Close",
     "copy": "Copy link",
     "copied": "Copied",
-    "language": "Language"
+    "language": "Language",
+    "retry": "Try again",
+    "sessionUnavailable": "We could not reach the server to check your session. Please check your connection and try again."
   },
   "nav": {
     "course": "Course",
@@ -233,6 +235,7 @@
     "DUPLICATE_EMAIL": "Employee email already exists.",
     "PASSWORD_TOO_WEAK": "The password does not meet the minimum requirements.",
     "PASSWORD_MISMATCH": "The two passwords do not match.",
+    "PASSWORD_SAME_AS_CURRENT": "The new password must be different from your current password.",
     "INTERNAL_ERROR": "Something went wrong. Please try again."
   }
 }
