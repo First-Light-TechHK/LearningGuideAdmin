@@ -38,7 +38,12 @@ export class ProblemJsonFilter implements ExceptionFilter {
         detail = body;
       }
       if (status === 401)
-        response.setHeader('WWW-Authenticate', 'Bearer realm="helpdesk"');
+        response.setHeader(
+          'WWW-Authenticate',
+          code === 'invalid_token'
+            ? 'Bearer realm="helpdesk", error="invalid_token"'
+            : 'Bearer realm="helpdesk"',
+        );
     }
 
     const message = `Integration request failed [${status}] ${

@@ -71,8 +71,9 @@ export class BackofficeAccessGuard implements CanActivate {
           },
           HttpStatus.SERVICE_UNAVAILABLE,
         );
+      // 与 Portal 集成接口同一个 401 代码（RFC 6750 §3.1 invalid_token）
       throw new UnauthorizedException({
-        code: 'unauthorized',
+        code: 'invalid_token',
         message: 'A valid Bearer token is required',
       });
     }

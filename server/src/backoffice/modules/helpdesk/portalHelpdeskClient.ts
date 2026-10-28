@@ -427,6 +427,10 @@ function mapProblem(
     return unavailable();
   }
   if (status === 404) return new HelpdeskError(404, notFoundCode, 'Not found');
+  // Portal 的 400（invalid_request / validation_failed / idempotency_key_required）
+  // 对员工来说都是「输入有误」：统一成 BackOffice 自己的 INVALID_INPUT。
+  if (status === 400)
+    return new HelpdeskError(400, 'INVALID_INPUT', message.slice(0, 300));
   const fallback =
     status === 409
       ? 'CONFLICT'

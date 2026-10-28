@@ -347,8 +347,10 @@ describe('Common Questions endpoints', () => {
 
     it('rejects a missing token with 401 problem+json', async () => {
       const res = await request(server()).get(path).expect(401);
-      expectProblem(res, 401, 'unauthorized');
-      expect(res.headers['www-authenticate']).toMatch(/^Bearer/);
+      expectProblem(res, 401, 'invalid_token');
+      expect(res.headers['www-authenticate']).toBe(
+        'Bearer realm="helpdesk", error="invalid_token"',
+      );
     });
 
     it('rejects a wrong token with 401, and an employee cookie does not help', async () => {
@@ -357,12 +359,12 @@ describe('Common Questions endpoints', () => {
         .set('Cookie', as('ADMIN'))
         .set('Authorization', 'Bearer wrong-token')
         .expect(401);
-      expectProblem(res, 401, 'unauthorized');
+      expectProblem(res, 401, 'invalid_token');
       const cookieOnly = await request(server())
         .get(path)
         .set('Cookie', as('ADMIN'))
         .expect(401);
-      expectProblem(cookieOnly, 401, 'unauthorized');
+      expectProblem(cookieOnly, 401, 'invalid_token');
     });
 
     it('answers 503 integration_disabled when ADMIN_HELPDESK_TOKEN is empty', async () => {

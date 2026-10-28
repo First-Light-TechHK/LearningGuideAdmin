@@ -284,10 +284,10 @@ export function activeFilterCount(filters: EnquiryFilters): number {
   return [filters.status !== 'all', filters.category !== 'all', filters.tag !== ''].filter(Boolean).length
 }
 
-/** 订阅状态胶囊：Active 绿色（Figma），付款异常琥珀色，其它中性。 */
+/** 订阅状态胶囊：Active 绿色（Figma），付款异常（含 Portal 的 grace 宽限期）琥珀色，其它中性。 */
 export function subscriptionTone(status: string): 'success' | 'warning' | 'neutral' {
   const value = status.trim().toLowerCase()
   if (value === 'active' || value === 'trialing') return 'success'
-  if (value === 'past_due' || value === 'unpaid' || value === 'incomplete') return 'warning'
+  if (value === 'past_due' || value === 'unpaid' || value === 'incomplete' || value === 'grace') return 'warning'
   return 'neutral'
 }

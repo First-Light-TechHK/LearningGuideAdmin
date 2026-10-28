@@ -376,7 +376,8 @@
       "monthly": "Monthly",
       "quarterly": "Quarterly",
       "annual": "Annual",
-      "yearly": "Annual"
+      "yearly": "Annual",
+      "semiannual": "Semi-annual"
     },
     "subscriptionStatus": {
       "active": "Active",
@@ -387,7 +388,9 @@
       "paused": "Paused",
       "cancelled": "Cancelled",
       "canceled": "Cancelled",
-      "expired": "Expired"
+      "expired": "Expired",
+      "cancel_at_period_end": "Cancels at period end",
+      "grace": "Payment grace period"
     },
     "tags": {
       "title": "Tags",
@@ -479,6 +482,7 @@
       "STALE_TICKET": "This enquiry was updated, please check again.",
       "INVALID_TRANSITION": "This action is not allowed in the current state.",
       "IDEMPOTENCY_CONFLICT": "This request clashes with an earlier one. Please reload and try again.",
+      "TAG_LIMIT_REACHED": "An enquiry can have up to 10 tags.",
       "INVALID_INPUT": "Please check what you entered and try again.",
       "NOT_AUTHORISED": "Your role can only view Help Desk.",
       "RATE_LIMITED": "Too many requests. Please wait a moment and try again.",

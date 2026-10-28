@@ -345,7 +345,7 @@ describe('HelpDesk service', () => {
       await createHelpdeskService(portal).reply(
         employee,
         TICKET_ID,
-        { body: 'note', internal: true, expectedSequence: 0 },
+        { body: 'note', internal: true, expectedSequence: 1 },
         KEY,
       );
       expect(portal.postMessage.mock.calls[0][1].internal).toBe(true);

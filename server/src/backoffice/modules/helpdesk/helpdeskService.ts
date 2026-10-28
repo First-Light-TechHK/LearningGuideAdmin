@@ -118,10 +118,11 @@ function idempotencyKey(raw: string | undefined): string {
   return raw.toLowerCase();
 }
 
+/** Portal 的 sequence 从 1 开始（每单至少有 created 事件），0 一定会被 Portal 拒绝。 */
 function expectedSequence(body: Record<string, unknown>): number {
   const value = body.expectedSequence;
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0)
-    throw invalid('expectedSequence must be a non-negative integer');
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1)
+    throw invalid('expectedSequence must be a positive integer');
   return value;
 }
 

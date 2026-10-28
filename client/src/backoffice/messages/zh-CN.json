@@ -376,7 +376,8 @@
       "monthly": "按月",
       "quarterly": "按季",
       "annual": "按年",
-      "yearly": "按年"
+      "yearly": "按年",
+      "semiannual": "按半年"
     },
     "subscriptionStatus": {
       "active": "生效中",
@@ -387,7 +388,9 @@
       "paused": "已暂停",
       "cancelled": "已取消",
       "canceled": "已取消",
-      "expired": "已过期"
+      "expired": "已过期",
+      "cancel_at_period_end": "到期后取消",
+      "grace": "付款宽限期"
     },
     "tags": {
       "title": "标签",
@@ -479,6 +482,7 @@
       "STALE_TICKET": "这条咨询已更新，请重新查看。",
       "INVALID_TRANSITION": "当前状态下不能执行这个操作。",
       "IDEMPOTENCY_CONFLICT": "这次提交与之前的请求冲突，请刷新后重试。",
+      "TAG_LIMIT_REACHED": "每个咨询最多 10 个标签。",
       "INVALID_INPUT": "请检查填写内容后重试。",
       "NOT_AUTHORISED": "你的角色只能查看服务台。",
       "RATE_LIMITED": "请求太频繁，请稍后再试。",

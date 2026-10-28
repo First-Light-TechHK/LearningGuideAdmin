@@ -127,8 +127,8 @@ describe('Helpdesk suggest integration endpoints', () => {
   });
 
   it.each([
-    ['no token', undefined, 401, 'unauthorized'],
-    ['a wrong token', 'Bearer nope', 401, 'unauthorized'],
+    ['no token', undefined, 401, 'invalid_token'],
+    ['a wrong token', 'Bearer nope', 401, 'invalid_token'],
   ])('rejects %s with problem+json', async (_name, header, status, code) => {
     for (const path of [
       '/api/integration/helpdesk/suggest',
@@ -141,6 +141,10 @@ describe('Helpdesk suggest integration endpoints', () => {
         /^application\/problem\+json/,
       );
       expect(res.body).toMatchObject({ status, code });
+      // Same challenge as Portal's integration API (RFC 6750 §3).
+      expect(res.headers['www-authenticate']).toBe(
+        'Bearer realm="helpdesk", error="invalid_token"',
+      );
     }
     expect(service.suggest).not.toHaveBeenCalled();
     expect(service.recordOutcome).not.toHaveBeenCalled();

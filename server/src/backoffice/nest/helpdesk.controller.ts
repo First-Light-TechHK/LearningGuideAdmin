@@ -36,6 +36,13 @@ const EXTENSIONS: Record<string, string> = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
 };
 
+/** Portal 只放行干净的 UTF-8 文本（txt / csv），转发时保留 charset，免得下载后乱码。 */
+export function attachmentContentType(contentType: string): string {
+  return contentType.startsWith('text/')
+    ? `${contentType}; charset=utf-8`
+    : contentType;
+}
+
 /** 图片 inline；其它 attachment，带 ASCII 兜底名与 RFC 5987 filename*。 */
 export function contentDisposition(
   contentType: string,
@@ -121,7 +128,7 @@ export class BackofficeHelpdeskController {
     @Res() response: Response,
   ): Promise<void> {
     const file = await run(() => this.helpdesk.attachment(attachmentId));
-    response.setHeader('Content-Type', file.contentType);
+    response.setHeader('Content-Type', attachmentContentType(file.contentType));
     response.setHeader('Content-Length', String(file.data.length));
     response.setHeader(
       'Content-Disposition',
