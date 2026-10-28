@@ -116,6 +116,13 @@ describe('Common Questions: create', () => {
     ['keyword not text', { keywords: [3] }],
     ['featured not boolean', { featured: 'yes' }],
     ['publish not boolean', { publish: 1 }],
+    // PostgreSQL TEXT rejects U+0000 (SQLSTATE 22021): must be 400, never 500
+    ['NUL in the question', { question: 'a\u0000b' }],
+    ['NUL in the answer', { answer: 'a\u0000b' }],
+    ['a control character in the answer', { answer: 'a\u0007b' }],
+    ['DEL in the question', { question: 'a\u007fb' }],
+    ['NUL in a keyword', { keywords: ['a\u0000b'] }],
+    ['a control character in a keyword', { keywords: ['a\u001bb'] }],
   ])('rejects %s with 400 INVALID_INPUT', async (_name, patch) => {
     const { repository, service } = setup();
     const error = await rejection(
@@ -123,6 +130,30 @@ describe('Common Questions: create', () => {
     );
     expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
     expect(repository.rows.size).toBe(0);
+  });
+
+  it('keeps line breaks and tabs in the answer', async () => {
+    const { service } = setup();
+    await expect(
+      service.create(employee, {
+        ...validInput,
+        answer: 'Step 1\tOpen\r\nStep 2',
+      }),
+    ).resolves.toMatchObject({ answer: 'Step 1\tOpen\nStep 2' });
+  });
+
+  it('rejects control characters on update too, before touching the row', async () => {
+    const existing = question();
+    const { repository, service } = setup([existing]);
+    const error = await rejection(
+      service.update(employee, existing.id, {
+        ...validInput,
+        version: 1,
+        question: 'x\u0000',
+      }),
+    );
+    expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+    expect(repository.rows.get(existing.id)?.version).toBe(1);
   });
 
   it('accepts exactly 200 / 4000 characters', async () => {
@@ -366,9 +397,7 @@ describe('Common Questions: list, counters and revisions', () => {
     const { service } = setup([draft, live]);
     for (const key of ['locale', 'category', 'status', 'q']) {
       for (const value of [['a', 'b'], ['en-GB', 'zh-CN'], { x: '1' }, 5]) {
-        const error = await rejection(
-          service.list({ [key]: value } as unknown as Record<string, string>),
-        );
+        const error = await rejection(service.list({ [key]: value }));
         expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
       }
     }

@@ -323,6 +323,10 @@ describe('Helpdesk suggest: input', () => {
     ['a long message', { message: 'm'.repeat(5001) }],
     ['no text at all', { subject: ' ', message: ' ' }],
     ['a non-string message', { message: 5 }],
+    // query_text is PostgreSQL TEXT (no U+0000): refuse before the model call
+    ['NUL in the message', { message: 'a\u0000b' }],
+    ['NUL in the subject', { subject: 'a\u0000b' }],
+    ['a control character in the message', { message: 'a\u0008b' }],
   ])('rejects %s with 400 invalid_request', async (_name, patch) => {
     const { service, findCandidates } = setup();
     const error = await service
@@ -330,6 +334,16 @@ describe('Helpdesk suggest: input', () => {
       .catch((e: unknown) => e);
     expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
     expect(findCandidates).not.toHaveBeenCalled();
+  });
+
+  it('keeps line breaks and tabs in the learner text', async () => {
+    const { service, findCandidates } = setup();
+    await service.suggest({ ...input, message: 'line 1\r\n\tline 2' });
+    expect(findCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: `${input.subject}\n\nline 1\r\n\tline 2`,
+      }),
+    );
   });
 
   it('accepts the maximum lengths', async () => {

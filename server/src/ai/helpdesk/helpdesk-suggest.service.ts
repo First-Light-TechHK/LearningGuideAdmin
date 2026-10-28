@@ -104,10 +104,15 @@ function record(raw: unknown): Record<string, unknown> {
     : {};
 }
 
+/** 控制字符（保留 \t \n \r）：query_text 是 PostgreSQL TEXT，不收 U+0000。 */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+
 function optionalText(body: Record<string, unknown>, key: string, max: number) {
   const value = body[key];
   if (value === undefined || value === null) return '';
   if (typeof value !== 'string') throw invalid(`${key} must be text`);
+  if (CONTROL.test(value)) throw invalid(`${key} has invalid characters`);
   const trimmed = value.trim();
   if (trimmed.length > max)
     throw invalid(`${key} must be at most ${max} characters`);

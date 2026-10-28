@@ -99,8 +99,16 @@ function optionalBoolean(
   return value;
 }
 
+/**
+ * 控制字符（保留 \t \n \r）：PostgreSQL TEXT 不收 U+0000（SQLSTATE 22021），
+ * 不先拦住就是 500；其它不可见控制字符也没有正当用途。
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+
 function text(value: unknown, name: string, max: number): string {
   if (typeof value !== 'string') throw invalid(`${name} is required`);
+  if (CONTROL.test(value)) throw invalid(`${name} has invalid characters`);
   const normalised = value.replace(/\r\n?/g, '\n').trim();
   if (normalised.length < 1 || normalised.length > max)
     throw invalid(`${name} must be 1-${max} characters`);
@@ -113,6 +121,7 @@ function keywords(value: unknown): string[] {
   const out: string[] = [];
   for (const item of value) {
     if (typeof item !== 'string') throw invalid('keywords must be text');
+    if (CONTROL.test(item)) throw invalid('keywords have invalid characters');
     const keyword = item.trim().replace(/\s+/g, ' ').toLowerCase();
     if (keyword === '') continue;
     if (keyword.length > QUESTION_LIMITS.keywordMax)
@@ -248,9 +257,7 @@ export function createQuestionService(
   }
 
   return {
-    async list(
-      raw: QuestionListQuery,
-    ): Promise<{ questions: QuestionView[] }> {
+    async list(raw: QuestionListQuery): Promise<{ questions: QuestionView[] }> {
       const input = queryText(raw, ['locale', 'category', 'status', 'q']);
       if (input.locale && !isHelpdeskLocale(input.locale))
         throw invalid('Unknown locale');
