@@ -33,10 +33,10 @@ describe('HelpDesk messages', () => {
   test('Figma 1324:2 wording (en-GB)', () => {
     const h = enGB.helpDesk as Record<string, unknown>
     assert.equal(get(h, 'title'), 'Help Desk')
-    assert.equal(get(h, 'subtitle'), 'Manage student enquiries and common questions')
-    assert.equal(get(h, 'addQuestion'), 'Add Question')
+    assert.equal(get(h, 'subtitle'), 'Manage student enquiries and FAQs')
+    assert.equal(get(h, 'addFaq'), 'Add FAQ')
     assert.equal(get(h, 'tabs.enquiries'), 'Enquiries')
-    assert.equal(get(h, 'tabs.questions'), 'Common Questions')
+    assert.equal(get(h, 'tabs.faqs'), 'FAQs')
     assert.equal(get(h, 'searchPlaceholder'), 'Search students or enquiries...')
     assert.equal(get(h, 'markReviewed'), 'Mark as reviewed')
     assert.equal(get(h, 'student.title'), 'Student Information')
@@ -53,6 +53,62 @@ describe('HelpDesk messages', () => {
     assert.equal(get(h, 'subscription.renewalDate'), 'Renewal Date')
     assert.equal(get(h, 'tags.title'), 'Tags')
     assert.equal(get(h, 'tags.add'), 'Add Tag')
+    // v2 middle column: the four action-bar buttons and the AI blocks
+    assert.equal(get(h, 'actions.emailStudent'), 'Email student')
+    assert.equal(get(h, 'actions.internalNotes'), 'Internal notes')
+    assert.equal(get(h, 'actions.flag'), 'Flag follow-up')
+    assert.equal(get(h, 'ai.title'), 'AI Support Assistant')
+    assert.equal(get(h, 'ai.tag'), 'AI-generated')
+    assert.equal(get(h, 'ai.helpful'), 'Student feedback: Yes, this solved my issue')
+    assert.equal(get(h, 'ai.notHelpful'), 'Student feedback: No, I still submit to support team')
+  })
+
+  test('Figma 1379:2 / 1379:299 wording (en-GB)', () => {
+    const h = enGB.helpDesk as Record<string, unknown>
+    assert.equal(get(h, 'faqs.search'), 'Search questions, answers or keywords...')
+    assert.equal(get(h, 'faqs.allCategories'), 'All categories')
+    assert.equal(get(h, 'faqs.popularFilter.all'), 'All FAQs')
+    assert.equal(get(h, 'faqs.count'), '{count} FAQs')
+    assert.equal(get(h, 'faqs.columns.question'), 'Question / Answer')
+    assert.equal(get(h, 'faqs.columns.category'), 'Category')
+    assert.equal(get(h, 'faqs.columns.popular'), 'Popular')
+    assert.equal(get(h, 'faqs.columns.updated'), 'Last Updated')
+    assert.equal(get(h, 'faqs.columns.action'), 'Action')
+    assert.equal(get(h, 'faqs.showing'), 'Showing {from}–{to} of {total} FAQs')
+    assert.equal(get(h, 'drawer.editTitle'), 'Edit FAQ')
+    assert.equal(get(h, 'drawer.subtitle'), 'Changes update the FAQ shown in Help Centre and used by AI Support.')
+    assert.equal(get(h, 'drawer.popular'), 'Popular FAQ')
+    assert.equal(get(h, 'drawer.questionEn'), 'Question (English)')
+    assert.equal(get(h, 'drawer.answerEn'), 'Answer (English)')
+    assert.equal(get(h, 'drawer.questionZh'), 'Question (Chinese)')
+    assert.equal(get(h, 'drawer.answerZh'), 'Answer (Chinese)')
+    assert.equal(get(h, 'drawer.keywords'), 'Keywords (for search & AI)')
+    assert.equal(get(h, 'drawer.save'), 'Save FAQ')
+  })
+
+  test('owner-approved zh-CN wording', () => {
+    const z = zhCN.helpDesk as Record<string, unknown>
+    assert.equal(get(z, 'tabs.enquiries'), '工单')
+    assert.equal(get(z, 'tabs.faqs'), '常见问题')
+    assert.equal(get(z, 'addFaq'), '新增常见问题')
+    assert.equal(get(z, 'claim'), '接单')
+    assert.equal(get(z, 'ai.helpful'), '学生反馈：已解决')
+    assert.equal(get(z, 'ai.notHelpful'), '学生反馈：仍提交给客服')
+  })
+
+  test('the four FAQ categories (v2 §1 labels)', () => {
+    assert.deepEqual(get(enGB, 'helpDesk.faqCategory'), {
+      account_technical: 'Account & Technical Support',
+      courses_learning: 'Courses & Learning',
+      payments_subscriptions: 'Payments & Subscriptions',
+      other: 'Other Enquiries',
+    })
+    assert.deepEqual(get(zhCN, 'helpDesk.faqCategory'), {
+      account_technical: '账户与技术支持',
+      courses_learning: '课程与学习',
+      payments_subscriptions: '付款与订阅',
+      other: '其他问题',
+    })
   })
 
   test('the four Enquiry Types replace the old categories', () => {
@@ -80,7 +136,8 @@ describe('HelpDesk messages', () => {
       'NOT_AUTHORISED',
       'RATE_LIMITED',
       'VERSION_CONFLICT',
-      'QUESTION_NOT_FOUND',
+      'FAQ_NOT_FOUND',
+      'IDEMPOTENCY_KEY_REUSED',
       'generic',
     ]) {
       assert.equal(typeof get(enGB, `helpDesk.errors.${code}`), 'string', code)
@@ -98,25 +155,32 @@ describe('HelpDesk messages', () => {
         'needsReply',
         'unassigned',
         'assignedTo',
-        // the Common Questions table has no Featured column (featured is a tag in the status cell)
-        'questions.columns.featured',
+        // v1 Common Questions is replaced by FAQs (v2 §1)
+        'addQuestion',
+        'tabs.questions',
+        'questions',
+        'modal',
+        'errors.QUESTION_NOT_FOUND',
       ]) {
         assert.equal(get(h, key), undefined, key)
       }
       assert.equal(typeof get(h, 'filters.needsReply'), 'string')
-      assert.equal(typeof get(h, 'questions.featured'), 'string')
     }
   })
 
-  test('"Question saved." is what + Add Question / Save confirms with', () => {
-    assert.equal(get(enGB, 'helpDesk.questions.saved'), 'Question saved.')
-    assert.match(read('backoffice/pages/HelpDeskPage.tsx'), /'helpDesk\.questions\.saved'/)
+  test('"FAQ saved." is what + Add FAQ / Save FAQ confirms with', () => {
+    assert.equal(get(enGB, 'helpDesk.faqs.saved'), 'FAQ saved.')
+    assert.match(read('backoffice/pages/HelpDeskPage.tsx'), /'helpDesk\.faqs\.saved'/)
   })
 })
 
 describe('HelpDesk wiring', () => {
-  test('the card board and the separate ticket page are removed', () => {
+  test('the card board, the separate ticket page and the v1 Common Questions UI are removed', () => {
     assert.equal(existsSync(new URL('backoffice/pages/HelpDeskTicketPage.tsx', root)), false)
+    for (const file of ['backoffice/helpdesk/QuestionsView.tsx', 'backoffice/helpdesk/QuestionModal.tsx', 'backoffice/lib/helpdeskQuestions.ts']) {
+      assert.equal(existsSync(new URL(file, root)), false, file)
+    }
+    assert.doesNotMatch(read('backoffice/lib/helpdeskApi.ts'), /\/api\/helpdesk\/questions/)
     const app = read('App.tsx')
     assert.doesNotMatch(app, /HelpDeskTicketPage/)
   })
@@ -137,7 +201,8 @@ describe('HelpDesk wiring', () => {
       'backoffice/pages/HelpDeskPage.tsx',
       'backoffice/lib/helpdeskApi.ts',
       'backoffice/lib/helpdeskView.ts',
-      'backoffice/lib/helpdeskQuestions.ts',
+      'backoffice/lib/helpdeskFaqs.ts',
+      'backoffice/lib/helpdeskMarkdown.ts',
     ].map(read)
     for (const source of sources) assert.doesNotMatch(source, /analytics|gtag|track\(|sendBeacon|traceparent/i)
   })

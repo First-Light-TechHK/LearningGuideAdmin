@@ -148,6 +148,15 @@ describe('EnquiryList rows', () => {
     assert.ok(screen.getByRole('searchbox', { name: '搜索学员或咨询...' }))
   })
 
+  test('a flagged row shows the flag icon; others do not (v2 §3d)', () => {
+    renderList({ rows: [row('a', { subject: 'Flagged one', flagged: true }), row('b', { subject: 'Plain one' })] })
+    assert.ok(within(rowButton('Flagged one')).getByRole('img', { name: 'Flagged for follow-up' }))
+    absent(within(rowButton('Plain one')).queryByRole('img', { name: 'Flagged for follow-up' }))
+    cleanup()
+    renderList({ locale: 'zh-CN', rows: [row('a', { subject: 'Flagged one', flagged: true })] })
+    assert.ok(within(rowButton('Flagged one')).getByRole('img', { name: '已标记跟进' }))
+  })
+
   test('the selected row is marked current and clicking a row selects it', () => {
     const { onSelect } = renderList({ rows: [row('a'), row('b')], selectedId: 'b' })
     assert.equal(rowButton('Subject b').getAttribute('aria-current'), 'true')
@@ -249,12 +258,30 @@ describe('EnquiryList search and filters', () => {
     assert.deepEqual(onFiltersChange.calls.at(-1), [{ tag: 'all' }])
   })
 
-  test('Clear filters resets status, type and tag; Close hides the panel', () => {
-    const { onFiltersChange } = renderList({ filters: { status: 'OPEN', category: 'other', tag: 'vip' } })
+  test('Flagged (v2 §3d) is a checkbox in the filter panel and counts as an active filter', () => {
+    const { onFiltersChange } = renderList()
+    fireEvent.click(screen.getByRole('button', { name: 'Filter enquiries' }))
+    const flagged = screen.getByRole('checkbox', { name: 'Flagged' }) as HTMLInputElement
+    assert.equal(flagged.checked, false)
+    fireEvent.click(flagged)
+    assert.deepEqual(onFiltersChange.calls, [[{ flagged: true }]])
+    cleanup()
+    const second = renderList({ filters: { flagged: true } })
+    const button = screen.getByRole('button', { name: /Filter enquiries/ })
+    assert.equal(within(button).getByText('1').className, 'hdFilterCount')
+    fireEvent.click(button)
+    const checked = screen.getByRole('checkbox', { name: 'Flagged' }) as HTMLInputElement
+    assert.equal(checked.checked, true)
+    fireEvent.click(checked)
+    assert.deepEqual(second.onFiltersChange.calls, [[{ flagged: false }]])
+  })
+
+  test('Clear filters resets status, type, tag and flagged; Close hides the panel', () => {
+    const { onFiltersChange } = renderList({ filters: { status: 'OPEN', category: 'other', tag: 'vip', flagged: true } })
     fireEvent.click(screen.getByRole('button', { name: /Filter enquiries/ }))
     assert.equal((screen.getByLabelText('Tag') as HTMLInputElement).value, 'vip')
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    assert.deepEqual(onFiltersChange.calls, [[{ status: 'all', category: 'all', tag: '' }]])
+    assert.deepEqual(onFiltersChange.calls, [[{ status: 'all', category: 'all', tag: '', flagged: false }]])
     assert.equal((screen.getByLabelText('Tag') as HTMLInputElement).value, '')
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     absent(screen.queryByRole('dialog'))
@@ -267,6 +294,7 @@ describe('EnquiryList search and filters', () => {
     assert.equal(status.options[0].textContent, '全部')
     assert.equal(status.options[1].textContent, '待回复')
     assert.ok(screen.getByLabelText('咨询类型'))
+    assert.ok(screen.getByRole('checkbox', { name: '已标记跟进' }))
     assert.ok(screen.getByRole('button', { name: '清除筛选' }))
     assert.ok(screen.getByText('还没有咨询。'))
   })

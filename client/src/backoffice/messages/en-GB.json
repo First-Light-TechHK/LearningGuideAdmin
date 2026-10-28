@@ -473,14 +473,13 @@
   },
   "helpDesk": {
     "title": "Help Desk",
-    "subtitle": "Manage student enquiries and common questions",
-    "addQuestion": "Add Question",
+    "subtitle": "Manage student enquiries and FAQs",
     "readOnly": "Your role can view Help Desk but cannot reply or change anything.",
     "notConnectedTitle": "HelpDesk is not connected yet",
     "notConnectedBody": "The Portal HelpDesk integration is not configured for this environment yet. Please ask an administrator to connect it.",
     "tabs": {
       "enquiries": "Enquiries",
-      "questions": "Common Questions"
+      "faqs": "FAQs"
     },
     "searchPlaceholder": "Search students or enquiries...",
     "filter": "Filter enquiries",
@@ -491,13 +490,15 @@
       "tagPlaceholder": "Any tag",
       "any": "All",
       "needsReply": "Needs reply",
-      "clear": "Clear filters"
+      "clear": "Clear filters",
+      "flagged": "Flagged"
     },
     "list": {
       "empty": "No enquiries yet.",
       "emptyFiltered": "No enquiries match your search or filters.",
       "loadingMore": "Loading more…",
-      "unread": "Unread"
+      "unread": "Unread",
+      "flagged": "Flagged for follow-up"
     },
     "selectPrompt": "Select an enquiry to see the conversation.",
     "today": "Today",
@@ -591,74 +592,6 @@
       "en-GB": "English (UK)",
       "zh-CN": "Chinese (Simplified)"
     },
-    "questions": {
-      "search": "Search questions",
-      "allLocales": "All languages",
-      "allCategories": "All enquiry types",
-      "statusFilter": {
-        "active": "Draft & published",
-        "all": "All, including archived",
-        "draft": "Draft",
-        "published": "Published",
-        "archived": "Archived"
-      },
-      "status": {
-        "draft": "Draft",
-        "published": "Published",
-        "archived": "Archived"
-      },
-      "columns": {
-        "order": "Order",
-        "question": "Question",
-        "locale": "Language",
-        "category": "Enquiry Type",
-        "status": "Status",
-        "stats": "Shown / Solved / Declined",
-        "updated": "Updated",
-        "actions": "Actions"
-      },
-      "featured": "Featured",
-      "statsTitle": "Suggested {shown} times · solved {solved} · declined {declined}",
-      "actions": {
-        "edit": "Edit",
-        "publish": "Publish",
-        "republish": "Publish again",
-        "unpublish": "Unpublish",
-        "archive": "Archive",
-        "moveUp": "Move up",
-        "moveDown": "Move down"
-      },
-      "archiveConfirm": "Archive this question? It will no longer be shown or suggested to learners.",
-      "reorderHint": "To change the order, choose one language and clear the other filters.",
-      "empty": "No common questions yet.",
-      "emptyFiltered": "No questions match these filters.",
-      "saved": "Question saved.",
-      "published": "Question published.",
-      "unpublished": "Question moved back to draft.",
-      "archived": "Question archived.",
-      "reordered": "Order saved."
-    },
-    "modal": {
-      "createTitle": "Add Question",
-      "editTitle": "Edit Question",
-      "subtitle": "Published questions appear on the Contact Support page and can be suggested to learners.",
-      "locale": "Language",
-      "category": "Enquiry Type",
-      "categoryPlaceholder": "Select a topic",
-      "question": "Question",
-      "answer": "Answer",
-      "answerHint": "Plain text. Line breaks are kept and links become clickable for learners.",
-      "keywords": "Keywords",
-      "keywordsPlaceholder": "Type a keyword and press Enter",
-      "keywordsHint": "Helps match learner enquiries. Up to 20.",
-      "featured": "Show on the Contact Support page",
-      "publish": "Publish now",
-      "save": "Save",
-      "saving": "Saving…",
-      "required": "Required",
-      "tooLong": "Too long",
-      "tooMany": "Up to 20 keywords"
-    },
     "errors": {
       "HELPDESK_NOT_CONNECTED": "HelpDesk is not connected yet.",
       "HELPDESK_UNAVAILABLE": "HelpDesk is unavailable right now. Please try again.",
@@ -670,9 +603,132 @@
       "INVALID_INPUT": "Please check what you entered and try again.",
       "NOT_AUTHORISED": "Your role can only view Help Desk.",
       "RATE_LIMITED": "Too many requests. Please wait a moment and try again.",
-      "VERSION_CONFLICT": "Someone else changed this question. The list has been reloaded, please try again.",
-      "QUESTION_NOT_FOUND": "This question no longer exists.",
-      "generic": "Something went wrong. Please try again."
+      "VERSION_CONFLICT": "Someone else changed this FAQ. Please reload and try again.",
+      "generic": "Something went wrong. Please try again.",
+      "FAQ_NOT_FOUND": "This FAQ no longer exists.",
+      "IDEMPOTENCY_KEY_REUSED": "This save clashes with an earlier one. Please try again."
+    },
+    "addFaq": "Add FAQ",
+    "actions": {
+      "label": "Actions",
+      "emailStudent": "Email student",
+      "emailHint": "Reply to the student. The reply is saved here and emailed to {email}.",
+      "internalNotes": "Internal notes",
+      "internalNotesHint": "Staff-only notes on this enquiry. Students never see them.",
+      "flag": "Flag follow-up",
+      "flagHint": "Flag this enquiry to follow up later.",
+      "unflagHint": "Flagged for follow-up. Click to remove the flag.",
+      "unavailable": "Not available for this enquiry right now."
+    },
+    "flaggedNotice": "Flagged for follow-up.",
+    "unflaggedNotice": "Flag removed.",
+    "notes": {
+      "title": "Internal notes",
+      "empty": "No internal notes yet."
+    },
+    "timeline": {
+      "label": "Enquiries from {name}",
+      "openCard": "Open this enquiry"
+    },
+    "ai": {
+      "title": "AI Support Assistant",
+      "tag": "AI-generated",
+      "helpful": "Student feedback: Yes, this solved my issue",
+      "notHelpful": "Student feedback: No, I still submit to support team",
+      "noAnswer": "No FAQ matched, so the assistant showed no answer."
+    },
+    "faqCategory": {
+      "account_technical": "Account & Technical Support",
+      "courses_learning": "Courses & Learning",
+      "payments_subscriptions": "Payments & Subscriptions",
+      "other": "Other Enquiries"
+    },
+    "faqs": {
+      "search": "Search questions, answers or keywords...",
+      "allCategories": "All categories",
+      "popularFilter": {
+        "all": "All FAQs",
+        "popular": "Popular",
+        "not_popular": "Not popular"
+      },
+      "countOne": "1 FAQ",
+      "count": "{count} FAQs",
+      "columns": {
+        "question": "Question / Answer",
+        "category": "Category",
+        "popular": "Popular",
+        "updated": "Last Updated",
+        "action": "Action"
+      },
+      "yes": "Yes",
+      "no": "No",
+      "edit": "Edit",
+      "preview": "Preview",
+      "editLabel": "Edit {question}",
+      "previewLabel": "Preview {question}",
+      "showing": "Showing {from}–{to} of {total} FAQs",
+      "pagination": "FAQ pages",
+      "page": "Page {page}",
+      "previous": "Previous page",
+      "next": "Next page",
+      "empty": "No FAQs yet.",
+      "emptyFiltered": "No FAQs match your search or filters.",
+      "saved": "FAQ saved.",
+      "deleted": "FAQ deleted."
+    },
+    "drawer": {
+      "addTitle": "Add FAQ",
+      "editTitle": "Edit FAQ",
+      "subtitle": "Changes update the FAQ shown in Help Centre and used by AI Support.",
+      "close": "Close",
+      "category": "Category",
+      "categoryPlaceholder": "Select a category",
+      "popular": "Popular FAQ",
+      "questionEn": "Question (English)",
+      "answerEn": "Answer (English)",
+      "questionZh": "Question (Chinese)",
+      "answerZh": "Answer (Chinese)",
+      "keywords": "Keywords (for search & AI)",
+      "keywordsPlaceholder": "password, reset, login",
+      "toolbar": {
+        "label": "Formatting",
+        "bold": "Bold",
+        "ordered": "Numbered list",
+        "bullet": "Bulleted list",
+        "link": "Link"
+      },
+      "link": {
+        "url": "Link address",
+        "placeholder": "https://… or mailto:…",
+        "insert": "Insert link",
+        "cancel": "Cancel",
+        "invalid": "Use an address that starts with https://, http:// or mailto:"
+      },
+      "cancel": "Cancel",
+      "save": "Save FAQ",
+      "saving": "Saving…",
+      "delete": "Delete FAQ",
+      "deleteConfirm": "Delete this FAQ? It will no longer appear in Help Centre or in AI Support answers.",
+      "deleteYes": "Delete",
+      "deleteNo": "Keep",
+      "discardTitle": "Discard unsaved changes?",
+      "discardYes": "Discard",
+      "discardNo": "Keep editing",
+      "conflict": "Someone else changed this FAQ. The latest version is loaded and your changes are kept. Save again to overwrite it.",
+      "errors": {
+        "required": "Required",
+        "tooLong": "Too long (up to {max} characters)",
+        "tooMany": "Up to 20 keywords",
+        "keywordTooLong": "Each keyword can be up to 40 characters",
+        "unsafeLink": "Links must start with https://, http:// or mailto:"
+      }
+    },
+    "preview": {
+      "title": "Preview FAQ",
+      "hint": "As shown in Help Centre",
+      "languages": "Preview language",
+      "en": "EN",
+      "zh": "中文"
     }
   }
 }

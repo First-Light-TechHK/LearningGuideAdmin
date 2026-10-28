@@ -1,6 +1,7 @@
 /**
- * HelpDesk（设计文档 §4A / §5.4，Figma 1324:2）：BackOffice Server `/api/helpdesk/**` 返回的形状，
- * 与 server/src/backoffice/modules/helpdesk/contracts.ts、questions/questionContracts.ts 保持一致。
+ * HelpDesk（设计文档 §4A / §5.4，Figma 1324:2 / 1379:2 / 1379:299；Tickets v2）：BackOffice Server
+ * `/api/helpdesk/**` 返回的形状，与 server/src/backoffice/modules/helpdesk/contracts.ts、
+ * faqs/faqContracts.ts 保持一致。
  */
 export const TICKET_STATUSES = [
   "OPEN",
@@ -13,7 +14,7 @@ export const TICKET_STATUSES = [
 
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
-/** Enquiry Type（Figma 1216:6），工单与 Common Questions 共用。 */
+/** 工单的 Enquiry Type（Figma 1216:6）。 */
 export const HELPDESK_CATEGORIES = [
   "technical_support",
   "course_content",
@@ -32,6 +33,18 @@ export type ListStatusFilter = (typeof LIST_STATUS_FILTERS)[number];
 export type AuthorKind = "learner" | "agent" | "system";
 
 export type Agent = { id: string; name: string };
+
+export type AvailableActions = {
+  claim: boolean;
+  reply: boolean;
+  internalNote: boolean;
+  /** Figma「Mark as reviewed」。 */
+  proposeResolution: boolean;
+  tag: boolean;
+  markRead: boolean;
+  /** Figma「Flag follow-up」（v2：任何状态都可用）。 */
+  flag: boolean;
+};
 
 export type EnquiryRow = {
   id: string;
@@ -57,6 +70,10 @@ export type EnquiryRow = {
   closedAt?: string | null;
   closeReason?: string | null;
   rating?: number | null;
+  /** v2：员工标了「Flag follow-up」。 */
+  flagged: boolean;
+  /** 每一行都带可用操作：学员时间线上的每张卡片都有操作栏。 */
+  available: AvailableActions;
 };
 
 export type TicketAttachment = {
@@ -109,14 +126,20 @@ export type TicketSubscription = {
   renewalDate: string | null;
 };
 
-export type AvailableActions = {
-  claim: boolean;
-  reply: boolean;
-  internalNote: boolean;
-  /** Figma「Mark as reviewed」。 */
-  proposeResolution: boolean;
-  tag: boolean;
-  markRead: boolean;
+/** AI 助手回答的学员反馈（v2 §4a）；没有反馈为 null。 */
+export const ASSIST_FEEDBACK = ["helpful", "not_helpful", "solved", "declined", "edited"] as const;
+export type AssistFeedback = (typeof ASSIST_FEEDBACK)[number];
+
+/** 工单关联的 AI 助手回答（v2 §4a aiAssist，旧的在前）；answer 是当时展示给学员的原文。 */
+export type TicketAiAssist = {
+  id: string;
+  source: string;
+  question: string;
+  faqId: string | null;
+  faqQuestion: string | null;
+  answer: string | null;
+  feedback: AssistFeedback | null;
+  createdAt: string;
 };
 
 export type EnquiryDetail = EnquiryRow & {
@@ -124,7 +147,7 @@ export type EnquiryDetail = EnquiryRow & {
   subscription: TicketSubscription | null;
   messages: TicketMessage[];
   events: TicketEvent[];
-  available: AvailableActions;
+  aiAssist: TicketAiAssist[];
 };
 
 export type EnquiryCounts = Record<TicketStatus, number> & { needsReply: number; all: number };
@@ -136,7 +159,7 @@ export type EnquiryList = {
 };
 
 export type AgentActionInput =
-  | { action: "claim" | "propose_resolution"; expectedSequence: number }
+  | { action: "claim" | "propose_resolution" | "flag" | "unflag"; expectedSequence: number }
   | { action: "add_tag" | "remove_tag"; tag: string; expectedSequence: number }
   | { action: "mark_read"; expectedSequence?: number };
 
@@ -148,40 +171,41 @@ export const TAGS_PER_TICKET_MAX = 10;
 export const SEARCH_MAX = 120;
 export const PAGE_SIZE = 30;
 
-/* ------------------------------ Common Questions ------------------------------ */
+/** 学员时间线：选中工单的学员最多 10 条工单（新的在前）。 */
+export const TIMELINE_LIMIT = 10;
 
-export const QUESTION_STATUSES = ["draft", "published", "archived"] as const;
-export type QuestionStatus = (typeof QUESTION_STATUSES)[number];
+/* ----------------------------------- FAQs ----------------------------------- */
 
-export type QuestionStats = { shown: number; solved: number; declined: number };
+/** FAQ 分类（Figma 1379:2 / 1387:2；v2 §1）。 */
+export const FAQ_CATEGORIES = ["account_technical", "courses_learning", "payments_subscriptions", "other"] as const;
+export type FaqCategory = (typeof FAQ_CATEGORIES)[number];
 
-export type HelpdeskQuestion = {
+/** 一条中英双语 FAQ（保存即发布；删除 = 归档，列表里看不到）。 */
+export type HelpdeskFaq = {
   id: string;
-  locale: HelpdeskLocale;
-  category: HelpdeskCategory;
-  question: string;
-  answer: string;
+  category: FaqCategory;
+  popular: boolean;
+  questionEn: string;
+  answerEn: string;
+  questionZh: string;
+  answerZh: string;
   keywords: string[];
-  status: QuestionStatus;
-  featured: boolean;
-  sortOrder: number;
+  status: "published" | "archived";
   version: number;
   createdBy: string | null;
   updatedBy: string | null;
   createdAt: string;
   updatedAt: string;
-  stats: QuestionStats;
 };
 
-export type QuestionFields = {
-  locale: HelpdeskLocale;
-  category: HelpdeskCategory;
-  question: string;
-  answer: string;
+export type FaqPage = { faqs: HelpdeskFaq[]; total: number; page: number; pageSize: number };
+
+export type FaqBody = {
+  category: FaqCategory;
+  popular: boolean;
+  questionEn: string;
+  answerEn: string;
+  questionZh: string;
+  answerZh: string;
   keywords: string[];
-  featured: boolean;
 };
-
-export type QuestionCreateBody = QuestionFields & { publish: boolean };
-export type QuestionUpdateBody = QuestionFields & { version: number };
-export type QuestionTransition = "publish" | "unpublish" | "archive";

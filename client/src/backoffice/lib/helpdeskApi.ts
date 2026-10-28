@@ -1,13 +1,13 @@
-import type {
-  AgentActionInput,
-  EnquiryDetail,
-  EnquiryList,
-  HelpdeskQuestion,
-  QuestionCreateBody,
-  QuestionTransition,
-  QuestionUpdateBody,
+import {
+  TIMELINE_LIMIT,
+  type AgentActionInput,
+  type EnquiryDetail,
+  type EnquiryList,
+  type FaqBody,
+  type FaqPage,
+  type HelpdeskFaq,
 } from '../contracts/helpdesk'
-import { questionQuery, type QuestionFilters } from './helpdeskQuestions'
+import { faqQuery, type FaqFilters } from './helpdeskFaqs'
 import { enquiryQuery, type EnquiryFilters } from './helpdeskView'
 import { notifySessionChanged } from './navigation'
 
@@ -43,12 +43,18 @@ function sendJson<T>(method: 'POST' | 'PUT', url: string, body: unknown, idempot
 }
 
 const ticketPath = (ticketId: string) => `/api/helpdesk/tickets/${encodeURIComponent(ticketId)}`
-const questionPath = (questionId: string) => `/api/helpdesk/questions/${encodeURIComponent(questionId)}`
+const faqPath = (faqId: string) => `/api/helpdesk/faqs/${encodeURIComponent(faqId)}`
 
 /* ---------------------------------- Enquiries ---------------------------------- */
 
 export function listEnquiries(filters: EnquiryFilters, cursor?: string | null) {
   return request<EnquiryList>(`/api/helpdesk/tickets?${enquiryQuery(filters, cursor)}`)
+}
+
+/** 学员时间线（Figma 1324:2 中栏）：这个学员最多 10 条工单，新的在前。 */
+export function listTimeline(learnerId: string) {
+  const query = new URLSearchParams({ learnerId, limit: String(TIMELINE_LIMIT) })
+  return request<EnquiryList>(`/api/helpdesk/tickets?${query.toString()}`)
 }
 
 export function getEnquiry(ticketId: string) {
@@ -63,7 +69,7 @@ export function sendMessage(
   return sendJson<EnquiryDetail>('POST', `${ticketPath(ticketId)}/messages`, input, idempotencyKey)
 }
 
-/** claim / propose_resolution（Mark as reviewed）/ add_tag / remove_tag / mark_read。 */
+/** claim / propose_resolution（Mark as reviewed）/ add_tag / remove_tag / mark_read / flag / unflag。 */
 export function sendAction(ticketId: string, input: AgentActionInput, idempotencyKey: string) {
   return sendJson<EnquiryDetail>('POST', `${ticketPath(ticketId)}/actions`, input, idempotencyKey)
 }
@@ -84,30 +90,27 @@ export function newIdempotencyKey(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/* ------------------------------- Common Questions ------------------------------- */
+/* ------------------------------------ FAQs ------------------------------------ */
 
-export function listQuestions(filters: QuestionFilters) {
-  const query = questionQuery(filters)
-  return request<{ questions: HelpdeskQuestion[] }>(`/api/helpdesk/questions${query ? `?${query}` : ''}`)
+export function listFaqs(filters: FaqFilters) {
+  return request<FaqPage>(`/api/helpdesk/faqs?${faqQuery(filters)}`)
 }
 
-/** 版本冲突后取最新版本（弹窗保留草稿，用新 version 重试）。 */
-export function getQuestion(questionId: string) {
-  return request<HelpdeskQuestion>(questionPath(questionId))
+/** 版本冲突后取最新版本（抽屉保留草稿，用新 version 重试）。 */
+export function getFaq(faqId: string) {
+  return request<HelpdeskFaq>(faqPath(faqId))
 }
 
-export function createQuestion(body: QuestionCreateBody) {
-  return sendJson<HelpdeskQuestion>('POST', '/api/helpdesk/questions', body)
+/** 新建：Idempotency-Key 防止重复提交生成两条。 */
+export function createFaq(body: FaqBody, idempotencyKey: string) {
+  return sendJson<HelpdeskFaq>('POST', '/api/helpdesk/faqs', body, idempotencyKey)
 }
 
-export function updateQuestion(questionId: string, body: QuestionUpdateBody) {
-  return sendJson<HelpdeskQuestion>('PUT', questionPath(questionId), body)
+export function updateFaq(faqId: string, body: FaqBody & { version: number }) {
+  return sendJson<HelpdeskFaq>('PUT', faqPath(faqId), body)
 }
 
-export function transitionQuestion(questionId: string, action: QuestionTransition, version: number) {
-  return sendJson<HelpdeskQuestion>('POST', `${questionPath(questionId)}/${action}`, { version })
-}
-
-export function reorderQuestions(items: { id: string; version: number }[]) {
-  return sendJson<{ questions: HelpdeskQuestion[] }>('POST', '/api/helpdesk/questions/reorder', { items })
+/** Delete FAQ = 归档（幂等）。 */
+export function archiveFaq(faqId: string, version: number) {
+  return sendJson<HelpdeskFaq>('POST', `${faqPath(faqId)}/archive`, { version })
 }

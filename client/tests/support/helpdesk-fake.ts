@@ -4,7 +4,7 @@ import type {
   AvailableActions,
   EnquiryDetail,
   EnquiryRow,
-  HelpdeskQuestion,
+  HelpdeskFaq,
 } from '../../src/backoffice/contracts/helpdesk'
 import type { SessionEmployee } from '../../src/backoffice/contracts/employee'
 
@@ -87,6 +87,7 @@ export const ALL_ACTIONS: AvailableActions = {
   proposeResolution: true,
   tag: true,
   markRead: true,
+  flag: true,
 }
 
 export function row(id: string, patch: Partial<EnquiryRow> = {}): EnquiryRow {
@@ -109,6 +110,8 @@ export function row(id: string, patch: Partial<EnquiryRow> = {}): EnquiryRow {
     updatedAt: '2026-10-28T09:00:00Z',
     lastMessageAt: '2026-10-28T09:00:00Z',
     lastMessageBy: 'learner',
+    flagged: false,
+    available: { ...ALL_ACTIONS },
     ...patch,
   }
 }
@@ -139,28 +142,27 @@ export function detail(id: string, patch: Partial<EnquiryDetail> = {}): EnquiryD
       },
     ],
     events: [],
-    available: { ...ALL_ACTIONS },
+    aiAssist: [],
     ...patch,
   }
 }
 
-export function question(id: string, patch: Partial<HelpdeskQuestion> = {}): HelpdeskQuestion {
+export function faq(id: string, patch: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
   return {
     id,
-    locale: 'en-GB',
-    category: 'technical_support',
-    question: `Question ${id}?`,
-    answer: `Answer ${id}.`,
+    category: 'account_technical',
+    popular: false,
+    questionEn: `Question ${id}?`,
+    answerEn: `Answer ${id}.`,
+    questionZh: `问题 ${id}？`,
+    answerZh: `答案 ${id}。`,
     keywords: [],
     status: 'published',
-    featured: false,
-    sortOrder: 1,
     version: 1,
     createdBy: null,
     updatedBy: null,
     createdAt: '2026-10-01T00:00:00Z',
-    updatedAt: '2026-10-20T00:00:00Z',
-    stats: { shown: 0, solved: 0, declined: 0 },
+    updatedAt: '2026-10-28T08:30:00Z',
     ...patch,
   }
 }

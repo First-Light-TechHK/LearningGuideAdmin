@@ -4,11 +4,19 @@ import assert from 'node:assert/strict'
 import {
   AVATAR_PALETTE,
   TAG_PALETTE,
+  TIMELINE_AVATAR,
+  enquiryTypeColor,
   activeFilterCount,
   applyDetailToRow,
+  assistFeedbackTone,
   avatarColor,
+  cardTime,
   dayLabel,
   claimInput,
+  flagInput,
+  groupByDay,
+  splitNotes,
+  timelineCards,
   enquiryControls,
   enquiryQuery,
   fileSize,
@@ -63,6 +71,7 @@ const AVAILABLE_ALL = {
   proposeResolution: true,
   tag: true,
   markRead: true,
+  flag: true,
 }
 
 describe('avatar and tag colours (Figma 1324:2)', () => {
@@ -166,6 +175,8 @@ describe('list paging and unread', () => {
       needsReply: true,
       sequence: 1,
       preview: 'p',
+      flagged: false,
+      available: { ...AVAILABLE_ALL, proposeResolution: false },
     }
     const other = { ...row, id: 'b' }
     const detail = {
@@ -175,9 +186,13 @@ describe('list paging and unread', () => {
       unreadByAgent: false,
       needsReply: false,
       sequence: 4,
+      flagged: true,
+      available: { ...AVAILABLE_ALL },
       messages: [{ id: 'm' }],
     }
     const [updated, untouched] = applyDetailToRow([row, other], detail)
+    assert.equal(updated.flagged, true, 'the row flag icon follows a flag toggle')
+    assert.equal(updated.available.proposeResolution, true, 'the card action bar follows the new state')
     assert.equal(updated.status, 'WAITING_USER')
     assert.deepEqual(updated.tags, ['vip'])
     assert.equal(updated.unreadByAgent, false)
@@ -203,25 +218,36 @@ describe('list paging and unread', () => {
 describe('write controls (VIEW sees none)', () => {
   test('FULL sees what the server allows', () => {
     assert.deepEqual(enquiryControls({ available: AVAILABLE_ALL }, true), {
+      actionBar: true,
       claim: true,
       markReviewed: true,
       composer: true,
       reply: true,
       internalNote: true,
       editTags: true,
+      flag: true,
     })
     assert.deepEqual(
       enquiryControls(
-        { available: { ...AVAILABLE_ALL, reply: false, proposeResolution: false, tag: false } },
+        { available: { ...AVAILABLE_ALL, reply: false, proposeResolution: false, tag: false, flag: false } },
         true,
       ),
-      { claim: true, markReviewed: false, composer: true, reply: false, internalNote: true, editTags: false },
+      {
+        actionBar: true,
+        claim: true,
+        markReviewed: false,
+        composer: true,
+        reply: false,
+        internalNote: true,
+        editTags: false,
+        flag: false,
+      },
     )
   })
 
   test('a brand-new OPEN enquiry can be claimed (Mark as reviewed needs ASSIGNED or WAITING_USER)', () => {
     // What the server returns for OPEN (availableActions in the Admin server, spec §2 state table).
-    const open = { claim: true, reply: true, internalNote: true, proposeResolution: false, tag: true, markRead: true }
+    const open = { claim: true, reply: true, internalNote: true, proposeResolution: false, tag: true, markRead: true, flag: true }
     const controls = enquiryControls({ available: open }, true)
     assert.equal(controls.claim, true)
     assert.equal(controls.markReviewed, false)
@@ -237,13 +263,78 @@ describe('write controls (VIEW sees none)', () => {
 
   test('VIEW sees no write controls at all, whatever the server says', () => {
     assert.deepEqual(enquiryControls({ available: AVAILABLE_ALL }, false), {
+      actionBar: false,
       claim: false,
       markReviewed: false,
       composer: false,
       reply: false,
       internalNote: false,
       editTags: false,
+      flag: false,
     })
+  })
+
+  test('Flag follow-up toggles: flag when not flagged, unflag when flagged, with the sequence on screen', () => {
+    assert.deepEqual(flagInput({ flagged: false, sequence: 5 }), { action: 'flag', expectedSequence: 5 })
+    assert.deepEqual(flagInput({ flagged: true, sequence: 6 }), { action: 'unflag', expectedSequence: 6 })
+  })
+})
+
+describe('student timeline (Figma 1324:2 middle column)', () => {
+  const card = (id: string, learner: string, createdAt: string) => ({ id, learner: { id: learner }, createdAt })
+
+  test("the selected enquiry plus that learner's others, newest first, max 10 plus the selected", () => {
+    const selected = card('s', 'u1', '2026-10-20T09:00:00Z')
+    const rows = [
+      card('a', 'u1', '2026-10-28T09:00:00Z'),
+      card('s', 'u1', '2026-10-20T09:00:00Z'),
+      card('x', 'u2', '2026-10-27T09:00:00Z'),
+      card('b', 'u1', '2026-10-25T09:00:00Z'),
+    ]
+    assert.deepEqual(
+      timelineCards(selected, rows).map((c) => c.id),
+      ['a', 'b', 's'],
+      "another learner's enquiry never shows; the selected one is not repeated",
+    )
+    const many = Array.from({ length: 12 }, (_, i) => card(`m${i}`, 'u1', `2026-10-${String(i + 10).padStart(2, '0')}T09:00:00Z`))
+    const old = card('old', 'u1', '2026-01-01T00:00:00Z')
+    const ids = timelineCards(old, many).map((c) => c.id)
+    assert.equal(ids.length, 11)
+    assert.equal(ids[0], 'm11')
+    assert.equal(ids.at(-1), 'old', 'the selected enquiry is always there even when older than the 10 newest')
+  })
+
+  test('grouped under "28 Oct 2026" date separators; card times are HH:mm', () => {
+    const groups = groupByDay(
+      [card('a', 'u', '2026-10-28T14:32:00'), card('b', 'u', '2026-10-28T09:05:00'), card('c', 'u', '2026-10-20T10:00:00')],
+      'en-GB',
+    )
+    assert.deepEqual(
+      groups.map((g) => [g.label, g.cards.map((c) => c.id)]),
+      [
+        ['28 Oct 2026', ['a', 'b']],
+        ['20 Oct 2026', ['c']],
+      ],
+    )
+    assert.equal(groupByDay([card('a', 'u', '2026-10-28T14:32:00')], 'zh-CN')[0].label, '2026年10月28日')
+    assert.equal(cardTime('2026-10-28T14:32:00', 'en-GB'), '14:32')
+    assert.equal(cardTime('2026-10-28T09:05:00', 'zh-CN'), '09:05')
+    assert.equal(cardTime(null, 'en-GB'), '')
+  })
+
+  test('internal notes live in the Internal notes panel, the rest is the conversation', () => {
+    const { notes, conversation } = splitNotes([message('r1', 'agent'), message('n1', 'agent', true), message('s1', 'system')])
+    assert.deepEqual(notes.map((m) => m.id), ['n1'])
+    assert.deepEqual(conversation.map((m) => m.id), ['r1', 's1'])
+  })
+
+  test('AI block feedback line: helpful / solved green, not helpful / declined red, otherwise none', () => {
+    assert.equal(assistFeedbackTone('helpful'), 'positive')
+    assert.equal(assistFeedbackTone('solved'), 'positive')
+    assert.equal(assistFeedbackTone('not_helpful'), 'negative')
+    assert.equal(assistFeedbackTone('declined'), 'negative')
+    assert.equal(assistFeedbackTone('edited'), null)
+    assert.equal(assistFeedbackTone(null), null)
   })
 })
 
@@ -286,13 +377,16 @@ describe('enquiry filters in the address bar', () => {
       status: 'needs_reply',
       category: 'course_content',
       tag: 'vip',
+      flagged: false,
     })
-    assert.deepEqual(readEnquiryFilters(new URLSearchParams('status=BOGUS&category=billing')), {
+    assert.deepEqual(readEnquiryFilters(new URLSearchParams('status=BOGUS&category=billing&flagged=yes')), {
       q: '',
       status: 'all',
       category: 'all',
       tag: '',
+      flagged: false,
     })
+    assert.equal(readEnquiryFilters(new URLSearchParams('flagged=true')).flagged, true)
   })
 
   test('writes only non-default values and keeps other params', () => {
@@ -303,6 +397,8 @@ describe('enquiry filters in the address bar', () => {
     assert.equal(params.get('tab'), 'enquiries')
     assert.equal(params.get('status'), null)
     assert.equal(params.get('q'), 'refund')
+    assert.equal(writeEnquiryFilters(params, { flagged: true }).get('flagged'), 'true')
+    assert.equal(writeEnquiryFilters(new URLSearchParams('flagged=true'), { flagged: false }).has('flagged'), false)
   })
 
   test('the literal word "all" is a real search or tag, only status / category use it as the default', () => {
@@ -316,17 +412,18 @@ describe('enquiry filters in the address bar', () => {
     assert.equal(params.get('tag'), 'all')
     assert.equal(params.get('status'), null)
     assert.equal(params.get('category'), null)
-    assert.deepEqual(readEnquiryFilters(params), { q: 'all', status: 'all', category: 'all', tag: 'all' })
+    assert.deepEqual(readEnquiryFilters(params), { q: 'all', status: 'all', category: 'all', tag: 'all', flagged: false })
     const cleared = writeEnquiryFilters(params, { q: '  ', tag: '' })
     assert.equal(cleared.has('q'), false)
     assert.equal(cleared.has('tag'), false)
   })
 
   test('API query: defaults left out, q capped at 120, cursor and limit passed', () => {
-    assert.equal(enquiryQuery({ q: '', status: 'all', category: 'all', tag: '' }), 'limit=30')
+    assert.equal(enquiryQuery({ q: '', status: 'all', category: 'all', tag: '', flagged: false }), 'limit=30')
     const query = new URLSearchParams(
-      enquiryQuery({ q: 'x'.repeat(130), status: 'OPEN', category: 'other', tag: 'vip' }, 'cur-1'),
+      enquiryQuery({ q: 'x'.repeat(130), status: 'OPEN', category: 'other', tag: 'vip', flagged: true }, 'cur-1'),
     )
+    assert.equal(query.get('flagged'), 'true')
     assert.equal(query.get('q'), 'x'.repeat(120))
     assert.equal(query.get('status'), 'OPEN')
     assert.equal(query.get('category'), 'other')
@@ -336,8 +433,9 @@ describe('enquiry filters in the address bar', () => {
   })
 
   test('active filter count ignores the search box', () => {
-    assert.equal(activeFilterCount({ q: 'x', status: 'all', category: 'all', tag: '' }), 0)
-    assert.equal(activeFilterCount({ q: '', status: 'OPEN', category: 'other', tag: 'vip' }), 3)
+    assert.equal(activeFilterCount({ q: 'x', status: 'all', category: 'all', tag: '', flagged: false }), 0)
+    assert.equal(activeFilterCount({ q: '', status: 'OPEN', category: 'other', tag: 'vip', flagged: false }), 3)
+    assert.equal(activeFilterCount({ q: '', status: 'all', category: 'all', tag: '', flagged: true }), 1)
   })
 })
 
@@ -348,5 +446,19 @@ describe('subscription status pill', () => {
     assert.equal(subscriptionTone('trialing'), 'success')
     assert.equal(subscriptionTone('past_due'), 'warning')
     assert.equal(subscriptionTone('cancelled'), 'neutral')
+  })
+})
+
+describe('timeline card colours (Figma 1324:2 v2)', () => {
+  test('the avatar outside each card is #ddebff / #1d63d6', () => {
+    assert.deepEqual(TIMELINE_AVATAR, { bg: '#ddebff', fg: '#1d63d6' })
+  })
+
+  test('type tag: Technical Support blue, Payments & Subscriptions purple; others reuse the closest existing chip', () => {
+    assert.deepEqual(enquiryTypeColor('technical_support'), { bg: '#ebf3ff', fg: '#2469d6' })
+    assert.deepEqual(enquiryTypeColor('payments_subscriptions'), { bg: '#efe9ff', fg: '#7756c7' })
+    assert.deepEqual(enquiryTypeColor('course_content'), { bg: '#ebf3ff', fg: '#2469d6' })
+    assert.deepEqual(enquiryTypeColor('other'), { bg: '#f2f5f9', fg: '#69778b' })
+    assert.deepEqual(enquiryTypeColor('something_new'), { bg: '#f2f5f9', fg: '#69778b' })
   })
 })

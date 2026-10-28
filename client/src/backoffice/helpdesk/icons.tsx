@@ -1,5 +1,5 @@
 /**
- * Help Desk 小图标（Figma 1324:2 的 search / filter / file / check-circle / calendar，14–16px 描边）。
+ * Help Desk 小图标（Figma 1324:2 的 search / filter / calendar，v2 的 flag / bot，14–16px 描边）。
  * Figma 资源下载在本环境被代理拦截，这里按同名描边图标重画，尺寸与颜色对齐设计稿（待视觉验收）。
  */
 type IconProps = { size?: number; className?: string }
@@ -36,24 +36,6 @@ export function HdFilterIcon({ size = 14, className }: IconProps) {
   )
 }
 
-export function HdFileIcon({ size = 14, className }: IconProps) {
-  return (
-    <svg {...stroke(size, className)}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-      <path d="M14 2v6h6" />
-    </svg>
-  )
-}
-
-export function HdCheckCircleIcon({ size = 14, className }: IconProps) {
-  return (
-    <svg {...stroke(size, className)}>
-      <circle cx="12" cy="12" r="10" />
-      <path d="m8.5 12 2.5 2.5 4.5-5" />
-    </svg>
-  )
-}
-
 export function HdCalendarIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...stroke(size, className)}>
@@ -71,10 +53,28 @@ export function HdCloseIcon({ size = 10, className }: IconProps) {
   )
 }
 
-export function HdArrowIcon({ size = 14, className, direction }: IconProps & { direction: 'up' | 'down' }) {
+/** Flag follow-up（v2 §3d）：左栏行内的小旗子。带 label 时是有名字的图片，否则只作装饰。 */
+export function HdFlagIcon({ size = 12, className, label }: IconProps & { label?: string }) {
+  const props = stroke(size, className)
+  return (
+    <svg {...props} aria-hidden={label ? undefined : true} role={label ? 'img' : undefined} aria-label={label}>
+      <path d="M4 22V4" />
+      <path d="M4 4h12l-2 4 2 4H4" />
+    </svg>
+  )
+}
+
+/** AI 客服助手头像里的机器人（Figma 1324:2 AI 块右侧，21px）。 */
+export function HdBotIcon({ size = 21, className }: IconProps) {
   return (
     <svg {...stroke(size, className)}>
-      {direction === 'up' ? <path d="M12 19V5M5 12l7-7 7 7" /> : <path d="M12 5v14M19 12l-7 7-7-7" />}
+      <rect x="4" y="8" width="16" height="12" rx="3" />
+      <path d="M12 4v4" />
+      <circle cx="12" cy="3" r="1" />
+      <path d="M9 13v1" />
+      <path d="M15 13v1" />
+      <path d="M2 13v2" />
+      <path d="M22 13v2" />
     </svg>
   )
 }

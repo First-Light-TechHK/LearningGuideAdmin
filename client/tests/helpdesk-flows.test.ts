@@ -1,10 +1,7 @@
 import test, { describe } from 'node:test'
 import assert from 'node:assert/strict'
 
-import {
-  afterQuestionSave,
-  questionSaveFailure,
-} from '../src/backoffice/lib/helpdeskQuestions'
+import { afterFaqSave } from '../src/backoffice/lib/helpdeskFaqs'
 import {
   clearBusy,
   composerKey,
@@ -24,7 +21,15 @@ import {
  * calls at that point, so these tests lock the behaviour, not just a helper.
  */
 
-const AVAILABLE = { claim: true, reply: true, internalNote: true, proposeResolution: true, tag: true, markRead: true }
+const AVAILABLE = {
+  claim: true,
+  reply: true,
+  internalNote: true,
+  proposeResolution: true,
+  tag: true,
+  markRead: true,
+  flag: true,
+}
 
 describe('write responses only touch the enquiry they were sent for (EnquiriesView.settle)', () => {
   const detail = { id: 'A', sequence: 3 }
@@ -155,9 +160,9 @@ describe('mark_read when an enquiry is opened (EnquiriesView)', () => {
 })
 
 describe('page header (HelpDeskPage): VIEW sees no write control', () => {
-  test('FULL gets + Add Question and the modal; VIEW gets neither', () => {
-    assert.deepEqual(helpDeskPageControls(true), { addQuestion: true, questionModal: true })
-    assert.deepEqual(helpDeskPageControls(false), { addQuestion: false, questionModal: false })
+  test('FULL gets + Add FAQ and the drawer; VIEW gets neither', () => {
+    assert.deepEqual(helpDeskPageControls(true), { addFaq: true, faqDrawer: true })
+    assert.deepEqual(helpDeskPageControls(false), { addFaq: false, faqDrawer: false })
   })
 })
 
@@ -183,26 +188,10 @@ describe('IME: Enter while composing never submits', () => {
   })
 })
 
-describe('Common Questions modal save failures (QuestionModal)', () => {
-  test('VERSION_CONFLICT while editing: reload the latest version, keep the draft', () => {
-    assert.equal(questionSaveFailure('VERSION_CONFLICT', true), 'reload')
-  })
-
-  test('QUESTION_NOT_FOUND while editing: close the modal', () => {
-    assert.equal(questionSaveFailure('QUESTION_NOT_FOUND', true), 'close')
-  })
-
-  test('anything else is shown in the modal', () => {
-    for (const code of ['INVALID_INPUT', 'INVALID_TRANSITION', 'HELPDESK_UNAVAILABLE']) {
-      assert.equal(questionSaveFailure(code, true), 'show')
-      assert.equal(questionSaveFailure(code, false), 'show')
-    }
-    assert.equal(questionSaveFailure('VERSION_CONFLICT', false), 'show')
-  })
-
-  test('the page: saved -> toast, close, refresh; conflict -> refresh, keep open; gone -> refresh, close, error', () => {
-    assert.deepEqual(afterQuestionSave('saved'), { refresh: true, close: true, toast: 'saved' })
-    assert.deepEqual(afterQuestionSave('conflict'), { refresh: true, close: false, toast: null })
-    assert.deepEqual(afterQuestionSave('gone'), { refresh: true, close: true, toast: 'gone' })
+describe('FAQ drawer results on the page (HelpDeskPage)', () => {
+  test('saved / deleted -> toast, close, refresh; gone -> refresh, close, error toast', () => {
+    assert.deepEqual(afterFaqSave('saved'), { refresh: true, close: true, toast: 'saved' })
+    assert.deepEqual(afterFaqSave('deleted'), { refresh: true, close: true, toast: 'deleted' })
+    assert.deepEqual(afterFaqSave('gone'), { refresh: true, close: true, toast: 'gone' })
   })
 })

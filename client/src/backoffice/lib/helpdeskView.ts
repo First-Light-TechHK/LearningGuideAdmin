@@ -5,7 +5,9 @@ import {
   SEARCH_MAX,
   TAGS_PER_TICKET_MAX,
   TAG_MAX_LENGTH,
+  TIMELINE_LIMIT,
   type AgentActionInput,
+  type AssistFeedback,
   type AvailableActions,
   type HelpdeskCategory,
   type ListStatusFilter,
@@ -38,6 +40,24 @@ export const TAG_PALETTE: readonly Swatch[] = [
   { bg: '#fff7ed', fg: '#ea580c' },
   { bg: '#f0fdf4', fg: '#16a34a' },
 ]
+
+/** 学员时间线卡片外的头像（Figma 1324:2 v2：每张卡片都是同一个学员，颜色固定）。 */
+export const TIMELINE_AVATAR: Swatch = { bg: '#ddebff', fg: '#1d63d6' }
+
+/**
+ * 卡片上的 Enquiry Type 标签（Figma 1324:2 v2）：画板里只有 Technical Support 与 Payments & Subscriptions；
+ * Course Content 用同一组蓝色、Other（及 Portal 新增的类型）用 FAQ 表格的灰色胶囊（待视觉验收）。
+ */
+const ENQUIRY_TYPE_SWATCH: Record<HelpdeskCategory, Swatch> = {
+  technical_support: { bg: '#ebf3ff', fg: '#2469d6' },
+  course_content: { bg: '#ebf3ff', fg: '#2469d6' },
+  payments_subscriptions: { bg: '#efe9ff', fg: '#7756c7' },
+  other: { bg: '#f2f5f9', fg: '#69778b' },
+}
+
+export function enquiryTypeColor(category: string): Swatch {
+  return (ENQUIRY_TYPE_SWATCH as Record<string, Swatch>)[category] ?? ENQUIRY_TYPE_SWATCH.other
+}
 
 /** FNV-1a 32 位：同一输入永远同一结果，用来挑颜色。 */
 function hash(text: string): number {
@@ -154,6 +174,8 @@ const ROW_FIELDS = [
   'lastMessageAt',
   'lastMessageBy',
   'contactEmail',
+  'flagged',
+  'available',
 ] as const
 
 /** 写操作成功后，把详情里的最新摘要字段同步回左栏那一行（其它行原样返回）。 */
@@ -185,6 +207,8 @@ export function claimInput(ticket: { sequence: number }): AgentActionInput {
 }
 
 export type EnquiryControls = {
+  /** 卡片操作栏（Figma 1324:2 的 4 个按钮）：VIEW 整个不显示。 */
+  actionBar: boolean
   /** 接单（spec §7 Claim）：只在 OPEN 时可用；接单后才出现 Mark as reviewed（状态表）。 */
   claim: boolean
   /** Figma「Mark as reviewed」= propose_resolution。 */
@@ -193,6 +217,8 @@ export type EnquiryControls = {
   reply: boolean
   internalNote: boolean
   editTags: boolean
+  /** Flag follow-up（flag / unflag）。 */
+  flag: boolean
 }
 
 /** 写操作控件：VIEW 一律不显示；FULL 按 Server 给的 available。 */
@@ -201,13 +227,73 @@ export function enquiryControls(ticket: { available: AvailableActions }, canWrit
   const reply = canWrite && a.reply
   const internalNote = canWrite && a.internalNote
   return {
+    actionBar: canWrite,
     claim: canWrite && a.claim,
     markReviewed: canWrite && a.proposeResolution,
     composer: reply || internalNote,
     reply,
     internalNote,
     editTags: canWrite && a.tag,
+    flag: canWrite && a.flag === true,
   }
+}
+
+/** Flag follow-up 是开关：没标记就 flag，已标记就 unflag；带员工看到的 sequence。 */
+export function flagInput(ticket: { flagged: boolean; sequence: number }): AgentActionInput {
+  return { action: ticket.flagged ? 'unflag' : 'flag', expectedSequence: ticket.sequence }
+}
+
+/* ---------------------------------- 学员时间线 ---------------------------------- */
+
+type TimelineCard = { id: string; learner: { id: string }; createdAt: string }
+
+/**
+ * 中栏（Figma 1324:2，v2 §3d）：选中的工单 + 同一学员的其它工单（最多 10 条，新的在前）。
+ * 别的学员的工单一律不显示；选中的那条即使比最新 10 条还旧也一定在。
+ */
+export function timelineCards<T extends TimelineCard>(selected: T, rows: T[]): T[] {
+  const learner = selected.learner.id
+  const others = rows.filter((row) => row.id !== selected.id && row.learner.id === learner)
+  const newest = (a: T, b: T) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)
+  const cards = [...others, selected].sort(newest).slice(0, TIMELINE_LIMIT)
+  return cards.includes(selected) ? cards : [...cards, selected]
+}
+
+/** 日期分隔条「28 Oct 2026」/「2026年10月28日」，同一天的卡片放在一组。 */
+export function groupByDay<T extends { createdAt: string }>(cards: T[], locale: Locale): { label: string; cards: T[] }[] {
+  const groups: { label: string; cards: T[] }[] = []
+  for (const card of cards) {
+    const label = longDate(card.createdAt, locale)
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) last.cards.push(card)
+    else groups.push({ label, cards: [card] })
+  }
+  return groups
+}
+
+/** 卡片上「contact email · 14:32」的时间（日期已在分隔条上）。 */
+export function cardTime(iso: string | null | undefined, locale: Locale): string {
+  const date = parse(iso)
+  if (!date) return ''
+  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)
+}
+
+/** 内部备注只在「Internal notes」面板里；其余（回复、系统行）是卡片下的对话。 */
+export function splitNotes(messages: TicketMessage[]): { notes: TicketMessage[]; conversation: TicketMessage[] } {
+  return {
+    notes: messages.filter((m) => m.internal),
+    conversation: messages.filter((m) => !m.internal),
+  }
+}
+
+/**
+ * AI 块的学员反馈行（v2 §3d）：helpful（以及提交时的 solved）绿色「Yes, this solved my issue」；
+ * not_helpful 与提交时的 declined 红色「No, I still submit to support team」；没有反馈（或 edited）不显示。
+ */
+export function assistFeedbackTone(feedback: AssistFeedback | null): 'positive' | 'negative' | null {
+  if (feedback === 'helpful' || feedback === 'solved') return 'positive'
+  if (feedback === 'not_helpful' || feedback === 'declined') return 'negative'
+  return null
 }
 
 /** 中栏：第一条公开的学员消息是 Enquiry 卡片，其余按原顺序排在下面。 */
@@ -245,9 +331,11 @@ export type EnquiryFilters = {
   status: ListStatusFilter
   category: HelpdeskCategory | 'all'
   tag: string
+  /** v2：只看标了 Flag follow-up 的（地址栏 flagged=true）。 */
+  flagged: boolean
 }
 
-export const DEFAULT_ENQUIRY_FILTERS: EnquiryFilters = { q: '', status: 'all', category: 'all', tag: '' }
+export const DEFAULT_ENQUIRY_FILTERS: EnquiryFilters = { q: '', status: 'all', category: 'all', tag: '', flagged: false }
 
 function isStatusFilter(value: string | null): value is ListStatusFilter {
   return value !== null && (LIST_STATUS_FILTERS as readonly string[]).includes(value)
@@ -266,6 +354,7 @@ export function readEnquiryFilters(params: URLSearchParams): EnquiryFilters {
     status: isStatusFilter(status) ? status : 'all',
     category: isCategory(category) ? category : 'all',
     tag: normalizeTag(params.get('tag') ?? '') ?? '',
+    flagged: params.get('flagged') === 'true',
   }
 }
 
@@ -277,7 +366,7 @@ export function writeEnquiryFilters(params: URLSearchParams, patch: Partial<Enqu
   const next = new URLSearchParams(params)
   for (const [key, value] of Object.entries(patch) as [keyof EnquiryFilters, unknown][]) {
     const text = String(value ?? '').trim()
-    if (text === '' || text === DEFAULT_ENQUIRY_FILTERS[key]) next.delete(key)
+    if (text === '' || text === String(DEFAULT_ENQUIRY_FILTERS[key])) next.delete(key)
     else next.set(key, text)
   }
   return next
@@ -376,9 +465,9 @@ export function markReadOnOpen(
   return shouldMarkRead(ticket, canWrite) ? markReadInput(ticket) : null
 }
 
-/** 页头写控件：VIEW 没有「+ Add Question」，也不会打开问答弹窗。 */
-export function helpDeskPageControls(canWrite: boolean): { addQuestion: boolean; questionModal: boolean } {
-  return { addQuestion: canWrite, questionModal: canWrite }
+/** 页头写控件：VIEW 没有「+ Add FAQ」，也不会打开 FAQ 抽屉。 */
+export function helpDeskPageControls(canWrite: boolean): { addFaq: boolean; faqDrawer: boolean } {
+  return { addFaq: canWrite, faqDrawer: canWrite }
 }
 
 /** BackOffice 列表接口的查询串。 */
@@ -387,6 +476,7 @@ export function enquiryQuery(filters: EnquiryFilters, cursor?: string | null, li
   if (filters.status !== 'all') query.set('status', filters.status)
   if (filters.category !== 'all') query.set('category', filters.category)
   if (filters.tag) query.set('tag', filters.tag)
+  if (filters.flagged) query.set('flagged', 'true')
   const q = filters.q.trim().slice(0, SEARCH_MAX)
   if (q) query.set('q', q)
   if (cursor) query.set('cursor', cursor)
@@ -396,7 +486,8 @@ export function enquiryQuery(filters: EnquiryFilters, cursor?: string | null, li
 
 /** 筛选按钮上的数字（不含搜索框）。 */
 export function activeFilterCount(filters: EnquiryFilters): number {
-  return [filters.status !== 'all', filters.category !== 'all', filters.tag !== ''].filter(Boolean).length
+  return [filters.status !== 'all', filters.category !== 'all', filters.tag !== '', filters.flagged].filter(Boolean)
+    .length
 }
 
 /** 订阅状态胶囊：Active 绿色（Figma），付款异常（含 Portal 的 grace 宽限期）琥珀色，其它中性。 */

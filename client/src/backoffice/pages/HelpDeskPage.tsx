@@ -1,28 +1,30 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { App } from '../../components/ui'
 import '../helpdesk.css'
-import type { HelpdeskQuestion } from '../contracts/helpdesk'
+import type { HelpdeskFaq } from '../contracts/helpdesk'
 import { EnquiriesView } from '../helpdesk/EnquiriesView'
-import { QuestionModal } from '../helpdesk/QuestionModal'
-import { QuestionsView } from '../helpdesk/QuestionsView'
+import { FaqDrawer } from '../helpdesk/FaqDrawer'
+import { FaqPreview } from '../helpdesk/FaqPreview'
+import { FaqsView } from '../helpdesk/FaqsView'
+import { afterFaqSave } from '../lib/helpdeskFaqs'
 import { errorMessage } from '../lib/helpdeskFormat'
-import { afterQuestionSave } from '../lib/helpdeskQuestions'
 import { helpDeskPageControls } from '../lib/helpdeskView'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { useWorkspaceAccess } from '../lib/workspaceAccess'
 
 /**
- * Help Desk（Figma 1324:2，设计文档 §4A.3 / §4A.7）：页头 +「+ Add Question」+ 两个 Tab。
- * - Enquiries（缺省）：三栏，/help-desk/:ticketId 选中一条咨询
- * - Common Questions（?tab=questions）：问答库表格
- * 写操作只给 helpDesk = FULL；VIEW 看得到全部内容，但没有任何写控件（服务端同样拒绝）。
+ * Help Desk（Tickets v2，Figma 1324:2 / 1379:2 / 1379:299）：页头 +「+ Add FAQ」（两个 Tab 都有）+ 两个 Tab。
+ * - Enquiries（缺省）：三栏，/help-desk/:ticketId 选中一条工单，中栏是这个学员的时间线
+ * - FAQs（?tab=faqs；旧链接 ?tab=questions 也到这里）：FAQ 表格，抽屉新增 / 编辑，Preview
+ * 抽屉盖在 Tab 下方的内容区上（.hdContent）。写操作只给 helpDesk = FULL；VIEW 能看能预览，
+ * 没有任何写控件（服务端同样拒绝）。
  */
 
-type TabKey = 'enquiries' | 'questions'
-type Editing = { question: HelpdeskQuestion | null } | null
+type TabKey = 'enquiries' | 'faqs'
+type Editing = { faq: HelpdeskFaq | null } | null
 
 export default function HelpDeskPage() {
   const locale = useLocale()
@@ -32,14 +34,39 @@ export default function HelpDeskPage() {
   const { message } = App.useApp()
   const navigate = useNavigate()
   const { ticketId } = useParams<{ ticketId?: string }>()
-  const [searchParams] = useSearchParams()
-  const tab: TabKey = searchParams.get('tab') === 'questions' && !ticketId ? 'questions' : 'enquiries'
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const tab: TabKey = (tabParam === 'faqs' || tabParam === 'questions') && !ticketId ? 'faqs' : 'enquiries'
   const [editing, setEditing] = useState<Editing>(null)
-  const [questionsVersion, setQuestionsVersion] = useState(0)
+  const [previewing, setPreviewing] = useState<HelpdeskFaq | null>(null)
+  const [faqsVersion, setFaqsVersion] = useState(0)
+
+  // v1 的 Common Questions 链接（?tab=questions）换成 ?tab=faqs，其它参数保留
+  useEffect(() => {
+    if (tabParam !== 'questions' || ticketId) return
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        next.set('tab', 'faqs')
+        return next
+      },
+      { replace: true },
+    )
+  }, [tabParam, ticketId, setSearchParams])
 
   function openTab(next: TabKey) {
     if (next === tab) return
-    navigate(next === 'questions' ? `/${locale}/help-desk?tab=questions` : `/${locale}/help-desk`)
+    navigate(next === 'faqs' ? `/${locale}/help-desk?tab=faqs` : `/${locale}/help-desk`)
+  }
+
+  function onDrawerDone(result: 'saved' | 'deleted' | 'gone') {
+    // Enquiries Tab 上看不到列表，靠提示告诉员工结果
+    const next = afterFaqSave(result)
+    if (next.refresh) setFaqsVersion((value) => value + 1)
+    if (next.close) setEditing(null)
+    if (next.toast === 'saved') message.success(t(locale, 'helpDesk.faqs.saved'))
+    else if (next.toast === 'deleted') message.success(t(locale, 'helpDesk.faqs.deleted'))
+    else message.error(errorMessage(locale, 'FAQ_NOT_FOUND'))
   }
 
   return (
@@ -49,15 +76,15 @@ export default function HelpDeskPage() {
           <h1 className="cardTitle">{t(locale, 'helpDesk.title')}</h1>
           <p className="hdSubtitle">{t(locale, 'helpDesk.subtitle')}</p>
         </div>
-        {controls.addQuestion ? (
-          <button type="button" className="hdPrimaryButton" onClick={() => setEditing({ question: null })}>
-            ＋ {t(locale, 'helpDesk.addQuestion')}
+        {controls.addFaq ? (
+          <button type="button" className="hdPrimaryButton" onClick={() => setEditing({ faq: null })}>
+            + {t(locale, 'helpDesk.addFaq')}
           </button>
         ) : null}
       </header>
 
       <div className="hdTabs" role="tablist" aria-label={t(locale, 'helpDesk.title')}>
-        {(['enquiries', 'questions'] as const).map((key) => (
+        {(['enquiries', 'faqs'] as const).map((key) => (
           <button
             key={key}
             type="button"
@@ -73,33 +100,31 @@ export default function HelpDeskPage() {
 
       {access.readOnly ? <div className="hdReadOnly">{t(locale, 'helpDesk.readOnly')}</div> : null}
 
-      {tab === 'enquiries' ? (
-        <EnquiriesView locale={locale} ticketId={ticketId ?? null} canWrite={canWrite} />
-      ) : (
-        <QuestionsView
-          locale={locale}
-          canWrite={canWrite}
-          refreshKey={questionsVersion}
-          onEdit={(question) => setEditing({ question })}
-        />
-      )}
+      <div className="hdContent">
+        {tab === 'enquiries' ? (
+          <EnquiriesView locale={locale} ticketId={ticketId ?? null} canWrite={canWrite} />
+        ) : (
+          <FaqsView
+            locale={locale}
+            canWrite={canWrite}
+            refreshKey={faqsVersion}
+            onEdit={(faq) => setEditing({ faq })}
+            onPreview={setPreviewing}
+          />
+        )}
 
-      {editing && controls.questionModal ? (
-        <QuestionModal
-          locale={locale}
-          question={editing.question}
-          defaultLocale={locale}
-          onClose={() => setEditing(null)}
-          onSaved={(_saved, outcome) => {
-            // Enquiries Tab 上看不到列表，靠提示告诉员工已保存
-            const next = afterQuestionSave(outcome)
-            if (next.refresh) setQuestionsVersion((value) => value + 1)
-            if (next.close) setEditing(null)
-            if (next.toast === 'saved') message.success(t(locale, 'helpDesk.questions.saved'))
-            else if (next.toast === 'gone') message.error(errorMessage(locale, 'QUESTION_NOT_FOUND'))
-          }}
-        />
-      ) : null}
+        {editing && controls.faqDrawer ? (
+          <FaqDrawer
+            key={editing.faq?.id ?? 'new'}
+            locale={locale}
+            faq={editing.faq}
+            onClose={() => setEditing(null)}
+            onDone={onDrawerDone}
+          />
+        ) : null}
+      </div>
+
+      {previewing ? <FaqPreview locale={locale} faq={previewing} onClose={() => setPreviewing(null)} /> : null}
     </section>
   )
 }

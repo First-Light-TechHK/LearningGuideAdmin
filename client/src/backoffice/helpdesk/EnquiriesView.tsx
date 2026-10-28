@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import type { AgentActionInput, EnquiryDetail, EnquiryRow } from '../contracts/helpdesk'
-import { getEnquiry, listEnquiries, newIdempotencyKey, sendAction, sendMessage, type HelpdeskResult } from '../lib/helpdeskApi'
+import { TIMELINE_LIMIT, type AgentActionInput, type EnquiryDetail, type EnquiryRow } from '../contracts/helpdesk'
+import {
+  getEnquiry,
+  listEnquiries,
+  listTimeline,
+  newIdempotencyKey,
+  sendAction,
+  sendMessage,
+  type HelpdeskResult,
+} from '../lib/helpdeskApi'
 import { errorMessage } from '../lib/helpdeskFormat'
 import {
   applyDetailToRow,
   claimInput,
   clearBusy,
   enquiryControls,
+  flagInput,
   markReadOnOpen,
   mergeTickets,
   NO_BUSY,
@@ -16,6 +25,7 @@ import {
   resyncQuery,
   settlePlan,
   startBusy,
+  timelineCards,
   visibleBusy,
   writeEnquiryFilters,
   type Busy,
@@ -24,13 +34,14 @@ import {
 } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
-import { EnquiryConversation, type Notice } from './EnquiryConversation'
 import { EnquiryList } from './EnquiryList'
+import { EnquiryTimeline, type Notice, type Panel, type TimelineEntry } from './EnquiryTimeline'
 import { StudentPanel } from './StudentPanel'
 
 /**
- * Enquiries 三栏（Figma 1324:2，设计文档 §4A.3）：左列表 / 中对话 / 右学员信息。
- * 筛选写在地址栏（可收藏、可分享），选中的咨询在路径里（/help-desk/:ticketId）。
+ * Enquiries 三栏（Figma 1324:2，设计文档 §4A.3，Tickets v2 §3d）：左列表 / 中间是选中工单的学员时间线 /
+ * 右学员信息。筛选写在地址栏（可收藏、可分享），选中的工单在路径里（/help-desk/:ticketId）。
+ * 时间线上每张卡片都有自己的操作栏：写操作按卡片的工单 id 与 sequence 发出，结果只提示在那张卡片下。
  */
 
 type Props = { locale: Locale; ticketId: string | null; canWrite: boolean }
@@ -49,7 +60,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filterKey = searchParams.toString()
   const filters = readEnquiryFilters(searchParams)
-  const { q, status, category, tag } = filters
+  const { q, status, category, tag, flagged } = filters
 
   const [query, setQuery] = useState(q)
   const [rows, setRows] = useState<EnquiryRow[]>([])
@@ -58,15 +69,22 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
 
-  const [ticket, setTicket] = useState<EnquiryDetail | null>(null)
+  // 打开过的工单详情（按 id）：时间线上已打开过的卡片也能显示正文、附件与 AI 块
+  const [details, setDetails] = useState<Record<string, EnquiryDetail>>({})
+  const [timeline, setTimeline] = useState<{ learnerId: string; rows: EnquiryRow[] } | null>(null)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice>(null)
-  // 进行中的写操作属于发出它的那条咨询（切到别的咨询后不再禁用那边的按钮）
+  const [panel, setPanel] = useState<Panel>(null)
+  // 进行中的写操作属于发出它的那条工单（切到别的工单后不再禁用那边的按钮）
   const [busy, setBusy] = useState<Busy>(NO_BUSY)
-  const busyLabel = visibleBusy(busy, ticketId)
+  const ticket = ticketId ? (details[ticketId] ?? null) : null
+  const learnerId = ticket?.learner.id ?? ''
 
   const listRequest = useRef(0)
+  const timelineRequest = useRef(0)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 中栏现在显示的卡片：写操作的结果只在卡片还在屏幕上时提示
+  const visibleIds = useRef<Set<string>>(new Set())
   // 详情请求回来时，确认员工还停在同一条咨询上（切走了就丢弃旧响应）
   const currentTicket = useRef<string | null>(ticketId)
   useEffect(() => {
@@ -79,7 +97,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     const id = ++listRequest.current
     setListLoading(true)
     setListError(null)
-    const result = await listEnquiries({ q, status, category, tag })
+    const result = await listEnquiries({ q, status, category, tag, flagged })
     if (id !== listRequest.current) return
     if (result.ok) {
       setRows(result.data.tickets)
@@ -90,7 +108,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
       setListError(result.code)
     }
     setListLoading(false)
-  }, [q, status, category, tag])
+  }, [q, status, category, tag, flagged])
 
   useEffect(() => {
     void loadList()
@@ -100,7 +118,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     if (!nextCursor || loadingMore || listLoading) return
     const id = listRequest.current
     setLoadingMore(true)
-    const result = await listEnquiries({ q, status, category, tag }, nextCursor)
+    const result = await listEnquiries({ q, status, category, tag, flagged }, nextCursor)
     setLoadingMore(false)
     if (id !== listRequest.current) return
     if (result.ok) {
@@ -110,7 +128,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
       setListError(result.code)
       setNextCursor(null)
     }
-  }, [nextCursor, loadingMore, listLoading, q, status, category, tag])
+  }, [nextCursor, loadingMore, listLoading, q, status, category, tag, flagged])
 
   useEffect(
     () => () => {
@@ -145,17 +163,20 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
 
   /* ---------------------------------- 详情 ---------------------------------- */
 
+  /** 最新的工单详情：放进缓存，并同步左栏与时间线上那一行。 */
   const adopt = useCallback((detail: EnquiryDetail) => {
-    setTicket(detail)
+    setDetails((current) => ({ ...current, [detail.id]: detail }))
     setRows((current) => applyDetailToRow(current, detail))
+    setTimeline((current) => (current ? { ...current, rows: applyDetailToRow(current.rows, detail) } : current))
   }, [])
 
+  /** 取详情：结果总是放进缓存；只有员工还停在这条上时才返回 / 报错（切走了就不打扰）。 */
   const loadTicket = useCallback(
     async (id: string) => {
       const result = await getEnquiry(id)
+      if (result.ok) adopt(result.data)
       if (currentTicket.current !== id) return null
       if (result.ok) {
-        adopt(result.data)
         setDetailError(null)
         return result.data
       }
@@ -166,9 +187,10 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
   )
 
   useEffect(() => {
-    setTicket(null)
     setNotice(null)
     setDetailError(null)
+    // 在别的卡片上点 Email student / Internal notes：选中那张并保持面板展开
+    setPanel((current) => (current && current.id === ticketId ? current : null))
     if (!ticketId) return
     let cancelled = false
     void (async () => {
@@ -186,31 +208,63 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     }
   }, [ticketId, canWrite, loadTicket, adopt])
 
+  // 学员时间线（Figma 1324:2 中栏）：选中工单的学员最多 10 条工单。取不到就只显示选中的那张。
+  useEffect(() => {
+    if (!learnerId) return
+    const id = ++timelineRequest.current
+    void listTimeline(learnerId).then((result) => {
+      if (id !== timelineRequest.current) return
+      setTimeline({ learnerId, rows: result.ok ? result.data.tickets : [] })
+    })
+  }, [learnerId])
+
+  // 时间线上其它卡片的详情（只读 GET，不调 mark_read）：Figma 1324:2 每张卡片都有正文、附件与 AI 块。
+  // 最多 9 条（时间线上限 10），每条只取一次；点开时仍会重新取最新的。
+  const prefetched = useRef<Set<string>>(new Set())
+  const timelineIds = timeline ? timeline.rows.map((r) => r.id).join(' ') : ''
+  useEffect(() => {
+    if (!timelineIds) return
+    for (const id of timelineIds.split(' ').slice(0, TIMELINE_LIMIT)) {
+      // 选中的那条由上面的 loadTicket 负责
+      if (prefetched.current.has(id) || id === currentTicket.current) continue
+      prefetched.current.add(id)
+      void getEnquiry(id).then((result) => {
+        if (result.ok) adopt(result.data)
+        else prefetched.current.delete(id)
+      })
+    }
+  }, [timelineIds, adopt])
+
+  /** 时间线上任意一张卡片的最新数据（操作栏用它的 sequence 与 available）。 */
+  function findTicket(id: string): EnquiryRow | null {
+    return details[id] ?? timeline?.rows.find((r) => r.id === id) ?? rows.find((r) => r.id === id) ?? null
+  }
+
   /**
-   * 写操作结果（只作用于发出请求的那条咨询 id）：成功换成最新工单；409 stale 重新加载并提示；
-   * 其它错误内联显示一次。员工已切到别的咨询时只同步左栏那一行。
+   * 写操作结果（只作用于发出请求的那条工单 id）：成功换成最新工单；409 stale 重新加载并提示；
+   * 其它错误在那张卡片下提示一次。卡片已不在屏幕上（切到了别的学员）时只同步数据，不提示。
    */
   async function settle(result: HelpdeskResult<EnquiryDetail>, id: string): Promise<boolean> {
-    const plan = settlePlan(result, id, currentTicket.current)
-    if (result.ok && plan.adoptTicket) adopt(result.data)
-    else if (plan.row) {
-      const row = plan.row as EnquiryDetail
-      setRows((current) => applyDetailToRow(current, row))
-    }
+    const onScreen = () => visibleIds.current.has(id)
+    const plan = settlePlan(result, id, onScreen() ? id : currentTicket.current)
+    if (result.ok) adopt(result.data)
     if (plan.reload) {
       await loadTicket(id)
-      if (currentTicket.current !== id) return false
+      if (!onScreen()) return false
     }
     if (plan.notice === 'clear') setNotice(null)
-    else if (plan.notice === 'stale') setNotice({ kind: 'info', text: t(locale, 'helpDesk.stale') })
-    else if (plan.notice === 'error' && !result.ok) setNotice({ kind: 'error', text: errorMessage(locale, result.code) })
+    else if (plan.notice === 'stale') setNotice({ id, kind: 'info', text: t(locale, 'helpDesk.stale') })
+    else if (plan.notice === 'error' && !result.ok) setNotice({ id, kind: 'error', text: errorMessage(locale, result.code) })
     return plan.ok
   }
 
-  /** 同一条咨询上一次只跑一个写操作；结束时只清自己设的 busy。 */
-  async function write(label: string, run: (id: string) => Promise<HelpdeskResult<EnquiryDetail>>): Promise<boolean> {
-    if (!ticket || busyLabel) return false
-    const id = ticket.id
+  /** 同一条工单上一次只跑一个写操作；结束时只清自己设的 busy。 */
+  async function write(
+    id: string,
+    label: string,
+    run: (id: string) => Promise<HelpdeskResult<EnquiryDetail>>,
+  ): Promise<boolean> {
+    if (visibleBusy(busy, id)) return false
     const mine: BusyToken = { label }
     setBusy((current) => startBusy(current, id, mine))
     const ok = await settle(await run(id), id)
@@ -218,37 +272,66 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     return ok
   }
 
-  function runAction(input: AgentActionInput, label: string): Promise<boolean> {
-    return write(label, (id) => sendAction(id, input, newIdempotencyKey()))
+  function runAction(id: string, input: AgentActionInput, label: string): Promise<boolean> {
+    return write(id, label, (target) => sendAction(target, input, newIdempotencyKey()))
   }
 
-  async function claim() {
-    if (!ticket) return
-    if (await runAction(claimInput(ticket), 'claim')) {
-      setNotice({ kind: 'info', text: t(locale, 'helpDesk.claimedNotice') })
+  async function claim(id: string) {
+    const target = findTicket(id)
+    if (target && (await runAction(id, claimInput(target), 'claim'))) {
+      setNotice({ id, kind: 'info', text: t(locale, 'helpDesk.claimedNotice') })
     }
   }
 
-  async function markReviewed() {
-    if (!ticket) return
-    if (await runAction({ action: 'propose_resolution', expectedSequence: ticket.sequence }, 'review')) {
-      setNotice({ kind: 'info', text: t(locale, 'helpDesk.reviewedNotice') })
+  async function markReviewed(id: string) {
+    const target = findTicket(id)
+    if (target && (await runAction(id, { action: 'propose_resolution', expectedSequence: target.sequence }, 'review'))) {
+      setNotice({ id, kind: 'info', text: t(locale, 'helpDesk.reviewedNotice') })
     }
   }
 
-  function send(body: string, internal: boolean, key: string): Promise<boolean> {
-    if (!ticket) return Promise.resolve(false)
-    const expectedSequence = ticket.sequence
-    return write('send', (id) => sendMessage(id, { body, internal, expectedSequence }, key))
+  async function toggleFlag(id: string) {
+    const target = findTicket(id)
+    if (!target) return
+    const input = flagInput(target)
+    if (await runAction(id, input, 'flag')) {
+      setNotice({
+        id,
+        kind: 'info',
+        text: t(locale, input.action === 'flag' ? 'helpDesk.flaggedNotice' : 'helpDesk.unflaggedNotice'),
+      })
+    }
+  }
+
+  function send(id: string, body: string, internal: boolean, key: string): Promise<boolean> {
+    const target = findTicket(id)
+    if (!target) return Promise.resolve(false)
+    const expectedSequence = target.sequence
+    return write(id, 'send', (target) => sendMessage(target, { body, internal, expectedSequence }, key))
+  }
+
+  function openPanel(next: Panel) {
+    setPanel(next)
+    if (next && next.id !== ticketId) select(next.id)
   }
 
   /* ---------------------------------- 渲染 ---------------------------------- */
 
+  const controls = ticket ? enquiryControls(ticket, canWrite) : null
+  const entries: TimelineEntry[] = ticket
+    ? timelineCards<EnquiryRow>(ticket, timeline?.learnerId === ticket.learner.id ? timeline.rows : []).map((row) => ({
+        row,
+        detail: row.id === ticket.id ? ticket : (details[row.id] ?? null),
+      }))
+    : []
+  const visibleKey = entries.map((entry) => entry.row.id).join(' ')
+  useLayoutEffect(() => {
+    visibleIds.current = new Set(visibleKey ? visibleKey.split(' ') : [])
+  }, [visibleKey])
+
   if (listError === 'HELPDESK_NOT_CONNECTED' || detailError === 'HELPDESK_NOT_CONNECTED') {
     return <NotConnected locale={locale} />
   }
-
-  const controls = ticket ? enquiryControls(ticket, canWrite) : null
 
   return (
     <div className="hdMain">
@@ -269,26 +352,35 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
       />
       {ticket && controls ? (
         <>
-          <EnquiryConversation
-            key={ticket.id}
-            locale={locale}
-            ticket={ticket}
-            controls={controls}
-            notice={notice}
-            busy={busyLabel}
-            onClaim={() => void claim()}
-            onMarkReviewed={() => void markReviewed()}
-            onSend={send}
-          />
+          <div className="hdConversation">
+            <EnquiryTimeline
+              locale={locale}
+              learnerName={ticket.learner.name || ticket.learner.email}
+              selectedId={ticket.id}
+              entries={entries}
+              canWrite={canWrite}
+              notice={notice}
+              busy={busy}
+              panel={panel}
+              onPanel={openPanel}
+              onOpen={select}
+              onClaim={(id) => void claim(id)}
+              onMarkReviewed={(id) => void markReviewed(id)}
+              onFlag={(id) => void toggleFlag(id)}
+              onSend={send}
+            />
+          </div>
           <StudentPanel
             key={`side-${ticket.id}`}
             locale={locale}
             ticket={ticket}
             editTags={controls.editTags}
-            busy={busyLabel}
-            onAddTag={(value) => runAction({ action: 'add_tag', tag: value, expectedSequence: ticket.sequence }, 'tag')}
+            busy={visibleBusy(busy, ticket.id)}
+            onAddTag={(value) =>
+              runAction(ticket.id, { action: 'add_tag', tag: value, expectedSequence: ticket.sequence }, 'tag')
+            }
             onRemoveTag={(value) =>
-              void runAction({ action: 'remove_tag', tag: value, expectedSequence: ticket.sequence }, 'tag')
+              void runAction(ticket.id, { action: 'remove_tag', tag: value, expectedSequence: ticket.sequence }, 'tag')
             }
           />
         </>

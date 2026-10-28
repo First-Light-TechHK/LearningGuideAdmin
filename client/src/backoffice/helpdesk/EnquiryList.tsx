@@ -12,10 +12,11 @@ import {
 } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
-import { HdFilterIcon, HdSearchIcon } from './icons'
+import { HdFilterIcon, HdFlagIcon, HdSearchIcon } from './icons'
 
 /**
  * 左栏 340px（Figma 1324:2 LeftPanel）：搜索 + 筛选按钮 + 咨询列表（滚动到底自动加载下一页）。
+ * v2：标了 Flag follow-up 的行在名字旁有小旗子，筛选里多一个「Flagged」（两者都没有画板，待视觉验收）。
  */
 
 export function LearnerAvatar({ seed, name, email }: { seed: string; name: string; email?: string }) {
@@ -104,13 +105,21 @@ function FilterPanel({
           }}
         />
       </label>
+      <label className="hdFilterCheck">
+        <input
+          type="checkbox"
+          checked={filters.flagged}
+          onChange={(event) => onChange({ flagged: event.target.checked })}
+        />
+        <span>{t(locale, 'helpDesk.filters.flagged')}</span>
+      </label>
       <div className="hdFilterActions">
         <button
           type="button"
           className="hdLinkButton"
           onClick={() => {
             setTag('')
-            onChange({ status: 'all', category: 'all', tag: '' })
+            onChange({ status: 'all', category: 'all', tag: '', flagged: false })
           }}
         >
           {t(locale, 'helpDesk.filters.clear')}
@@ -210,6 +219,9 @@ export function EnquiryList(props: Props) {
                 <span className="hdRowBody">
                   <span className="hdRowTop">
                     <span className="hdRowName">{name}</span>
+                    {row.flagged ? (
+                      <HdFlagIcon className="hdRowFlag" label={t(locale, 'helpDesk.list.flagged')} />
+                    ) : null}
                     <time className="hdRowTime" dateTime={row.lastMessageAt ?? row.updatedAt}>
                       {listTime(row.lastMessageAt ?? row.updatedAt, locale, now)}
                     </time>

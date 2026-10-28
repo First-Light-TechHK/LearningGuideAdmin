@@ -32,3 +32,8 @@ export function errorMessage(locale: Locale, code: string): string {
   const value = t(locale, key)
   return value === key ? t(locale, 'helpDesk.errors.generic') : value
 }
+
+/** FAQ 分类（account_technical / courses_learning / payments_subscriptions / other）。 */
+export function faqCategoryLabel(locale: Locale, category: string): string {
+  return labelOr(locale, `helpDesk.faqCategory.${category}`, category)
+}

@@ -2,21 +2,30 @@ import test, { describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { HELPDESK_CATEGORIES, HELPDESK_LOCALES, TICKET_STATUSES } from '../src/backoffice/contracts/helpdesk'
+import {
+  ASSIST_FEEDBACK,
+  FAQ_CATEGORIES,
+  HELPDESK_CATEGORIES,
+  HELPDESK_LOCALES,
+  TICKET_STATUSES,
+  TIMELINE_LIMIT,
+} from '../src/backoffice/contracts/helpdesk'
 import {
   billingCycleLabel,
   categoryLabel,
   errorMessage,
+  faqCategoryLabel,
   statusLabel,
   subscriptionStatusLabel,
 } from '../src/backoffice/lib/helpdeskFormat'
-import { subscriptionTone } from '../src/backoffice/lib/helpdeskView'
+import { assistFeedbackTone, subscriptionTone } from '../src/backoffice/lib/helpdeskView'
 
 // The Portal <-> Admin Helpdesk wire contract (fixtures/helpdesk-contract.json, captured from a
 // real local run of both apps). The client shows what Portal sends, via the Admin server.
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const fixture = JSON.parse(read('./fixtures/helpdesk-contract.json')) as {
   enums: Record<string, string[]> & { agentProblemCode: Record<string, string[]> }
+  adminToPortal: { timelineRequest: string; detailResponse: Record<string, unknown> }
 }
 const LOCALES = ['en-GB', 'zh-CN'] as const
 
@@ -65,5 +74,32 @@ describe('HelpDesk client against the Portal contract', () => {
       }
     }
     assert.notEqual(errorMessage('en-GB', 'TAG_LIMIT_REACHED'), generic)
+  })
+
+  test('v2: AI assist feedback values match Portal; helpful / solved are green, not_helpful / declined red', () => {
+    assert.deepEqual([...ASSIST_FEEDBACK], fixture.enums.assistFeedback)
+    assert.deepEqual(
+      fixture.enums.assistFeedback.map((value) => assistFeedbackTone(value as (typeof ASSIST_FEEDBACK)[number])),
+      ['positive', 'negative', 'positive', 'negative', null],
+    )
+  })
+
+  test('v2: FAQ categories match the contract and every one has a label in both languages', () => {
+    assert.deepEqual([...FAQ_CATEGORIES], fixture.enums.faqCategory)
+    for (const locale of LOCALES) {
+      for (const category of fixture.enums.faqCategory) {
+        assert.notEqual(faqCategoryLabel(locale, category), category, `${locale} ${category}`)
+      }
+    }
+    assert.equal(faqCategoryLabel('en-GB', 'account_technical'), 'Account & Technical Support')
+    assert.equal(faqCategoryLabel('zh-CN', 'other'), '其他问题')
+  })
+
+  test('v2: agent actions include flag / unflag; the detail carries flagged; the timeline asks for 10', () => {
+    assert.ok(fixture.enums.agentAction.includes('flag'))
+    assert.ok(fixture.enums.agentAction.includes('unflag'))
+    assert.equal(typeof fixture.adminToPortal.detailResponse.flagged, 'boolean')
+    const query = new URL(fixture.adminToPortal.timelineRequest, 'http://x').searchParams
+    assert.equal(Number(query.get('limit')), TIMELINE_LIMIT)
   })
 })

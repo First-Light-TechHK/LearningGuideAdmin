@@ -473,14 +473,13 @@
   },
   "helpDesk": {
     "title": "服务台",
-    "subtitle": "管理学员咨询与常见问题",
-    "addQuestion": "新增问题",
+    "subtitle": "管理学员工单与常见问题",
     "readOnly": "你的角色只能查看服务台，不能回复或修改。",
     "notConnectedTitle": "HelpDesk 尚未接通",
     "notConnectedBody": "当前环境还没有接通 Portal 工单接口，请联系管理员配置。",
     "tabs": {
-      "enquiries": "咨询",
-      "questions": "常见问题"
+      "enquiries": "工单",
+      "faqs": "常见问题"
     },
     "searchPlaceholder": "搜索学员或咨询...",
     "filter": "筛选咨询",
@@ -491,13 +490,15 @@
       "tagPlaceholder": "任意标签",
       "any": "全部",
       "needsReply": "待回复",
-      "clear": "清除筛选"
+      "clear": "清除筛选",
+      "flagged": "已标记跟进"
     },
     "list": {
       "empty": "还没有咨询。",
       "emptyFiltered": "没有符合搜索或筛选条件的咨询。",
       "loadingMore": "正在加载更多…",
-      "unread": "未读"
+      "unread": "未读",
+      "flagged": "已标记跟进"
     },
     "selectPrompt": "选择一条咨询查看对话。",
     "today": "今天",
@@ -591,74 +592,6 @@
       "en-GB": "英语（英国）",
       "zh-CN": "简体中文"
     },
-    "questions": {
-      "search": "搜索问题",
-      "allLocales": "全部语言",
-      "allCategories": "全部咨询类型",
-      "statusFilter": {
-        "active": "草稿与已发布",
-        "all": "全部（含已归档）",
-        "draft": "草稿",
-        "published": "已发布",
-        "archived": "已归档"
-      },
-      "status": {
-        "draft": "草稿",
-        "published": "已发布",
-        "archived": "已归档"
-      },
-      "columns": {
-        "order": "顺序",
-        "question": "问题",
-        "locale": "语言",
-        "category": "咨询类型",
-        "status": "状态",
-        "stats": "推荐 / 解决 / 未解决",
-        "updated": "更新时间",
-        "actions": "操作"
-      },
-      "featured": "精选",
-      "statsTitle": "推荐 {shown} 次 · 解决 {solved} · 未解决 {declined}",
-      "actions": {
-        "edit": "编辑",
-        "publish": "发布",
-        "republish": "重新发布",
-        "unpublish": "下线",
-        "archive": "归档",
-        "moveUp": "上移",
-        "moveDown": "下移"
-      },
-      "archiveConfirm": "确定归档这个问题？归档后不再向学员展示或推荐。",
-      "reorderHint": "调整顺序前，请只选一种语言并清除其它筛选。",
-      "empty": "还没有常见问题。",
-      "emptyFiltered": "没有符合筛选条件的问题。",
-      "saved": "问题已保存。",
-      "published": "问题已发布。",
-      "unpublished": "问题已改回草稿。",
-      "archived": "问题已归档。",
-      "reordered": "顺序已保存。"
-    },
-    "modal": {
-      "createTitle": "新增问题",
-      "editTitle": "编辑问题",
-      "subtitle": "已发布的问题会出现在学员的联系客服页，并可被推荐给学员。",
-      "locale": "语言",
-      "category": "咨询类型",
-      "categoryPlaceholder": "选择类型",
-      "question": "问题",
-      "answer": "答案",
-      "answerHint": "纯文本，保留换行；学员端会把链接变成可点击。",
-      "keywords": "关键词",
-      "keywordsPlaceholder": "输入关键词后按回车",
-      "keywordsHint": "用于匹配学员的咨询，最多 20 个。",
-      "featured": "在联系客服页展示",
-      "publish": "立即发布",
-      "save": "保存",
-      "saving": "保存中…",
-      "required": "必填",
-      "tooLong": "内容过长",
-      "tooMany": "最多 20 个关键词"
-    },
     "errors": {
       "HELPDESK_NOT_CONNECTED": "HelpDesk 尚未接通。",
       "HELPDESK_UNAVAILABLE": "HelpDesk 暂时不可用，请稍后再试。",
@@ -670,9 +603,132 @@
       "INVALID_INPUT": "请检查填写内容后重试。",
       "NOT_AUTHORISED": "你的角色只能查看服务台。",
       "RATE_LIMITED": "请求太频繁，请稍后再试。",
-      "VERSION_CONFLICT": "这个问题刚被其他人修改，列表已刷新，请重新操作。",
-      "QUESTION_NOT_FOUND": "这个问题已不存在。",
-      "generic": "出了点问题，请重试。"
+      "VERSION_CONFLICT": "这条常见问题刚被其他人修改，请刷新后重试。",
+      "generic": "出了点问题，请重试。",
+      "FAQ_NOT_FOUND": "这条常见问题已不存在。",
+      "IDEMPOTENCY_KEY_REUSED": "这次保存与之前的提交冲突，请重试。"
+    },
+    "addFaq": "新增常见问题",
+    "actions": {
+      "label": "操作",
+      "emailStudent": "给学员发邮件",
+      "emailHint": "回复学员：回复保存在这里，并发送到 {email}。",
+      "internalNotes": "内部备注",
+      "internalNotesHint": "这条工单的内部备注，只有员工可见，学员永远看不到。",
+      "flag": "标记跟进",
+      "flagHint": "标记这条工单，稍后跟进。",
+      "unflagHint": "已标记跟进，点击取消标记。",
+      "unavailable": "这条工单当前不能执行这个操作。"
+    },
+    "flaggedNotice": "已标记跟进。",
+    "unflaggedNotice": "已取消跟进标记。",
+    "notes": {
+      "title": "内部备注",
+      "empty": "还没有内部备注。"
+    },
+    "timeline": {
+      "label": "{name} 的工单",
+      "openCard": "打开这条工单"
+    },
+    "ai": {
+      "title": "AI 客服助手",
+      "tag": "AI 生成",
+      "helpful": "学生反馈：已解决",
+      "notHelpful": "学生反馈：仍提交给客服",
+      "noAnswer": "没有匹配的常见问题，助手没有给出答案。"
+    },
+    "faqCategory": {
+      "account_technical": "账户与技术支持",
+      "courses_learning": "课程与学习",
+      "payments_subscriptions": "付款与订阅",
+      "other": "其他问题"
+    },
+    "faqs": {
+      "search": "搜索问题、答案或关键词...",
+      "allCategories": "全部分类",
+      "popularFilter": {
+        "all": "全部常见问题",
+        "popular": "热门",
+        "not_popular": "非热门"
+      },
+      "countOne": "1 条常见问题",
+      "count": "{count} 条常见问题",
+      "columns": {
+        "question": "问题 / 答案",
+        "category": "分类",
+        "popular": "热门",
+        "updated": "最后更新",
+        "action": "操作"
+      },
+      "yes": "是",
+      "no": "否",
+      "edit": "编辑",
+      "preview": "预览",
+      "editLabel": "编辑 {question}",
+      "previewLabel": "预览 {question}",
+      "showing": "显示第 {from}–{to} 条，共 {total} 条",
+      "pagination": "常见问题分页",
+      "page": "第 {page} 页",
+      "previous": "上一页",
+      "next": "下一页",
+      "empty": "还没有常见问题。",
+      "emptyFiltered": "没有符合搜索或筛选条件的常见问题。",
+      "saved": "常见问题已保存。",
+      "deleted": "常见问题已删除。"
+    },
+    "drawer": {
+      "addTitle": "新增常见问题",
+      "editTitle": "编辑常见问题",
+      "subtitle": "修改会同步更新帮助中心展示的常见问题，以及 AI 客服使用的答案。",
+      "close": "关闭",
+      "category": "分类",
+      "categoryPlaceholder": "选择分类",
+      "popular": "热门常见问题",
+      "questionEn": "问题（英文）",
+      "answerEn": "答案（英文）",
+      "questionZh": "问题（中文）",
+      "answerZh": "答案（中文）",
+      "keywords": "关键词（用于搜索和 AI）",
+      "keywordsPlaceholder": "password, 重置, 登录",
+      "toolbar": {
+        "label": "格式",
+        "bold": "粗体",
+        "ordered": "编号列表",
+        "bullet": "项目符号列表",
+        "link": "链接"
+      },
+      "link": {
+        "url": "链接地址",
+        "placeholder": "https://… 或 mailto:…",
+        "insert": "插入链接",
+        "cancel": "取消",
+        "invalid": "地址需以 https://、http:// 或 mailto: 开头"
+      },
+      "cancel": "取消",
+      "save": "保存常见问题",
+      "saving": "保存中…",
+      "delete": "删除常见问题",
+      "deleteConfirm": "删除这条常见问题？删除后它不会再出现在帮助中心和 AI 客服的回答里。",
+      "deleteYes": "删除",
+      "deleteNo": "保留",
+      "discardTitle": "放弃未保存的修改？",
+      "discardYes": "放弃",
+      "discardNo": "继续编辑",
+      "conflict": "这条常见问题刚被其他人修改。已载入最新版本并保留你的修改，再次保存即可覆盖。",
+      "errors": {
+        "required": "必填",
+        "tooLong": "太长了（最多 {max} 个字符）",
+        "tooMany": "最多 20 个关键词",
+        "keywordTooLong": "每个关键词最多 40 个字符",
+        "unsafeLink": "链接需以 https://、http:// 或 mailto: 开头"
+      }
+    },
+    "preview": {
+      "title": "预览常见问题",
+      "hint": "帮助中心里的显示效果",
+      "languages": "预览语言",
+      "en": "EN",
+      "zh": "中文"
     }
   }
 }

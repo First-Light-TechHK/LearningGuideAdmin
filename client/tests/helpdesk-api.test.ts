@@ -2,18 +2,18 @@ import test, { afterEach, beforeEach, describe } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  archiveFaq,
   attachmentUrl,
-  createQuestion,
+  createFaq,
   getEnquiry,
-  getQuestion,
+  getFaq,
   listEnquiries,
-  listQuestions,
+  listFaqs,
+  listTimeline,
   newIdempotencyKey,
-  reorderQuestions,
   sendAction,
   sendMessage,
-  transitionQuestion,
-  updateQuestion,
+  updateFaq,
 } from '../src/backoffice/lib/helpdeskApi'
 
 type Call = { url: string; init: RequestInit }
@@ -92,9 +92,19 @@ describe('envelope handling', () => {
 
 describe('enquiries', () => {
   test('list builds the filter query', async () => {
-    await listEnquiries({ q: 'login', status: 'needs_reply', category: 'all', tag: '' }, 'c2')
+    await listEnquiries({ q: 'login', status: 'needs_reply', category: 'all', tag: '', flagged: false }, 'c2')
     assert.equal(calls[0].url, '/api/helpdesk/tickets?status=needs_reply&q=login&cursor=c2&limit=30')
     assert.equal(calls[0].init.credentials, 'same-origin')
+  })
+
+  test('the Flagged filter sends flagged=true (v2)', async () => {
+    await listEnquiries({ q: '', status: 'all', category: 'all', tag: '', flagged: true })
+    assert.equal(calls[0].url, '/api/helpdesk/tickets?flagged=true&limit=30')
+  })
+
+  test('the student timeline asks for that learner, 10 at most (v2)', async () => {
+    await listTimeline('user 1')
+    assert.equal(calls[0].url, '/api/helpdesk/tickets?learnerId=user+1&limit=10')
   })
 
   test('detail encodes the id', async () => {
@@ -117,6 +127,8 @@ describe('enquiries', () => {
     await sendAction('t1', { action: 'add_tag', tag: 'vip', expectedSequence: 3 }, 'k2')
     await sendAction('t1', { action: 'remove_tag', tag: 'vip', expectedSequence: 4 }, 'k3')
     await sendAction('t1', { action: 'mark_read' }, 'k4')
+    await sendAction('t1', { action: 'flag', expectedSequence: 5 }, 'k5')
+    await sendAction('t1', { action: 'unflag', expectedSequence: 6 }, 'k6')
     assert.deepEqual(
       calls.map((call) => [call.url, JSON.parse(String(call.init.body)), headers(call)['idempotency-key']]),
       [
@@ -124,6 +136,8 @@ describe('enquiries', () => {
         ['/api/helpdesk/tickets/t1/actions', { action: 'add_tag', tag: 'vip', expectedSequence: 3 }, 'k2'],
         ['/api/helpdesk/tickets/t1/actions', { action: 'remove_tag', tag: 'vip', expectedSequence: 4 }, 'k3'],
         ['/api/helpdesk/tickets/t1/actions', { action: 'mark_read' }, 'k4'],
+        ['/api/helpdesk/tickets/t1/actions', { action: 'flag', expectedSequence: 5 }, 'k5'],
+        ['/api/helpdesk/tickets/t1/actions', { action: 'unflag', expectedSequence: 6 }, 'k6'],
       ],
     )
   })
@@ -140,72 +154,48 @@ describe('enquiries', () => {
   })
 })
 
-describe('common questions', () => {
-  test('list with filters', async () => {
-    reply = async () => envelope({ questions: [] })
-    const result = await listQuestions({ locale: 'en-GB', category: 'all', status: 'all', q: '' })
-    assert.equal(calls[0].url, '/api/helpdesk/questions?locale=en-GB&status=all')
-    assert.deepEqual(result, { ok: true, data: { questions: [] } })
+describe('FAQs (Tickets v2 §3)', () => {
+  const body = {
+    category: 'other' as const,
+    popular: true,
+    questionEn: 'Q',
+    answerEn: 'A',
+    questionZh: '问',
+    answerZh: '答',
+    keywords: ['k'],
+  }
+
+  test('list with the URL filters', async () => {
+    reply = async () => envelope({ faqs: [], total: 0, page: 2, pageSize: 10 })
+    const result = await listFaqs({ q: 'reset', category: 'other', popular: 'popular', page: 2 })
+    assert.equal(calls[0].url, '/api/helpdesk/faqs?category=other&popular=true&q=reset&page=2&pageSize=10')
+    assert.deepEqual(result, { ok: true, data: { faqs: [], total: 0, page: 2, pageSize: 10 } })
   })
 
-  test('one question by encoded id (reloaded after a version conflict)', async () => {
-    reply = async () => envelope({ id: 'q 1', version: 4 })
-    const result = await getQuestion('q 1')
-    assert.equal(calls[0].url, '/api/helpdesk/questions/q%201')
+  test('one FAQ by encoded id (reloaded after a version conflict)', async () => {
+    reply = async () => envelope({ id: 'f 1', version: 4 })
+    await getFaq('f 1')
+    assert.equal(calls[0].url, '/api/helpdesk/faqs/f%201')
     assert.equal(calls[0].init.method, undefined)
-    assert.deepEqual(result, { ok: true, data: { id: 'q 1', version: 4 } })
   })
 
-  test('create = POST, update = PUT with version', async () => {
-    const body = {
-      locale: 'en-GB' as const,
-      category: 'other' as const,
-      question: 'Q',
-      answer: 'A',
-      keywords: [],
-      featured: false,
-    }
-    await createQuestion({ ...body, publish: true })
-    await updateQuestion('q1', { ...body, version: 2 })
-    assert.equal(calls[0].url, '/api/helpdesk/questions')
-    assert.equal(calls[0].init.method, 'POST')
-    assert.deepEqual(JSON.parse(String(calls[0].init.body)), { ...body, publish: true })
-    assert.equal(calls[1].url, '/api/helpdesk/questions/q1')
-    assert.equal(calls[1].init.method, 'PUT')
-    assert.deepEqual(JSON.parse(String(calls[1].init.body)), { ...body, version: 2 })
-  })
-
-  test('publish / unpublish / archive carry the version', async () => {
-    await transitionQuestion('q1', 'publish', 3)
-    await transitionQuestion('q1', 'unpublish', 4)
-    await transitionQuestion('q1', 'archive', 5)
+  test('create = POST with Idempotency-Key, update = PUT with version, delete = archive with version', async () => {
+    await createFaq(body, 'key-1')
+    await updateFaq('f1', { ...body, version: 2 })
+    await archiveFaq('f1', 3)
     assert.deepEqual(
-      calls.map((call) => [call.url, call.init.method, JSON.parse(String(call.init.body))]),
+      calls.map((call) => [call.url, call.init.method, JSON.parse(String(call.init.body)), headers(call)['idempotency-key']]),
       [
-        ['/api/helpdesk/questions/q1/publish', 'POST', { version: 3 }],
-        ['/api/helpdesk/questions/q1/unpublish', 'POST', { version: 4 }],
-        ['/api/helpdesk/questions/q1/archive', 'POST', { version: 5 }],
+        ['/api/helpdesk/faqs', 'POST', body, 'key-1'],
+        ['/api/helpdesk/faqs/f1', 'PUT', { ...body, version: 2 }, undefined],
+        ['/api/helpdesk/faqs/f1/archive', 'POST', { version: 3 }, undefined],
       ],
     )
   })
 
-  test('reorder sends the whole order', async () => {
-    await reorderQuestions([
-      { id: 'a', version: 1 },
-      { id: 'b', version: 2 },
-    ])
-    assert.equal(calls[0].url, '/api/helpdesk/questions/reorder')
-    assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
-      items: [
-        { id: 'a', version: 1 },
-        { id: 'b', version: 2 },
-      ],
-    })
-  })
-
   test('VERSION_CONFLICT comes back as its own code', async () => {
     reply = async () => failure('VERSION_CONFLICT', 409)
-    assert.deepEqual(await transitionQuestion('q1', 'publish', 1), {
+    assert.deepEqual(await updateFaq('f1', { ...body, version: 1 }), {
       ok: false,
       code: 'VERSION_CONFLICT',
       status: 409,
