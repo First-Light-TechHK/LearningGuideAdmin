@@ -180,14 +180,28 @@ function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
     .some((tag) => tag === '*' || tag === strip(etag));
 }
 
-export type QuestionListQuery = {
-  locale?: string;
-  category?: string;
-  status?: string;
-  q?: string;
-};
+/** 查询参数只收一个字符串，其它（?q=a&q=b 的数组、对象、数字）一律 400，不是 500。 */
+function queryText<K extends string>(
+  input: Partial<Record<K, unknown>>,
+  keys: readonly K[],
+): Partial<Record<K, string>> {
+  const out: Partial<Record<K, string>> = {};
+  for (const key of keys) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'string')
+      throw invalid(`${key} must be a single text value`);
+    out[key] = value;
+  }
+  return out;
+}
 
-export type PublishedQuery = { locale?: string; featured?: string };
+/** 控制器原样转来的查询参数（类型未知，见 queryText）。 */
+export type QuestionListQuery = Partial<
+  Record<'locale' | 'category' | 'status' | 'q', unknown>
+>;
+
+export type PublishedQuery = Partial<Record<'locale' | 'featured', unknown>>;
 
 export type PublishedResult = {
   etag: string;
@@ -235,8 +249,9 @@ export function createQuestionService(
 
   return {
     async list(
-      input: QuestionListQuery,
+      raw: QuestionListQuery,
     ): Promise<{ questions: QuestionView[] }> {
+      const input = queryText(raw, ['locale', 'category', 'status', 'q']);
       if (input.locale && !isHelpdeskLocale(input.locale))
         throw invalid('Unknown locale');
       if (input.category && !isHelpdeskCategory(input.category))
@@ -374,9 +389,10 @@ export function createQuestionService(
     },
 
     async published(
-      input: PublishedQuery,
+      raw: PublishedQuery,
       ifNoneMatch?: string,
     ): Promise<PublishedResult> {
+      const input = queryText(raw, ['locale', 'featured']);
       if (!isHelpdeskLocale(input.locale))
         throw invalid('locale must be en-GB or zh-CN');
       if (

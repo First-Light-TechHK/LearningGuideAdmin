@@ -136,16 +136,33 @@ function tag(value: unknown): string {
   return normalised;
 }
 
-export type ListInput = {
-  status?: string;
-  category?: string;
-  tag?: string;
-  q?: string;
-  cursor?: string;
-  limit?: string;
-};
+const LIST_KEYS = [
+  'status',
+  'category',
+  'tag',
+  'q',
+  'cursor',
+  'limit',
+] as const;
 
-function parseList(input: ListInput) {
+/** 控制器原样转来的查询参数（类型未知：?q=a&q=b 在 Express 里是数组）。 */
+export type ListInput = Partial<Record<(typeof LIST_KEYS)[number], unknown>>;
+
+/** 查询参数只收一个字符串，其它（数组、对象、数字）一律 400，不是 500。 */
+function queryText(input: ListInput) {
+  const out: Partial<Record<(typeof LIST_KEYS)[number], string>> = {};
+  for (const key of LIST_KEYS) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'string')
+      throw invalid(`${key} must be a single text value`);
+    out[key] = value;
+  }
+  return out;
+}
+
+function parseList(raw: ListInput) {
+  const input = queryText(raw);
   const status = (input.status || 'all') as ListStatusFilter;
   if (!(LIST_STATUS_FILTERS as readonly string[]).includes(status))
     throw invalid('Unknown status');

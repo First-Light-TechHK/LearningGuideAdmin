@@ -362,6 +362,18 @@ describe('Common Questions: list, counters and revisions', () => {
     }
   });
 
+  it('answers 400 (not 500) when a list query parameter is repeated or not text', async () => {
+    const { service } = setup([draft, live]);
+    for (const key of ['locale', 'category', 'status', 'q']) {
+      for (const value of [['a', 'b'], ['en-GB', 'zh-CN'], { x: '1' }, 5]) {
+        const error = await rejection(
+          service.list({ [key]: value } as unknown as Record<string, string>),
+        );
+        expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+      }
+    }
+  });
+
   it('adds shown / solved / declined counters from the suggestion log', async () => {
     const statsFor = jest
       .fn()
@@ -474,7 +486,9 @@ describe('Common Questions: what Portal reads (published only, ETag)', () => {
       {},
       { locale: 'fr' },
       { locale: 'en-GB', featured: 'maybe' },
-    ]) {
+      { locale: ['en-GB', 'zh-CN'] },
+      { locale: 'en-GB', featured: ['true', 'false'] },
+    ] as unknown as Record<string, string>[]) {
       const error = await rejection(service.published(query));
       expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
     }

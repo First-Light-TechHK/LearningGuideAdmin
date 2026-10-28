@@ -72,13 +72,15 @@ export class BackofficeHelpdeskController {
   ) {}
 
   @Get('tickets')
+  // 查询参数声明为 unknown：全局 ValidationPipe(transform) 会把 string 参数 String() 化
+  // （?q=a&q=b → 'a,b'）；原样交给服务校验，重复或非文本一律 400 INVALID_INPUT。
   list(
-    @Query('status') status?: string,
-    @Query('category') category?: string,
-    @Query('tag') tag?: string,
-    @Query('q') q?: string,
-    @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string,
+    @Query('status') status?: unknown,
+    @Query('category') category?: unknown,
+    @Query('tag') tag?: unknown,
+    @Query('q') q?: unknown,
+    @Query('cursor') cursor?: unknown,
+    @Query('limit') limit?: unknown,
   ) {
     return run(() =>
       this.helpdesk.list({ status, category, tag, q, cursor, limit }),

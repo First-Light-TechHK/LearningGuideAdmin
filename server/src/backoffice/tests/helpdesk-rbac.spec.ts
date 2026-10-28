@@ -333,6 +333,16 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
     expect(envelope(res).error.code).toBe('INVALID_INPUT');
   });
 
+  it('answers a repeated list query parameter with 400 INVALID_INPUT, not 500', async () => {
+    for (const query of ['q=a&q=b', 'tag=x&tag=y', 'cursor=a&cursor=b']) {
+      const res = await request(server())
+        .get(`/api/helpdesk/tickets?${query}`)
+        .set('Cookie', as('ADMIN'))
+        .expect(400);
+      expect(envelope(res).error.code).toBe('INVALID_INPUT');
+    }
+  });
+
   describe('attachment proxy', () => {
     it('streams the image with no-store caching for a VIEW role', async () => {
       fetchMock.mockImplementationOnce(() =>

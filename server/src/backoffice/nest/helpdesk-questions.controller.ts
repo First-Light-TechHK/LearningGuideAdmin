@@ -36,11 +36,13 @@ export class BackofficeHelpdeskQuestionsController {
   ) {}
 
   @Get()
+  // 查询参数声明为 unknown：全局 ValidationPipe(transform) 会把 string 参数 String() 化
+  // （?q=a&q=b → 'a,b'）；原样交给服务校验，重复或非文本一律 400 INVALID_INPUT。
   list(
-    @Query('locale') locale?: string,
-    @Query('category') category?: string,
-    @Query('status') status?: string,
-    @Query('q') q?: string,
+    @Query('locale') locale?: unknown,
+    @Query('category') category?: unknown,
+    @Query('status') status?: unknown,
+    @Query('q') q?: unknown,
   ) {
     return run(() => this.questions.list({ locale, category, status, q }));
   }
@@ -134,8 +136,8 @@ export class HelpdeskIntegrationQuestionsController {
   @Get('questions')
   async published(
     @Res() response: Response,
-    @Query('locale') locale?: string,
-    @Query('featured') featured?: string,
+    @Query('locale') locale?: unknown,
+    @Query('featured') featured?: unknown,
     @Headers('if-none-match') ifNoneMatch?: string,
   ): Promise<void> {
     let result: Awaited<ReturnType<QuestionService['published']>>;

@@ -279,6 +279,16 @@ describe('Common Questions endpoints', () => {
         .expect(400);
       expect(body(res).error?.code).toBe('INVALID_INPUT');
     });
+
+    it('answers a repeated list query parameter with 400 INVALID_INPUT, not 500', async () => {
+      for (const query of ['q=a&q=b', 'locale=en-GB&locale=zh-CN']) {
+        const res = await request(server())
+          .get(`/api/helpdesk/questions?${query}`)
+          .set('Cookie', as('ADMIN'))
+          .expect(400);
+        expect(body(res).error?.code).toBe('INVALID_INPUT');
+      }
+    });
   });
 
   describe('Portal side: GET /api/integration/helpdesk/questions', () => {
@@ -382,6 +392,13 @@ describe('Common Questions endpoints', () => {
         .set('Authorization', `Bearer ${TOKEN}`)
         .expect(400);
       expectProblem(res, 400, 'invalid_request');
+      const repeated = await request(server())
+        .get(
+          '/api/integration/helpdesk/questions?locale=en-GB&locale=zh-CN&featured=true&featured=false',
+        )
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(400);
+      expectProblem(repeated, 400, 'invalid_request');
     });
   });
 });

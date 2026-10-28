@@ -294,6 +294,19 @@ describe('HelpDesk service', () => {
     }
   });
 
+  it('answers 400 (not 500) when a query parameter is repeated or not text', async () => {
+    const portal = fakeClient();
+    const service = createHelpdeskService(portal);
+    // Express parses ?q=a&q=b into an array; a hand-made URL must not crash the list
+    for (const key of ['status', 'category', 'tag', 'q', 'cursor', 'limit']) {
+      for (const value of [['a', 'b'], { x: '1' }, 5]) {
+        const error = await rejection(service.list({ [key]: value }));
+        expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+      }
+    }
+    expect(portal.listTickets).not.toHaveBeenCalled();
+  });
+
   it('returns detail with needsReply and the available actions', async () => {
     const portal = fakeClient();
     portal.getTicket.mockResolvedValue(detail({ status: 'WAITING_USER' }));
