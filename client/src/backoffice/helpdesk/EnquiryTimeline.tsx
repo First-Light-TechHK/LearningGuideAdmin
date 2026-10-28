@@ -284,7 +284,11 @@ export function EnquiryTimeline(props: Props) {
                             </button>
                           )}
                         </h2>
-                        <span className="hdTypeTag" style={{ background: swatch.bg, color: swatch.fg }}>
+                        <span
+                          className="hdTypeTag"
+                          data-category={ticket.category}
+                          style={{ background: swatch.bg, color: swatch.fg }}
+                        >
                           {categoryLabel(locale, ticket.category)}
                         </span>
                       </div>

@@ -98,7 +98,7 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
     <div className="hdFaqs">
       <div className="hdFaqFilters">
         <label className="hdFaqSearch">
-          <HdSearchIcon size={14} className="hdFaqSearchIcon" />
+          <HdSearchIcon size={10} className="hdFaqSearchIcon" />
           <input
             type="search"
             value={search}
@@ -175,7 +175,11 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
                     <div className="hdFaqSummary">{summaryLine(zh ? faq.answerZh : faq.answerEn)}</div>
                   </td>
                   <td>
-                    <span className="hdFaqChip" style={{ background: swatch.bg, color: swatch.fg }}>
+                    <span
+                      className="hdFaqChip"
+                      data-category={faq.category}
+                      style={{ background: swatch.bg, color: swatch.fg }}
+                    >
                       {faqCategoryLabel(locale, faq.category)}
                     </span>
                   </td>
