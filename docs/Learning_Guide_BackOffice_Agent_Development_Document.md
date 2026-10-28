@@ -64,6 +64,7 @@
 >
 > **2026-10-28 HelpDesk 问答库与推荐日志建表（Figma addendum §A / §C）**：三张新表，只加不改：
 > - `helpdesk_questions`、`helpdesk_question_revisions`（迁移 `20261028090000_helpdesk_questions`，归 BackOffice）：问答库与只追加的修订记录（触发器拒绝 UPDATE / DELETE）；`version` 乐观并发，修订与修改同一事务；全文 GIN 索引 `to_tsvector('english', question || ' ' || answer)` 与关键词 GIN 索引。
+> - **Tickets v2（迁移 `20261029090000_helpdesk_faqs`）**：`helpdesk_faqs`（中英双语一行：`category` 四选一、`popular`、`question_en/answer_en/question_zh/answer_zh`、`keywords`、`status` published / archived、`version`）与只追加的 `helpdesk_faq_revisions`；`helpdesk_suggestions` 加 `faq_id`、`source`（submit / chat / chip），`category` 可空，outcome 增加 helpful / not_helpful。**运维说明**：`helpdesk_questions` / `helpdesk_question_revisions` 从 v2 起不再被任何代码读写（Common Questions 界面与 `/api/helpdesk/questions` 接口已删除），表与数据保留，留待之后单独的清理迁移删除；已提交的迁移一律不改。
 > - `helpdesk_suggestions`（迁移 `20261028090100_helpdesk_suggestions`，归 Agent）：每次推荐检索一行；`outcome` 首个为准；`query_text` 90 天后清空；`qa_id` 跨域不建外键。
 > - Prisma 模型 `HelpdeskQuestion` / `HelpdeskQuestionRevision` / `HelpdeskSuggestion` 只声明表结构；CHECK、表达式索引与触发器以迁移 SQL 为准。
 
@@ -725,6 +726,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 > 依据：`lg-helpdesk/tickets-v1-spec.md` §1/§4/§5（Integration）/§7（2026-10-28 用户拍板：「每个工单就是一个小卡片在 Back Office 上 … 按原有 UI UX 风格 … TDD 锁住」）。v1 不做：飞书同步、前端埋点、AI 客服、SaaS。
 > **待视觉验收**：Enquiries 三栏按 Figma 1324:2 实现；没有画板的部分（筛选弹层、之后的消息与内部备注、状态胶囊、回复框、日期分隔文字、空态、只读提示条、Common Questions Tab 与新增 / 编辑弹窗）沿用同一套颜色或 Knowledge / AI Tutor 的 antd 表格与弹窗，由用户手动验收。
 > **2026-10-28 Figma 对齐（`lg-helpdesk/tickets-v1-figma-addendum.md`，与原方案冲突时以它为准）**：Figma 文件 `sxro3x6YXENJvjhGExmlQ7`，BackOffice Enquiries 画板 1324:2。卡片看板改为 Enquiries 三栏（§4A.3），新增 Common Questions 问答库（§4A.7）、Agent 推荐（§4A.8）与 Portal → Admin 集成鉴权（§4A.9）。工单分类改为四个 Enquiry Type：`technical_support` / `course_content` / `payments_subscriptions` / `other`。
+> **Tickets v2（2026-10-28 20:40Z，`lg-helpdesk/tickets-v2-figma-addendum.md`，与上面冲突时以它为准）**：Common Questions（§4A.7）由双语 FAQs 取代，Enquiries 中栏改为学员时间线；见 §4A.10。§4A.7 与 §4A.8 中关于 `helpdesk_questions` 的内容只作历史记录。
 
 ### 4A.1 归属与数据流
 
@@ -826,10 +828,19 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 
 ### 4A.9 Portal → Admin 集成鉴权（Figma addendum §E）
 
-- 路径 `/api/integration/helpdesk/**`：`GET questions`（admin 角色）、`POST suggest` 与 `POST suggestions/:id/outcome`（agent 角色）。
+- 路径 `/api/integration/helpdesk/**`：`GET faqs`、`GET faqs/:id`（admin 角色，v2 取代 `GET questions`）、`POST suggest` 与 `POST suggestions/:id/outcome`（agent 角色）。
 - `Authorization: Bearer <ADMIN_HELPDESK_TOKEN>`（RFC 6750），每次请求现读环境变量、`timingSafeEqual` 定长比较；令牌为空 → 503 `integration_disabled`（本地也不放行）；缺失 / 错误 → 401 `invalid_token`（带 `WWW-Authenticate: Bearer realm="helpdesk", error="invalid_token"`，与 Portal 集成接口同一个代码，RFC 6750 §3.1）。
 - 成功体为纯 JSON（不套 §5.3 信封）；错误一律 RFC 9457 `application/problem+json`：`{ type: "https://www.ilovelearningguide.com/problems/<code>", title, status, detail, code }`，code 为 `invalid_token` / `integration_disabled` / `invalid_request` / `not_found` / `internal_error`。请求体不是合法 JSON、路由不存在等在控制器之外发生的错误，也由全局过滤器对这一前缀输出 problem+json。
-- 拆分部署时：`questions` 在 admin 实例，`suggest*` 在 agent 实例；Portal 只配一个 `ADMIN_HELPDESK_BASE_URL`，需由网关按路径分流或两个角色同进程（今天的部署方式）。
+- 拆分部署时：`faqs` 在 admin 实例，`suggest*` 在 agent 实例；Portal 只配一个 `ADMIN_HELPDESK_BASE_URL`，需由网关按路径分流或两个角色同进程（今天的部署方式）。
+
+### 4A.10 Tickets v2：FAQs 与学员时间线（2026-10-28，`tickets-v2-figma-addendum.md`）
+
+- **FAQs Tab（Figma 1379:2，`?tab=faqs`；旧链接 `?tab=questions` 自动换成 `?tab=faqs`）**：搜索（防抖 300ms）+「All categories」+「All FAQs / Popular / Not popular」+「N FAQs」，筛选与页码都写在地址栏；表格列 Question / Answer（界面语言的问题 + 答案第一行去 Markdown）、Category（颜色按分类固定）、Popular（Yes 绿 / No 灰）、Last Updated、Action（Edit 描边按钮 + Preview 链接）；每页 10 条，「Showing 1–8 of 8 FAQs」+ 页码。代码 `client/src/backoffice/helpdesk/FaqsView.tsx`、`lib/helpdeskFaqs.ts`。
+- **新增 / 编辑抽屉（Figma 1379:299，`FaqDrawer.tsx`）**：盖在 Tab 下方的内容区上，右侧 620 宽；Category* + Popular FAQ、Question / Answer（English）*、Question / Answer（Chinese）*、Keywords。答案工具栏 B / 1. / • / Link 只插入 Markdown 子集（Link 在工具栏下方要地址，只收 http(s) / mailto）。保存即发布；新建带 `Idempotency-Key`（同内容重试沿用），编辑带 `version`，409 时载入最新版本、保留草稿并提示；404 关闭抽屉并提示已不存在。「Delete FAQ」（只在编辑时，左下角）确认后归档。Escape / 遮罩 / × / Cancel 在有未保存修改时先确认。
+- **Preview（`FaqPreview.tsx`）**：只读弹窗，EN / 中文 切换（缺省跟随界面语言），答案经唯一的安全渲染器 `Markdown.tsx`（只生成 React 元素，原始 HTML 当文字，外链新标签页 + `rel="noopener noreferrer"`）。VIEW 角色没有「+ Add FAQ」与 Edit / Delete，但能 Preview。
+- **Enquiries 中栏 = 学员时间线（Figma 1324:2 v2，`EnquiryTimeline.tsx`）**：选中工单后取 `GET /api/helpdesk/tickets?learnerId=<Portal user id>&limit=10`，与选中的工单合并（只留同一学员，新的在前，最多 10 条，选中的一定在），按日期分组。时间线上其它卡片的详情各取一次（只读 GET，不调 mark_read），以便每张卡片都有正文、附件与 AI 块；点卡片主题即选中（URL 保留筛选）。每张卡片的操作栏 4 个等宽按钮：Mark as reviewed（OPEN 时为 Claim / 接单）、Email student（展开这张卡片的回复框）、Internal notes（展开内部备注与备注框；员工端的内部备注只在这里出现）、Flag follow-up（`flag` / `unflag` 开关，`aria-pressed`）。写操作按卡片自己的 id 与 sequence 发出，结果提示在那张卡片下。卡片后是它的 AI 块（`aiAssist`）：标题「AI Support Assistant」+「AI-generated」+ 右侧机器人头像；`helpful` / `solved` 绿色「Student feedback: Yes, this solved my issue」，`not_helpful` / `declined` 红色「…No, I still submit to support team」，没有反馈（或 `edited`）不显示。VIEW 整个操作栏不显示，内部备注只读显示在对话里。
+- **左栏**：标了跟进的行在名字旁有小旗子；筛选弹层多一个「Flagged」勾选（URL `flagged=true`）。
+- **待视觉验收**：Preview 弹窗、Link 地址行、Delete / 放弃修改确认、按钮的展开 / 按下 / 禁用态、回复框与备注面板、当前卡片的高亮边框、卡片上的状态胶囊（放在 meta 行右侧）、左栏小旗子与 Flagged 勾选。截图与对照：`lg-helpdesk/tickets-v2-shots/app-1324-2-*.png`、`app-1379-2-*.png`、`app-1379-299-*.png`、`app-faq-preview-*.png` 与对应 `compare-*.png`。
 
 ---
 
@@ -986,23 +997,22 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET | /api/helpdesk/tickets?status=&category=&tag=&q=&cursor=&limit= | helpDesk VIEW | `status` ∈ `all`（缺省）/ `needs_reply` / `OPEN` / `ASSIGNED` / `WAITING_USER` / `PENDING_CONFIRM` / `CLOSED` / `CANCELLED`；`category` 为四个 Enquiry Type；`tag` ≤32；`q` ≤120；`limit` 1–100（缺省 30）；返回 `{ tickets: (TicketSummary & { needsReply })[], nextCursor, counts }` |
 | GET | /api/helpdesk/tickets/:ticketId | helpDesk VIEW | TicketDetail（含内部备注、附件、事件时间线、`student`、`subscription`）+ `needsReply` + `available: { claim, reply, internalNote, proposeResolution, tag, markRead }` |
 | POST | /api/helpdesk/tickets/:ticketId/messages | helpDesk FULL | body `{ body, internal, expectedSequence }`，头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
-| POST | /api/helpdesk/tickets/:ticketId/actions | helpDesk FULL | body `{ action: "claim" \| "propose_resolution" \| "add_tag" \| "remove_tag" \| "mark_read", expectedSequence, tag? }`（`mark_read` 可不带 expectedSequence，前端总是带上，Portal 只在工单 sequence 未超过它时清未读；标签动作必带 `tag`），头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
+| POST | /api/helpdesk/tickets/:ticketId/actions | helpDesk FULL | body `{ action: "claim" \| "propose_resolution" \| "add_tag" \| "remove_tag" \| "mark_read" \| "flag" \| "unflag", expectedSequence, tag? }`（v2：`flag` / `unflag` 必带 expectedSequence）（`mark_read` 可不带 expectedSequence，前端总是带上，Portal 只在工单 sequence 未超过它时清未读；标签动作必带 `tag`），头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
 | GET | /api/helpdesk/attachments/:attachmentId | helpDesk VIEW | 代理 Portal 附件（png / jpeg / webp / gif 内联；pdf / txt / csv / docx / xlsx 以 `Content-Disposition: attachment` 下载；txt / csv 转发 Portal 标的 charset（只认 `utf-8` / `utf-16le` / `utf-16be`；GBK 等旧编码 Portal 不标，这里也不标，绝不自补 utf-8）；≤ 10 MB），`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'` |
-| GET | /api/helpdesk/questions?locale=&category=&status=&q= | helpDesk VIEW | Common Questions 列表；`status` 缺省 = draft + published，`all` 含归档；返回 `{ questions: QuestionView[] }`（含 `stats`） |
-| GET | /api/helpdesk/questions/:id | helpDesk VIEW | 单个 QuestionView |
-| GET | /api/helpdesk/questions/:id/revisions | helpDesk VIEW | `{ revisions: [{ id, questionId, version, action, employeeId, at, snapshot }] }`，新的在前 |
-| POST | /api/helpdesk/questions | helpDesk FULL | body `{ locale, category, question, answer, keywords?, featured?, publish? }` → 201 QuestionView |
-| PUT | /api/helpdesk/questions/:id | helpDesk FULL | body `{ version, locale, category, question, answer, keywords?, featured? }` → QuestionView |
-| POST | /api/helpdesk/questions/:id/publish · /unpublish · /archive | helpDesk FULL | body `{ version }` → QuestionView |
-| POST | /api/helpdesk/questions/reorder | helpDesk FULL | body `{ items: [{ id, version }] }`（1–500，不可重复）→ `{ questions: QuestionView[] }` |
+| GET | /api/helpdesk/tickets?learnerId=&limit=10 · ?flagged=true | helpDesk VIEW | v2：学员时间线（`learnerId` ≤128 字、无控制字符）与「Flagged」筛选（只接受 `true`，其它值 400）；原样转给 Portal。列表行带 `flagged`、`available` |
+| GET | /api/helpdesk/faqs?category=&popular=true\|false&q=&page=&pageSize= | helpDesk VIEW | v2 FAQs 列表（不含已删除 = 归档）；`pageSize` 缺省 10、最大 50；返回 `{ faqs, total, page, pageSize }` |
+| GET | /api/helpdesk/faqs/:id · /:id/revisions | helpDesk VIEW | 单条 FAQ（归档或不存在 404 `FAQ_NOT_FOUND`）；修订记录新的在前 |
+| POST | /api/helpdesk/faqs | helpDesk FULL | body `{ category, popular, questionEn, answerEn, questionZh, answerZh, keywords[] }`，可带 `Idempotency-Key`（同 key 不同内容 422 `IDEMPOTENCY_KEY_REUSED`）→ 201 FAQ（保存即发布） |
+| PUT | /api/helpdesk/faqs/:id | helpDesk FULL | 同上 body + `version`；版本不符 409 `VERSION_CONFLICT` |
+| POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等 |
 
 ### 5.5 Helpdesk 集成接口（Portal → Admin，2026-10-28，§4A.9）
 
 | 方法 | 路径 | 角色 | 说明 |
 |------|------|------|------|
-| GET | /api/integration/helpdesk/questions?locale=en-GB&featured=true | admin | `{ questions: [{ id, category, question, answer }], etag }`，头 `ETag`；`If-None-Match` 命中 304 |
-| POST | /api/integration/helpdesk/suggest | agent | body `{ learnerId, locale, category, subject, message }` → `{ suggestion: { id, qaId, question, answer } \| null }` |
-| POST | /api/integration/helpdesk/suggestions/:id/outcome | agent | body `{ outcome: "solved" \| "declined" \| "edited" }` → `{ id, outcome, changed }`（首个为准） |
+| GET | /api/integration/helpdesk/faqs?locale=&popular=&category=&q=&limit= · /faqs/:id?locale= | admin | v2：`{ faqs: [{ id, category, popular, question, answer, updatedAt }], etag }`（按 `locale` 取中文或英文；`limit` ≤100），头 `ETag` + `Cache-Control: no-cache`，`If-None-Match` 命中 304；problem code `invalid_request` / `not_found` |
+| POST | /api/integration/helpdesk/suggest | agent | v2 body `{ learnerId, locale, source?: "submit" \| "chat" \| "chip", category?, subject?, message, faqId? }` → `{ suggestion: { id, faqId, question, answer } \| null }`；`chip` 必带 `faqId`、不调模型；submit 每学员每小时 10 次，chat + chip 共 30 次 |
+| POST | /api/integration/helpdesk/suggestions/:id/outcome | agent | body `{ outcome }`：submit 取 `solved` / `declined` / `edited`，chat / chip 取 `helpful` / `not_helpful`（不匹配 400 `invalid_request`）→ `{ id, outcome, changed }`（首个为准） |
 
 鉴权均为 `Authorization: Bearer ADMIN_HELPDESK_TOKEN`，错误为 problem+json。
 
