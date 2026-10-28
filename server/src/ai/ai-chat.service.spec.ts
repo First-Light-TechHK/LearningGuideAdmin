@@ -262,6 +262,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       COURSE_ID,
       'portal',
+      undefined,
     );
 
     await collect(
@@ -270,6 +271,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       COURSE_ID,
       'study-group',
+      undefined,
     );
   });
 
@@ -281,6 +283,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       expect.any(String),
       'admin-test',
+      undefined,
     );
   });
 });
