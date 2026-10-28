@@ -333,6 +333,7 @@ model HelpdeskQuestion {
   revisions HelpdeskQuestionRevision[]
 
   @@index([locale, status, sortOrder], map: "helpdesk_questions_list_idx")
+  @@index([keywords], map: "helpdesk_questions_keywords_idx", type: Gin)
   @@map("helpdesk_questions")
 }
 
