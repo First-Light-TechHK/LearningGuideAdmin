@@ -329,16 +329,27 @@ export function settlePlan<T extends { id: string }>(
   return { ok: false, row: null, adoptTicket: false, reload: false, notice: 'error' }
 }
 
-export type Busy = { label: string; ticketId: string } | null
+/** 一次写操作的标记（按引用比较，结束时只清自己）。 */
+export type BusyToken = { readonly label: string }
+/** 每条咨询各自进行中的写操作：A 还在跑时切到 B 再切回来，A 的按钮仍是禁用的。 */
+export type Busy = Readonly<Record<string, BusyToken>>
+export const NO_BUSY: Busy = Object.freeze({})
+
+export function startBusy(busy: Busy, ticketId: string, token: BusyToken): Busy {
+  return { ...busy, [ticketId]: token }
+}
 
 /** 进行中的写操作只禁用它所属那条咨询的按钮。 */
 export function visibleBusy(busy: Busy, ticketId: string | null): string | null {
-  return busy !== null && busy.ticketId === ticketId ? busy.label : null
+  return ticketId !== null && Object.hasOwn(busy, ticketId) ? busy[ticketId].label : null
 }
 
-/** 请求结束时只清掉自己设的 busy（切到另一条后那条的 busy 不受影响）。 */
-export function clearBusy(current: Busy, mine: Busy): Busy {
-  return current === mine ? null : current
+/** 请求结束时只清掉自己设的那条（别的咨询的、或之后同一条新发的写操作不受影响）。 */
+export function clearBusy(busy: Busy, ticketId: string, token: BusyToken): Busy {
+  if (busy[ticketId] !== token) return busy
+  const rest = { ...busy }
+  delete rest[ticketId]
+  return rest
 }
 
 export type ComposerKey = { key: string; body: string; internal: boolean }

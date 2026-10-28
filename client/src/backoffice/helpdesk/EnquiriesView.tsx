@@ -11,12 +11,15 @@ import {
   enquiryControls,
   markReadOnOpen,
   mergeTickets,
+  NO_BUSY,
   readEnquiryFilters,
   resyncQuery,
   settlePlan,
+  startBusy,
   visibleBusy,
   writeEnquiryFilters,
   type Busy,
+  type BusyToken,
   type EnquiryFilters,
 } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
@@ -59,7 +62,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice>(null)
   // 进行中的写操作属于发出它的那条咨询（切到别的咨询后不再禁用那边的按钮）
-  const [busy, setBusy] = useState<Busy>(null)
+  const [busy, setBusy] = useState<Busy>(NO_BUSY)
   const busyLabel = visibleBusy(busy, ticketId)
 
   const listRequest = useRef(0)
@@ -208,10 +211,10 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
   async function write(label: string, run: (id: string) => Promise<HelpdeskResult<EnquiryDetail>>): Promise<boolean> {
     if (!ticket || busyLabel) return false
     const id = ticket.id
-    const mine: Busy = { label, ticketId: id }
-    setBusy(mine)
+    const mine: BusyToken = { label }
+    setBusy((current) => startBusy(current, id, mine))
     const ok = await settle(await run(id), id)
-    setBusy((current) => clearBusy(current, mine))
+    setBusy((current) => clearBusy(current, id, mine))
     return ok
   }
 

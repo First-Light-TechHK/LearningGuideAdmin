@@ -13,6 +13,8 @@ import {
   markReadOnOpen,
   resyncQuery,
   settlePlan,
+  NO_BUSY,
+  startBusy,
   visibleBusy,
 } from '../src/backoffice/lib/helpdeskView'
 
@@ -83,16 +85,29 @@ describe('write responses only touch the enquiry they were sent for (EnquiriesVi
 
 describe('busy state belongs to one enquiry', () => {
   test('a request still running for A does not disable B', () => {
-    assert.equal(visibleBusy({ label: 'send', ticketId: 'A' }, 'A'), 'send')
-    assert.equal(visibleBusy({ label: 'send', ticketId: 'A' }, 'B'), null)
-    assert.equal(visibleBusy(null, 'A'), null)
+    const busy = startBusy(NO_BUSY, 'A', { label: 'send' })
+    assert.equal(visibleBusy(busy, 'A'), 'send')
+    assert.equal(visibleBusy(busy, 'B'), null)
+    assert.equal(visibleBusy(NO_BUSY, 'A'), null)
+    assert.equal(visibleBusy(busy, null), null)
   })
 
-  test('a late finish of A does not clear B\'s busy flag', () => {
-    const b = { label: 'claim', ticketId: 'B' }
-    assert.equal(clearBusy(b, { label: 'send', ticketId: 'A' }), b)
-    assert.equal(clearBusy(b, b), null)
-    assert.equal(clearBusy(null, b), null)
+  test('A, then B, then B finishes: A\'s write is still running, so A stays disabled when the agent goes back', () => {
+    const a = { label: 'claim' }
+    const b = { label: 'tag' }
+    const afterB = clearBusy(startBusy(startBusy(NO_BUSY, 'A', a), 'B', b), 'B', b)
+    assert.equal(visibleBusy(afterB, 'A'), 'claim')
+    assert.equal(visibleBusy(afterB, 'B'), null)
+    assert.equal(visibleBusy(clearBusy(afterB, 'A', a), 'A'), null)
+  })
+
+  test('a late finish only clears the write that set the flag', () => {
+    const first = { label: 'send' }
+    const second = { label: 'claim' }
+    const busy = startBusy(clearBusy(startBusy(NO_BUSY, 'A', first), 'A', first), 'A', second)
+    assert.equal(visibleBusy(clearBusy(busy, 'A', first), 'A'), 'claim')
+    assert.equal(visibleBusy(clearBusy(busy, 'B', second), 'A'), 'claim')
+    assert.equal(clearBusy(NO_BUSY, 'A', first), NO_BUSY)
   })
 })
 
