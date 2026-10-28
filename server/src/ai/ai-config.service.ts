@@ -53,11 +53,26 @@ export interface AiConfigView {
   assessment: AiModeView;
 }
 
-/** 「管理所有 online」弹窗的行视图（§4.2.6） */
+/**
+ * 「管理所有 online」弹窗的行视图（§4.2.6）。
+ *
+ * 2026-10-28 复盘 A1：以前只有 `online` 一个字段，于是"打开开关但学员端仍无
+ * 入口"无法在界面上解释 —— 实际还有两个前提：课程已映射到 Portal（externalId）
+ * 且存在上线版本（currentReleaseId）。现在把两者都返回，并给出 blockedReason，
+ * 让弹窗能显示"未同步 / 无上线版本 / 未开启"三态，而不是一个会骗人的开关。
+ */
 export interface AiTutorListView {
   courseId: string;
   title: string;
   online: boolean;
+  /** Portal course.slug；null 表示该课程还没和 Portal 课程对应 */
+  externalId: string | null;
+  /** 是否存在上线版本（学员侧只读 currentReleaseId） */
+  hasLiveRelease: boolean;
+  /** 学员端是否真的能看到入口：externalId && online && hasLiveRelease */
+  available: boolean;
+  /** available=false 时的原因，available=true 时为 null */
+  blockedReason: 'not-synced' | 'no-live-release' | 'not-online' | null;
 }
 
 /** Portal 学员侧可见的 AI Tutor（2026-10-22） */
@@ -300,11 +315,28 @@ export class AiConfigService {
   /** §4.2.6/§5.2：列出全部 AI Tutor（Course）及其 Online 状态（读 Course.aiTutorOnline） */
   async listTutors(): Promise<AiTutorListView[]> {
     const courses = await this.knowledge.listCourses();
-    return courses.map((c) => ({
-      courseId: c.id,
-      title: c.title,
-      online: c.aiTutorOnline,
-    }));
+    return courses.map((c) => {
+      const hasLiveRelease = Boolean(c.currentReleaseId);
+      const mapped = Boolean(c.externalId);
+      // 与 LearnerTutorView.available 保持同一判据，避免后台与学员端结论不一致。
+      const available = mapped && c.aiTutorOnline && hasLiveRelease;
+      const blockedReason: AiTutorListView['blockedReason'] = available
+        ? null
+        : !mapped
+          ? 'not-synced'
+          : !hasLiveRelease
+            ? 'no-live-release'
+            : 'not-online';
+      return {
+        courseId: c.id,
+        title: c.title,
+        online: c.aiTutorOnline,
+        externalId: c.externalId,
+        hasLiveRelease,
+        available,
+        blockedReason,
+      };
+    });
   }
 
   /**

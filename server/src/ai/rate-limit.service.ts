@@ -79,9 +79,17 @@ export class RateLimitService {
   async assertAllowed(
     courseId: string,
     channel: AiRateLimitChannel = 'portal',
+    /** 2026-10-28：portal 桶加 userId 分桶，每个 Portal 用户独立计数；admin-test / study-group 桶不加 */
+    userId?: string,
   ): Promise<void> {
     const limit = this.limitFor(channel);
-    const key = channel === 'portal' ? courseId : `${courseId}::${channel}`;
+    let key: string;
+    if (channel === 'portal') {
+      // portal 桶：有 userId 则 user 独立计数，否则回退到课程级（向后兼容）
+      key = userId ? `${courseId}::user:${userId}` : courseId;
+    } else {
+      key = `${courseId}::${channel}`;
+    }
     if (await this.store.tryHit(key, limit, RateLimitService.WINDOW_MS)) return;
     throw new HttpException(
       `请求过于频繁，请稍后再试（每课程每分钟最多 ${limit} 次）`,

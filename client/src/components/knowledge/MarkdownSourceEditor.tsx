@@ -16,6 +16,7 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { createMarkdownLivePreview } from './markdownLivePreview'
 import { createMarkdownBlockWidgets } from './markdownBlockWidgets'
 import { toggleWrap } from './markdownCommands'
+import { useKText } from './i18n'
 
 /**
  * 纯 Markdown 源码编辑器（CodeMirror 6，2026-10-29）。
@@ -45,9 +46,17 @@ export function MarkdownSourceEditor({
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   const onViewReadyRef = useRef(onViewReady)
+  const { text, locale } = useKText()
+  // 持有最新 text / locale：createMarkdownBlockWidgets 仅在挂载时创建一次，
+  // 通过 ref 让其始终读到当前语言的文案函数
+  const textRef = useRef(text)
+  const localeRef = useRef(locale)
+  textRef.current = text
+  localeRef.current = locale
   /** 外部写入文档时置位，避免 updateListener 把回灌当成用户输入再写回 store */
   const externalRef = useRef(false)
   const readOnlyCompartment = useRef(new Compartment())
+  const placeholderCompartment = useRef(new Compartment())
 
   useLayoutEffect(() => {
     onChangeRef.current = onChange
@@ -60,8 +69,14 @@ export function MarkdownSourceEditor({
     if (!host) return
     const { field: blockWidgets, getOccupiedLineRanges } = createMarkdownBlockWidgets(
       () => viewRef.current,
+      () => textRef.current,
+      () => localeRef.current,
     )
-    const livePreview = createMarkdownLivePreview(getOccupiedLineRanges)
+    const livePreview = createMarkdownLivePreview(
+      getOccupiedLineRanges,
+      () => textRef.current,
+      () => localeRef.current,
+    )
     const view = new EditorView({
       parent: host,
       state: EditorState.create({
@@ -110,7 +125,7 @@ export function MarkdownSourceEditor({
             // 只读时彻底关闭 contenteditable：避免 View 角色仍能聚焦输入
             EditorView.editable.of(!readOnly),
           ]),
-          placeholder('在此编辑 Markdown 源码…'),
+          placeholderCompartment.current.of(placeholder(text('editor.placeholder'))),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !externalRef.current) {
               onChangeRef.current(update.state.doc.toString())
@@ -160,6 +175,25 @@ export function MarkdownSourceEditor({
       ]),
     })
   }, [readOnly])
+
+  // 语言切换：更新 placeholder（不重建编辑器，保留光标/撤销栈）
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({
+      effects: placeholderCompartment.current.reconfigure(
+        placeholder(text('editor.placeholder')),
+      ),
+    })
+  }, [locale, text])
+
+  // 语言切换：触发一次空事务，让块级 Widget（表格工具栏、图片失败提示等）重建，
+  // 以应用新 locale 的文案（widget eq 中包含 locale，故会重建 DOM）
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({})
+  }, [locale])
 
   return <div ref={hostRef} style={{ height: '100%', minHeight: 0, overflow: 'hidden' }} />
 }

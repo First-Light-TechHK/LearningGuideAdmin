@@ -4,6 +4,7 @@ import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import type { SyncSummary } from '../../api/knowledge'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
+import { useKText } from './i18n'
 
 /**
  * Sync 同步按钮（§3.2.2）：
@@ -19,6 +20,7 @@ export function SyncButtons() {
 
 function SyncButtonsInner() {
   const { message } = App.useApp()
+  const { text } = useKText()
   const selectedExternalId = useKnowledgeStore((s) => s.selectedExternalId)
   const syncing = useKnowledgeStore((s) => s.syncing)
   const runSync = useKnowledgeStore((s) => s.runSync)
@@ -27,13 +29,13 @@ function SyncButtonsInner() {
     try {
       const summary: SyncSummary = await runSync('structure')
       if (summary.unchanged) {
-        message.info('课程与课时标题已与课程映射表一致，无变更')
+        message.info(text('sync.unchanged'))
       } else {
         const parts: string[] = []
-        if (summary.courseCreated > 0) parts.push(`新增 ${summary.courseCreated} 门课程`)
-        if (summary.created > 0) parts.push(`新增 ${summary.created} 个课时`)
-        if (summary.updated > 0) parts.push(`更新 ${summary.updated} 个标题`)
-        message.success(`同步完成：${parts.join('，')}`)
+        if (summary.courseCreated > 0) parts.push(text('sync.courseCreated', { n: summary.courseCreated }))
+        if (summary.created > 0) parts.push(text('sync.pageCreated', { n: summary.created }))
+        if (summary.updated > 0) parts.push(text('sync.titleUpdated', { n: summary.updated }))
+        message.success(text('sync.done', { detail: parts.join(text('listSeparator')) }))
       }
     } catch (e) {
       message.error((e as Error).message)
@@ -52,11 +54,11 @@ function SyncButtonsInner() {
         disabled={disabled}
         onClick={() => void doSync()}
       >
-        同步课程标题
+        {text('sync.button')}
       </Button>
       {disabled && (
         <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
-          请先在上方选择同步目标
+          {text('sync.selectTarget')}
         </span>
       )}
     </Space>

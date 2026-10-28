@@ -2,6 +2,7 @@ import { syntaxTree } from '@codemirror/language'
 import type { EditorState, Range } from '@codemirror/state'
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from '@codemirror/view'
 import { ImageWidget, InlineMathWidget, parseDestination } from './markdownWidgets'
+import type { TextFn } from './markdownWidgets'
 
 /**
  * Markdown「Live Preview」行内装饰层（2026-10-29，M2 + M3）。
@@ -218,10 +219,14 @@ function buildInlineDecorations(
   out: Range<Decoration>[],
   occupied: Array<[number, number]>,
   codeRanges: Array<[number, number]>,
+  getText: () => TextFn,
+  getLocale: () => string,
 ) {
   const { state } = view
   const doc = state.doc
   const tree = syntaxTree(state)
+  const text = getText()
+  const locale = getLocale()
   const exclusions = collectInlineExclusions(view)
   const overlapsExclusion = (from: number, to: number) =>
     exclusions.some(([a, b]) => from < b && to > a)
@@ -281,7 +286,7 @@ function buildInlineDecorations(
           const src = parseDestination(parsed[2])
           if (!src) return false
           out.push(
-            Decoration.replace({ widget: new ImageWidget(src, parsed[1], false) }).range(
+            Decoration.replace({ widget: new ImageWidget(src, parsed[1], false, text, locale) }).range(
               node.from,
               node.to,
             ),
@@ -329,13 +334,17 @@ function inCodeRangeFromTree(state: EditorState, pos: number): boolean {
 
 type GetOccupied = (state: EditorState) => Array<[number, number]>
 
-export function createMarkdownLivePreview(getOccupiedLineRanges: GetOccupied) {
+export function createMarkdownLivePreview(
+  getOccupiedLineRanges: GetOccupied,
+  getText: () => TextFn,
+  getLocale: () => string,
+) {
   function buildDecorations(view: EditorView): DecorationSet {
     const out: Range<Decoration>[] = []
     const occupied = getOccupiedLineRanges(view.state)
     const codeRanges = collectCodeRanges(view)
     buildLineDecorations(view, out, codeRanges, occupied)
-    buildInlineDecorations(view, out, occupied, codeRanges)
+    buildInlineDecorations(view, out, occupied, codeRanges, getText, getLocale)
     return Decoration.set(out, true)
   }
 

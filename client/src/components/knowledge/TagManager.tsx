@@ -3,6 +3,7 @@ import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useKText } from './i18n'
 
 interface TagManagerProps {
   tags: string[]
@@ -66,6 +67,7 @@ function ColorPalette({
  * - 已添加的 tag 左侧色点可点击改色
  */
 export function TagManager({ tags, onChange, compact }: TagManagerProps) {
+  const { text } = useKText()
   const access = useWorkspaceAccess()
   const tagLibrary = useKnowledgeStore((s) => s.tags)
   const tagsLoading = useKnowledgeStore((s) => s.tagsLoading)
@@ -285,7 +287,7 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
                   cursor: 'pointer',
                   border: '1px solid #d9d9d9',
                 }}
-                title="选择颜色（不选则自动分配）"
+                title={text('tag.chooseColor')}
               />
             </Popover>
           </div>
@@ -297,7 +299,7 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
           icon={<PlusOutlined />}
           onClick={() => setAdding(true)}
         >
-          标签
+          {text('tag.add')}
         </Button>
       )}
     </Space>

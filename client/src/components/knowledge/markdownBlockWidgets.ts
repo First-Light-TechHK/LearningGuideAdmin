@@ -2,6 +2,7 @@ import { syntaxTree } from '@codemirror/language'
 import { EditorState, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
 import { BlockMathWidget, ImageWidget, TableWidget, parseDestination } from './markdownWidgets'
+import type { TextFn } from './markdownWidgets'
 
 /**
  * 块级 Widget 层（2026-10-29 M3 / 2026-10-27 M4 表格可编辑）。
@@ -196,6 +197,8 @@ function buildRanges(blocks: BlockRange[]) {
 
 interface BuildDeps {
   getView: () => EditorView | null
+  getText: () => TextFn
+  getLocale: () => string
 }
 
 function decorateActive(
@@ -219,6 +222,8 @@ function decorate(
   const ranges = []
   const rendered: BlockRange[] = []
   const readOnly = state.readOnly
+  const text = deps.getText()
+  const locale = deps.getLocale()
   const setEditing = (range: { from: number; to: number } | null) => {
     const view = deps.getView()
     if (!view) return
@@ -258,6 +263,8 @@ function decorate(
             deps.getView,
             setEditing,
             applyChange,
+            text,
+            locale,
           ),
           block: true,
         }).range(block.from, block.to),
@@ -269,10 +276,10 @@ function decorate(
       const src = parseDestination(parsed[2])
       if (!src) continue
       ranges.push(
-        Decoration.replace({
-          widget: new ImageWidget(src, parsed[1], true),
-          block: true,
-        }).range(block.from, block.to),
+        Decoration.replace({ widget: new ImageWidget(src, parsed[1], true, text, locale), block: true }).range(
+          block.from,
+          block.to,
+        ),
       )
       rendered.push(block)
     }
@@ -280,8 +287,12 @@ function decorate(
   return { decorations: Decoration.set(ranges, true), rendered }
 }
 
-export function createMarkdownBlockWidgets(getView: () => EditorView | null) {
-  const deps: BuildDeps = { getView }
+export function createMarkdownBlockWidgets(
+  getView: () => EditorView | null,
+  getText: () => TextFn,
+  getLocale: () => string,
+) {
+  const deps: BuildDeps = { getView, getText, getLocale }
 
   function build(state: EditorState, editing: { from: number; to: number } | null): BlockWidgetState {
     const blocks = collectBlocks(state)
