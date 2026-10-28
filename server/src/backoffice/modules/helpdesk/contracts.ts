@@ -171,8 +171,14 @@ export type PortalTicketList = {
   counts: Record<string, number>;
 };
 
+/** txt / csv 可能的编码：Portal 认得出 UTF-8 / UTF-16 就标出来，GBK 等旧编码不标 charset。 */
+export const ATTACHMENT_CHARSETS = ['utf-8', 'utf-16le', 'utf-16be'] as const;
+export type AttachmentCharset = (typeof ATTACHMENT_CHARSETS)[number];
+
 export type AttachmentFile = {
   contentType: string;
+  /** 文本附件上 Portal 标的 charset（仅 UTF-8 / UTF-16）；其它情况 null。 */
+  charset: AttachmentCharset | null;
   data: Buffer;
   /** Portal Content-Disposition 里的文件名（已去掉路径）；没有则 null。 */
   fileName: string | null;

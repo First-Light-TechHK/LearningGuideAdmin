@@ -395,6 +395,42 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
       expect(res.headers['cache-control']).toBe('private, no-store');
     });
 
+    it.each([
+      ['text/csv; charset=utf-16le', 'text/csv; charset=utf-16le'],
+      ['text/plain; charset=UTF-16BE', 'text/plain; charset=utf-16be'],
+      ['text/csv; charset=utf-8', 'text/csv; charset=utf-8'],
+      // a legacy encoding (GBK, Windows-1252, ...): Portal names no charset, so neither does the proxy
+      ['text/csv', 'text/csv'],
+      ['text/plain; charset=gbk', 'text/plain'],
+    ])(
+      'keeps the encoding Portal declares for a text file (%s -> %s)',
+      async (portalType, proxiedType) => {
+        fetchMock.mockImplementationOnce(() =>
+          Promise.resolve(
+            new Response(new Uint8Array([0xff, 0xfe, 0x41, 0x00]), {
+              status: 200,
+              headers: { 'content-type': portalType },
+            }),
+          ),
+        );
+        const res = await request(server())
+          .get('/api/helpdesk/attachments/a4')
+          .set('Cookie', as('ADMIN'))
+          .buffer(true)
+          .parse((stream, done) => {
+            const chunks: Buffer[] = [];
+            stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+            stream.on('end', () => done(null, Buffer.concat(chunks)));
+          })
+          .expect(200);
+        expect(res.headers['content-type']).toBe(proxiedType);
+        expect(res.headers['content-disposition']).toMatch(/^attachment; /);
+        expect(Buffer.from(res.body as Buffer)).toEqual(
+          Buffer.from([0xff, 0xfe, 0x41, 0x00]),
+        );
+      },
+    );
+
     it('serves images inline', async () => {
       fetchMock.mockImplementationOnce(() =>
         Promise.resolve(

@@ -1,11 +1,13 @@
 import { Logger } from '@nestjs/common';
 
 import {
+  ATTACHMENT_CHARSETS,
   ATTACHMENT_CONTENT_TYPES,
   ATTACHMENT_INLINE_TYPES,
   ATTACHMENT_MAX_BYTES,
   type Agent,
   type AgentAction,
+  type AttachmentCharset,
   type AttachmentFile,
   type AuthorKind,
   type PortalTicketList,
@@ -368,6 +370,19 @@ function normaliseList(raw: unknown): PortalTicketList {
   };
 }
 
+/** 文本附件 Content-Type 里的 charset，只认 UTF-8 / UTF-16；旧编码（GBK 等）与非文本类型为 null。 */
+function textCharset(
+  contentType: string,
+  header: string,
+): AttachmentCharset | null {
+  if (!contentType.startsWith('text/')) return null;
+  const match = /;\s*charset\s*=\s*"?([^";\s]+)"?/i.exec(header);
+  const charset = match ? match[1].toLowerCase() : null;
+  return (ATTACHMENT_CHARSETS as readonly string[]).includes(charset ?? '')
+    ? (charset as AttachmentCharset)
+    : null;
+}
+
 /**
  * Content-Disposition 里的文件名（RFC 6266：filename* 优先）；去掉路径与控制字符，最长 120。
  */
@@ -625,10 +640,8 @@ export function createPortalHelpdeskClient(
           notFoundCode: 'ATTACHMENT_NOT_FOUND',
         },
       );
-      const contentType = (response.headers.get('content-type') ?? '')
-        .split(';')[0]
-        .trim()
-        .toLowerCase();
+      const header = response.headers.get('content-type') ?? '';
+      const contentType = header.split(';')[0].trim().toLowerCase();
       if (
         !(ATTACHMENT_CONTENT_TYPES as readonly string[]).includes(contentType)
       ) {
@@ -647,6 +660,7 @@ export function createPortalHelpdeskClient(
       if (data.length > ATTACHMENT_MAX_BYTES) throw unavailable();
       return {
         contentType,
+        charset: textCharset(contentType, header),
         data,
         fileName: dispositionFileName(
           response.headers.get('content-disposition'),

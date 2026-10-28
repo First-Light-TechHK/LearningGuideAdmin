@@ -13,7 +13,10 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 
-import { ATTACHMENT_INLINE_TYPES } from '../modules/helpdesk/contracts';
+import {
+  ATTACHMENT_INLINE_TYPES,
+  type AttachmentCharset,
+} from '../modules/helpdesk/contracts';
 import type { HelpdeskService } from '../modules/helpdesk/helpdeskService';
 import {
   runHelpdesk as run,
@@ -36,10 +39,16 @@ const EXTENSIONS: Record<string, string> = {
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
 };
 
-/** Portal 只放行干净的 UTF-8 文本（txt / csv），转发时保留 charset，免得下载后乱码。 */
-export function attachmentContentType(contentType: string): string {
-  return contentType.startsWith('text/')
-    ? `${contentType}; charset=utf-8`
+/**
+ * txt / csv 可能是 UTF-8、UTF-16 或 GBK 等旧编码：转发 Portal 标的 charset（只认 UTF-8 / UTF-16），
+ * 旧编码不标 charset（总是下载），绝不自己补 utf-8，免得按头解码的查看器乱码。
+ */
+export function attachmentContentType(
+  contentType: string,
+  charset: AttachmentCharset | null,
+): string {
+  return contentType.startsWith('text/') && charset
+    ? `${contentType}; charset=${charset}`
     : contentType;
 }
 
@@ -130,7 +139,10 @@ export class BackofficeHelpdeskController {
     @Res() response: Response,
   ): Promise<void> {
     const file = await run(() => this.helpdesk.attachment(attachmentId));
-    response.setHeader('Content-Type', attachmentContentType(file.contentType));
+    response.setHeader(
+      'Content-Type',
+      attachmentContentType(file.contentType, file.charset),
+    );
     response.setHeader('Content-Length', String(file.data.length));
     response.setHeader(
       'Content-Disposition',

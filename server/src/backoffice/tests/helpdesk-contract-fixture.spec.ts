@@ -302,13 +302,22 @@ describe('Helpdesk contract fixture: Admin writes to Portal', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('keeps the UTF-8 charset Portal declares for text attachments', () => {
-    expect(attachmentContentType('text/csv')).toBe('text/csv; charset=utf-8');
-    expect(attachmentContentType('text/plain')).toBe(
-      'text/plain; charset=utf-8',
+  it('keeps the charset Portal declares for text attachments, and adds none of its own', () => {
+    expect(attachmentContentType('text/csv', 'utf-8')).toBe(
+      'text/csv; charset=utf-8',
     );
-    expect(attachmentContentType('application/pdf')).toBe('application/pdf');
-    expect(attachmentContentType('image/png')).toBe('image/png');
+    expect(attachmentContentType('text/plain', 'utf-16le')).toBe(
+      'text/plain; charset=utf-16le',
+    );
+    expect(attachmentContentType('text/csv', 'utf-16be')).toBe(
+      'text/csv; charset=utf-16be',
+    );
+    // legacy encodings (GBK, Windows-1252, ...) come with no charset
+    expect(attachmentContentType('text/csv', null)).toBe('text/csv');
+    expect(attachmentContentType('application/pdf', null)).toBe(
+      'application/pdf',
+    );
+    expect(attachmentContentType('image/png', 'utf-8')).toBe('image/png');
   });
 });
 

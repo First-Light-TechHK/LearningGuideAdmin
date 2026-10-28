@@ -514,6 +514,24 @@ describe('Portal HelpDesk client', () => {
       });
     });
 
+    it.each([
+      ['text/csv; charset=utf-16le', 'text/csv', 'utf-16le'],
+      ['text/plain; charset="UTF-16BE"', 'text/plain', 'utf-16be'],
+      ['text/csv; charset=utf-8', 'text/csv', 'utf-8'],
+      ['text/csv', 'text/csv', null],
+      ['text/plain; charset=gbk', 'text/plain', null],
+      ['image/png; charset=binary', 'image/png', null],
+      ['application/pdf; charset=utf-8', 'application/pdf', null],
+    ])(
+      'keeps only a UTF-8 / UTF-16 charset of a text file (%s)',
+      async (header, contentType, charset) => {
+        const fetchImpl = jest.fn().mockResolvedValue(image(header, 2));
+        await expect(
+          client(fetchImpl).getAttachment('a1'),
+        ).resolves.toMatchObject({ contentType, charset });
+      },
+    );
+
     it('reads the file name from Content-Disposition', async () => {
       const withName = (value: string) =>
         new Response(new Uint8Array(2), {
