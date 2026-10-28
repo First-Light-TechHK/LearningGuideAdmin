@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-10-28 ｜ HelpDesk v1 两端联调（Portal + Admin server + Admin client）
+
+- **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 拿 TDD 开发锁住」；Figma addendum（QA 知识库数据层 / Agent / Student / Backoffice）。本条是把 Portal 与 BackOffice 在本地真跑起来、互相调用，修联调中发现的问题。
+- **联调环境（只用本地值）**：本地 PostgreSQL 16 + pgvector（`prisma migrate deploy` 全部迁移）；Admin server（`PORTAL_HELPDESK_BASE_URL/TOKEN`、`ADMIN_HELPDESK_TOKEN` 为本地测试值；模型走本地假 OpenRouter 端点，没有真实 key）；Admin client（vite）；Portal dev（DEV + 本地存储，`ADMIN_HELPDESK_BASE_URL/TOKEN` 指向本地 Admin）。脚本在 `lg-helpdesk/integration-harness/`。
+- **端到端（Playwright，Portal 仓库 `tests/e2e/helpdesk-integration.spec.ts`）**：员工建并发布 3 个常见问题（1 个精选）→ 学员只看到精选那个 → 提交匹配问题的咨询 → AI 助手弹窗 →「No, still submit」带截图 → Enquiries 行有未读点 → 打开即清、学员信息 / 订阅「—」、加标签、内部备注、回复 → 学员只看到回复 → 学员再回复，行重新未读 → Mark as reviewed → 学员确认 → BackOffice 显示 Closed；「Yes, this solved my issue」不建单、计数 solved；VIEW 角色无任何写控件且不发写请求；zh-CN 两端（含有订阅的学员）。7/7 通过，连跑两次。
+- **联调发现并修复（先写测试见红再改）**：
+  1. Portal 订阅投影会给 `semiannual`、`cancel_at_period_end`、`grace`，页面没有文案，直接显示原值 → client 两种语言补文案，`grace` 用琥珀色胶囊。
+  2. Server 接受 `expectedSequence: 0`，Portal 只认 ≥1 → Server 自己 400 `INVALID_INPUT`，不再转发。
+  3. Portal 的 400（`validation_failed` 等）被转成 `VALIDATION_FAILED`，页面没有文案 → 统一成 `INVALID_INPUT`；补 `TAG_LIMIT_REACHED` 文案。
+  4. txt / csv 附件经 Admin 代理后丢了 `charset=utf-8` → 转发时保留。
+  5. 两个方向的 401 代码不一致（Admin `unauthorized`，Portal `invalid_token`）→ Admin 改为 `invalid_token`，并带 RFC 6750 `error="invalid_token"`。
+- **契约锁定**：`helpdesk-contract.json`（server、client 各一份，与 Portal 仓库同一份）+ server `helpdesk-contract-fixture.spec.ts` + client `helpdesk-contract.test.ts`，见设计文档 §4A.6。
+- **自测证据**：server `npm run build` 通过；`npm test` 40 套件通过 + 2 个 PG 套件跳过（420 通过）；带 `HELPDESK_TEST_DATABASE_URL` 42/42 套件、438 通过；改动文件 `npx eslint` 0 问题。client `npm test` 67/67；`npm run build` 通过；`npx oxlint` 改动文件 0 问题。
+- **开放问题**：「Mark as reviewed」= propose_resolution 仍是假设；新建（OPEN）的咨询要先回复才能 Mark as reviewed（状态机只允许 ASSIGNED / WAITING_USER），Figma 上新咨询也画了这个按钮，待产品确认。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+
+---
+
 ## 2026-10-28 ｜ HelpDesk v1（Figma 补充，Admin 前端）：Enquiries 三栏 + Common Questions
 
 - **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 按照我们原有的 UI UX 风格 … 拿 TDD 开发锁住」；「现在先不做埋点」；Figma node 1324-2「QA知识库数据层 / Agent / Student / Backoffice，页面还会有一些变动的」。本条只做 Admin **client**（server 未改）。

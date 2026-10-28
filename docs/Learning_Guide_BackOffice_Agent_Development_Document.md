@@ -789,10 +789,15 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | Server 未配置 Portal 地址或令牌 | 503 `HELPDESK_NOT_CONNECTED`（不发出请求） |
 | 503 `integration_disabled`、401、403 | 503 `HELPDESK_NOT_CONNECTED`（不把 Portal 的 401 透传成员工会话失效） |
 | 404 | 404 `TICKET_NOT_FOUND` |
-| 409 `stale_ticket` / `invalid_transition` / `idempotency_conflict` / `reopen_window_passed` | 409 `STALE_TICKET` / `INVALID_TRANSITION` / `IDEMPOTENCY_CONFLICT` / `REOPEN_WINDOW_PASSED`（problem `code` 转大写） |
+| 400 `invalid_request` / `validation_failed` / `idempotency_key_required` | 400 `INVALID_INPUT`（2026-10-28 联调后统一，页面有对应文案） |
+| 409 `stale_ticket` / `invalid_transition` / `idempotency_conflict` / `tag_limit_reached` / `reopen_window_passed` | 409 `STALE_TICKET` / `INVALID_TRANSITION` / `IDEMPOTENCY_CONFLICT` / `TAG_LIMIT_REACHED` / `REOPEN_WINDOW_PASSED`（problem `code` 转大写；员工端可能收到的每个 409 都有文案，由契约测试锁定） |
 | 其它 4xx（problem+json） | 同状态码，`code` 取 problem `code` 转大写，缺省 `INVALID_INPUT` |
 | 5xx、无法连接、响应无法解析 | 502 `HELPDESK_UNAVAILABLE` |
 | 超时（JSON 5 秒、附件 10 秒） | 504 `HELPDESK_UNAVAILABLE` |
+
+`expectedSequence` 必须是 ≥1 的整数（Portal 每单至少有 created 事件，sequence 从 1 开始）；0 或负数在 Server 直接 400 `INVALID_INPUT`，不发给 Portal。
+
+**线上契约（2026-10-28 两端联调后锁定）**：`server/src/backoffice/tests/fixtures/helpdesk-contract.json` 与 `client/tests/fixtures/helpdesk-contract.json`（两份相同，Portal 仓库 `tests/fixtures/helpdesk-contract.json` 也是同一份）取自 Portal + Admin 在本地真实联调的请求 / 回包并脱敏。`helpdesk-contract-fixture.spec.ts`（server）锁：枚举一致、能完整读出 Portal 的列表 / 详情、发给 Portal 的消息与动作体、Portal 每个 problem code 的映射、给 Portal 的 questions / suggest / outcome 回包形状；`client/tests/helpdesk-contract.test.ts` 锁：两份 fixture 相同、Portal 会发来的订阅状态（`active` / `cancel_at_period_end` / `grace`）与计费周期（`annual` / `semiannual`）在两种语言都有文案、员工端可能收到的 409 都有文案。改契约时三份一起改。
 
 Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUESTION_NOT_FOUND`、409 `VERSION_CONFLICT`（版本不一致，先于状态检查）、409 `INVALID_TRANSITION`（如下线草稿、编辑已归档）。
 
@@ -820,8 +825,8 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 ### 4A.9 Portal → Admin 集成鉴权（Figma addendum §E）
 
 - 路径 `/api/integration/helpdesk/**`：`GET questions`（admin 角色）、`POST suggest` 与 `POST suggestions/:id/outcome`（agent 角色）。
-- `Authorization: Bearer <ADMIN_HELPDESK_TOKEN>`（RFC 6750），每次请求现读环境变量、`timingSafeEqual` 定长比较；令牌为空 → 503 `integration_disabled`（本地也不放行）；缺失 / 错误 → 401 `unauthorized`（带 `WWW-Authenticate: Bearer`）。
-- 成功体为纯 JSON（不套 §5.3 信封）；错误一律 RFC 9457 `application/problem+json`：`{ type: "https://www.ilovelearningguide.com/problems/<code>", title, status, detail, code }`，code 为 `unauthorized` / `integration_disabled` / `invalid_request` / `not_found` / `internal_error`。请求体不是合法 JSON、路由不存在等在控制器之外发生的错误，也由全局过滤器对这一前缀输出 problem+json。
+- `Authorization: Bearer <ADMIN_HELPDESK_TOKEN>`（RFC 6750），每次请求现读环境变量、`timingSafeEqual` 定长比较；令牌为空 → 503 `integration_disabled`（本地也不放行）；缺失 / 错误 → 401 `invalid_token`（带 `WWW-Authenticate: Bearer realm="helpdesk", error="invalid_token"`，与 Portal 集成接口同一个代码，RFC 6750 §3.1）。
+- 成功体为纯 JSON（不套 §5.3 信封）；错误一律 RFC 9457 `application/problem+json`：`{ type: "https://www.ilovelearningguide.com/problems/<code>", title, status, detail, code }`，code 为 `invalid_token` / `integration_disabled` / `invalid_request` / `not_found` / `internal_error`。请求体不是合法 JSON、路由不存在等在控制器之外发生的错误，也由全局过滤器对这一前缀输出 problem+json。
 - 拆分部署时：`questions` 在 admin 实例，`suggest*` 在 agent 实例；Portal 只配一个 `ADMIN_HELPDESK_BASE_URL`，需由网关按路径分流或两个角色同进程（今天的部署方式）。
 
 ---
@@ -980,7 +985,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET | /api/helpdesk/tickets/:ticketId | helpDesk VIEW | TicketDetail（含内部备注、附件、事件时间线、`student`、`subscription`）+ `needsReply` + `available: { claim, reply, internalNote, proposeResolution, tag, markRead }` |
 | POST | /api/helpdesk/tickets/:ticketId/messages | helpDesk FULL | body `{ body, internal, expectedSequence }`，头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
 | POST | /api/helpdesk/tickets/:ticketId/actions | helpDesk FULL | body `{ action: "claim" \| "propose_resolution" \| "add_tag" \| "remove_tag" \| "mark_read", expectedSequence, tag? }`（`mark_read` 可不带 expectedSequence；标签动作必带 `tag`），头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
-| GET | /api/helpdesk/attachments/:attachmentId | helpDesk VIEW | 代理 Portal 附件（png / jpeg / webp / gif 内联；pdf / txt / csv / docx / xlsx 以 `Content-Disposition: attachment` 下载；≤ 10 MB），`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'` |
+| GET | /api/helpdesk/attachments/:attachmentId | helpDesk VIEW | 代理 Portal 附件（png / jpeg / webp / gif 内联；pdf / txt / csv / docx / xlsx 以 `Content-Disposition: attachment` 下载；txt / csv 保留 Portal 的 `charset=utf-8`；≤ 10 MB），`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'` |
 | GET | /api/helpdesk/questions?locale=&category=&status=&q= | helpDesk VIEW | Common Questions 列表；`status` 缺省 = draft + published，`all` 含归档；返回 `{ questions: QuestionView[] }`（含 `stats`） |
 | GET | /api/helpdesk/questions/:id | helpDesk VIEW | 单个 QuestionView |
 | GET | /api/helpdesk/questions/:id/revisions | helpDesk VIEW | `{ revisions: [{ id, questionId, version, action, employeeId, at, snapshot }] }`，新的在前 |
