@@ -210,7 +210,7 @@ export class ReleasesService {
    */
   async setLive(courseId: string, dto: ActivateReleaseDto) {
     // §3.4.4 第 3 步：在单事务内校验归属 → 更新上线指针（轻量，不重建/覆盖草稿）
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await lockCourseRow(tx, courseId);
       const course = await tx.course.findUnique({
         where: { id: courseId },
@@ -230,8 +230,20 @@ export class ReleasesService {
         where: { id: courseId },
         data: { currentReleaseId: release.id },
       });
-      return { id: release.id, versionTag: release.versionTag };
+      // 自愈：历史版本可能在索引失败（如 embedding 鉴权过期、事务超时）后
+      // 从未生成 chunks，上线后检索会一直为空。上线时补建一次索引。
+      const chunkCount = await tx.knowledgeChunk.count({
+        where: { releaseId: release.id },
+      });
+      return { id: release.id, versionTag: release.versionTag, missingChunks: chunkCount === 0 };
     });
+
+    if (result.missingChunks) {
+      void this.indexing.indexRelease(result.id).catch(() => {
+        /* IndexingService 内部已记录日志 */
+      });
+    }
+    return { id: result.id, versionTag: result.versionTag };
   }
 
   /** Course 的 Release 历史列表（不含 snapshotData，避免响应过大；标注 Live / 后台测试所选 / 当前编辑版本） */
