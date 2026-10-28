@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-10-28 ｜ HelpDesk v1 审查修复（Admin client + server）：Claim 接单、mark_read 带 sequence、全文索引表达式
+
+- **任务**：协调方转来的审查结论，逐条先核实再修；用户原话见下方各条（「拿 TDD 开发锁住」「现在先不做埋点」）。
+- **核实结论**：①新建（OPEN）咨询上没有任何接单入口，「Mark as reviewed」要等第一次公开回复后才出现——属实（spec §7 列有 Claim，状态表规定 propose_resolution 只在 ASSIGNED / WAITING_USER）；②`helpdesk_questions_search_idx` 用 `'simple'`，候选查询用 `'english'`，索引永远用不上——属实（迁移未进任何远端分支，原地修改）。
+- **变更清单**：
+  - client：`lib/helpdeskView.ts` 新增 `claimInput` / `markReadInput`，`EnquiryControls.claim`（FULL 且 Server `available.claim`）；`EnquiryConversation.tsx` 在 Enquiry 卡片底部、Mark as reviewed 的位置显示「Claim / 接单」（复用 `hdMarkReviewed` 样式，不新增 CSS）；`EnquiriesView.tsx` 接单走 `runAction`（409 stale 重新加载）；打开即已读改为带 `expectedSequence`（Portal 只在 sequence 未变时清未读）；en-GB / zh-CN `helpDesk` 段新增 4 个文案。
+  - server：迁移索引改为 `to_tsvector('english', question || ' ' || answer)`，导出 `CANDIDATES_SQL`；新增 `helpdesk-questions-search-index.spec.ts`（索引表达式与查询表达式一字不差、只用 english）；PG 套件新增 EXPLAIN 用例（关闭顺序扫描后命中该索引）。
+- **TDD 证据**：client 先改 `tests/helpdesk-view.test.ts`，运行失败（`claimInput` 不存在）；server 新 spec 与 PG 用例先跑 3 个失败（`'simple'` ≠ `'english'`、`CANDIDATES_SQL` 未导出）；实现后全绿。
+- **自测证据**：client `npm test` 70/70、`npm run build` 通过、`npx oxlint <改动文件>` 0 错误（2 条 HEAD 已有的 set-state-in-effect 警告）；server `npm run build` 通过，`npm test` 41 套件通过 + 2 个 PG 套件跳过；设 `HELPDESK_TEST_DATABASE_URL`（本地临时 PG 16）后 43/43 套件、441 通过 + 1 个仓库原有 skip；`npx eslint <改动文件>` 0 问题。
+- **待视觉验收**：OPEN 咨询卡片底部显示「Claim / 接单」而 Figma 1324:2 画的是「Mark as reviewed」，待产品 / 视觉确认。
+- **开放问题**：候选查询把全文命中与关键词 / 中文双字命中用 OR 合并，即使表达式一致，规划器仍会扫描该语言下的已发布问题（表很小，结果正确）；若问题库变大，可拆成全文分支 UNION 关键词分支再合并打分。本地联调库 `lg_admin_int` 已跑过旧版本迁移，校验和会变，重建该临时库即可。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+
+---
+
 ## 2026-10-28 ｜ HelpDesk v1 两端联调（Portal + Admin server + Admin client）
 
 - **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 拿 TDD 开发锁住」；Figma addendum（QA 知识库数据层 / Agent / Student / Backoffice）。本条是把 Portal 与 BackOffice 在本地真跑起来、互相调用，修联调中发现的问题。

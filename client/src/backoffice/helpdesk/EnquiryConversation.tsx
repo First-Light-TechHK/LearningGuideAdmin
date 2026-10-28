@@ -86,12 +86,13 @@ type Props = {
   controls: EnquiryControls
   notice: Notice
   busy: string | null
+  onClaim: () => void
   onMarkReviewed: () => void
   /** idempotencyKey：同一份草稿重试沿用同一个，草稿变了或发送成功后换新。 */
   onSend: (body: string, internal: boolean, idempotencyKey: string) => Promise<boolean>
 }
 
-export function EnquiryConversation({ locale, ticket, controls, notice, busy, onMarkReviewed, onSend }: Props) {
+export function EnquiryConversation({ locale, ticket, controls, notice, busy, onClaim, onMarkReviewed, onSend }: Props) {
   const [mode, setMode] = useState<ComposerMode>('reply')
   const [draft, setDraft] = useState('')
   const threadRef = useRef<HTMLDivElement | null>(null)
@@ -146,6 +147,18 @@ export function EnquiryConversation({ locale, ticket, controls, notice, busy, on
             {enquiry?.body ? <div className="hdBody">{enquiry.body}</div> : null}
             <div className="hdCardFoot">
               <Attachments files={enquiry?.attachments ?? []} locale={locale} />
+              {controls.claim ? (
+                <button
+                  type="button"
+                  className="hdMarkReviewed"
+                  title={t(locale, 'helpDesk.claimHint')}
+                  onClick={onClaim}
+                  disabled={busy !== null}
+                >
+                  <HdCheckCircleIcon />
+                  {busy === 'claim' ? t(locale, 'helpDesk.claiming') : t(locale, 'helpDesk.claim')}
+                </button>
+              ) : null}
               {controls.markReviewed ? (
                 <button
                   type="button"

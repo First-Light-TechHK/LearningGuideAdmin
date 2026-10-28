@@ -6,7 +6,9 @@ import { getEnquiry, listEnquiries, newIdempotencyKey, sendAction, sendMessage, 
 import { errorMessage } from '../lib/helpdeskFormat'
 import {
   applyDetailToRow,
+  claimInput,
   enquiryControls,
+  markReadInput,
   mergeTickets,
   readEnquiryFilters,
   shouldMarkRead,
@@ -155,7 +157,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
       const detail = await loadTicket(ticketId)
       // 打开即已读（只对 FULL；VIEW 打开不清未读）。失败不打扰员工，下次打开再试。
       if (cancelled || !detail || !shouldMarkRead(detail, canWrite)) return
-      const result = await sendAction(detail.id, { action: 'mark_read' }, newIdempotencyKey())
+      const result = await sendAction(detail.id, markReadInput(detail), newIdempotencyKey())
       if (cancelled || currentTicket.current !== detail.id) return
       // 未读以 Portal 为准：失败时不在本地清除
       if (result.ok) adopt(result.data)
@@ -187,6 +189,13 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     const ok = await settle(await sendAction(ticket.id, input, newIdempotencyKey()), ticket.id)
     setBusy(null)
     return ok
+  }
+
+  async function claim() {
+    if (!ticket) return
+    if (await runAction(claimInput(ticket), 'claim')) {
+      setNotice({ kind: 'info', text: t(locale, 'helpDesk.claimedNotice') })
+    }
   }
 
   async function markReviewed() {
@@ -241,6 +250,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
             controls={controls}
             notice={notice}
             busy={busy}
+            onClaim={() => void claim()}
             onMarkReviewed={() => void markReviewed()}
             onSend={send}
           />

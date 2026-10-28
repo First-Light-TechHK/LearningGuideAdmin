@@ -766,7 +766,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 ### 4A.4 工单详情（`/:locale/help-desk/:ticketId`，Figma 1324:2 中栏 + 右栏）
 
-> 2026-10-28 起详情不再是独立页面：选中左栏一行即在中栏 / 右栏展开。中栏 = 日期分隔 + Enquiry 卡片（主题、Enquiry Type 标签、`联系邮箱 · 时间`、正文、附件 chip「文件名 + 大小」经代理打开、**Mark as reviewed** = `propose_resolution`）+ 之后的消息 + 回复框；右栏 = 姓名 / 邮箱、Student Information、Current Subscription Plan（Active 绿色胶囊，无订阅显示「—」）、Tags（`+ Add Tag`，× 删除，仅 FULL）。打开即调 `mark_read`（仅 FULL 且确有未读）。Claim 按钮与事件时间线不在 Figma 中，已移除（回复时 Portal 自动认领）。下面几条为原卡片看板时期的描述，以本段为准。
+> 2026-10-28 起详情不再是独立页面：选中左栏一行即在中栏 / 右栏展开。中栏 = 日期分隔 + Enquiry 卡片（主题、Enquiry Type 标签、`联系邮箱 · 时间`、正文、附件 chip「文件名 + 大小」经代理打开、**Mark as reviewed** = `propose_resolution`）+ 之后的消息 + 回复框；右栏 = 姓名 / 邮箱、Student Information、Current Subscription Plan（Active 绿色胶囊，无订阅显示「—」）、Tags（`+ Add Tag`，× 删除，仅 FULL）。打开即调 `mark_read`（仅 FULL 且确有未读），并带上当时看到的 `expectedSequence`：之后学员新发的消息不会被这次 mark_read 清掉未读。2026-10-28 审查后补回 **Claim / 接单**（Tickets v1 spec §7）：只在 OPEN 且 FULL 时显示在 Enquiry 卡片底部、Mark as reviewed 的位置，样式同 Mark as reviewed；接单后工单进 ASSIGNED，才出现 Mark as reviewed（状态表规定 propose_resolution 只在 ASSIGNED / WAITING_USER）。Figma 1324:2 在新咨询上画的是 Mark as reviewed，这一处差异**待视觉验收 / 产品确认**。回复未认领工单时 Portal 仍会自动认领。事件时间线不在 Figma 中，未做。下面几条为原卡片看板时期的描述，以本段为准。
 
 - 左栏对话：学员消息靠左、员工消息靠右（带员工名），**内部备注**用琥珀色底与「Internal note / 内部备注」标记区分（学员永远看不到）；附件图片缩略图经 BackOffice Server 代理 `GET /api/helpdesk/attachments/:id` 加载（浏览器不直连 Portal），点击新窗口打开原图。
 - 底部回复区（仅 FULL）：Reply to learner / Internal note 二选一 + 文本框（1–5000 字）+ Send。
@@ -984,7 +984,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET | /api/helpdesk/tickets?status=&category=&tag=&q=&cursor=&limit= | helpDesk VIEW | `status` ∈ `all`（缺省）/ `needs_reply` / `OPEN` / `ASSIGNED` / `WAITING_USER` / `PENDING_CONFIRM` / `CLOSED` / `CANCELLED`；`category` 为四个 Enquiry Type；`tag` ≤32；`q` ≤120；`limit` 1–100（缺省 30）；返回 `{ tickets: (TicketSummary & { needsReply })[], nextCursor, counts }` |
 | GET | /api/helpdesk/tickets/:ticketId | helpDesk VIEW | TicketDetail（含内部备注、附件、事件时间线、`student`、`subscription`）+ `needsReply` + `available: { claim, reply, internalNote, proposeResolution, tag, markRead }` |
 | POST | /api/helpdesk/tickets/:ticketId/messages | helpDesk FULL | body `{ body, internal, expectedSequence }`，头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
-| POST | /api/helpdesk/tickets/:ticketId/actions | helpDesk FULL | body `{ action: "claim" \| "propose_resolution" \| "add_tag" \| "remove_tag" \| "mark_read", expectedSequence, tag? }`（`mark_read` 可不带 expectedSequence；标签动作必带 `tag`），头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
+| POST | /api/helpdesk/tickets/:ticketId/actions | helpDesk FULL | body `{ action: "claim" \| "propose_resolution" \| "add_tag" \| "remove_tag" \| "mark_read", expectedSequence, tag? }`（`mark_read` 可不带 expectedSequence，前端总是带上，Portal 只在工单 sequence 未超过它时清未读；标签动作必带 `tag`），头 `Idempotency-Key`（UUID）；Server 注入 `agent`；返回最新 TicketDetail |
 | GET | /api/helpdesk/attachments/:attachmentId | helpDesk VIEW | 代理 Portal 附件（png / jpeg / webp / gif 内联；pdf / txt / csv / docx / xlsx 以 `Content-Disposition: attachment` 下载；txt / csv 保留 Portal 的 `charset=utf-8`；≤ 10 MB），`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'` |
 | GET | /api/helpdesk/questions?locale=&category=&status=&q= | helpDesk VIEW | Common Questions 列表；`status` 缺省 = draft + published，`all` 含归档；返回 `{ questions: QuestionView[] }`（含 `stats`） |
 | GET | /api/helpdesk/questions/:id | helpDesk VIEW | 单个 QuestionView |

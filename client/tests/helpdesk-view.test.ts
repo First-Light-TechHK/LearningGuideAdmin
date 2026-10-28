@@ -8,11 +8,13 @@ import {
   applyDetailToRow,
   avatarColor,
   dayLabel,
+  claimInput,
   enquiryControls,
   enquiryQuery,
   fileSize,
   initials,
   listTime,
+  markReadInput,
   mergeTickets,
   normalizeTag,
   readEnquiryFilters,
@@ -192,11 +194,16 @@ describe('list paging and unread', () => {
     assert.equal(shouldMarkRead({ ...ticket, unreadByAgent: false }, true), false)
     assert.equal(shouldMarkRead({ ...ticket, available: { ...AVAILABLE_ALL, markRead: false } }, true), false)
   })
+
+  test('mark_read carries the sequence the agent saw, so a newer learner message stays unread', () => {
+    assert.deepEqual(markReadInput({ sequence: 7 }), { action: 'mark_read', expectedSequence: 7 })
+  })
 })
 
 describe('write controls (VIEW sees none)', () => {
   test('FULL sees what the server allows', () => {
     assert.deepEqual(enquiryControls({ available: AVAILABLE_ALL }, true), {
+      claim: true,
       markReviewed: true,
       composer: true,
       reply: true,
@@ -208,12 +215,29 @@ describe('write controls (VIEW sees none)', () => {
         { available: { ...AVAILABLE_ALL, reply: false, proposeResolution: false, tag: false } },
         true,
       ),
-      { markReviewed: false, composer: true, reply: false, internalNote: true, editTags: false },
+      { claim: true, markReviewed: false, composer: true, reply: false, internalNote: true, editTags: false },
     )
+  })
+
+  test('a brand-new OPEN enquiry can be claimed (Mark as reviewed needs ASSIGNED or WAITING_USER)', () => {
+    // What the server returns for OPEN (availableActions in the Admin server, spec §2 state table).
+    const open = { claim: true, reply: true, internalNote: true, proposeResolution: false, tag: true, markRead: true }
+    const controls = enquiryControls({ available: open }, true)
+    assert.equal(controls.claim, true)
+    assert.equal(controls.markReviewed, false)
+    const assigned = enquiryControls({ available: { ...open, claim: false, proposeResolution: true } }, true)
+    assert.equal(assigned.claim, false)
+    assert.equal(assigned.markReviewed, true)
+    assert.equal(enquiryControls({ available: open }, false).claim, false, 'VIEW cannot claim')
+  })
+
+  test('claim is sent with the sequence on screen (stale -> 409, reload)', () => {
+    assert.deepEqual(claimInput({ sequence: 1 }), { action: 'claim', expectedSequence: 1 })
   })
 
   test('VIEW sees no write controls at all, whatever the server says', () => {
     assert.deepEqual(enquiryControls({ available: AVAILABLE_ALL }, false), {
+      claim: false,
       markReviewed: false,
       composer: false,
       reply: false,

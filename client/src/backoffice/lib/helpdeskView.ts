@@ -5,6 +5,7 @@ import {
   SEARCH_MAX,
   TAGS_PER_TICKET_MAX,
   TAG_MAX_LENGTH,
+  type AgentActionInput,
   type AvailableActions,
   type HelpdeskCategory,
   type ListStatusFilter,
@@ -173,7 +174,19 @@ export function shouldMarkRead(
   return canWrite && ticket.unreadByAgent && ticket.available.markRead
 }
 
+/** mark_read 带上员工看到的 sequence：之后学员又发来的消息仍保持未读（Portal 只在 sequence 未变时清除）。 */
+export function markReadInput(ticket: { sequence: number }): AgentActionInput {
+  return { action: 'mark_read', expectedSequence: ticket.sequence }
+}
+
+/** Claim（接单）：以页面上的 sequence 为准，工单已变则 409 stale 重新加载。 */
+export function claimInput(ticket: { sequence: number }): AgentActionInput {
+  return { action: 'claim', expectedSequence: ticket.sequence }
+}
+
 export type EnquiryControls = {
+  /** 接单（spec §7 Claim）：只在 OPEN 时可用；接单后才出现 Mark as reviewed（状态表）。 */
+  claim: boolean
   /** Figma「Mark as reviewed」= propose_resolution。 */
   markReviewed: boolean
   composer: boolean
@@ -188,6 +201,7 @@ export function enquiryControls(ticket: { available: AvailableActions }, canWrit
   const reply = canWrite && a.reply
   const internalNote = canWrite && a.internalNote
   return {
+    claim: canWrite && a.claim,
     markReviewed: canWrite && a.proposeResolution,
     composer: reply || internalNote,
     reply,

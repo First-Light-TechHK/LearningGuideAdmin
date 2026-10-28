@@ -201,7 +201,11 @@ export function searchTerms(text: string): {
   return { tsquery: words.join(' | '), bigrams: [...bigrams].slice(0, 40) };
 }
 
-const CANDIDATES_SQL = `
+/**
+ * 候选检索。to_tsvector('english', question || ' ' || answer) 必须与迁移里的
+ * helpdesk_questions_search_idx 表达式一字不差（helpdesk-questions-search-index.spec.ts 锁定）。
+ */
+export const CANDIDATES_SQL = `
 WITH input AS (
   SELECT CASE WHEN $3 = '' THEN NULL ELSE to_tsquery('english', $3) END AS tsq,
          lower($4) AS body,

@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 
 import type { HelpdeskQuestion } from '../modules/helpdesk/questions/questionContracts';
 import {
+  CANDIDATES_SQL,
   createPgQuestionRepository,
   type QuestionRepository,
   type SqlDb,
@@ -263,6 +264,36 @@ describeDb('Helpdesk questions repository (PostgreSQL)', () => {
     ).toEqual([inv.id]);
     expect(await repo.nextSortOrder('en-GB')).toBeGreaterThan(30);
     expect(await repo.nextSortOrder('zh-CN')).toBe(10);
+  });
+
+  it('the full-text search index serves the candidate query expression', async () => {
+    await repo.insert(
+      row({
+        question: 'How do I reset my password?',
+        answer: 'Use Forgot password.',
+      }),
+      EMP,
+    );
+    const vector =
+      /to_tsvector\('english', q\.question \|\| ' ' \|\| q\.answer\)/.exec(
+        CANDIDATES_SQL,
+      );
+    expect(vector).not.toBeNull();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SET LOCAL enable_seqscan = off');
+      const { rows } = await client.query(
+        `EXPLAIN SELECT q.id FROM helpdesk_questions q WHERE ${vector![0]} @@ to_tsquery('english', 'password')`,
+      );
+      const plan = rows
+        .map((r: Record<string, string>) => r['QUERY PLAN'])
+        .join('\n');
+      expect(plan).toContain('helpdesk_questions_search_idx');
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
   });
 
   describe('suggestion candidates', () => {

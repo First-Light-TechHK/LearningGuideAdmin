@@ -48,9 +48,10 @@ CREATE TABLE "helpdesk_question_revisions" (
 
 -- CreateIndex
 CREATE INDEX "helpdesk_questions_list_idx" ON "helpdesk_questions"("locale", "status", "sort_order");
--- 候选检索（Agent 推荐）：全文（simple 配置，不做词干）+ 关键词
+-- 候选检索（Agent 推荐）：全文（english 配置，与 questionRepository.ts CANDIDATES_SQL 的
+-- to_tsvector / to_tsquery 完全同一表达式，否则规划器用不上此索引）+ 关键词
 CREATE INDEX "helpdesk_questions_search_idx" ON "helpdesk_questions"
-    USING GIN (to_tsvector('simple', "question" || ' ' || "answer"));
+    USING GIN (to_tsvector('english', "question" || ' ' || "answer"));
 CREATE INDEX "helpdesk_questions_keywords_idx" ON "helpdesk_questions" USING GIN ("keywords");
 CREATE UNIQUE INDEX "helpdesk_question_revisions_question_version_key"
     ON "helpdesk_question_revisions"("question_id", "version");
