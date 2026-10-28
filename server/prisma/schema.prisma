@@ -128,7 +128,7 @@ model KnowledgeChunk {
 // AI 提示词模板库（预设两套模式）
 model PromptTemplate {
   id           String   @id @default(uuid())
-  mode         String // 枚举: "LECTURE" | "SOCRATIC"
+  mode         String // 枚举: "LECTURE" | "SOCRATIC" | "ASSESSMENT"
   systemPrompt String   @db.Text // 系统提示词
   welcomeMsg   String   @db.Text // 欢迎语
   isDefault    Boolean  @default(false)
@@ -136,13 +136,16 @@ model PromptTemplate {
   updatedAt    DateTime @updatedAt
 
   // 反向关联：被哪些课程引用
-  // 注：CourseAiConfig 存在两条指向本模型的关系（Lecture/Socratic），
-  // Prisma 要求多关系必须命名消歧，故拆分为两个反向列表字段（不影响数据库列结构）
-  lectureConfigs  CourseAiConfig[] @relation("LectureTemplate")
-  socraticConfigs CourseAiConfig[] @relation("SocraticTemplate")
+  // 注：CourseAiConfig 存在多条指向本模型的关系（Lecture/Socratic/Assessment），
+  // Prisma 要求多关系必须命名消歧，故拆分为多个反向列表字段（不影响数据库列结构）
+  lectureConfigs    CourseAiConfig[] @relation("LectureTemplate")
+  socraticConfigs   CourseAiConfig[] @relation("SocraticTemplate")
+  assessmentConfigs CourseAiConfig[] @relation("AssessmentTemplate")
 }
 
 // 课程 + 发布版本 专属的 AI 配置（2026-10-20 改拍：由「每课程一份」→「每个 Release 一份」）
+// 2026-10-27 调整：System Prompt 按模式分开（Lecture/Socratic/Assessment），
+//   Welcome Message 与 LLM Model 统一为课程级共享列（不随模式切换）。
 model CourseAiConfig {
   id        String  @id @default(uuid())
   courseId  String
@@ -150,25 +153,28 @@ model CourseAiConfig {
   releaseId String
   release   Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
-  // 引用基础模板（两条关系分别命名以消歧）
-  lectureModeId    String?
-  socraticModeId   String?
-  lectureTemplate  PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
-  socraticTemplate PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
+  // 引用基础模板（三条关系分别命名以消歧）
+  lectureModeId      String?
+  socraticModeId     String?
+  assessmentModeId   String?
+  lectureTemplate    PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
+  socraticTemplate   PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
+  assessmentTemplate PromptTemplate? @relation("AssessmentTemplate", fields: [assessmentModeId], references: [id])
 
-  // 覆盖自定义的提示词（按模式分开，可选；有值即优先于该模式模板）
-  // 2026-10-20 由单一 customSystemPrompt / customWelcomeMsg 拆分而来（存量值迁移时两模式同时回填）
-  lectureSystemPrompt  String? @db.Text
-  socraticSystemPrompt String? @db.Text
-  lectureWelcomeMsg    String? @db.Text
-  socraticWelcomeMsg   String? @db.Text
+  // 各模式自定义 System Prompt（按模式分开，可选；有值即优先于该模式模板）
+  // 2026-10-27 新增 assessmentSystemPrompt；welcome 与 model 统一为共享列
+  lectureSystemPrompt    String? @db.Text
+  socraticSystemPrompt   String? @db.Text
+  assessmentSystemPrompt String? @db.Text
 
-  // LLM 配置（llmProvider / llmBaseUrl / apiKey 课程级共享；model 按模式，null 回退 AI_AVAILABLE_MODELS[0]）
-  llmProvider   String // 如: "openrouter"
-  lectureModel  String?
-  socraticModel String?
-  llmBaseUrl    String? // 可选的自定义 Base URL
-  apiKey        String? // 加密存储
+  // 统一 Welcome Message（不再按模式分开）
+  welcomeMsg String? @db.Text
+
+  // LLM 配置（llmProvider / llmBaseUrl / apiKey / model 均课程级共享；model null 回退 AI_AVAILABLE_MODELS[0]）
+  llmProvider String // 如: "openrouter"
+  model       String?
+  llmBaseUrl  String? // 可选的自定义 Base URL
+  apiKey      String? // 加密存储
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

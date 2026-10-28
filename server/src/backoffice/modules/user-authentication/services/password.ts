@@ -59,3 +59,13 @@ async function scryptWithParams(plain: string, salt: Buffer): Promise<Buffer> {
   const derived = await scrypt(plain, salt, KEY_LENGTH);
   return Buffer.from(derived);
 }
+
+/**
+ * 账号不存在或尚未设密码时也跑一次同等开销的 scrypt，
+ * 让「邮箱不存在」与「密码错误」的响应耗时一致（防账号枚举）。
+ */
+export async function burnPasswordCheck(plain: string): Promise<void> {
+  await scryptWithParams(plain, DUMMY_SALT);
+}
+
+const DUMMY_SALT = randomBytes(SALT_LENGTH);

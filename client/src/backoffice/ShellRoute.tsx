@@ -13,7 +13,15 @@ type SessionPayload = { employee: SessionEmployee; sidebarState?: 'expanded' | '
 type SessionState =
   | { kind: 'loading' }
   | { kind: 'signedOut' }
+  | { kind: 'unavailable' }
   | { kind: 'signedIn'; employee: SessionEmployee; sidebarState: 'expanded' | 'collapsed' }
+
+/** /api/session 返回这些码才说明真的没登录（会话无效、账号停用或未验证）。 */
+const SIGNED_OUT_CODES: ReadonlySet<string> = new Set([
+  'INVALID_EMPLOYEE_ACCOUNT',
+  'ACCOUNT_NOT_ACTIVE',
+  'EMAIL_NOT_VERIFIED',
+])
 
 const EmployeeContext = createContext<SessionEmployee | null>(null)
 
@@ -38,26 +46,46 @@ export function ShellRoute() {
 
   const load = useCallback(async () => {
     const result = await boRequest<SessionPayload>('/api/session')
-    setState(
-      result.success
-        ? {
-            kind: 'signedIn',
-            employee: result.data.employee,
-            sidebarState: result.data.sidebarState === 'collapsed' ? 'collapsed' : 'expanded',
-          }
-        : { kind: 'signedOut' },
-    )
+    if (result.success) {
+      setState({
+        kind: 'signedIn',
+        employee: result.data.employee,
+        sidebarState: result.data.sidebarState === 'collapsed' ? 'collapsed' : 'expanded',
+      })
+      return
+    }
+    // 只有服务端明确说会话无效才登出；断网或 5xx 时保留当前页面，首次加载则提示重试
+    if (SIGNED_OUT_CODES.has(result.error)) setState({ kind: 'signedOut' })
+    else setState((previous) => (previous.kind === 'signedIn' ? previous : { kind: 'unavailable' }))
   }, [])
 
   useEffect(() => {
     void load()
     const onChange = () => void load()
+    // 切回这个标签页时重读一次：角色或状态可能在别处被改过
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load()
+    }
     window.addEventListener(SESSION_CHANGED_EVENT, onChange)
-    return () => window.removeEventListener(SESSION_CHANGED_EVENT, onChange)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener(SESSION_CHANGED_EVENT, onChange)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [load])
 
   if (state.kind === 'loading') {
     return <div className="shellLoading">{t(locale, 'common.loading')}</div>
+  }
+  if (state.kind === 'unavailable') {
+    return (
+      <div className="shellLoading">
+        <p>{t(locale, 'common.sessionUnavailable')}</p>
+        <button type="button" className="button" onClick={() => void load()}>
+          {t(locale, 'common.retry')}
+        </button>
+      </div>
+    )
   }
   if (state.kind === 'signedOut') {
     return <Navigate to={`/${locale}/sign-in`} replace />

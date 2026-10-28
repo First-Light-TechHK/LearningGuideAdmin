@@ -52,6 +52,31 @@ describe('email normalisation', () => {
     assert.equal(isValidEmail('employee example.com'), false);
     assert.equal(isValidEmail(''), false);
   });
+
+  it('rejects malformed domains and dotted local parts', () => {
+    for (const bad of [
+      'a@b..c',
+      'a@.b.c',
+      'a@b.c.',
+      'a@-b.com',
+      'a@b-.com',
+      'a@b.c',
+      'a@b.c0m',
+      '.a@b.com',
+      'a.@b.com',
+      'a..b@b.com',
+    ]) {
+      assert.equal(isValidEmail(bad), false, bad);
+    }
+    for (const good of [
+      'first.last+tag@sub.example.co.uk',
+      'admin@ilovelearningguide.com',
+      'x@xn--fiqs8s.com',
+      ' Mixed.Case@Example.COM ',
+    ]) {
+      assert.equal(isValidEmail(good), true, good);
+    }
+  });
 });
 
 describe('role catalogue', () => {

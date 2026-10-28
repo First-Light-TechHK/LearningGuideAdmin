@@ -9,6 +9,7 @@ import {
 } from '../../api/knowledge'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { tokens } from '../../theme/tokens'
+import { useKText } from './i18n'
 
 /**
  * 「上传并解析」两步弹窗（§3.2.3）：
@@ -26,6 +27,7 @@ export function UploadDocumentModal({
   onClose: () => void
 }) {
   const { message } = App.useApp()
+  const { text } = useKText()
   const importDocument = useKnowledgeStore((s) => s.importDocument)
   const [file, setFile] = useState<File | null>(null)
   const [step, setStep] = useState<1 | 2>(1)
@@ -49,12 +51,15 @@ export function UploadDocumentModal({
     const ext = dot > 0 ? f.name.slice(dot).toLowerCase() : ''
     if (!(UPLOAD_ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
       message.error(
-        `格式暂不支持：${ext || '未知'}（支持 ${UPLOAD_ALLOWED_EXTENSIONS.join(' / ')}）`,
+        text('upload.unsupportedFormat', {
+          ext: ext || text('upload.unknownExt'),
+          list: UPLOAD_ALLOWED_EXTENSIONS.join(' / '),
+        }),
       )
       return false
     }
     if (f.size > UPLOAD_MAX_FILE_SIZE) {
-      message.error('文件大小超过 15MB 限制')
+      message.error(text('upload.tooLarge'))
       return false
     }
     return true
@@ -84,7 +89,7 @@ export function UploadDocumentModal({
         title: converted.title,
         contentMd: converted.markdown,
       })
-      message.success(`已创建页面「${converted.title}」`)
+      message.success(text('upload.imported', { title: converted.title }))
       close()
     } catch (e) {
       message.error((e as Error).message)
@@ -96,20 +101,20 @@ export function UploadDocumentModal({
   return (
     <Modal
       open={!!target}
-      title="上传并解析"
+      title={text('upload.title')}
       onCancel={close}
       destroyOnHidden
       width={720}
       footer={
         <div style={{ display: 'flex', gap: tokens.spacing.sm, justifyContent: 'flex-end' }}>
-          <Button onClick={close}>取消</Button>
+          <Button onClick={close}>{text('common.cancel')}</Button>
           {step === 1 ? (
             <Button type="primary" disabled={!file} loading={converting} onClick={goParse}>
-              Next →
+              {text('upload.next')}
             </Button>
           ) : (
             <Button type="primary" loading={importing} onClick={doImport}>
-              Import
+              {text('upload.import')}
             </Button>
           )}
         </div>
@@ -123,7 +128,7 @@ export function UploadDocumentModal({
             marginBottom: tokens.spacing.sm,
           }}
         >
-          目标课程：{target.courseTitle}
+          {text('upload.targetCourse', { title: target.courseTitle })}
         </div>
       )}
       {step === 1 ? (
@@ -141,7 +146,7 @@ export function UploadDocumentModal({
               <InboxOutlined />
             </p>
             <p style={{ margin: '4px 0' }}>
-              拖拽文件到此处，或 <em>点击选择</em>
+              {text('upload.dragHint')}
             </p>
             <p
               style={{
@@ -150,7 +155,9 @@ export function UploadDocumentModal({
                 margin: 0,
               }}
             >
-              支持 {UPLOAD_ALLOWED_EXTENSIONS.map((e) => e.slice(1).toUpperCase()).join('、')}；单次 1 个文件，≤15MB
+              {text('upload.formatHint', {
+                list: UPLOAD_ALLOWED_EXTENSIONS.map((e) => e.slice(1).toUpperCase()).join(text('listSeparator')),
+              })}
             </p>
           </Upload.Dragger>
           {file && (

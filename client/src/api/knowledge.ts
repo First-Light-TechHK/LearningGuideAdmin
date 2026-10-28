@@ -96,16 +96,23 @@ export const knowledgeApi = {
     http.delete(`/courses/${id}`).then((r) => r.data),
 
   // 页面 CRUD（§5.1.2，2026-10-16 扁平化：Page 直接挂 Course）
+  // 2026-10-27：contentMd 可能是整份上传文档（数 MB），默认 15s 超时不够，建页/保存单独放宽到 120s
   createPage: (
     courseId: string,
     data: { title: string; contentMd: string; sectionTags?: Record<string, string[]> },
-  ) => http.post<PageNode>(`/courses/${courseId}/pages`, data).then((r) => r.data),
+  ) =>
+    http
+      .post<PageNode>(`/courses/${courseId}/pages`, data, { timeout: 120_000 })
+      .then((r) => r.data),
   getPage: (id: string) =>
     http.get<PageNode>(`/pages/${id}`).then((r) => r.data),
   updatePage: (
     id: string,
     data: { title?: string; contentMd?: string; sectionTags?: Record<string, string[]>; sortOrder?: number },
-  ) => http.put<PageNode>(`/pages/${id}`, data).then((r) => r.data),
+  ) =>
+    http
+      .put<PageNode>(`/pages/${id}`, data, { timeout: 120_000 })
+      .then((r) => r.data),
   /** 批量重排 Course 下 Page 顺序（§5.1.2，2026-10-19 新增，左侧树拖拽排序用） */
   reorderPages: (courseId: string, orderedIds: string[]) =>
     http

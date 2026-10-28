@@ -37,6 +37,29 @@ function validateNewPassword(
   return null;
 }
 
+export type LinkStatus = 'usable' | 'expired' | 'used' | 'invalid';
+
+/**
+ * PRD PORT-ACT-003：打开激活/重置页面时先判断链接状态，
+ * 过期或已用直接给出专用提示。只返回状态，不透露账号信息。
+ */
+export async function inspectLinkStatus(
+  rawToken: string,
+  purpose: 'ACTIVATION' | 'PASSWORD_RESET',
+): Promise<LinkStatus> {
+  if (rawToken === '') return 'invalid';
+  const inspected = await inspectToken(rawToken, purpose);
+  if (inspected.state === 'EXPIRED') return 'expired';
+  if (inspected.state === 'USED' || inspected.state === 'REVOKED')
+    return 'used';
+  if (inspected.state !== 'USABLE' || !inspected.employeeId) return 'invalid';
+  if (purpose === 'ACTIVATION') {
+    const employee = await employeeRepository.findById(inspected.employeeId);
+    if (!employee || employee.emailVerification === 'VERIFIED') return 'used';
+  }
+  return 'usable';
+}
+
 /** PRD PORT-ACT-002 / PORT-ACT-003：激活链接设置初始密码并完成验证。 */
 export async function activateWithToken(input: {
   rawToken: string;
@@ -58,6 +81,13 @@ export async function activateWithToken(input: {
     return { ok: false, code: tokenStateToErrorCode(inspected.state) };
   }
 
+  // 账号已经验证过（例如走过重置密码），激活链接就不再有意义
+  const target = await employeeRepository.findById(inspected.employeeId);
+  if (!target || target.emailVerification === 'VERIFIED') {
+    await revokeTokensForEmployee(inspected.employeeId, 'ACTIVATION');
+    return { ok: false, code: 'TOKEN_ALREADY_USED' };
+  }
+
   const consumed = await consumeOnce(inspected.tokenId);
   if (!consumed) return { ok: false, code: 'INVALID_TOKEN' };
 
@@ -66,6 +96,8 @@ export async function activateWithToken(input: {
     inspected.employeeId,
     passwordHash,
   );
+  // 密码已设定：其余未用的激活/重置链接一律作废
+  await revokeTokensForEmployee(inspected.employeeId);
 
   // 验证只改变 Verification，不改 Account Status（PRD BR-PORT-012 同理）
   const employee = await employeeRepository.findById(inspected.employeeId);
@@ -168,7 +200,8 @@ export async function resetWithToken(input: {
     passwordHash,
   );
 
-  // 重置后旧会话全部失效（PRD PORT-SES-003）
+  // 重置后旧会话与其余未用的激活/重置链接全部失效（PRD PORT-SES-003）
+  await revokeTokensForEmployee(inspected.employeeId);
   await sessionRepository.revokeAllForEmployee(inspected.employeeId);
 
   const employee = await employeeRepository.findById(inspected.employeeId);
@@ -216,6 +249,10 @@ export async function changeOwnPassword(input: {
       ipAddress: input.ipAddress,
     });
     return { ok: false, code: 'INVALID_CREDENTIALS' };
+  }
+
+  if (await verifyPassword(input.newPassword, record.passwordHash)) {
+    return { ok: false, code: 'PASSWORD_SAME_AS_CURRENT' };
   }
 
   const passwordHash = await hashPassword(input.newPassword);

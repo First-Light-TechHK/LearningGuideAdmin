@@ -7,6 +7,8 @@ import { signInAs } from './helpers/employee-session';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProviderRegistry } from '../src/ai/providers/provider.registry';
 import { LlmStreamOptions } from '../src/ai/providers/llm-provider.interface';
+import { EmbeddingService } from '../src/ai/embedding/embedding.service';
+import { fakeEmbeddingService } from './helpers/fake-embedding';
 
 /**
  * AI Tutor 后端 e2e（开发文档 §5.2、§4.4、§7 Phase 5）。
@@ -30,11 +32,16 @@ describe('AI API (e2e)', () => {
   };
 
   beforeAll(async () => {
+    // 保存配置只接受 AI_AVAILABLE_MODELS 内的模型（QA 2026-10-27 A10）
+    process.env.AI_AVAILABLE_MODELS =
+      'test/model-a,test/model-b,test/model-lec,test/model-soc,test/model-iso';
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
       .overrideProvider(ProviderRegistry)
       .useValue({ get: () => fakeProvider })
+      .overrideProvider(EmbeddingService)
+      .useValue(fakeEmbeddingService)
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);
@@ -119,8 +126,8 @@ describe('AI API (e2e)', () => {
         hasApiKey: false,
       }),
     );
-    expect(typeof res.body.data.lecture.model).toBe('string');
-    expect(typeof res.body.data.socratic.model).toBe('string');
+    // 2026-10-27：Model 为课程级共享
+    expect(typeof res.body.data.model).toBe('string');
     expect(res.body.data.lecture.systemPrompt).toBeNull();
     // 2026-10-20：回退 currentReleaseId，测试所选 Release 即上线版本 → isLive=true
     expect(res.body.data.releaseId).toBe(releaseId);
@@ -142,10 +149,10 @@ describe('AI API (e2e)', () => {
       })
       .expect(200);
     expect(res.body.data.hasApiKey).toBe(true);
-    // 2026-10-20 二次改拍：只写 SOCRATIC 模式那一组；LECTURE 保持未自定义（按模式隔离）
-    expect(res.body.data.socratic.model).toBe('test/model-b');
+    // System Prompt 只写 SOCRATIC；Welcome / Model 为课程级共享（2026-10-27）
+    expect(res.body.data.model).toBe('test/model-b');
     expect(res.body.data.socratic.systemPrompt).toBe('CUSTOM-PROMPT');
-    expect(res.body.data.socratic.welcomeMsg).toBe('CUSTOM-WELCOME');
+    expect(res.body.data.welcomeMsg).toBe('CUSTOM-WELCOME');
     expect(res.body.data.lecture.systemPrompt).toBeNull();
     expect(JSON.stringify(res.body)).not.toContain('sk-plain-secret');
 
@@ -232,7 +239,7 @@ describe('AI API (e2e)', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('限流：同一 courseId 每分钟第 11 次请求应 429（§4.4.3）', async () => {
+  it('限流：后台测试同一 courseId 每分钟第 31 次请求应 429（§4.4.3；admin-test 独立配额，QA A2）', async () => {
     const rlCourse = await prisma.course.create({
       data: { title: 'AI-E2E限流课' },
     });
@@ -259,7 +266,7 @@ describe('AI API (e2e)', () => {
       })
       .expect(200);
     let lastStatus = 0;
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 31; i++) {
       const res = await api
         .post('/api/ai/chat-stream')
         .send({ courseId: rlCourse.id, message: `m${i}`, mode: 'LECTURE' });
@@ -279,7 +286,7 @@ describe('AI API (e2e)', () => {
       .send({ mode: 'SOCRATIC' })
       .expect(201);
     expect(res.body.data.socratic.systemPrompt).toBeNull();
-    expect(res.body.data.socratic.welcomeMsg).toBeNull();
+    expect(res.body.data.welcomeMsg).toBe('CUSTOM-WELCOME'); // 共享 Welcome 不受重置影响
     expect(res.body.data.hasApiKey).toBe(true); // reset 不清 key
   });
 
@@ -308,11 +315,10 @@ describe('AI API (e2e)', () => {
         welcomeMsg: 'SOC-WELCOME',
       })
       .expect(200);
-    // 两种模式各自保存，互不覆盖
+    // 两种模式的 System Prompt 各自保存，互不覆盖；Model 为共享列，以最后一次保存为准
     expect(soc.body.data.lecture.systemPrompt).toBe('LEC-PROMPT');
-    expect(soc.body.data.lecture.model).toBe('test/model-lec');
     expect(soc.body.data.socratic.systemPrompt).toBe('SOC-PROMPT');
-    expect(soc.body.data.socratic.model).toBe('test/model-soc');
+    expect(soc.body.data.model).toBe('test/model-soc');
 
     // 重置 LECTURE → 只清 LECTURE，SOCRATIC 保留
     const r = await api
@@ -320,9 +326,8 @@ describe('AI API (e2e)', () => {
       .send({ mode: 'LECTURE' })
       .expect(201);
     expect(r.body.data.lecture.systemPrompt).toBeNull();
-    expect(r.body.data.lecture.model).not.toBe('test/model-lec'); // 回退默认
     expect(r.body.data.socratic.systemPrompt).toBe('SOC-PROMPT');
-    expect(r.body.data.socratic.model).toBe('test/model-soc');
+    expect(r.body.data.model).toBe('test/model-soc'); // 重置不动共享 Model
   });
 
   it('PUT /api/ai/config/:courseId/online 切换 Online 即时生效（§4.2.6）', async () => {
@@ -407,6 +412,33 @@ describe('AI API (e2e)', () => {
     await prisma.release.delete({ where: { id: release2Id } });
   });
 
+  it('重复提交发布（连点 / 重试）只生成一个 Release（QA 2026-10-27 幂等）', async () => {
+    const dupCourse = await prisma.course.create({
+      data: { title: 'AI-E2E重复发布课' },
+    });
+    await prisma.page.create({
+      data: {
+        courseId: dupCourse.id,
+        title: 'Lesson 1',
+        contentMd: '# Lesson 1',
+        sectionTags: { 'h1-lesson-1': ['intro'] },
+        sortOrder: 1,
+      },
+    });
+    const publish = (revisionNotes: string) =>
+      api.post(`/api/courses/${dupCourse.id}/release`).send({ revisionNotes });
+    const [first, second] = await Promise.all([publish('DUP'), publish('DUP')]);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(second.body.data.id).toBe(first.body.data.id);
+    // 说明不同则是一次新的发布
+    expect((await publish('DUP-2')).status).toBe(201);
+    const count = await prisma.release.count({
+      where: { courseId: dupCourse.id },
+    });
+    expect(count).toBe(2);
+  });
+
   it('AI 配置按 Release 维度隔离：切换 Release 回显各自保存的配置（§4.2.5/§4.3.1，2026-10-20）', async () => {
     // 独立课程，避免污染共享夹具
     const isoCourse = await prisma.course.create({
@@ -436,7 +468,7 @@ describe('AI API (e2e)', () => {
       })
       .expect(200);
 
-    // R2：发布快照 → 切到 R2 → 其 AI 配置来自模板默认（无自定义、无 key）
+    // R2：发布快照时沿用当前测试所选版本（R1）的配置（QA 2026-10-27 A3）
     const r2 = await api
       .post(`/api/courses/${isoCourse.id}/release`)
       .send({ revisionNotes: 'R2' })
@@ -449,8 +481,21 @@ describe('AI API (e2e)', () => {
       .send({ releaseId: r2Id })
       .expect(200);
     expect(atR2.body.data.releaseId).toBe(r2Id);
-    expect(atR2.body.data.lecture.systemPrompt).toBeNull();
-    expect(atR2.body.data.hasApiKey).toBe(false);
+    expect(atR2.body.data.lecture.systemPrompt).toBe('ISO-R1-PROMPT');
+    expect(atR2.body.data.hasApiKey).toBe(true);
+
+    // 此后在 R2 上的修改只写 R2，R1 不受影响（仍按 Release 隔离）
+    await api
+      .put('/api/ai/config')
+      .send({
+        courseId: isoCourse.id,
+        releaseId: r2Id,
+        mode: 'LECTURE',
+        llmProvider: 'openrouter',
+        llmModel: 'test/model-iso',
+        systemPrompt: 'ISO-R2-PROMPT',
+      })
+      .expect(200);
 
     // 切回 R1 → 回显 R1 保存的自定义配置与 key（隔离生效）
     const backR1 = await api
@@ -458,12 +503,89 @@ describe('AI API (e2e)', () => {
       .send({ releaseId: r1Id })
       .expect(200);
     expect(backR1.body.data.lecture.systemPrompt).toBe('ISO-R1-PROMPT');
-    expect(backR1.body.data.lecture.welcomeMsg).toBe('ISO-R1-WELCOME');
+    expect(backR1.body.data.welcomeMsg).toBe('ISO-R1-WELCOME');
     expect(backR1.body.data.hasApiKey).toBe(true);
 
     // 清理（先删 Release：其配置行随 CourseAiConfig_releaseId_fkey 级联；再删 Course）
     await prisma.release.deleteMany({ where: { courseId: isoCourse.id } });
     await prisma.course.delete({ where: { id: isoCourse.id } });
+  });
+
+  it('首次发布即成为测试所选版本，可直接保存配置（QA 2026-10-27 A6）', async () => {
+    const fresh = await prisma.course.create({ data: { title: 'AI-E2E首发课' } });
+    const rel = await api
+      .post(`/api/courses/${fresh.id}/release`)
+      .send({ revisionNotes: '首发' })
+      .expect(201);
+    const cfg = await api.get(`/api/ai/config/${fresh.id}`).expect(200);
+    expect(cfg.body.data.releaseId).toBe(rel.body.data.id);
+    expect(cfg.body.data.isLive).toBe(false);
+    await api
+      .put('/api/ai/config')
+      .send({ courseId: fresh.id, mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'test/model-a' })
+      .expect(200);
+  });
+
+  it('保存不在 AI_AVAILABLE_MODELS 内的模型应 400（QA 2026-10-27 A10）', async () => {
+    await api
+      .put('/api/ai/config')
+      .send({ courseId, mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'vendor/not-allowed' })
+      .expect(400);
+  });
+
+  it('后台测试对话不占学员端限流额度（QA 2026-10-27 A2）', async () => {
+    const shared = await prisma.course.create({
+      data: { title: 'AI-E2E限流分桶课', externalId: 'ai-e2e-quota' },
+    });
+    const rel = await api
+      .post(`/api/courses/${shared.id}/release`)
+      .send({ revisionNotes: 'q' })
+      .expect(201);
+    await api
+      .post(`/api/courses/${shared.id}/set-live`)
+      .send({ releaseId: rel.body.data.id })
+      .expect(201);
+    await prisma.course.update({ where: { id: shared.id }, data: { aiTutorOnline: true } });
+    for (let i = 0; i < 10; i++) {
+      await api
+        .post('/api/ai/chat-stream')
+        .send({ courseId: shared.id, message: `admin-${i}`, mode: 'LECTURE' })
+        .expect(200);
+    }
+    await api
+      .post('/api/user/ai/chat-stream')
+      .send({ externalCourseId: 'ai-e2e-quota', message: 'hi', mode: 'LECTURE', locale: 'en-GB' })
+      .expect(200);
+  });
+
+  it('并发删除 Release 与 Set Live / 切换测试版本，指针不会指向已删除版本（QA 2026-10-27 A7）', async () => {
+    const race = await prisma.course.create({ data: { title: 'AI-E2E并发课' } });
+    const base = await api
+      .post(`/api/courses/${race.id}/release`)
+      .send({ revisionNotes: 'base' })
+      .expect(201);
+    await api
+      .post(`/api/courses/${race.id}/set-live`)
+      .send({ releaseId: base.body.data.id })
+      .expect(201);
+    for (let i = 0; i < 8; i++) {
+      const victim = await api
+        .post(`/api/courses/${race.id}/release`)
+        .send({ revisionNotes: `v${i}` })
+        .expect(201);
+      const victimId = victim.body.data.id as string;
+      await Promise.all([
+        api.delete(`/api/releases/${victimId}`),
+        api.post(`/api/courses/${race.id}/set-live`).send({ releaseId: victimId }),
+        api.put(`/api/ai/config/${race.id}/active-release`).send({ releaseId: victimId }),
+      ]);
+      const course = await prisma.course.findUnique({ where: { id: race.id } });
+      const ids = (
+        await prisma.release.findMany({ where: { courseId: race.id }, select: { id: true } })
+      ).map((r) => r.id);
+      expect(ids).toContain(course!.currentReleaseId);
+      if (course!.aiTestReleaseId) expect(ids).toContain(course!.aiTestReleaseId);
+    }
   });
 
   it('GET /api/ai/tutors 返回全部 AI Tutor 及 Online 状态（§4.2.6）', async () => {
@@ -513,9 +635,7 @@ describe('AI API (e2e)', () => {
       .expect(200);
     expect(res.text).toContain('data: {"delta":"Hello"}');
     expect(res.text).toContain('data: {"done":true}');
-    expect(lastOpts!.messages[0].content).toContain(
-      'Always answer in British English.',
-    );
+    expect(lastOpts!.messages[0].content).toContain('Use British English');
 
     await prisma.course.update({
       where: { id: courseId },

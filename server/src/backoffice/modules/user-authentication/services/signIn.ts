@@ -8,7 +8,7 @@ import {
 import { tryRecordAuditEvent } from '../../../repositories/auditRepository';
 import * as employeeRepository from '../../../repositories/employeeRepository';
 import { issueSession, toSessionEmployee } from './session';
-import { verifyPassword } from './password';
+import { burnPasswordCheck, verifyPassword } from './password';
 
 export type EmailCheckResult = {
   exists: boolean;
@@ -78,6 +78,7 @@ export async function signIn(input: {
 
   const employee = await employeeRepository.findByLoginEmail(email);
   if (!employee) {
+    await burnPasswordCheck(input.password);
     await tryRecordAuditEvent({
       eventName: 'employee_login_attempt',
       actorEmployeeId: null,
@@ -86,7 +87,8 @@ export async function signIn(input: {
       result: 'FAILURE',
       ipAddress: input.ipAddress,
     });
-    return { ok: false, code: 'INVALID_EMPLOYEE_ACCOUNT' };
+    // 与密码错误同码：登录接口不暴露邮箱是否存在
+    return { ok: false, code: 'INVALID_CREDENTIALS' };
   }
 
   const auditBase = {
@@ -97,6 +99,15 @@ export async function signIn(input: {
     ipAddress: input.ipAddress,
   };
 
+  // 先校验密码，账号状态只告诉知道密码的人
+  const passwordOk = employee.passwordHash
+    ? await verifyPassword(input.password, employee.passwordHash)
+    : (await burnPasswordCheck(input.password), false);
+  if (!passwordOk) {
+    await tryRecordAuditEvent({ ...auditBase, result: 'FAILURE' });
+    return { ok: false, code: 'INVALID_CREDENTIALS' };
+  }
+
   if (employee.accountStatus !== 'ACTIVE') {
     await tryRecordAuditEvent({ ...auditBase, result: 'DENIED' });
     return { ok: false, code: 'ACCOUNT_NOT_ACTIVE' };
@@ -105,14 +116,6 @@ export async function signIn(input: {
   if (employee.emailVerification !== 'VERIFIED') {
     await tryRecordAuditEvent({ ...auditBase, result: 'DENIED' });
     return { ok: false, code: 'EMAIL_NOT_VERIFIED' };
-  }
-
-  if (
-    !employee.passwordHash ||
-    !(await verifyPassword(input.password, employee.passwordHash))
-  ) {
-    await tryRecordAuditEvent({ ...auditBase, result: 'FAILURE' });
-    return { ok: false, code: 'INVALID_CREDENTIALS' };
   }
 
   const session = await issueSession({

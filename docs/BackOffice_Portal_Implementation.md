@@ -100,7 +100,7 @@ Controller → 输入校验 → 守卫（会话/权限） → modules/*/services
 ## 5. 安全设计要点
 
 - 会话 Cookie：httpOnly + SameSite=Lax + 生产态 Secure
-- 双重超时：绝对 12h（`expires_at`）+ 空闲 30min（`last_seen_at`）
+- 双重超时：绝对 7 天（`expires_at`）+ 空闲 7 天（`last_seen_at`），Cookie 有效期同步 7 天
 - 登录失败、邮箱检查、重发邮件、改密均有限流（固定窗口内存实现）
 - 审计事件表带 CHECK 约束，禁止写入形如 `password=`/`token=` 的明文
 - 忘记密码对外始终返回同一结果，避免账号枚举
@@ -181,8 +181,8 @@ Admin 触发的创建员工、修改未验证邮箱、重发激活、重置密�
 | 密码长度 | 8–128 字符 | `lib/securityPolicy.ts` |
 | 激活令牌有效期 | 48 小时（PRD 强制） | `ACTIVATION_TOKEN_HOURS` |
 | 重置令牌有效期 | 2 小时 | `RESET_TOKEN_HOURS` |
-| 会话绝对超时 | 12 小时 | `SESSION_MAX_HOURS` |
-| 会话空闲超时 | 30 分钟 | `SESSION_IDLE_MINUTES` |
+| 会话绝对超时 | 7 天（168 小时） | `SESSION_MAX_DAYS` / `SESSION_MAX_HOURS` |
+| 会话空闲超时 | 7 天（10080 分钟） | `SESSION_MAX_DAYS` / `SESSION_IDLE_MINUTES` |
 | 登录限流 | 5 分钟内 10 次 / IP | `SIGN_IN_MAX_PER_WINDOW` |
 | 发信限流 | 5 分钟内 5 次 / IP | `EMAIL_SEND_MAX_PER_WINDOW` |
 | 列表分页 | 参照 Ant Design Table：表格区域内部滚动、表头 sticky、分页固定卡片底部；UI 默认 8（设计稿），可选 8 / 10 / 20 / 50 / 100；服务端兜底上限 100 | `EMPLOYEE_PAGE_SIZE_*` |

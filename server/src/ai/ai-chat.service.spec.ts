@@ -262,6 +262,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       COURSE_ID,
       'portal',
+      undefined,
     );
 
     await collect(
@@ -270,6 +271,19 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       COURSE_ID,
       'study-group',
+      undefined,
+    );
+  });
+
+  it('后台测试对话走独立的 admin-test 限流槽位，不占学员额度（QA A2）', async () => {
+    const { service, rateLimit } = setup(async function* () {
+      yield 'ok';
+    });
+    await collect(service.streamChat(dto()));
+    expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
+      expect.any(String),
+      'admin-test',
+      undefined,
     );
   });
 });

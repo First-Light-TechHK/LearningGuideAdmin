@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { App, Button, Card, Divider, Input, Popconfirm, Select, Space, Switch, Typography } from '../ui'
+import { App, Button, Card, Divider, Input, Popconfirm, Segmented, Select, Space, Switch, Typography } from '../ui'
 import { useAiStore } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
+import { useAiText } from './i18n'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 
@@ -44,6 +45,8 @@ export function ConfigPanel() {
   const courses = useAiStore((s) => s.courses)
   const selectedCourseId = useAiStore((s) => s.selectedCourseId)
   const config = useAiStore((s) => s.config)
+  const editMode = useAiStore((s) => s.editMode)
+  const setEditMode = useAiStore((s) => s.setEditMode)
   const selectCourse = useAiStore((s) => s.selectCourse)
   const form = useAiStore((s) => s.form)
   const saving = useAiStore((s) => s.saving)
@@ -53,6 +56,8 @@ export function ConfigPanel() {
   const reset = useAiStore((s) => s.reset)
   const setOnline = useAiStore((s) => s.setOnline)
   const openTutorManager = useAiStore((s) => s.openTutorManager)
+  const streaming = useAiStore((s) => s.streaming)
+  const { text, modeLabel } = useAiText()
   /** 未保存改动守卫（§4.3.6）：切换课程前弹「保存 / 取消」 */
   const guard = useUnsavedGuard()
 
@@ -68,9 +73,9 @@ export function ConfigPanel() {
     // save() 内部吞异常并返回布尔（§4.3.6 供 guard 判断）
     const ok = await save()
     if (ok) {
-      message.success('AI 配置已保存')
+      message.success(text('saved'))
     } else {
-      message.error(useAiStore.getState().error ?? '保存失败')
+      message.error(useAiStore.getState().error ?? text('saveFailed'))
     }
   }
 
@@ -80,19 +85,22 @@ export function ConfigPanel() {
     await selectCourse(v)
   }
 
-  const onReset = async () => {
-    try {
-      await reset()
-      message.success('已恢复默认模板')
-    } catch (e) {
-      message.error((e as Error).message)
-    }
+  /** 切换编辑模式（Lecture / Socratic / Assessment）前先过未保存提醒 */
+  const onEditModeChange = async (v: string) => {
+    if (!(await guard())) return
+    setEditMode(v as 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT')
+  }
+
+  /** Reset 只改编辑区，Save 后才生效（REQ-0147，QA 2026-10-27 A4） */
+  const onReset = () => {
+    reset()
+    message.info(text('resetDone'))
   }
 
   const onOnlineChange = async (checked: boolean) => {
     try {
       await setOnline(checked)
-      message.success(checked ? '已上线（对用户侧开放）' : '已下线（不对用户侧开放）')
+      message.success(checked ? text('onlineOn') : text('onlineOff'))
     } catch (e) {
       message.error((e as Error).message)
     }
@@ -144,7 +152,7 @@ export function ConfigPanel() {
               }}
             >
               <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.secondary }}>
-                Online
+                {text('online')}
               </span>
               <Switch
                 size="small"
@@ -155,9 +163,11 @@ export function ConfigPanel() {
             </span>
             <Select
               value={selectedCourseId ?? undefined}
-              placeholder="Change Course"
+              placeholder={text('changeCourse')}
               size="small"
               open={courseOpen}
+              // 流式回答进行中不允许切换课程（QA 2026-10-27 A13）
+              disabled={streaming}
               onOpenChange={setCourseOpen}
               style={{ minWidth: 150, flexShrink: 0, marginLeft: 'auto' }}
               onChange={(v) => void onChangeCourse(v)}
@@ -171,7 +181,7 @@ export function ConfigPanel() {
                       <Divider style={{ margin: `${tokens.spacing.xs}px 0` }} />
                       <div style={{ padding: `0 ${tokens.spacing.sm}px ${tokens.spacing.xs}px` }}>
                         <Button type="link" style={{ padding: 0, height: 'auto' }} onClick={onManageOnline}>
-                          <span style={{ textDecoration: 'underline' }}>管理所有 online</span>
+                          <span style={{ textDecoration: 'underline' }}>{text('manageOnline')}</span>
                         </Button>
                       </div>
                     </>
@@ -195,9 +205,22 @@ export function ConfigPanel() {
           },
         }}
       >
+        {/* 模式切换（2026-10-27 新增）：Lecture / Socratic / Assessment，决定下方 System Prompt 编辑的是哪个模式 */}
+        <div style={{ marginBottom: tokens.spacing.md, flexShrink: 0 }}>
+          <Segmented
+            block
+            value={editMode}
+            onChange={(v) => void onEditModeChange(v as string)}
+            options={(['LECTURE', 'SOCRATIC', 'ASSESSMENT'] as const).map((m) => ({
+              label: modeLabel(m),
+              value: m,
+            }))}
+          />
+        </div>
+
         {/* System Prompt：占剩余空间的 70%，超出文本框可滚动 */}
         <div style={{ ...sectionStyle, flex: '7 1 0', marginBottom: tokens.spacing.md }}>
-          <div style={labelStyle}>System Prompt</div>
+          <div style={labelStyle}>{text('systemPrompt')}</div>
           <Input.TextArea
             value={form.systemPrompt}
             readOnly={!access.canEdit}
@@ -209,12 +232,12 @@ export function ConfigPanel() {
               resize: 'none',
             }}
           />
-          <div style={extraStyle}>切换右侧模式时自动载入对应模板/自定义值</div>
+          <div style={extraStyle}>{text('systemPromptHint', { mode: modeLabel(editMode) })}</div>
         </div>
 
         {/* Welcome Message：占剩余空间的 30%，超出可滚动 */}
         <div style={{ ...sectionStyle, flex: '3 1 0', marginBottom: tokens.spacing.md }}>
-          <div style={labelStyle}>Welcome Message</div>
+          <div style={labelStyle}>{text('welcomeMessage')}</div>
           <Input.TextArea
             value={form.welcomeMsg}
             readOnly={!access.canEdit}
@@ -225,10 +248,10 @@ export function ConfigPanel() {
 
         {/* LLM Model：自然高度，不参与比例分配 */}
         <div style={{ ...sectionStyle, flex: '0 0 auto' }}>
-          <div style={labelStyle}>LLM Model</div>
+          <div style={labelStyle}>{text('llmModel')}</div>
           <Select
             value={form.llmModel || undefined}
-            placeholder="选择模型"
+            placeholder={text('selectModel')}
             disabled={!access.canEdit}
             onChange={(v) => patchForm({ llmModel: v })}
             options={models.map((m) => ({ value: m, label: m }))}
@@ -249,20 +272,20 @@ export function ConfigPanel() {
           }}
         >
           <Popconfirm
-            title="重置为默认模板？"
-            description="将清除当前模式（Lecture / Socratic）的自定义 Prompt / Model 覆盖"
-            okText="重置"
-            cancelText="取消"
+            title={text('resetTitle')}
+            description={text('resetDescription', { mode: modeLabel(editMode) })}
+            okText={text('resetConfirm')}
+            cancelText={text('unsavedStay')}
             onConfirm={onReset}
           >
             <Button type="link" style={{ padding: 0, height: 'auto' }}>
-              <span style={{ textDecoration: 'underline' }}>Reset</span>
+              <span style={{ textDecoration: 'underline' }}>{text('reset')}</span>
             </Button>
           </Popconfirm>
           <Space size={tokens.spacing.lg}>
-            {dirty && <Text type="warning">Unsaved changes</Text>}
+            {dirty && <Text type="warning">{text('unsaved')}</Text>}
             <Button type="primary" loading={saving} onClick={() => void onSave()}>
-              Save Configuration
+              {text('save')}
             </Button>
           </Space>
         </div>
