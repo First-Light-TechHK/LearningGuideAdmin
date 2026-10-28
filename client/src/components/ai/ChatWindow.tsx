@@ -12,6 +12,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   type MenuProps,
 } from '../ui'
 import { PlusOutlined, RobotOutlined, SendOutlined, UserOutlined } from '@ant-design/icons'
@@ -32,6 +33,11 @@ const katexPlugins = {
 /** 默认头像占位（后续可替换为课程/用户自定义头像） */
 const AI_AVATAR = <RobotOutlined />
 const USER_AVATAR = <UserOutlined />
+
+/** Release 下拉最多展示几项后启用滚动窗口（§4.3.1，2026-10-28 新增） */
+const MAX_VISIBLE_RELEASES = 5
+/** 滚动窗口 max-height：约容纳 5 个双行项（2026-10-28 新增） */
+const MAX_DROPDOWN_HEIGHT = 300
 
 /**
  * 动态状态徽章（§4.3.1，2026-10-20）：测试所选 Release == 上线版本 → Live，否则 Testing。
@@ -104,16 +110,52 @@ function ReleaseSelector() {
     }
   }
 
+  /** 单一决策变量：是否启用滚动窗口（§4.3.1，2026-10-28；经验：条件收敛） */
+  const canScroll = releases.length > MAX_VISIBLE_RELEASES
+
   const items: MenuProps['items'] = releases.length
-    ? releases.map((r) => ({
-        key: r.id,
-        label: (
-          <Space size="small">
-            <span>{r.versionTag}</span>
-            {r.isActive && <Tag color="green">Live</Tag>}
-          </Space>
-        ),
-      }))
+    ? releases.map((r) => {
+        /** 第二行版本说明：revisionNotes 为空 → 占位；单行截断 + tooltip（设计文档拍板） */
+        const hasNotes = Boolean(r.revisionNotes?.trim())
+        const noteDisplay = hasNotes ? r.revisionNotes : text('noRevisionNotes')
+        const noteColor = hasNotes ? tokens.color.text.secondary : tokens.color.text.tertiary
+        return {
+          key: r.id,
+          label: (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: tokens.spacing.xs,
+                minWidth: 220,
+                padding: `${tokens.spacing.xs}px 0`,
+              }}
+            >
+              {/* 第一行：versionTag + Live 徽章 */}
+              <Space size="small">
+                <span>{r.versionTag}</span>
+                {r.isActive && <Tag color="green">{text('live')}</Tag>}
+              </Space>
+              {/* 第二行：版本说明（单行截断 + tooltip） */}
+              <Tooltip title={hasNotes ? r.revisionNotes : undefined}>
+                <span
+                  style={{
+                    display: 'block',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    fontSize: tokens.fontSize.md,
+                    color: noteColor,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {noteDisplay}
+                </span>
+              </Tooltip>
+            </div>
+          ),
+        }
+      })
     : [{ key: '__none', label: text('noReleases'), disabled: true }]
 
   return (
@@ -127,6 +169,8 @@ function ReleaseSelector() {
           onClick: ({ key }) => {
             if (key !== '__none') void pick(key)
           },
+          // 条件滚动：>5 项才启 max-height（§4.3.1，2026-10-28）
+          style: canScroll ? { maxHeight: MAX_DROPDOWN_HEIGHT, overflowY: 'auto' } : undefined,
         }}
       >
         <span

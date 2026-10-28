@@ -119,6 +119,27 @@
 
 ---
 
+## 2026-10-28 ｜ AI Tutor Release 下拉：版本说明展示 + 滑动窗口
+
+- **任务（用户）**：AI Tutor 对话头部的 Release 选择器下拉，要求：① 每个版本项下方展示 `revisionNotes`；② 版本数 > 5 时启用滚动窗口。
+- **用户拍板（AskUserQuestion 三轮）**：revisionNotes **单行截断 + 省略号 + hover tooltip**；超过 5 个才启用滚动（`MAX_VISIBLE_RELEASES=5`，`max-height: 300px; overflow-y: auto`）；revisionNotes 为空时显示灰色占位「无版本说明」。
+- **变更清单（设计文档先行）**：
+  - `docs/Learning_Guide_BackOffice_Agent_Development_Document.md` §4.3.1：追加「版本说明展示」和「滑动窗口」两条 bullet
+  - `client/src/components/ai/ChatWindow.tsx`：
+    - 新增常量 `MAX_VISIBLE_RELEASES = 5`、`MAX_DROPDOWN_HEIGHT = 300`
+    - `ReleaseSelector` 新增单一决策变量 `canScroll = releases.length > MAX_VISIBLE_RELEASES`（经验教训：条件收敛）
+    - Dropdown 菜单项 label 由单行改为两行布局（flex column + minWidth 220px + padding）；第一行 versionTag + Live 徽章；第二行 revisionNotes（`whiteSpace:nowrap` + `overflow:hidden` + `textOverflow:ellipsis` 三件套）；外层包 Tooltip（仅 revisionNotes 非空时 `title` 有值，空时 `title=undefined` Tooltip 安全返回 children）
+    - `menu.style` 条件设置：`canScroll ? { maxHeight: MAX_DROPDOWN_HEIGHT, overflowY: 'auto' } : undefined`（antd MenuProps 透传 style 到 `<ul>` 根元素）
+    - 引入 `Tooltip` 从 `../ui`；Typography import 因未使用已移除
+  - `client/src/backoffice/messages/zh-CN.json` / `en-GB.json`：`aiTutor` 命名空间新增 `noRevisionNotes`（zh「无版本说明」/ en「No version notes」）
+- **类型与后端**：后端 `GET /api/courses/:id/releases` 已返回 `revisionNotes`，`ReleaseSummary.revisionNotes: string` 已存在于前端 API 类型，**无需后端改动**、**无 DB/migration 影响**
+- **自测证据**：client `npx tsc --noEmit` EXIT=0；client `npm run build`（tsc -b + vite build）EXIT=0；`npm run lint`（oxlint）0 errors（14 条 warning 为既有项目问题）
+- **审查结论**：test_agent **通过，0 Blocking**。代码审查覆盖 antd MenuProps.style 有效性（rc-menu MenuProps 继承 `HTMLAttributes<HTMLUListElement>`，style 天然包含）、Tooltip title=undefined 安全（antd tooltip.d.ts title 可选，title 空时直接返回 children）、单行截断 CSS 三件套正确性、canScroll 单一决策变量位置合理、边界（0/5/6 个 Release、空/纯空格 revisionNotes）全部覆盖。两条非阻断观察项：OBS-001 revisionNotes 行显式 color 导致选中态不变主色（设计选择，非 bug）；OBS-002 常量可后续提取到 tokens（锦上添花）。
+- **Git**：未提交（待用户手动冒烟）
+- **下一步**：用户手动冒烟验证（见下方清单）
+
+---
+
 ## 2026-10-27 ｜ M5：行内格式按钮 toggle（再次点击取消）
 
 - **任务（用户）**：工具栏粗体/斜体/删除线/行内代码/行内公式按钮只会无限叠加标记（如连续点加粗变成 `****text****`），要求「已处于该格式时再次点击取消」。

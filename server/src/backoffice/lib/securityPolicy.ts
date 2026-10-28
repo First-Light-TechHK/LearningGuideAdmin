@@ -8,8 +8,10 @@ export const RESET_TOKEN_HOURS = 2;
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
 
-export const SESSION_IDLE_MINUTES = 30;
-export const SESSION_MAX_HOURS = 12;
+/** 产品要求：登录后 7 天内无需再次登录（除非主动退出或清理 Cookie）。 */
+export const SESSION_MAX_DAYS = 7;
+export const SESSION_IDLE_MINUTES = SESSION_MAX_DAYS * 24 * 60;
+export const SESSION_MAX_HOURS = SESSION_MAX_DAYS * 24;
 
 /** 登录页输入邮箱时防抖调用，一次输入就会打好几次，额度放宽 */
 export const EMAIL_CHECK_MAX_PER_WINDOW = 60;

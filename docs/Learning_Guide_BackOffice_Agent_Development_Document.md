@@ -594,6 +594,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 - 左侧：**知识库 Release 选择器**（2026-10-20 新增）——显示「当前测试所选 Release」的 versionTag（蓝色、可点击），其右侧为**动态徽章**（所选 Release ≠ 上线版本时显示 `Testing`；所选 Release = 上线版本时显示 `Live`，均为浅绿底绿字）；再右侧为 **Set Live** 主色按钮。
   - 点击 versionTag 展开下拉：按发布时间**倒序**列出该 Course 全部 Release，**上线版本行**显示绿色 `Live` 徽章、当前所选项高亮；点某行 = 切换 AI Tutor 测试所用 Release（**持久化到后端 `Course.aiTestReleaseId`**）。
+  - **版本说明展示（2026-10-28 新增）**：每个下拉项为两行布局——第一行 versionTag + Live 徽章；第二行展示 `revisionNotes`（单行截断 + `…`，hover 弹出完整说明 Tooltip）。`revisionNotes` 为空时显示灰色占位「无版本说明 / No version notes」，而非留白导致视觉落差。
+  - **滑动窗口（2026-10-28 新增）**：当 Release 数量 > **5** 时，下拉菜单启用垂直滚动（`max-height: 300px` + `overflow-y: auto`，约容纳 5 个双行项）；≤5 时不设高度限制，自然展开。阈值 5 固定为常量，不上调不调低。
   - **Set Live**：仅把 `Course.currentReleaseId` 指向所选 Release，**不重建/覆盖 Page 草稿**（§3.4.4）；成功后左徽章由 `Testing` 切为 `Live`。
   - 切换 Release 时若 AI 配置有未保存改动：**弹未保存改动提醒**（保存 / 取消；§4.3.6）。
   - **进入 AI Tutor 时刷新（2026-10-23 修复）**：模块切换不会清空 `aiStore`，因此每次进入 AI Tutor 都重新拉取当前课程的 `config` 与 Release 列表；在 Knowledge Pages 新建的 Release 会立即出现在版本下拉中。若配置面板存在未保存改动，只刷新列表与配置元数据，**不覆盖表单内容**。Create Release 仍只生成快照，Live 指针只由 Set Live 变更。

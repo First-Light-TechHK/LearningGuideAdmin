@@ -290,7 +290,8 @@
     "learnerAvailable": "Live",
     "learnerNotSynced": "Not synced to Portal",
     "learnerNoLiveRelease": "No live release",
-    "learnerNotOnline": "Not switched on"
+    "learnerNotOnline": "Not switched on",
+    "noRevisionNotes": "No version notes"
   },
   "knowledge": {
     "common": {
