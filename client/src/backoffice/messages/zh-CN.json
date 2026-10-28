@@ -508,9 +508,6 @@
     "markReviewed": "标记为已处理",
     "markReviewedHint": "请学员确认问题已解决；{hours} 小时内没有回应将自动结束。",
     "reviewedNotice": "已标记为已处理，已请学员确认。",
-    "needsReply": "待回复",
-    "unassigned": "未分配",
-    "assignedTo": "处理人：{name}",
     "status": {
       "OPEN": "待受理",
       "ASSIGNED": "处理中",
@@ -615,7 +612,6 @@
         "locale": "语言",
         "category": "咨询类型",
         "status": "状态",
-        "featured": "精选",
         "stats": "推荐 / 解决 / 未解决",
         "updated": "更新时间",
         "actions": "操作"

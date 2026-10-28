@@ -508,9 +508,6 @@
     "markReviewed": "Mark as reviewed",
     "markReviewedHint": "Asks the learner to confirm the issue is solved. Without an answer it closes after {hours} hours.",
     "reviewedNotice": "Marked as reviewed. The learner has been asked to confirm.",
-    "needsReply": "Needs reply",
-    "unassigned": "Unassigned",
-    "assignedTo": "Assigned to {name}",
     "status": {
       "OPEN": "New",
       "ASSIGNED": "In progress",
@@ -615,7 +612,6 @@
         "locale": "Language",
         "category": "Enquiry Type",
         "status": "Status",
-        "featured": "Featured",
         "stats": "Shown / Solved / Declined",
         "updated": "Updated",
         "actions": "Actions"

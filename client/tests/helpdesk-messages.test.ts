@@ -88,10 +88,29 @@ describe('HelpDesk messages', () => {
   })
 
   test('the old card-board wording is gone', () => {
-    const h = enGB.helpDesk as Record<string, unknown>
-    assert.equal(get(h, 'tabs.needsReply'), undefined)
-    assert.equal(get(h, 'loadMore'), undefined)
-    assert.equal(get(h, 'detail.back'), undefined)
+    for (const bundle of [enGB, zhCN]) {
+      const h = bundle.helpDesk as Record<string, unknown>
+      for (const key of [
+        'tabs.needsReply',
+        'loadMore',
+        'detail.back',
+        // card-board leftovers; the filter keeps its own helpDesk.filters.needsReply
+        'needsReply',
+        'unassigned',
+        'assignedTo',
+        // the Common Questions table has no Featured column (featured is a tag in the status cell)
+        'questions.columns.featured',
+      ]) {
+        assert.equal(get(h, key), undefined, key)
+      }
+      assert.equal(typeof get(h, 'filters.needsReply'), 'string')
+      assert.equal(typeof get(h, 'questions.featured'), 'string')
+    }
+  })
+
+  test('"Question saved." is what + Add Question / Save confirms with', () => {
+    assert.equal(get(enGB, 'helpDesk.questions.saved'), 'Question saved.')
+    assert.match(read('backoffice/pages/HelpDeskPage.tsx'), /'helpDesk\.questions\.saved'/)
   })
 })
 
