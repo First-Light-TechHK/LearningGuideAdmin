@@ -290,7 +290,8 @@
     "learnerAvailable": "已上线",
     "learnerNotSynced": "未同步到 Portal",
     "learnerNoLiveRelease": "无上线版本",
-    "learnerNotOnline": "未开启"
+    "learnerNotOnline": "未开启",
+    "noRevisionNotes": "无版本说明"
   },
   "knowledge": {
     "common": {
