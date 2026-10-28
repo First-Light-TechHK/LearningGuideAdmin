@@ -266,30 +266,45 @@ describeDb('Helpdesk questions repository (PostgreSQL)', () => {
     expect(await repo.nextSortOrder('zh-CN')).toBe(10);
   });
 
-  it('the full-text search index serves the candidate query expression', async () => {
-    await repo.insert(
-      row({
-        question: 'How do I reset my password?',
-        answer: 'Use Forgot password.',
-      }),
-      EMP,
-    );
-    const vector =
-      /to_tsvector\('english', q\.question \|\| ' ' \|\| q\.answer\)/.exec(
-        CANDIDATES_SQL,
-      );
-    expect(vector).not.toBeNull();
+  it('the real candidate query (CANDIDATES_SQL) is served by the full-text GIN index', async () => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('SET LOCAL enable_seqscan = off');
+      // a realistic library: a few thousand published rows, statistics up to date
+      await client.query(
+        `INSERT INTO helpdesk_questions
+           (id, locale, category, question, answer, keywords, status, sort_order)
+         SELECT gen_random_uuid(), 'en-GB', 'other',
+                'Filler question ' || g, 'Filler answer about topic ' || g,
+                ARRAY['filler' || g], 'published', g
+           FROM generate_series(1, 3000) AS g`,
+      );
+      await client.query(
+        `INSERT INTO helpdesk_questions
+           (id, locale, category, question, answer, keywords, status, sort_order)
+         VALUES (gen_random_uuid(), 'en-GB', 'technical_support',
+                 'How do I reset my password?', 'Use Forgot password.',
+                 ARRAY['password'], 'published', 1)`,
+      );
+      await client.query('ANALYZE helpdesk_questions');
+      await client.query(
+        `PREPARE hd_candidates(text, text, text, text, text[], int) AS ${CANDIDATES_SQL}`,
+      );
+      const args = `'en-GB', 'technical_support', 'password | reset', 'How do I reset my password?', ARRAY[]::text[], 8`;
       const { rows } = await client.query(
-        `EXPLAIN SELECT q.id FROM helpdesk_questions q WHERE ${vector![0]} @@ to_tsquery('english', 'password')`,
+        `EXPLAIN EXECUTE hd_candidates(${args})`,
       );
       const plan = rows
         .map((r: Record<string, string>) => r['QUERY PLAN'])
         .join('\n');
       expect(plan).toContain('helpdesk_questions_search_idx');
+      const found = await client.query<{ question: string }>(
+        `EXECUTE hd_candidates(${args})`,
+      );
+      expect(found.rows.map((r) => r.question)).toEqual([
+        'How do I reset my password?',
+      ]);
+      await client.query('DEALLOCATE hd_candidates');
       await client.query('ROLLBACK');
     } finally {
       client.release();

@@ -49,7 +49,8 @@ describe('Helpdesk Common Questions search index', () => {
     const queries = [
       ...CANDIDATES_SQL.matchAll(/to_tsquery\(\s*'([a-z]+)'/g),
     ].map((m) => m[1]);
-    expect(queries).toEqual(['english']);
+    expect(queries.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(queries)).toEqual(new Set(['english']));
     expect(migration).not.toMatch(/'simple'|simple 配置/);
   });
 });

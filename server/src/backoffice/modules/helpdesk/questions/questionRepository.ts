@@ -204,28 +204,43 @@ export function searchTerms(text: string): {
 /**
  * 候选检索。to_tsvector('english', question || ' ' || answer) 必须与迁移里的
  * helpdesk_questions_search_idx 表达式一字不差（helpdesk-questions-search-index.spec.ts 锁定）。
+ * 先按两路取命中的行再打分：全文一路的 WHERE 就是索引表达式 @@ to_tsquery($3)（直接写在
+ * WHERE 里，规划器按实参估算，才会选 GIN 索引；经 CTE 传 tsquery 时它常常改走全表扫描）
+ * （helpdesk-questions-repository.pg.spec.ts 对本条 SQL 做 EXPLAIN 锁定）；关键词 / 中文双字
+ * 是「片段出现在原文里」，索引帮不上，只扫该语言已发布的行（不再逐行算 to_tsvector）。
+ * 只有命中的少数行才算 ts_rank。
  */
 export const CANDIDATES_SQL = `
 WITH input AS (
   SELECT CASE WHEN $3 = '' THEN NULL ELSE to_tsquery('english', $3) END AS tsq,
          lower($4) AS body,
          $5::text[] AS bigrams
+), matched AS (
+  SELECT q.id, q.category, q.question, q.answer, q.keywords, q.sort_order
+    FROM helpdesk_questions q
+   WHERE q.locale = $1 AND q.status = 'published' AND $3 <> ''
+     AND to_tsvector('english', q.question || ' ' || q.answer) @@ to_tsquery('english', $3)
+  UNION
+  SELECT q.id, q.category, q.question, q.answer, q.keywords, q.sort_order
+    FROM helpdesk_questions q CROSS JOIN input i
+   WHERE q.locale = $1 AND q.status = 'published'
+     AND (EXISTS (SELECT 1 FROM unnest(q.keywords) AS k
+                   WHERE k <> '' AND position(lower(k) IN i.body) > 0)
+          OR EXISTS (SELECT 1 FROM unnest(i.bigrams) AS b
+                   WHERE position(b IN q.question) > 0))
 ), scored AS (
   SELECT q.id, q.category, q.question, q.answer, q.sort_order,
          COALESCE(ts_rank(to_tsvector('english', q.question || ' ' || q.answer), i.tsq), 0) AS text_rank,
-         COALESCE(to_tsvector('english', q.question || ' ' || q.answer) @@ i.tsq, false) AS text_hit,
          (SELECT count(*) FROM unnest(q.keywords) AS k
            WHERE k <> '' AND position(lower(k) IN i.body) > 0) AS keyword_hits,
          (SELECT count(*) FROM unnest(i.bigrams) AS b
            WHERE position(b IN q.question) > 0) AS bigram_hits
-    FROM helpdesk_questions q CROSS JOIN input i
-   WHERE q.locale = $1 AND q.status = 'published'
+    FROM matched q CROSS JOIN input i
 )
 SELECT id, category, question, answer,
        ((text_rank + 0.3 * keyword_hits + 0.1 * bigram_hits)
          * CASE WHEN category = $2 THEN 1.25 ELSE 1 END)::float8 AS score
   FROM scored
- WHERE text_hit OR keyword_hits > 0 OR bigram_hits > 0
  ORDER BY score DESC, sort_order ASC, id ASC
  LIMIT $6`;
 
