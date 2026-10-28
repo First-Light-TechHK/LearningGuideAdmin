@@ -10,16 +10,18 @@ import type {
 } from '../providers/llm-provider.interface';
 import { MemoryRateLimitStore } from '../rate-limit.service';
 import {
+  ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
   suggestModel,
   SUGGEST_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
   SUGGEST_TIMEOUT_MS,
 } from './helpdesk-suggest.service';
-import type {
-  HelpdeskSuggestionLog,
-  SuggestionLogEntry,
-  SuggestionOutcome,
+import {
+  outcomeFits,
+  type HelpdeskSuggestionLog,
+  type SuggestionLogEntry,
+  type SuggestionOutcome,
 } from './helpdesk-suggestion.store';
 
 /**
@@ -33,7 +35,7 @@ const LEARNER = 'portal-user-1';
 const candidates: HelpdeskQaCandidate[] = [
   {
     id: '0192bbbb-0000-7000-8000-000000000001',
-    category: 'technical_support',
+    category: 'account_technical',
     question: 'How do I reset my password?',
     answer: 'Use Forgot password on the sign-in page.\nThen check your inbox.',
     score: 2,
@@ -68,12 +70,25 @@ function memoryLog() {
     }),
     setOutcome: jest.fn((id: string, outcome: SuggestionOutcome) => {
       const row = rows.find((r) => r.id === id);
-      if (!row) return Promise.resolve(null);
+      if (!row) return Promise.resolve({ kind: 'not_found' as const });
+      if (!outcomeFits(row.source, outcome))
+        return Promise.resolve({
+          kind: 'wrong_source' as const,
+          source: row.source,
+        });
       if (row.outcome === null) {
         row.outcome = outcome;
-        return Promise.resolve({ outcome, changed: true });
+        return Promise.resolve({
+          kind: 'recorded' as const,
+          outcome,
+          changed: true,
+        });
       }
-      return Promise.resolve({ outcome: row.outcome, changed: false });
+      return Promise.resolve({
+        kind: 'recorded' as const,
+        outcome: row.outcome,
+        changed: false,
+      });
     }),
     purgeQueryText,
   };
@@ -106,10 +121,16 @@ function setup(
   const findCandidates = jest
     .fn<Promise<HelpdeskQaCandidate[]>, [unknown]>()
     .mockResolvedValue(options.found ?? candidates);
-  const qa: HelpdeskQaSource = { findCandidates };
+  const findPublished = jest.fn((id: string, locale: string) => {
+    const hit = candidates.find((c) => c.id === id);
+    return Promise.resolve(
+      hit && locale === 'en-GB' ? { ...hit, score: 0 } : null,
+    );
+  });
+  const qa: HelpdeskQaSource = { findCandidates, findPublished };
   const { complete, providers } = fakeProvider(
     options.reply ??
-      (() => Promise.resolve(JSON.stringify({ qaId: candidates[0].id }))),
+      (() => Promise.resolve(JSON.stringify({ faqId: candidates[0].id }))),
   );
   const { rows, log, purgeQueryText } = memoryLog();
   const rateLimit = new MemoryRateLimitStore();
@@ -131,6 +152,7 @@ function setup(
     service,
     qa,
     findCandidates,
+    findPublished,
     complete,
     providers,
     rows,
@@ -156,17 +178,18 @@ describe('Helpdesk suggest: happy path', () => {
     const { suggestion } = await service.suggest(input);
     expect(suggestion).toEqual({
       id: rows[0].id,
-      qaId: candidates[0].id,
+      faqId: candidates[0].id,
       question: candidates[0].question,
       answer: candidates[0].answer,
     });
     expect(rows[0]).toMatchObject({
       learnerId: LEARNER,
       locale: 'en-GB',
+      source: 'submit',
       category: 'technical_support',
       queryText: `${input.subject}\n\n${input.message}`,
       candidateIds: candidates.map((c) => c.id),
-      qaId: candidates[0].id,
+      faqId: candidates[0].id,
       model: 'test/cheap-model',
     });
     expect(rows[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
@@ -177,9 +200,10 @@ describe('Helpdesk suggest: happy path', () => {
   it('asks the model for structured output limited to the candidate ids', async () => {
     const { service, complete, findCandidates } = setup();
     await service.suggest(input);
+    // the ticket's Enquiry Type boosts the FAQ category on the same topic
     expect(findCandidates).toHaveBeenCalledWith({
       locale: 'en-GB',
-      category: 'technical_support',
+      category: 'account_technical',
       text: `${input.subject}\n\n${input.message}`,
       limit: 8,
     });
@@ -206,9 +230,9 @@ describe('Helpdesk suggest: happy path', () => {
   it('accepts a JSON answer wrapped in a code fence', async () => {
     const { service } = setup({
       reply: () =>
-        Promise.resolve('```json\n{"qaId": "' + candidates[1].id + '"}\n```'),
+        Promise.resolve('```json\n{"faqId": "' + candidates[1].id + '"}\n```'),
     });
-    expect((await service.suggest(input)).suggestion?.qaId).toBe(
+    expect((await service.suggest(input)).suggestion?.faqId).toBe(
       candidates[1].id,
     );
   });
@@ -221,7 +245,7 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     expect(complete).not.toHaveBeenCalled();
     expect(rows[0]).toMatchObject({
       candidateIds: [],
-      qaId: null,
+      faqId: null,
       model: null,
     });
   });
@@ -229,16 +253,18 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
   it.each([
     [
       'an id that is not a candidate',
-      '{"qaId":"0192bbbb-0000-7000-8000-0000000000ff"}',
+      '{"faqId":"0192bbbb-0000-7000-8000-0000000000ff"}',
     ],
-    ['an explicit null', '{"qaId":null}'],
+    ['an explicit null', '{"faqId":null}'],
     ['free text', 'The answer is to reset your password.'],
     ['a wrong shape', '{"id":"0192bbbb-0000-7000-8000-000000000001"}'],
-    ['a number', '{"qaId":1}'],
+    // v1 used qaId; the v2 schema only knows faqId
+    ['the old v1 key', '{"qaId":"0192bbbb-0000-7000-8000-000000000001"}'],
+    ['a number', '{"faqId":1}'],
   ])('returns null when the model answers %s', async (_name, reply) => {
     const { service, rows } = setup({ reply: () => Promise.resolve(reply) });
     await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
-    expect(rows[0].qaId).toBeNull();
+    expect(rows[0].faqId).toBeNull();
   });
 
   it('times out after the configured limit (3 s by default) and aborts the call', async () => {
@@ -317,7 +343,7 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
 
 describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", () => {
   // Portal gives up after ADMIN_SUGGEST_TIMEOUT_MS = 4 s and creates the ticket; an answer
-  // decided after that was never shown, so it must not be logged as shown (qa_id).
+  // decided after that was never shown, so it must not be logged as shown (faq_id).
   const T0 = Date.UTC(2026, 9, 28, 9, 0, 0);
 
   it("sits between the model timeout and Portal's 4 s", () => {
@@ -327,7 +353,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     expect(SUGGEST_DEADLINE_MS).toBeGreaterThan(SUGGEST_TIMEOUT_MS);
   });
 
-  it('skips the model and logs no qa_id when retrieval used up the deadline', async () => {
+  it('skips the model and logs no faq_id when retrieval used up the deadline', async () => {
     let now = T0;
     const { service, findCandidates, complete, rows } = setup({
       now: () => now,
@@ -339,7 +365,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
     expect(complete).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
-    expect(rows[0].qaId).toBeNull();
+    expect(rows[0].faqId).toBeNull();
     expect(rows[0].candidateIds).toEqual(candidates.map((c) => c.id));
   });
 
@@ -353,7 +379,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     });
     await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
     expect(complete).not.toHaveBeenCalled();
-    expect(rows[0]?.qaId ?? null).toBeNull();
+    expect(rows[0]?.faqId ?? null).toBeNull();
   });
 
   it('drops a model answer that arrives after the deadline', async () => {
@@ -362,7 +388,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now: () => now,
       reply: () => {
         now += 2_600;
-        return Promise.resolve(JSON.stringify({ qaId: candidates[0].id }));
+        return Promise.resolve(JSON.stringify({ faqId: candidates[0].id }));
       },
     });
     findCandidates.mockImplementation(() => {
@@ -371,7 +397,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     });
     await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
     expect(rows).toHaveLength(1);
-    expect(rows[0].qaId).toBeNull();
+    expect(rows[0].faqId).toBeNull();
   });
 
   it('gives the model only the time that is left, then aborts it', async () => {
@@ -400,17 +426,17 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now: () => now,
       reply: () => {
         now += 2_000;
-        return Promise.resolve(JSON.stringify({ qaId: candidates[0].id }));
+        return Promise.resolve(JSON.stringify({ faqId: candidates[0].id }));
       },
     });
     findCandidates.mockImplementation(() => {
       now += 1_000;
       return Promise.resolve(candidates);
     });
-    expect((await service.suggest(input)).suggestion?.qaId).toBe(
+    expect((await service.suggest(input)).suggestion?.faqId).toBe(
       candidates[0].id,
     );
-    expect(rows[0].qaId).toBe(candidates[0].id);
+    expect(rows[0].faqId).toBe(candidates[0].id);
   });
 });
 
@@ -420,6 +446,10 @@ describe('Helpdesk suggest: input', () => {
     ['a long learnerId', { learnerId: 'x'.repeat(129) }],
     ['an unknown locale', { locale: 'fr-FR' }],
     ['an old category', { category: 'billing' }],
+    ['an unknown source', { source: 'email' }],
+    ['a chip without faqId', { source: 'chip' }],
+    ['a chip with a malformed faqId', { source: 'chip', faqId: 'faq-1' }],
+    ['a chat without a message', { source: 'chat', message: ' ' }],
     ['a long subject', { subject: 's'.repeat(121) }],
     ['a long message', { message: 'm'.repeat(5001) }],
     ['no text at all', { subject: ' ', message: ' ' }],
@@ -456,6 +486,165 @@ describe('Helpdesk suggest: input', () => {
         message: 'm'.repeat(5000),
       }),
     ).resolves.toHaveProperty('suggestion');
+  });
+});
+
+describe('Helpdesk suggest v2: source and category', () => {
+  it('treats a body without source as submit (v1 Portal)', async () => {
+    const { service, rows } = setup();
+    await service.suggest(input);
+    expect(rows[0].source).toBe('submit');
+  });
+
+  it('accepts an FAQ category as is, and no category at all', async () => {
+    const { service, findCandidates, rows } = setup();
+    await service.suggest({ ...input, category: 'courses_learning' });
+    expect(findCandidates).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: 'courses_learning' }),
+    );
+    const { category: _omit, ...withoutCategory } = input;
+    void _omit;
+    await service.suggest(withoutCategory);
+    expect(findCandidates).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: null }),
+    );
+    expect(rows[0].category).toBe('courses_learning');
+    expect(rows[1].category).toBeNull();
+  });
+});
+
+describe('Helpdesk suggest v2: chat', () => {
+  const chat = {
+    learnerId: LEARNER,
+    locale: 'en-GB',
+    source: 'chat',
+    message: 'I never get the reset email',
+  };
+
+  it('runs the same candidate + model pipeline and logs source chat', async () => {
+    const { service, complete, findCandidates, rows } = setup();
+    const { suggestion } = await service.suggest(chat);
+    expect(suggestion).toEqual({
+      id: rows[0].id,
+      faqId: candidates[0].id,
+      question: candidates[0].question,
+      answer: candidates[0].answer,
+    });
+    expect(findCandidates).toHaveBeenCalledWith({
+      locale: 'en-GB',
+      category: null,
+      text: chat.message,
+      limit: 8,
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(rows[0]).toMatchObject({
+      source: 'chat',
+      category: null,
+      queryText: chat.message,
+      faqId: candidates[0].id,
+    });
+  });
+
+  it('returns null without an API key', async () => {
+    const { service, complete } = setup({ env: {} });
+    await expect(service.suggest(chat)).resolves.toEqual({ suggestion: null });
+    expect(complete).not.toHaveBeenCalled();
+  });
+});
+
+describe('Helpdesk suggest v2: chip', () => {
+  const chip = {
+    learnerId: LEARNER,
+    locale: 'en-GB',
+    source: 'chip',
+    message: 'How do I reset my password?',
+    faqId: candidates[0].id.toUpperCase(),
+  };
+
+  it('returns the published FAQ verbatim with no model call and no API key, and logs it', async () => {
+    const { service, complete, findCandidates, findPublished, rows } = setup({
+      env: {},
+    });
+    const { suggestion } = await service.suggest(chip);
+    expect(findPublished).toHaveBeenCalledWith(candidates[0].id, 'en-GB');
+    expect(findCandidates).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(suggestion).toEqual({
+      id: rows[0].id,
+      faqId: candidates[0].id,
+      question: candidates[0].question,
+      answer: candidates[0].answer,
+    });
+    expect(rows[0]).toMatchObject({
+      source: 'chip',
+      category: null,
+      queryText: chip.message,
+      candidateIds: [candidates[0].id],
+      faqId: candidates[0].id,
+      model: null,
+    });
+  });
+
+  it('returns null for an FAQ that is not published in that locale, still logged', async () => {
+    const { service, rows } = setup();
+    await expect(
+      service.suggest({ ...chip, locale: 'zh-CN' }),
+    ).resolves.toEqual({ suggestion: null });
+    await expect(
+      service.suggest({
+        ...chip,
+        faqId: '0192bbbb-0000-7000-8000-0000000000ff',
+      }),
+    ).resolves.toEqual({ suggestion: null });
+    expect(rows.map((r) => r.faqId)).toEqual([null, null]);
+  });
+
+  it('returns null when the FAQ cannot be read', async () => {
+    const { service, findPublished } = setup();
+    findPublished.mockRejectedValue(new Error('db down'));
+    await expect(service.suggest(chip)).resolves.toEqual({ suggestion: null });
+  });
+});
+
+describe('Helpdesk suggest v2: separate rate limits', () => {
+  const chat = {
+    learnerId: LEARNER,
+    locale: 'en-GB',
+    source: 'chat',
+    message: 'reset email',
+  };
+  const chip = {
+    learnerId: LEARNER,
+    locale: 'en-GB',
+    source: 'chip',
+    message: 'How do I reset my password?',
+    faqId: candidates[0].id,
+  };
+
+  it('allows 30 chat + chip answers per learner per hour, then null', async () => {
+    expect(ASSIST_RATE_LIMIT).toEqual({ limit: 30, windowMs: 3_600_000 });
+    const { service, rateLimit } = setup();
+    const hit = jest.spyOn(rateLimit, 'tryHit');
+    for (let i = 0; i < 15; i++) {
+      expect((await service.suggest(chat)).suggestion).not.toBeNull();
+      expect((await service.suggest(chip)).suggestion).not.toBeNull();
+    }
+    await expect(service.suggest(chat)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(chip)).resolves.toEqual({ suggestion: null });
+    expect(hit).toHaveBeenLastCalledWith(
+      `helpdesk-assist:${LEARNER}`,
+      30,
+      3_600_000,
+    );
+    // the submit allowance is separate and untouched
+    expect((await service.suggest(input)).suggestion).not.toBeNull();
+  });
+
+  it('does not let submit use up the chat allowance', async () => {
+    const { service } = setup();
+    for (let i = 0; i < 10; i++) await service.suggest(input);
+    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    expect((await service.suggest(chat)).suggestion).not.toBeNull();
   });
 });
 
@@ -506,6 +695,59 @@ describe('Helpdesk suggest: outcome', () => {
       outcome: 'solved',
       changed: false,
     });
+  });
+
+  it('takes helpful / not_helpful for chat and chip answers, first one wins', async () => {
+    const { service } = setup();
+    const chat = await service.suggest({
+      learnerId: LEARNER,
+      locale: 'en-GB',
+      source: 'chat',
+      message: 'reset',
+    });
+    const id = chat.suggestion?.id as string;
+    await expect(
+      service.recordOutcome(id, { outcome: 'helpful' }),
+    ).resolves.toEqual({ id, outcome: 'helpful', changed: true });
+    await expect(
+      service.recordOutcome(id, { outcome: 'not_helpful' }),
+    ).resolves.toEqual({ id, outcome: 'helpful', changed: false });
+    const chip = await service.suggest({
+      learnerId: LEARNER,
+      locale: 'en-GB',
+      source: 'chip',
+      faqId: candidates[1].id,
+    });
+    const chipId = chip.suggestion?.id as string;
+    await expect(
+      service.recordOutcome(chipId, { outcome: 'not_helpful' }),
+    ).resolves.toEqual({ id: chipId, outcome: 'not_helpful', changed: true });
+  });
+
+  it('refuses an outcome that belongs to the other surface with 400', async () => {
+    const { service } = setup();
+    const submit = await service.suggest(input);
+    const chat = await service.suggest({
+      learnerId: LEARNER,
+      locale: 'en-GB',
+      source: 'chat',
+      message: 'reset',
+    });
+    for (const [id, outcome] of [
+      [submit.suggestion?.id, 'helpful'],
+      [submit.suggestion?.id, 'not_helpful'],
+      [chat.suggestion?.id, 'solved'],
+      [chat.suggestion?.id, 'declined'],
+      [chat.suggestion?.id, 'edited'],
+    ] as const) {
+      const error = await service
+        .recordOutcome(id as string, { outcome })
+        .catch((e: unknown) => e);
+      expect(problemOf(error)).toEqual({
+        status: 400,
+        code: 'invalid_request',
+      });
+    }
   });
 
   it('rejects an unknown outcome or a malformed id with 400, and an unknown id with 404', async () => {

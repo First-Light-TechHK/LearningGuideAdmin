@@ -1,48 +1,77 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 
-import type {
-  HelpdeskQuestionStats,
-  HelpdeskSuggestionStats,
-} from '../../contracts/helpdesk-qa';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
- * helpdesk_suggestions（Figma addendum §C；迁移 20261028090100_helpdesk_suggestions）：
- * Agent 每次检索记一行；学员反馈 outcome 首个为准；query_text 90 天后清空。
- * 同一张表给 BackOffice 的 Common Questions 计数（经契约 HelpdeskSuggestionStats）。
+ * helpdesk_suggestions（Figma addendum §C；Tickets v2 §1；迁移 20261028090100 + 20261029090000）：
+ * Agent 每次回答记一行（来源 submit / chat / chip，faq_id 是展示给学员的 FAQ）；
+ * 学员反馈 outcome 首个为准，且必须属于该来源；query_text 90 天后清空。
  */
+export const SUGGESTION_SOURCES = ['submit', 'chat', 'chip'] as const;
+export type SuggestionSource = (typeof SUGGESTION_SOURCES)[number];
+
+/** 提交工单弹窗（submit）的结果。 */
 export const SUGGESTION_OUTCOMES = ['solved', 'declined', 'edited'] as const;
-export type SuggestionOutcome = (typeof SUGGESTION_OUTCOMES)[number];
+/** 聊天面板（chat / chip）的结果。 */
+export const ASSIST_OUTCOMES = ['helpful', 'not_helpful'] as const;
+/** 全部结果（顺序同契约 enums.assistFeedback）。 */
+export const ALL_OUTCOMES = [
+  ...ASSIST_OUTCOMES,
+  ...SUGGESTION_OUTCOMES,
+] as const;
+export type SuggestionOutcome = (typeof ALL_OUTCOMES)[number];
+
+export function isSuggestionOutcome(
+  value: unknown,
+): value is SuggestionOutcome {
+  return (ALL_OUTCOMES as readonly unknown[]).includes(value);
+}
+
+/** 结果是否属于该来源：submit 只收 solved / declined / edited，chat / chip 只收 helpful / not_helpful。 */
+export function outcomeFits(
+  source: SuggestionSource,
+  outcome: SuggestionOutcome,
+): boolean {
+  const allowed: readonly string[] =
+    source === 'submit' ? SUGGESTION_OUTCOMES : ASSIST_OUTCOMES;
+  return allowed.includes(outcome);
+}
 
 export type SuggestionLogEntry = {
   id: string;
   learnerId: string;
   locale: string;
-  category: string;
+  source: SuggestionSource;
+  /** 工单类型或 FAQ 分类（原样）；chat / chip 没有时为 null。 */
+  category: string | null;
   queryText: string;
   candidateIds: string[];
-  qaId: string | null;
-  /** 没调模型（无候选）时为 null。 */
+  /** 展示给学员的 FAQ；没有答案时为 null。 */
+  faqId: string | null;
+  /** 没调模型（无候选、chip）时为 null。 */
   model: string | null;
   latencyMs: number;
 };
 
+export type OutcomeResult =
+  | { kind: 'recorded'; outcome: SuggestionOutcome; changed: boolean }
+  | { kind: 'not_found' }
+  | { kind: 'wrong_source'; source: SuggestionSource };
+
 export interface HelpdeskSuggestionLog {
   record(entry: SuggestionLogEntry): Promise<void>;
-  /** 首个为准：已有结果时不改，返回已存的；找不到返回 null。 */
-  setOutcome(
-    id: string,
-    outcome: SuggestionOutcome,
-  ): Promise<{ outcome: SuggestionOutcome; changed: boolean } | null>;
+  /** 首个为准：已有结果时不改，返回已存的；结果不属于该来源时什么都不改。 */
+  setOutcome(id: string, outcome: SuggestionOutcome): Promise<OutcomeResult>;
   /** 清空早于 cutOff 的 query_text，返回清理行数。 */
   purgeQueryText(cutOff: Date): Promise<number>;
 }
 
+function sourcesFor(outcome: SuggestionOutcome): SuggestionSource[] {
+  return SUGGESTION_SOURCES.filter((source) => outcomeFits(source, outcome));
+}
+
 @Injectable()
-export class PrismaHelpdeskSuggestionStore
-  implements HelpdeskSuggestionLog, HelpdeskSuggestionStats
-{
+export class PrismaHelpdeskSuggestionStore implements HelpdeskSuggestionLog {
   constructor(private readonly prisma: PrismaService) {}
 
   async record(entry: SuggestionLogEntry): Promise<void> {
@@ -51,10 +80,11 @@ export class PrismaHelpdeskSuggestionStore
         id: entry.id,
         learnerId: entry.learnerId,
         locale: entry.locale,
+        source: entry.source,
         category: entry.category,
         queryText: entry.queryText,
         candidateIds: entry.candidateIds,
-        qaId: entry.qaId,
+        faqId: entry.faqId,
         model: entry.model,
         latencyMs: Math.max(0, Math.round(entry.latencyMs)),
       },
@@ -64,19 +94,26 @@ export class PrismaHelpdeskSuggestionStore
   async setOutcome(
     id: string,
     outcome: SuggestionOutcome,
-  ): Promise<{ outcome: SuggestionOutcome; changed: boolean } | null> {
-    // 条件更新保证并发下只有第一个生效
+  ): Promise<OutcomeResult> {
+    // 条件更新保证并发下只有第一个生效；来源不对的行不会被改
     const { count } = await this.prisma.helpdeskSuggestion.updateMany({
-      where: { id, outcome: null },
+      where: { id, outcome: null, source: { in: sourcesFor(outcome) } },
       data: { outcome },
     });
-    if (count === 1) return { outcome, changed: true };
+    if (count === 1) return { kind: 'recorded', outcome, changed: true };
     const row = await this.prisma.helpdeskSuggestion.findUnique({
       where: { id },
-      select: { outcome: true },
+      select: { outcome: true, source: true },
     });
-    if (!row || row.outcome === null) return null;
-    return { outcome: row.outcome as SuggestionOutcome, changed: false };
+    if (!row) return { kind: 'not_found' };
+    const source = row.source as SuggestionSource;
+    if (!outcomeFits(source, outcome)) return { kind: 'wrong_source', source };
+    if (row.outcome === null) return { kind: 'not_found' };
+    return {
+      kind: 'recorded',
+      outcome: row.outcome as SuggestionOutcome,
+      changed: false,
+    };
   }
 
   async purgeQueryText(cutOff: Date): Promise<number> {
@@ -85,30 +122,5 @@ export class PrismaHelpdeskSuggestionStore
       data: { queryText: null },
     });
     return count;
-  }
-
-  async statsFor(
-    questionIds: string[],
-  ): Promise<Map<string, HelpdeskQuestionStats>> {
-    const stats = new Map<string, HelpdeskQuestionStats>();
-    if (questionIds.length === 0) return stats;
-    const rows = await this.prisma.$queryRaw<
-      { qa_id: string; shown: number; solved: number; declined: number }[]
-    >(Prisma.sql`
-      SELECT qa_id::text AS qa_id,
-             count(*)::int AS shown,
-             count(*) FILTER (WHERE outcome = 'solved')::int AS solved,
-             count(*) FILTER (WHERE outcome = 'declined')::int AS declined
-        FROM helpdesk_suggestions
-       WHERE qa_id = ANY(${questionIds}::uuid[])
-       GROUP BY qa_id`);
-    for (const row of rows) {
-      stats.set(row.qa_id, {
-        shown: Number(row.shown),
-        solved: Number(row.solved),
-        declined: Number(row.declined),
-      });
-    }
-    return stats;
   }
 }

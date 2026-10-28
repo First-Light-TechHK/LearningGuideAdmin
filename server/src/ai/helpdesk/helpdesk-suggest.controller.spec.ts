@@ -79,13 +79,14 @@ describe('Helpdesk suggest integration endpoints', () => {
   const body = {
     learnerId: 'portal-user-1',
     locale: 'en-GB',
+    source: 'submit',
     category: 'technical_support',
     subject: 'Cannot log in',
     message: 'Help',
   };
 
   it('returns { suggestion } as plain JSON with no envelope', async () => {
-    const suggestion = { id: SID, qaId: 'q1', question: 'Q', answer: 'A' };
+    const suggestion = { id: SID, faqId: 'q1', question: 'Q', answer: 'A' };
     service.suggest.mockResolvedValue({ suggestion });
     const res = await request(server())
       .post('/api/integration/helpdesk/suggest')
@@ -217,7 +218,10 @@ describe('AiModule.register wiring (agent role owns suggest)', () => {
           knowledge: { provide: KNOWLEDGE_CLIENT, useValue: {} },
           helpdeskQa: {
             provide: HELPDESK_QA_SOURCE,
-            useValue: { findCandidates: () => Promise.resolve([]) },
+            useValue: {
+              findCandidates: () => Promise.resolve([]),
+              findPublished: () => Promise.resolve(null),
+            },
           },
         }),
       ],

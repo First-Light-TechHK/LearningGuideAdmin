@@ -27,10 +27,9 @@ import {
   HELPDESK_SERVICE,
 } from '../nest/helpdesk.controller';
 import {
-  BackofficeHelpdeskQuestionsController,
-  HelpdeskIntegrationQuestionsController,
-} from '../nest/helpdesk-questions.controller';
-import { HELPDESK_SUGGESTION_STATS } from '../../contracts/helpdesk-qa';
+  BackofficeHelpdeskFaqsController,
+  HelpdeskIntegrationFaqsController,
+} from '../nest/helpdesk-faqs.controller';
 
 /**
  * HelpDesk Tickets v1 §7：菜单 helpDesk 的 VIEW 只能读，FULL 才能写；
@@ -478,25 +477,17 @@ describe('BackofficeModule wiring', () => {
   });
 });
 
-describe('BackofficeModule.register wiring (Common Questions)', () => {
-  it('registers the Common Questions and Portal integration controllers with the suggestion counters', async () => {
-    const statsFor = jest.fn().mockResolvedValue(new Map());
+describe('BackofficeModule wiring (FAQs, Tickets v2 §2 / §3)', () => {
+  it('registers the FAQ and Portal FAQ integration controllers', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [
-        BackofficeModule.register({
-          helpdeskSuggestionStats: {
-            provide: HELPDESK_SUGGESTION_STATS,
-            useValue: { statsFor },
-          },
-        }),
-      ],
+      imports: [BackofficeModule],
     }).compile();
-    expect(moduleRef.get(BackofficeHelpdeskQuestionsController)).toBeInstanceOf(
-      BackofficeHelpdeskQuestionsController,
+    expect(moduleRef.get(BackofficeHelpdeskFaqsController)).toBeInstanceOf(
+      BackofficeHelpdeskFaqsController,
     );
-    expect(
-      moduleRef.get(HelpdeskIntegrationQuestionsController),
-    ).toBeInstanceOf(HelpdeskIntegrationQuestionsController);
+    expect(moduleRef.get(HelpdeskIntegrationFaqsController)).toBeInstanceOf(
+      HelpdeskIntegrationFaqsController,
+    );
     expect(moduleRef.get(BackofficeHelpdeskController)).toBeInstanceOf(
       BackofficeHelpdeskController,
     );

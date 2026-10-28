@@ -13,22 +13,22 @@ import {
   type EmployeeRole,
   type SessionEmployee,
 } from '../contracts/employee';
-import type { HelpdeskQuestion } from '../modules/helpdesk/questions/questionContracts';
-import { createQuestionService } from '../modules/helpdesk/questions/questionService';
+import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
+import { createFaqService } from '../modules/helpdesk/faqs/faqService';
 import { levelFor } from '../modules/rbac/permissions';
 import { resolveSession } from '../modules/user-authentication/services/session';
 import { BackofficeAccessGuard } from '../nest/backoffice-access.guard';
 import {
-  BackofficeHelpdeskQuestionsController,
-  HelpdeskIntegrationQuestionsController,
-  HELPDESK_QUESTION_SERVICE,
-} from '../nest/helpdesk-questions.controller';
-import { createMemoryQuestionRepository } from './helpers/memoryQuestionRepository';
+  BackofficeHelpdeskFaqsController,
+  HelpdeskIntegrationFaqsController,
+  HELPDESK_FAQ_SERVICE,
+} from '../nest/helpdesk-faqs.controller';
+import { createMemoryFaqRepository } from './helpers/memoryFaqRepository';
 
 /**
- * Helpdesk addendum §A / §E / §F：
- * - 员工端 Common Questions：菜单 helpDesk VIEW 只读，FULL 才能写；
- * - Portal 读已发布问题：只认 Bearer ADMIN_HELPDESK_TOKEN（不要员工登录），
+ * Tickets v2 §2 / §3：
+ * - 员工端 FAQs：菜单 helpDesk VIEW 只读（列表、打开、预览、修订），FULL 才能新增 / 编辑 / 删除；
+ * - Portal 读已发布 FAQ：只认 Bearer ADMIN_HELPDESK_TOKEN（不要员工登录），
  *   缺失 / 错误 401、环境变量为空 503，错误体是 RFC 9457 problem+json；支持 ETag / If-None-Match。
  * 会话 mock；令牌是本地测试值。
  */
@@ -37,18 +37,18 @@ jest.mock('../modules/user-authentication/services/session', () => ({
 }));
 
 const TOKEN = 'test-admin-helpdesk-token-local-only';
-const QID = '0192bbbb-0000-7000-8000-000000000001';
+const FID = '0192bbbb-0000-7000-8000-000000000001';
 
-const seed: HelpdeskQuestion = {
-  id: QID,
-  locale: 'en-GB',
-  category: 'technical_support',
-  question: 'How do I reset my password?',
-  answer: 'Use Forgot password.',
+const seed: HelpdeskFaq = {
+  id: FID,
+  category: 'account_technical',
+  popular: true,
+  questionEn: 'How do I reset my password?',
+  answerEn: 'Use **Forgot password**.',
+  questionZh: '如何重置密码？',
+  answerZh: '点击**忘记密码**。',
   keywords: ['password'],
   status: 'published',
-  featured: true,
-  sortOrder: 10,
   version: 1,
   createdBy: null,
   updatedBy: null,
@@ -56,7 +56,7 @@ const seed: HelpdeskQuestion = {
   updatedAt: '2026-10-01T00:00:00.000Z',
 };
 
-let repository = createMemoryQuestionRepository([seed]);
+let repository = createMemoryFaqRepository([seed]);
 
 function employeeFor(role: EmployeeRole): SessionEmployee {
   return {
@@ -74,25 +74,23 @@ function employeeFor(role: EmployeeRole): SessionEmployee {
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true })],
   controllers: [
-    BackofficeHelpdeskQuestionsController,
-    HelpdeskIntegrationQuestionsController,
+    BackofficeHelpdeskFaqsController,
+    HelpdeskIntegrationFaqsController,
   ],
   providers: [
     {
-      provide: HELPDESK_QUESTION_SERVICE,
+      provide: HELPDESK_FAQ_SERVICE,
       useFactory: () =>
-        createQuestionService({
+        createFaqService({
           repository: {
             // 每个用例重建仓库，这里转发到当前实例
             list: (f) => repository.list(f),
             get: (id) => repository.get(id),
-            nextSortOrder: (l) => repository.nextSortOrder(l),
-            insert: (q, e) => repository.insert(q, e),
+            insert: (q, e, k) => repository.insert(q, e, k),
             update: (id, v, p, a, e) => repository.update(id, v, p, a, e),
-            reorder: (i, e) => repository.reorder(i, e),
             revisions: (id) => repository.revisions(id),
-            listPublished: (l, f) => repository.listPublished(l, f),
-            searchCandidates: (i) => repository.searchCandidates(i),
+            listPublished: (f) => repository.listPublished(f),
+            searchPublished: (s) => repository.searchPublished(s),
           },
         }),
     },
@@ -101,21 +99,21 @@ function employeeFor(role: EmployeeRole): SessionEmployee {
     { provide: APP_GUARD, useClass: BackofficeAccessGuard },
   ],
 })
-class QuestionsTestModule {}
+class FaqsTestModule {}
 
 type Envelope = {
   success: boolean;
-  data: Record<string, unknown> & { questions?: { id: string }[] };
+  data: Record<string, unknown> & { faqs?: { id: string }[] };
   error: { code: string } | null;
 };
 
-describe('Common Questions endpoints', () => {
+describe('FAQ endpoints', () => {
   let app: INestApplication<App>;
   const savedToken = process.env.ADMIN_HELPDESK_TOKEN;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [QuestionsTestModule],
+      imports: [FaqsTestModule],
     }).compile();
     app = moduleRef.createNestApplication({ logger: false });
     configureApp(app);
@@ -129,7 +127,7 @@ describe('Common Questions endpoints', () => {
   });
 
   beforeEach(() => {
-    repository = createMemoryQuestionRepository([seed]);
+    repository = createMemoryFaqRepository([seed]);
     process.env.ADMIN_HELPDESK_TOKEN = TOKEN;
     (resolveSession as jest.Mock).mockReset();
     (resolveSession as jest.Mock).mockImplementation((token?: string) =>
@@ -151,75 +149,71 @@ describe('Common Questions endpoints', () => {
     (r) => levelFor(r, 'helpDesk') === 'FULL',
   );
   const create = {
-    locale: 'en-GB',
     category: 'other',
-    question: 'Can I pause my plan?',
-    answer: 'Yes, from Subscription.',
+    popular: false,
+    questionEn: 'Can I pause my plan?',
+    answerEn: 'Yes, from **Subscription**.',
+    questionZh: '可以暂停订阅吗？',
+    answerZh: '可以，在**订阅**里操作。',
     keywords: ['pause'],
-    featured: false,
-    publish: true,
   };
 
   describe('employee side (session + helpDesk menu)', () => {
     it('requires a signed-in employee', async () => {
-      const res = await request(server())
-        .get('/api/helpdesk/questions')
-        .expect(401);
+      const res = await request(server()).get('/api/helpdesk/faqs').expect(401);
       expect(body(res).error?.code).toBe('INVALID_EMPLOYEE_ACCOUNT');
     });
 
-    it.each(viewRoles)('%s can list, open and see revisions', async (role) => {
-      const list = await request(server())
-        .get('/api/helpdesk/questions?locale=en-GB')
-        .set('Cookie', as(role))
-        .expect(200);
-      expect(body(list).data.questions?.map((q) => q.id)).toEqual([QID]);
-      await request(server())
-        .get(`/api/helpdesk/questions/${QID}`)
-        .set('Cookie', as(role))
-        .expect(200);
-      await request(server())
-        .get(`/api/helpdesk/questions/${QID}/revisions`)
-        .set('Cookie', as(role))
-        .expect(200);
-    });
-
     it.each(viewRoles)(
-      '%s cannot create, edit, publish, unpublish, archive or reorder',
+      '%s can list, open (preview) and see revisions',
       async (role) => {
-        const writes: [string, string, unknown][] = [
-          ['post', '/api/helpdesk/questions', create],
-          ['put', `/api/helpdesk/questions/${QID}`, { ...create, version: 1 }],
-          ['post', `/api/helpdesk/questions/${QID}/publish`, { version: 1 }],
-          ['post', `/api/helpdesk/questions/${QID}/unpublish`, { version: 1 }],
-          ['post', `/api/helpdesk/questions/${QID}/archive`, { version: 1 }],
-          [
-            'post',
-            '/api/helpdesk/questions/reorder',
-            { items: [{ id: QID, version: 1 }] },
-          ],
-        ];
-        for (const [method, path, payload] of writes) {
-          const req =
-            method === 'post'
-              ? request(server()).post(path)
-              : request(server()).put(path);
-          const res = await req
-            .set('Cookie', as(role))
-            .send(payload as object)
-            .expect(403);
-          expect(body(res).error?.code).toBe('NOT_AUTHORISED');
-        }
-        expect(repository.rows.get(QID)?.version).toBe(1);
-        expect(repository.rows.size).toBe(1);
+        const list = await request(server())
+          .get('/api/helpdesk/faqs?popular=true')
+          .set('Cookie', as(role))
+          .expect(200);
+        expect(body(list).data.faqs?.map((f) => f.id)).toEqual([FID]);
+        expect(body(list).data).toMatchObject({
+          total: 1,
+          page: 1,
+          pageSize: 10,
+        });
+        await request(server())
+          .get(`/api/helpdesk/faqs/${FID}`)
+          .set('Cookie', as(role))
+          .expect(200);
+        await request(server())
+          .get(`/api/helpdesk/faqs/${FID}/revisions`)
+          .set('Cookie', as(role))
+          .expect(200);
       },
     );
 
+    it.each(viewRoles)('%s cannot add, edit or delete', async (role) => {
+      const writes: [string, string, unknown][] = [
+        ['post', '/api/helpdesk/faqs', create],
+        ['put', `/api/helpdesk/faqs/${FID}`, { ...create, version: 1 }],
+        ['post', `/api/helpdesk/faqs/${FID}/archive`, { version: 1 }],
+      ];
+      for (const [method, path, payload] of writes) {
+        const req =
+          method === 'post'
+            ? request(server()).post(path)
+            : request(server()).put(path);
+        const res = await req
+          .set('Cookie', as(role))
+          .send(payload as object)
+          .expect(403);
+        expect(body(res).error?.code).toBe('NOT_AUTHORISED');
+      }
+      expect(repository.rows.get(FID)?.version).toBe(1);
+      expect(repository.rows.size).toBe(1);
+    });
+
     it.each(fullRoles)(
-      '%s can create (201) and the creator is the signed-in employee',
+      '%s can add (201, published) and the creator is the signed-in employee',
       async (role) => {
         const res = await request(server())
-          .post('/api/helpdesk/questions')
+          .post('/api/helpdesk/faqs')
           .set('Cookie', as(role))
           .send({ ...create, createdBy: 'forged' })
           .expect(201);
@@ -231,59 +225,68 @@ describe('Common Questions endpoints', () => {
       },
     );
 
-    it.each(fullRoles)(
-      '%s can edit, unpublish, archive and reorder',
-      async (role) => {
-        const cookie = as(role);
-        await request(server())
-          .put(`/api/helpdesk/questions/${QID}`)
-          .set('Cookie', cookie)
-          .send({ ...create, version: 1 })
-          .expect(200);
-        await request(server())
-          .post(`/api/helpdesk/questions/${QID}/unpublish`)
-          .set('Cookie', cookie)
-          .send({ version: 2 })
-          .expect(200);
-        await request(server())
-          .post('/api/helpdesk/questions/reorder')
-          .set('Cookie', cookie)
-          .send({ items: [{ id: QID, version: 3 }] })
-          .expect(200);
-        const archived = await request(server())
-          .post(`/api/helpdesk/questions/${QID}/archive`)
-          .set('Cookie', cookie)
-          .send({ version: 3 })
-          .expect(200);
-        expect(body(archived).data).toMatchObject({
-          status: 'archived',
-          version: 4,
-        });
-      },
-    );
+    it('creates once per Idempotency-Key header', async () => {
+      const key = '0192dddd-0000-4000-8000-000000000009';
+      const first = await request(server())
+        .post('/api/helpdesk/faqs')
+        .set('Cookie', as('ADMIN'))
+        .set('Idempotency-Key', key)
+        .send(create)
+        .expect(201);
+      const retry = await request(server())
+        .post('/api/helpdesk/faqs')
+        .set('Cookie', as('ADMIN'))
+        .set('Idempotency-Key', key)
+        .send(create)
+        .expect(201);
+      expect(body(retry).data.id).toBe(body(first).data.id);
+      expect(repository.rows.size).toBe(2);
+    });
+
+    it.each(fullRoles)('%s can edit and delete', async (role) => {
+      const cookie = as(role);
+      await request(server())
+        .put(`/api/helpdesk/faqs/${FID}`)
+        .set('Cookie', cookie)
+        .send({ ...create, version: 1 })
+        .expect(200);
+      const archived = await request(server())
+        .post(`/api/helpdesk/faqs/${FID}/archive`)
+        .set('Cookie', cookie)
+        .send({ version: 2 })
+        .expect(200);
+      expect(body(archived).data).toMatchObject({
+        status: 'archived',
+        version: 3,
+      });
+      await request(server())
+        .get(`/api/helpdesk/faqs/${FID}`)
+        .set('Cookie', cookie)
+        .expect(404);
+    });
 
     it('answers a stale version with 409 VERSION_CONFLICT in the envelope', async () => {
       const res = await request(server())
-        .post(`/api/helpdesk/questions/${QID}/unpublish`)
+        .put(`/api/helpdesk/faqs/${FID}`)
         .set('Cookie', as('ADMIN'))
-        .send({ version: 9 })
+        .send({ ...create, version: 9 })
         .expect(409);
       expect(body(res).error?.code).toBe('VERSION_CONFLICT');
     });
 
     it('answers bad input with 400 INVALID_INPUT', async () => {
       const res = await request(server())
-        .post('/api/helpdesk/questions')
+        .post('/api/helpdesk/faqs')
         .set('Cookie', as('ADMIN'))
-        .send({ ...create, locale: 'fr' })
+        .send({ ...create, category: 'technical_support' })
         .expect(400);
       expect(body(res).error?.code).toBe('INVALID_INPUT');
     });
 
     it('answers a repeated list query parameter with 400 INVALID_INPUT, not 500', async () => {
-      for (const query of ['q=a&q=b', 'locale=en-GB&locale=zh-CN']) {
+      for (const query of ['q=a&q=b', 'popular=true&popular=false']) {
         const res = await request(server())
-          .get(`/api/helpdesk/questions?${query}`)
+          .get(`/api/helpdesk/faqs?${query}`)
           .set('Cookie', as('ADMIN'))
           .expect(400);
         expect(body(res).error?.code).toBe('INVALID_INPUT');
@@ -291,9 +294,8 @@ describe('Common Questions endpoints', () => {
     });
   });
 
-  describe('Portal side: GET /api/integration/helpdesk/questions', () => {
-    const path =
-      '/api/integration/helpdesk/questions?locale=en-GB&featured=true';
+  describe('Portal side: GET /api/integration/helpdesk/faqs', () => {
+    const path = '/api/integration/helpdesk/faqs?locale=zh-CN&popular=true';
 
     function expectProblem(
       res: request.Response,
@@ -320,7 +322,7 @@ describe('Common Questions endpoints', () => {
       expect(typeof body.detail).toBe('string');
     }
 
-    it('returns published questions with an ETag and no employee session', async () => {
+    it('returns published FAQs in the locale with an ETag and no employee session', async () => {
       const res = await request(server())
         .get(path)
         .set('Authorization', `Bearer ${TOKEN}`)
@@ -329,12 +331,14 @@ describe('Common Questions endpoints', () => {
       expect(res.headers.etag).toMatch(/^"/);
       expect(res.headers['cache-control']).toBe('no-cache');
       expect(res.body).toEqual({
-        questions: [
+        faqs: [
           {
-            id: QID,
-            category: 'technical_support',
-            question: seed.question,
-            answer: seed.answer,
+            id: FID,
+            category: 'account_technical',
+            popular: true,
+            question: seed.questionZh,
+            answer: seed.answerZh,
+            updatedAt: seed.updatedAt,
           },
         ],
         etag: res.headers.etag,
@@ -355,12 +359,44 @@ describe('Common Questions endpoints', () => {
       expect(res.headers.etag).toBe(first.headers.etag);
     });
 
+    it('returns one FAQ by id, and 404 problem+json for an unknown or deleted one', async () => {
+      const one = await request(server())
+        .get(`/api/integration/helpdesk/faqs/${FID}?locale=en-GB`)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(200);
+      expect(one.body).toEqual({
+        id: FID,
+        category: 'account_technical',
+        popular: true,
+        question: seed.questionEn,
+        answer: seed.answerEn,
+        updatedAt: seed.updatedAt,
+      });
+      expect(one.headers['cache-control']).toBe('no-cache');
+      const missing = await request(server())
+        .get(
+          '/api/integration/helpdesk/faqs/0192bbbb-0000-7000-8000-0000000000ff?locale=en-GB',
+        )
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(404);
+      expectProblem(missing, 404, 'not_found');
+      const bad = await request(server())
+        .get(`/api/integration/helpdesk/faqs/${FID}?locale=fr`)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(400);
+      expectProblem(bad, 400, 'invalid_request');
+    });
+
     it('rejects a missing token with 401 problem+json', async () => {
       const res = await request(server()).get(path).expect(401);
       expectProblem(res, 401, 'invalid_token');
       expect(res.headers['www-authenticate']).toBe(
         'Bearer realm="helpdesk", error="invalid_token"',
       );
+      const one = await request(server())
+        .get(`/api/integration/helpdesk/faqs/${FID}?locale=en-GB`)
+        .expect(401);
+      expectProblem(one, 401, 'invalid_token');
     });
 
     it('rejects a wrong token with 401, and an employee cookie does not help', async () => {
@@ -388,13 +424,13 @@ describe('Common Questions endpoints', () => {
 
     it('answers bad query parameters with 400 problem+json', async () => {
       const res = await request(server())
-        .get('/api/integration/helpdesk/questions?locale=fr')
+        .get('/api/integration/helpdesk/faqs?locale=fr')
         .set('Authorization', `Bearer ${TOKEN}`)
         .expect(400);
       expectProblem(res, 400, 'invalid_request');
       const repeated = await request(server())
         .get(
-          '/api/integration/helpdesk/questions?locale=en-GB&locale=zh-CN&featured=true&featured=false',
+          '/api/integration/helpdesk/faqs?locale=en-GB&locale=zh-CN&popular=true&popular=false',
         )
         .set('Authorization', `Bearer ${TOKEN}`)
         .expect(400);

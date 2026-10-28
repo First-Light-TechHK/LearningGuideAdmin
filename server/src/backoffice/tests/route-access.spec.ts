@@ -175,18 +175,15 @@ describe('route access classification', () => {
     }
   });
 
-  it('puts Common Questions (HelpDesk addendum §A) behind the HelpDesk menu too', () => {
+  it('puts the FAQs (Tickets v2 §3) behind the HelpDesk menu too', () => {
     const h = ['helpDesk'];
     const cases: [string, string, string][] = [
-      ['GET', '/api/helpdesk/questions', 'VIEW'],
-      ['GET', '/api/helpdesk/questions/q1', 'VIEW'],
-      ['GET', '/api/helpdesk/questions/q1/revisions', 'VIEW'],
-      ['POST', '/api/helpdesk/questions', 'CREATE'],
-      ['PUT', '/api/helpdesk/questions/q1', 'CREATE'],
-      ['POST', '/api/helpdesk/questions/q1/publish', 'CREATE'],
-      ['POST', '/api/helpdesk/questions/q1/unpublish', 'CREATE'],
-      ['POST', '/api/helpdesk/questions/q1/archive', 'CREATE'],
-      ['POST', '/api/helpdesk/questions/reorder', 'CREATE'],
+      ['GET', '/api/helpdesk/faqs', 'VIEW'],
+      ['GET', '/api/helpdesk/faqs/f1', 'VIEW'],
+      ['GET', '/api/helpdesk/faqs/f1/revisions', 'VIEW'],
+      ['POST', '/api/helpdesk/faqs', 'CREATE'],
+      ['PUT', '/api/helpdesk/faqs/f1', 'CREATE'],
+      ['POST', '/api/helpdesk/faqs/f1/archive', 'CREATE'],
     ];
     for (const [method, path, action] of cases) {
       assert.deepEqual(
@@ -199,11 +196,12 @@ describe('route access classification', () => {
 
   it('exempts only the Portal helpdesk integration routes from the employee login (Bearer only)', () => {
     for (const [method, path] of [
-      ['GET', '/api/integration/helpdesk/questions'],
-      ['GET', '/api/integration/helpdesk/questions?locale=en-GB'],
+      ['GET', '/api/integration/helpdesk/faqs'],
+      ['GET', '/api/integration/helpdesk/faqs?locale=en-GB'],
+      ['GET', '/api/integration/helpdesk/faqs/f1?locale=zh-CN'],
       ['POST', '/api/integration/helpdesk/suggest'],
       ['POST', '/api/integration/helpdesk/suggestions/s1/outcome'],
-      ['GET', '/API/Integration/HelpDesk/questions/'],
+      ['GET', '/API/Integration/HelpDesk/faqs/'],
     ]) {
       assert.deepEqual(
         routeAccess(method, path.split('?')[0]),
@@ -218,12 +216,9 @@ describe('route access classification', () => {
     assert.deepEqual(routeAccess('GET', '/api/integration'), {
       kind: 'employeeAdmin',
     });
-    assert.deepEqual(
-      routeAccess('GET', '/api/integration/helpdeskx/questions'),
-      {
-        kind: 'employeeAdmin',
-      },
-    );
+    assert.deepEqual(routeAccess('GET', '/api/integration/helpdeskx/faqs'), {
+      kind: 'employeeAdmin',
+    });
   });
 
   it('gives unregistered endpoints to Admin only', () => {

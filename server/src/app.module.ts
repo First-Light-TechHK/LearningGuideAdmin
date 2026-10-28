@@ -16,12 +16,8 @@ import { ALL_ROLES, type AppRole } from './app-roles';
 import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
 import { KsModule } from './ks/ks.module';
 import { PrismaKnowledgeClient } from './ks/prisma-knowledge.client';
-import {
-  HELPDESK_QA_SOURCE,
-  HELPDESK_SUGGESTION_STATS,
-} from './contracts/helpdesk-qa';
-import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/questions/questionRepository';
-import { PrismaHelpdeskSuggestionStore } from './ai/helpdesk/helpdesk-suggestion.store';
+import { HELPDESK_QA_SOURCE } from './contracts/helpdesk-qa';
+import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqRepository';
 
 /**
  * Agent 读 KS 的方式：同进程起了 ks 角色、或没配 KS_BASE_URL 时直接读库；
@@ -71,7 +67,7 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
               adminApi: admin,
               learnerApi: agent,
               knowledge: knowledgeProvider(roles),
-              // Helpdesk 推荐的候选：读 BackOffice 的已发布问答（同库直读，契约见 src/contracts）
+              // Helpdesk 推荐的候选：读 BackOffice 的已发布 FAQ（同库直读，契约见 src/contracts）
               helpdeskQa: {
                 provide: HELPDESK_QA_SOURCE,
                 useFactory: () => createPgHelpdeskQaSource(),
@@ -79,18 +75,8 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
             }),
           ]
         : []),
-      // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）；Common Questions 的推荐计数
-      // 读 Agent 的 helpdesk_suggestions（经契约 HELPDESK_SUGGESTION_STATS）
-      ...(admin
-        ? [
-            BackofficeModule.register({
-              helpdeskSuggestionStats: {
-                provide: HELPDESK_SUGGESTION_STATS,
-                useClass: PrismaHelpdeskSuggestionStore,
-              },
-            }),
-          ]
-        : []),
+      // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）；HelpDesk 工单与 FAQ 库
+      ...(admin ? [BackofficeModule] : []),
     ],
     controllers: [AppController, HealthController],
     providers: [

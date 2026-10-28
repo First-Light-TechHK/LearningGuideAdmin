@@ -8,8 +8,9 @@ import { uuidv7 } from '../../common/uuidv7';
 import { PrismaHelpdeskSuggestionStore } from './helpdesk-suggestion.store';
 
 /**
- * helpdesk_suggestions 实测（Helpdesk addendum §C）：记一行、结果首个为准、
- * Common Questions 计数（shown / solved / declined）、90 天后清空 query_text。
+ * helpdesk_suggestions 实测（Helpdesk addendum §C；Tickets v2 §1）：记一行（来源、faq_id、
+ * 可空类型）、结果首个为准且必须属于该来源、90 天后清空 query_text。
+ * （v1 的 Common Questions 计数随 Common Questions 一起下线。）
  * 需要 HELPDESK_TEST_DATABASE_URL；未设置时跳过。
  */
 const url = process.env.HELPDESK_TEST_DATABASE_URL;
@@ -55,16 +56,20 @@ describeDb('PrismaHelpdeskSuggestionStore (PostgreSQL)', () => {
     await admin?.end();
   });
 
-  function entry(qaId: string | null) {
+  function entry(
+    faqId: string | null,
+    source: 'submit' | 'chat' | 'chip' = 'submit',
+  ) {
     return {
       id: uuidv7(),
       learnerId: 'portal-user-1',
       locale: 'en-GB' as const,
-      category: 'technical_support' as const,
+      source,
+      category: source === 'submit' ? 'technical_support' : null,
       queryText: 'Cannot log in',
       candidateIds: [qa1, qa2],
-      qaId,
-      model: qaId ? 'test/model' : null,
+      faqId,
+      model: faqId ? 'test/model' : null,
       latencyMs: 12,
     };
   }
@@ -73,14 +78,84 @@ describeDb('PrismaHelpdeskSuggestionStore (PostgreSQL)', () => {
     const row = entry(qa1);
     await store.record(row);
     await expect(store.setOutcome(row.id, 'declined')).resolves.toEqual({
+      kind: 'recorded',
       outcome: 'declined',
       changed: true,
     });
     await expect(store.setOutcome(row.id, 'solved')).resolves.toEqual({
+      kind: 'recorded',
       outcome: 'declined',
       changed: false,
     });
-    await expect(store.setOutcome(uuidv7(), 'solved')).resolves.toBeNull();
+    await expect(store.setOutcome(uuidv7(), 'solved')).resolves.toEqual({
+      kind: 'not_found',
+    });
+  });
+
+  it('stores source, faq_id and a null category, and takes chat outcomes', async () => {
+    const row = entry(qa2, 'chat');
+    await store.record(row);
+    const { rows } = await admin.query<{
+      source: string;
+      faq_id: string;
+      category: string | null;
+      qa_id: string | null;
+    }>(
+      `SELECT source, faq_id::text, category, qa_id::text FROM ${schema}.helpdesk_suggestions WHERE id = $1`,
+      [row.id],
+    );
+    expect(rows[0]).toEqual({
+      source: 'chat',
+      faq_id: qa2,
+      category: null,
+      qa_id: null,
+    });
+    await expect(store.setOutcome(row.id, 'helpful')).resolves.toEqual({
+      kind: 'recorded',
+      outcome: 'helpful',
+      changed: true,
+    });
+    await expect(store.setOutcome(row.id, 'not_helpful')).resolves.toEqual({
+      kind: 'recorded',
+      outcome: 'helpful',
+      changed: false,
+    });
+  });
+
+  it('refuses an outcome from the other surface and leaves the row alone', async () => {
+    const submit = entry(qa1);
+    const chip = entry(qa1, 'chip');
+    for (const r of [submit, chip]) await store.record(r);
+    await expect(store.setOutcome(submit.id, 'helpful')).resolves.toEqual({
+      kind: 'wrong_source',
+      source: 'submit',
+    });
+    await expect(store.setOutcome(chip.id, 'solved')).resolves.toEqual({
+      kind: 'wrong_source',
+      source: 'chip',
+    });
+    const { rows } = await admin.query<{ outcome: string | null }>(
+      `SELECT outcome FROM ${schema}.helpdesk_suggestions WHERE id = ANY($1::uuid[])`,
+      [[submit.id, chip.id]],
+    );
+    expect(rows.map((r) => r.outcome)).toEqual([null, null]);
+  });
+
+  it('enforces the source and outcome values in the database', async () => {
+    const row = entry(qa1);
+    await store.record(row);
+    await expect(
+      admin.query(
+        `UPDATE ${schema}.helpdesk_suggestions SET source = 'email' WHERE id = $1`,
+        [row.id],
+      ),
+    ).rejects.toThrow(/helpdesk_suggestions_source_check/);
+    await expect(
+      admin.query(
+        `UPDATE ${schema}.helpdesk_suggestions SET outcome = 'maybe' WHERE id = $1`,
+        [row.id],
+      ),
+    ).rejects.toThrow(/helpdesk_suggestions_outcome_check/);
   });
 
   it('lets only one of two concurrent outcomes win', async () => {
@@ -90,25 +165,12 @@ describeDb('PrismaHelpdeskSuggestionStore (PostgreSQL)', () => {
       store.setOutcome(row.id, 'solved'),
       store.setOutcome(row.id, 'edited'),
     ]);
-    expect(results.filter((r) => r?.changed)).toHaveLength(1);
-    expect(results[0]?.outcome).toBe(results[1]?.outcome);
-  });
-
-  it('counts shown / solved / declined per question', async () => {
-    const a = entry(qa2);
-    const b = entry(qa2);
-    const c = entry(qa2);
-    for (const r of [a, b, c, entry(null)]) await store.record(r);
-    await store.setOutcome(a.id, 'solved');
-    await store.setOutcome(b.id, 'declined');
-    await store.setOutcome(c.id, 'edited');
-    const stats = await store.statsFor([
-      qa2,
-      '0192bbbb-0000-7000-8000-0000000000ff',
-    ]);
-    expect(stats.get(qa2)).toEqual({ shown: 3, solved: 1, declined: 1 });
-    expect(stats.has('0192bbbb-0000-7000-8000-0000000000ff')).toBe(false);
-    await expect(store.statsFor([])).resolves.toEqual(new Map());
+    const recorded = results.map((r) =>
+      r.kind === 'recorded' ? r : { outcome: null, changed: false },
+    );
+    expect(recorded.filter((r) => r.changed)).toHaveLength(1);
+    expect(recorded[0].outcome).toBe(recorded[1].outcome);
+    expect(recorded[0].outcome).not.toBeNull();
   });
 
   it('clears query text older than the cut-off, keeps recent text and the counters', async () => {
@@ -132,20 +194,20 @@ describeDb('PrismaHelpdeskSuggestionStore (PostgreSQL)', () => {
     const { rows } = await admin.query<{
       id: string;
       query_text: string | null;
-      qa_id: string;
+      faq_id: string;
     }>(
-      `SELECT id::text, query_text, qa_id::text FROM ${schema}.helpdesk_suggestions WHERE id = ANY($1::uuid[])`,
+      `SELECT id::text, query_text, faq_id::text FROM ${schema}.helpdesk_suggestions WHERE id = ANY($1::uuid[])`,
       [[old.id, recent.id, edge.id]],
     );
     const byId = new Map(rows.map((r) => [r.id, r]));
-    expect(byId.get(old.id)).toMatchObject({ query_text: null, qa_id: qa1 });
+    expect(byId.get(old.id)).toMatchObject({ query_text: null, faq_id: qa1 });
     expect(byId.get(recent.id)).toMatchObject({
       query_text: 'Still within 90 days',
-      qa_id: qa1,
+      faq_id: qa1,
     });
     expect(byId.get(edge.id)).toMatchObject({
       query_text: 'Exactly 89 days old',
-      qa_id: qa2,
+      faq_id: qa2,
     });
     // a second run finds nothing left to clear
     await expect(
