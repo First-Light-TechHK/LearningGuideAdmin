@@ -25,13 +25,19 @@ import {
  * 1. 每学员每小时最多 10 次（共用 ai_rate_limit_hits），超出返回 null；
  * 2. 从已发布问题里取候选（全文 + 关键词 + 同类加权，前 8 个），没有候选不调模型；
  * 3. 经 OpenRouter 要结构化输出 {qaId}，只能是候选 id 之一或 null，否则按 null；
- *    模型 HELPDESK_SUGGEST_MODEL，缺省取 AI_AVAILABLE_MODELS 里第一个便宜模型；3 秒超时；
+ *    模型 HELPDESK_SUGGEST_MODEL，缺省取 AI_AVAILABLE_MODELS 里第一个便宜模型；3 秒超时，
+ *    且整次推荐不超过 3.5 秒（Portal 等 4 秒），过期的答案不返回、不记 qa_id；
  *    没有 API key、任何错误都返回 null（绝不阻塞学员提交工单）；
  * 4. 返回库里的原答案，模型从不写给学员看的文字；
  * 5. 每次检索写一行 helpdesk_suggestions；query_text 90 天后清空（本实例每小时最多清一次）。
  */
 
 export const SUGGEST_TIMEOUT_MS = 3_000;
+/**
+ * 整次推荐（限流 + 检索 + 模型）的总期限，低于 Portal 的 ADMIN_SUGGEST_TIMEOUT_MS（4 秒）：
+ * 过了期限 Portal 已放弃、直接建单，学员没看到答案，所以不再记 qa_id（不计入 shown）。
+ */
+export const SUGGEST_DEADLINE_MS = 3_500;
 export const SUGGEST_CANDIDATES = 8;
 export const SUGGEST_RATE_LIMIT = { limit: 10, windowMs: 3_600_000 } as const;
 export const QUERY_TEXT_RETENTION_DAYS = 90;
@@ -243,12 +249,14 @@ export class HelpdeskSuggestService {
     const env = this.env();
     const apiKey = env.OPENROUTER_API_KEY?.trim() ?? '';
     if (apiKey === '') return null;
+    const deadline = this.now() + SUGGEST_DEADLINE_MS;
+    const left = () => deadline - this.now();
     const allowed = await this.deps.rateLimit.tryHit(
       `helpdesk-suggest:${input.learnerId}`,
       SUGGEST_RATE_LIMIT.limit,
       SUGGEST_RATE_LIMIT.windowMs,
     );
-    if (!allowed) return null;
+    if (!allowed || left() <= 0) return null;
 
     const started = this.now();
     const queryText = [input.subject, input.message]
@@ -265,14 +273,21 @@ export class HelpdeskSuggestService {
 
     let chosen: HelpdeskQaCandidate | null = null;
     let model: string | null = null;
-    if (candidates.length > 0) {
+    if (candidates.length > 0 && left() > 0) {
       model = suggestModel(env);
-      chosen = await this.askModel(input, candidates, {
-        model,
-        apiKey,
-        baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
-      });
+      chosen = await this.askModel(
+        input,
+        candidates,
+        {
+          model,
+          apiKey,
+          baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
+        },
+        Math.min(this.timeoutMs, left()),
+      );
     }
+    // 过了期限才定下来的答案学员看不到：记一行检索，但不记 qa_id
+    if (left() <= 0) chosen = null;
 
     const id = uuidv7(this.now());
     await this.deps.log.record({
@@ -301,6 +316,7 @@ export class HelpdeskSuggestService {
     input: SuggestInput,
     candidates: HelpdeskQaCandidate[],
     target: { model: string; apiKey: string; baseUrl: string },
+    timeoutMs: number,
   ): Promise<HelpdeskQaCandidate | null> {
     const provider = this.deps.providers.get('openrouter');
     if (!provider.complete) return null;
@@ -310,7 +326,7 @@ export class HelpdeskSuggestService {
       timer = setTimeout(() => {
         controller.abort();
         resolve(null);
-      }, this.timeoutMs);
+      }, timeoutMs);
     });
     try {
       const call = provider

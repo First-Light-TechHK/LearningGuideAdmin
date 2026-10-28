@@ -12,7 +12,9 @@ import { MemoryRateLimitStore } from '../rate-limit.service';
 import {
   HelpdeskSuggestService,
   suggestModel,
+  SUGGEST_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
+  SUGGEST_TIMEOUT_MS,
 } from './helpdesk-suggest.service';
 import type {
   HelpdeskSuggestionLog,
@@ -310,6 +312,105 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     jest.spyOn(rateLimit, 'tryHit').mockRejectedValue(new Error('db down'));
     await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
     expect(complete).not.toHaveBeenCalled();
+  });
+});
+
+describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", () => {
+  // Portal gives up after ADMIN_SUGGEST_TIMEOUT_MS = 4 s and creates the ticket; an answer
+  // decided after that was never shown, so it must not be logged as shown (qa_id).
+  const T0 = Date.UTC(2026, 9, 28, 9, 0, 0);
+
+  it("sits between the model timeout and Portal's 4 s", () => {
+    expect(SUGGEST_TIMEOUT_MS).toBe(3_000);
+    expect(SUGGEST_DEADLINE_MS).toBe(3_500);
+    expect(SUGGEST_DEADLINE_MS).toBeLessThan(4_000);
+    expect(SUGGEST_DEADLINE_MS).toBeGreaterThan(SUGGEST_TIMEOUT_MS);
+  });
+
+  it('skips the model and logs no qa_id when retrieval used up the deadline', async () => {
+    let now = T0;
+    const { service, findCandidates, complete, rows } = setup({
+      now: () => now,
+    });
+    findCandidates.mockImplementation(() => {
+      now += SUGGEST_DEADLINE_MS + 1;
+      return Promise.resolve(candidates);
+    });
+    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    expect(complete).not.toHaveBeenCalled();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].qaId).toBeNull();
+    expect(rows[0].candidateIds).toEqual(candidates.map((c) => c.id));
+  });
+
+  it('counts the rate-limit check against the same deadline', async () => {
+    let now = T0;
+    const { service, rateLimit, complete, rows } = setup({ now: () => now });
+    const real = rateLimit.tryHit.bind(rateLimit);
+    jest.spyOn(rateLimit, 'tryHit').mockImplementation((...args) => {
+      now += SUGGEST_DEADLINE_MS;
+      return real(...args);
+    });
+    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    expect(complete).not.toHaveBeenCalled();
+    expect(rows[0]?.qaId ?? null).toBeNull();
+  });
+
+  it('drops a model answer that arrives after the deadline', async () => {
+    let now = T0;
+    const { service, findCandidates, rows } = setup({
+      now: () => now,
+      reply: () => {
+        now += 2_600;
+        return Promise.resolve(JSON.stringify({ qaId: candidates[0].id }));
+      },
+    });
+    findCandidates.mockImplementation(() => {
+      now += 1_000;
+      return Promise.resolve(candidates);
+    });
+    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].qaId).toBeNull();
+  });
+
+  it('gives the model only the time that is left, then aborts it', async () => {
+    let now = T0;
+    let signal: AbortSignal | undefined;
+    const { service, findCandidates } = setup({
+      now: () => now,
+      reply: (opts) => {
+        signal = opts.signal;
+        return new Promise<string>(() => undefined);
+      },
+    });
+    findCandidates.mockImplementation(() => {
+      now += SUGGEST_DEADLINE_MS - 40;
+      return Promise.resolve(candidates);
+    });
+    const started = Date.now();
+    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('still returns an answer decided in time', async () => {
+    let now = T0;
+    const { service, findCandidates, rows } = setup({
+      now: () => now,
+      reply: () => {
+        now += 2_000;
+        return Promise.resolve(JSON.stringify({ qaId: candidates[0].id }));
+      },
+    });
+    findCandidates.mockImplementation(() => {
+      now += 1_000;
+      return Promise.resolve(candidates);
+    });
+    expect((await service.suggest(input)).suggestion?.qaId).toBe(
+      candidates[0].id,
+    );
+    expect(rows[0].qaId).toBe(candidates[0].id);
   });
 });
 
