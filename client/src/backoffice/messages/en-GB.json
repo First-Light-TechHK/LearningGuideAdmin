@@ -285,7 +285,12 @@
     "managerTitle": "Manage all online tutors",
     "managerSearch": "Search AI Tutor",
     "managerColumnTutor": "AI Tutor",
-    "managerColumnOnline": "Online"
+    "managerColumnOnline": "Online",
+    "managerColumnLearner": "Learner view",
+    "learnerAvailable": "Live",
+    "learnerNotSynced": "Not synced to Portal",
+    "learnerNoLiveRelease": "No live release",
+    "learnerNotOnline": "Not switched on"
   },
   "knowledge": {
     "common": {

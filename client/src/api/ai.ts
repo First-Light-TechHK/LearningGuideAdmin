@@ -48,6 +48,12 @@ export interface AiTutorListView {
   courseId: string
   title: string
   online: boolean
+  /** Portal course.slug；null 表示还没和 Portal 课程对应 */
+  externalId: string | null
+  hasLiveRelease: boolean
+  /** 学员端是否真的能看到入口（externalId && online && hasLiveRelease） */
+  available: boolean
+  blockedReason: 'not-synced' | 'no-live-release' | 'not-online' | null
 }
 
 export const aiApi = {
