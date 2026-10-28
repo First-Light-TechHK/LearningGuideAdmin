@@ -223,6 +223,22 @@ describe('Portal HelpDesk client', () => {
       expect(result.counts).toEqual({ OPEN: 1 });
     });
 
+    it('sends the v2 flagged and learnerId filters', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(json(200, { tickets: [], nextCursor: null })),
+        );
+      await client(fetchImpl).listTickets({ flagged: true });
+      await client(fetchImpl).listTickets({ learnerId: 'user_1', limit: 10 });
+      expect(call(fetchImpl, 0).url).toBe(
+        'http://portal.test/api/integration/helpdesk/tickets?flagged=true',
+      );
+      expect(call(fetchImpl, 1).url).toBe(
+        'http://portal.test/api/integration/helpdesk/tickets?learnerId=user_1&limit=10',
+      );
+    });
+
     it('omits empty query parameters', async () => {
       const fetchImpl = jest
         .fn()
@@ -617,6 +633,7 @@ describe('Portal HelpDesk client', () => {
         closedAt: null,
         closeReason: null,
         rating: null,
+        flagged: false,
       });
     });
 
@@ -660,6 +677,99 @@ describe('Portal HelpDesk client', () => {
       expect(summary.locale).toBe('en-GB');
       expect(summary.confirmDueAt).toBe('t4');
       expect(summary.rating).toBe(5);
+      expect(summary.flagged).toBe(false);
+    });
+
+    it('reads the v2 flag (flagged, or a flaggedAt time)', () => {
+      expect(normaliseSummary({ ...rawSummary, flagged: true }).flagged).toBe(
+        true,
+      );
+      expect(
+        normaliseSummary({ ...rawSummary, flaggedAt: '2026-10-28T02:00:00Z' })
+          .flagged,
+      ).toBe(true);
+      expect(
+        normaliseSummary({ ...rawSummary, flagged_at: '2026-10-28T02:00:00Z' })
+          .flagged,
+      ).toBe(true);
+      expect(
+        normaliseSummary({ ...rawSummary, flagged: false, flaggedAt: null })
+          .flagged,
+      ).toBe(false);
+      expect(normaliseSummary({ ...rawSummary, flagged: 'yes' }).flagged).toBe(
+        false,
+      );
+    });
+
+    it('maps aiAssist (oldest first, as Portal sends it) and drops junk', () => {
+      const detail = normaliseDetail({
+        ...rawDetail,
+        aiAssist: [
+          {
+            id: 'as1',
+            source: 'chat',
+            question: 'Where is my invoice?',
+            faqId: 'f1',
+            faqQuestion: 'Where can I find my invoice?',
+            answer: 'Open **My Subscription**.',
+            feedback: 'not_helpful',
+            createdAt: '2026-10-28T00:50:00Z',
+          },
+          {
+            id: 'as2',
+            source: 'submit',
+            question: 'Help',
+            faq_id: null,
+            faq_question: null,
+            answer: null,
+            feedback: null,
+            created_at: '2026-10-28T00:59:00Z',
+          },
+          {
+            id: 'as3',
+            source: 'email',
+            question: 'x',
+            feedback: 'great',
+            createdAt: 't',
+          },
+          null,
+          'x',
+        ],
+      });
+      expect(detail.aiAssist).toEqual([
+        {
+          id: 'as1',
+          source: 'chat',
+          question: 'Where is my invoice?',
+          faqId: 'f1',
+          faqQuestion: 'Where can I find my invoice?',
+          answer: 'Open **My Subscription**.',
+          feedback: 'not_helpful',
+          createdAt: '2026-10-28T00:50:00Z',
+        },
+        {
+          id: 'as2',
+          source: 'submit',
+          question: 'Help',
+          faqId: null,
+          faqQuestion: null,
+          answer: null,
+          feedback: null,
+          createdAt: '2026-10-28T00:59:00Z',
+        },
+        {
+          // an unknown source is kept as is; an unknown feedback shows no line
+          id: 'as3',
+          source: 'email',
+          question: 'x',
+          faqId: null,
+          faqQuestion: null,
+          answer: null,
+          feedback: null,
+          createdAt: 't',
+        },
+      ]);
+      expect(normaliseDetail(rawDetail).aiAssist).toEqual([]);
     });
 
     it('shortens CloudEvents types and maps event data', () => {

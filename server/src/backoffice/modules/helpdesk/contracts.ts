@@ -24,7 +24,8 @@ export type AuthorKind = 'learner' | 'agent' | 'system';
 
 /**
  * 员工端写操作（学员端的 cancel / confirm / reject / close / rate 不在 BackOffice）。
- * Figma「Mark as reviewed」= propose_resolution（假设，待产品确认）。
+ * Figma「Mark as reviewed」= propose_resolution；「Flag follow-up」= flag / unflag（v2 §4a，
+ * 幂等，任何状态都可用，与其它动作一样带 expectedSequence）。
  */
 export const AGENT_ACTIONS = [
   'claim',
@@ -32,6 +33,8 @@ export const AGENT_ACTIONS = [
   'add_tag',
   'remove_tag',
   'mark_read',
+  'flag',
+  'unflag',
 ] as const;
 export type AgentAction = (typeof AGENT_ACTIONS)[number];
 
@@ -102,6 +105,8 @@ export type TicketSummary = {
   closedAt: string | null;
   closeReason: string | null;
   rating: number | null;
+  /** v2 §4a：员工标了「Flag follow-up」。 */
+  flagged: boolean;
 };
 
 export type TicketAttachment = {
@@ -157,11 +162,39 @@ export type TicketSubscription = {
   renewalDate: string | null;
 };
 
+/** AI 助手回答的来源（v2 §2）：提交工单弹窗、聊天提问、聊天里点常见问题。 */
+export const ASSIST_SOURCES = ['submit', 'chat', 'chip'] as const;
+/** 学员反馈（v2 §4a helpdesk_assist_log.feedback）。 */
+export const ASSIST_FEEDBACK = [
+  'helpful',
+  'not_helpful',
+  'solved',
+  'declined',
+  'edited',
+] as const;
+export type AssistFeedback = (typeof ASSIST_FEEDBACK)[number];
+
+/**
+ * 工单关联的 AI 助手回答（v2 §4a aiAssist，旧的在前）。answer 是当时展示给学员的原文
+ * （Markdown 子集），由 Portal 记录；没有答案时 faqId / faqQuestion / answer 都是 null。
+ */
+export type TicketAiAssist = {
+  id: string;
+  source: string;
+  question: string;
+  faqId: string | null;
+  faqQuestion: string | null;
+  answer: string | null;
+  feedback: AssistFeedback | null;
+  createdAt: string;
+};
+
 export type TicketDetail = TicketSummary & {
   student: TicketStudent | null;
   subscription: TicketSubscription | null;
   messages: TicketMessage[];
   events: TicketEvent[];
+  aiAssist: TicketAiAssist[];
 };
 
 export type PortalTicketList = {
@@ -192,6 +225,8 @@ export type AvailableActions = {
   proposeResolution: boolean;
   tag: boolean;
   markRead: boolean;
+  /** Figma「Flag follow-up」（flag / unflag）。 */
+  flag: boolean;
 };
 
 export type EnquiryCounts = Record<TicketStatus, number> & {
@@ -199,7 +234,11 @@ export type EnquiryCounts = Record<TicketStatus, number> & {
   all: number;
 };
 
-export type EnquiryRow = TicketSummary & { needsReply: boolean };
+/** 列表行也带可用操作：学员时间线上的每张卡片都有操作栏（Figma 1324:2）。 */
+export type EnquiryRow = TicketSummary & {
+  needsReply: boolean;
+  available: AvailableActions;
+};
 
 export type EnquiryList = {
   tickets: EnquiryRow[];

@@ -90,9 +90,20 @@ export class BackofficeHelpdeskController {
     @Query('q') q?: unknown,
     @Query('cursor') cursor?: unknown,
     @Query('limit') limit?: unknown,
+    @Query('flagged') flagged?: unknown,
+    @Query('learnerId') learnerId?: unknown,
   ) {
     return run(() =>
-      this.helpdesk.list({ status, category, tag, q, cursor, limit }),
+      this.helpdesk.list({
+        status,
+        category,
+        tag,
+        q,
+        cursor,
+        limit,
+        flagged,
+        learnerId,
+      }),
     );
   }
 

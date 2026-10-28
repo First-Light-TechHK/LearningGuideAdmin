@@ -58,6 +58,7 @@ function summary(overrides: Partial<TicketSummary> = {}): TicketSummary {
     closedAt: null,
     closeReason: null,
     rating: null,
+    flagged: false,
     ...overrides,
   };
 }
@@ -69,6 +70,7 @@ function detail(overrides: Partial<TicketDetail> = {}): TicketDetail {
     subscription: null,
     messages: [],
     events: [],
+    aiAssist: [],
     ...overrides,
   };
 }
@@ -178,6 +180,8 @@ describe('HelpDesk board rules', () => {
       proposeResolution: false,
       tag: true,
       markRead: true,
+      // v2: Portal allows flag / unflag in every state
+      flag: true,
     };
     expect(availableActions('OPEN')).toEqual({
       ...none,
@@ -256,6 +260,8 @@ describe('HelpDesk service', () => {
         tag: undefined,
         q: undefined,
         cursor: undefined,
+        flagged: undefined,
+        learnerId: undefined,
         limit: 30,
       });
     }
@@ -288,6 +294,10 @@ describe('HelpDesk service', () => {
       { limit: '101' },
       { limit: 'abc' },
       { cursor: 'x'.repeat(513) },
+      { flagged: 'yes' },
+      { flagged: 'false' },
+      { learnerId: 'u'.repeat(129) },
+      { learnerId: 'u\u0000' },
     ]) {
       const error = await rejection(service.list(query));
       expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
@@ -298,13 +308,54 @@ describe('HelpDesk service', () => {
     const portal = fakeClient();
     const service = createHelpdeskService(portal);
     // Express parses ?q=a&q=b into an array; a hand-made URL must not crash the list
-    for (const key of ['status', 'category', 'tag', 'q', 'cursor', 'limit']) {
+    for (const key of [
+      'status',
+      'category',
+      'tag',
+      'q',
+      'cursor',
+      'limit',
+      'flagged',
+      'learnerId',
+    ]) {
       for (const value of [['a', 'b'], { x: '1' }, 5]) {
         const error = await rejection(service.list({ [key]: value }));
         expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
       }
     }
     expect(portal.listTickets).not.toHaveBeenCalled();
+  });
+
+  it("lists the flagged enquiries and one student's timeline (v2)", async () => {
+    const portal = fakeClient();
+    const service = createHelpdeskService(portal);
+    await service.list({ flagged: 'true' });
+    await service.list({ learnerId: ' user_fixture_learner ', limit: '10' });
+    expect(portal.listTickets.mock.calls[0][0]).toMatchObject({
+      flagged: true,
+      learnerId: undefined,
+    });
+    expect(portal.listTickets.mock.calls[1][0]).toMatchObject({
+      flagged: undefined,
+      learnerId: 'user_fixture_learner',
+      limit: 10,
+    });
+  });
+
+  it('gives every row its available actions so each timeline card can act', async () => {
+    const portal = fakeClient();
+    portal.listTickets.mockResolvedValue({
+      tickets: [
+        summary({ id: 'a', status: 'OPEN', flagged: true }),
+        summary({ id: 'b', status: 'CLOSED' }),
+      ],
+      nextCursor: null,
+      counts: {},
+    });
+    const { tickets } = await createHelpdeskService(portal).list({});
+    expect(tickets[0].available).toEqual(availableActions('OPEN'));
+    expect(tickets[0].flagged).toBe(true);
+    expect(tickets[1].available).toEqual(availableActions('CLOSED'));
   });
 
   it('returns detail with needsReply and the available actions', async () => {
@@ -561,6 +612,41 @@ describe('HelpDesk service', () => {
         service.act(employee, TICKET_ID, { action: 'claim' }, KEY),
       );
       expect(error.code).toBe('INVALID_INPUT');
+    });
+
+    it('flags and unflags as the signed-in employee, with expectedSequence (v2)', async () => {
+      const portal = fakeClient();
+      const service = createHelpdeskService(portal);
+      await service.act(
+        employee,
+        TICKET_ID,
+        { action: 'flag', expectedSequence: 5 },
+        KEY,
+      );
+      await service.act(
+        employee,
+        TICKET_ID,
+        { action: 'unflag', expectedSequence: 6 },
+        KEY,
+      );
+      expect(portal.postAction.mock.calls.map((c) => c[1])).toEqual([
+        {
+          action: 'flag',
+          agent: { id: 'emp-42', name: 'alice' },
+          expectedSequence: 5,
+        },
+        {
+          action: 'unflag',
+          agent: { id: 'emp-42', name: 'alice' },
+          expectedSequence: 6,
+        },
+      ]);
+      for (const action of ['flag', 'unflag']) {
+        const error = await rejection(
+          service.act(employee, TICKET_ID, { action }, KEY),
+        );
+        expect(error.code).toBe('INVALID_INPUT');
+      }
     });
 
     it('refuses learner-only or unknown actions', async () => {

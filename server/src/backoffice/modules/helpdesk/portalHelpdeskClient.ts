@@ -7,10 +7,13 @@ import {
   ATTACHMENT_MAX_BYTES,
   type Agent,
   type AgentAction,
+  ASSIST_FEEDBACK,
+  type AssistFeedback,
   type AttachmentCharset,
   type AttachmentFile,
   type AuthorKind,
   type PortalTicketList,
+  type TicketAiAssist,
   type TicketAttachment,
   type TicketDetail,
   type TicketEvent,
@@ -90,6 +93,10 @@ export type ListQuery = {
   category?: string;
   tag?: string;
   q?: string;
+  /** v2：只看已标记的（Portal 只认 flagged=true）。 */
+  flagged?: boolean;
+  /** v2：某个学员的工单（学员时间线）。 */
+  learnerId?: string;
   limit?: number;
   cursor?: string;
 };
@@ -242,6 +249,9 @@ export function normaliseSummary(raw: unknown): TicketSummary {
     closedAt: strOrNull(pick(r, 'closedAt', 'closed_at')),
     closeReason: strOrNull(pick(r, 'closeReason', 'close_reason')),
     rating: numOrNull(r.rating),
+    flagged:
+      r.flagged === true ||
+      strOrNull(pick(r, 'flaggedAt', 'flagged_at')) !== null,
   };
 }
 
@@ -326,6 +336,25 @@ function normaliseStudent(raw: unknown, summary: TicketSummary): TicketStudent {
   };
 }
 
+function assistFeedback(value: unknown): AssistFeedback | null {
+  return (ASSIST_FEEDBACK as readonly unknown[]).includes(value)
+    ? (value as AssistFeedback)
+    : null;
+}
+
+function normaliseAiAssist(raw: Raw): TicketAiAssist {
+  return {
+    id: str(raw.id),
+    source: str(raw.source),
+    question: str(raw.question),
+    faqId: strOrNull(pick(raw, 'faqId', 'faq_id')),
+    faqQuestion: strOrNull(pick(raw, 'faqQuestion', 'faq_question')),
+    answer: strOrNull(raw.answer),
+    feedback: assistFeedback(raw.feedback),
+    createdAt: str(pick(raw, 'createdAt', 'created_at')),
+  };
+}
+
 function normaliseSubscription(raw: unknown): TicketSubscription | null {
   if (!isRecord(raw)) return null;
   return {
@@ -348,6 +377,9 @@ export function normaliseDetail(raw: unknown): TicketDetail {
       : [],
     events: Array.isArray(r.events)
       ? r.events.filter(isRecord).map(normaliseEvent)
+      : [],
+    aiAssist: Array.isArray(r.aiAssist)
+      ? r.aiAssist.filter(isRecord).map(normaliseAiAssist)
       : [],
   };
 }
@@ -583,6 +615,8 @@ export function createPortalHelpdeskClient(
       if (query.category) params.set('category', query.category);
       if (query.tag) params.set('tag', query.tag);
       if (query.q) params.set('q', query.q);
+      if (query.flagged) params.set('flagged', 'true');
+      if (query.learnerId) params.set('learnerId', query.learnerId);
       if (query.limit !== undefined) params.set('limit', String(query.limit));
       if (query.cursor) params.set('cursor', query.cursor);
       const search = params.toString();

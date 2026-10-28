@@ -89,6 +89,7 @@ export function availableActions(status: TicketStatus): AvailableActions {
     proposeResolution: status === 'ASSIGNED' || status === 'WAITING_USER',
     tag: true,
     markRead: true,
+    flag: true,
   };
 }
 
@@ -143,7 +144,11 @@ const LIST_KEYS = [
   'q',
   'cursor',
   'limit',
+  'flagged',
+  'learnerId',
 ] as const;
+/** Portal 用户 id（Better Auth）不会超过这个长度。 */
+const MAX_LEARNER_ID = 128;
 
 /** 控制器原样转来的查询参数（类型未知：?q=a&q=b 在 Express 里是数组）。 */
 export type ListInput = Partial<Record<(typeof LIST_KEYS)[number], unknown>>;
@@ -177,6 +182,13 @@ function parseList(raw: ListInput) {
   if (q.length > MAX_QUERY) throw invalid('Search is too long');
   const cursor = input.cursor ?? '';
   if (cursor.length > MAX_CURSOR) throw invalid('Invalid cursor');
+  // Portal 只认 flagged=true；false 没有意义（等于不筛），一律 400 免得误以为生效
+  const flaggedRaw = input.flagged ?? '';
+  if (flaggedRaw !== '' && flaggedRaw !== 'true')
+    throw invalid('flagged must be true');
+  const learnerId = input.learnerId?.trim() ?? '';
+  if (learnerId.length > MAX_LEARNER_ID || CONTROL.test(learnerId))
+    throw invalid('Invalid learner id');
   let limit = DEFAULT_LIMIT;
   if (input.limit !== undefined && input.limit !== '') {
     limit = Number(input.limit);
@@ -189,6 +201,8 @@ function parseList(raw: ListInput) {
     tag: tagFilter,
     q: q === '' ? undefined : q,
     cursor: cursor === '' ? undefined : cursor,
+    flagged: flaggedRaw === 'true' ? true : undefined,
+    learnerId: learnerId === '' ? undefined : learnerId,
     limit,
   };
 }
@@ -220,6 +234,7 @@ export function createHelpdeskService(
         tickets: result.tickets.map((ticket) => ({
           ...ticket,
           needsReply: needsReply(ticket),
+          available: availableActions(ticket.status),
         })),
         nextCursor: result.nextCursor,
         counts: enquiryCounts(result.counts),
