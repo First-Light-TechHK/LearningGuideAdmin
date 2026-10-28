@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
+import { App } from '../../components/ui'
 import '../helpdesk.css'
 import type { HelpdeskQuestion } from '../contracts/helpdesk'
 import { EnquiriesView } from '../helpdesk/EnquiriesView'
 import { QuestionModal } from '../helpdesk/QuestionModal'
 import { QuestionsView } from '../helpdesk/QuestionsView'
+import { errorMessage } from '../lib/helpdeskFormat'
+import { afterQuestionSave } from '../lib/helpdeskQuestions'
+import { helpDeskPageControls } from '../lib/helpdeskView'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { useWorkspaceAccess } from '../lib/workspaceAccess'
@@ -24,6 +28,8 @@ export default function HelpDeskPage() {
   const locale = useLocale()
   const access = useWorkspaceAccess()
   const canWrite = access.canCreate
+  const controls = helpDeskPageControls(canWrite)
+  const { message } = App.useApp()
   const navigate = useNavigate()
   const { ticketId } = useParams<{ ticketId?: string }>()
   const [searchParams] = useSearchParams()
@@ -43,7 +49,7 @@ export default function HelpDeskPage() {
           <h1 className="cardTitle">{t(locale, 'helpDesk.title')}</h1>
           <p className="hdSubtitle">{t(locale, 'helpDesk.subtitle')}</p>
         </div>
-        {canWrite ? (
+        {controls.addQuestion ? (
           <button type="button" className="hdPrimaryButton" onClick={() => setEditing({ question: null })}>
             ＋ {t(locale, 'helpDesk.addQuestion')}
           </button>
@@ -78,15 +84,19 @@ export default function HelpDeskPage() {
         />
       )}
 
-      {editing && canWrite ? (
+      {editing && controls.questionModal ? (
         <QuestionModal
           locale={locale}
           question={editing.question}
           defaultLocale={locale}
           onClose={() => setEditing(null)}
           onSaved={(_saved, outcome) => {
-            setQuestionsVersion((value) => value + 1)
-            if (outcome === 'saved') setEditing(null)
+            // Enquiries Tab 上看不到列表，靠提示告诉员工已保存
+            const next = afterQuestionSave(outcome)
+            if (next.refresh) setQuestionsVersion((value) => value + 1)
+            if (next.close) setEditing(null)
+            if (next.toast === 'saved') message.success(t(locale, 'helpDesk.questions.saved'))
+            else if (next.toast === 'gone') message.error(errorMessage(locale, 'QUESTION_NOT_FOUND'))
           }}
         />
       ) : null}

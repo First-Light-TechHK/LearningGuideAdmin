@@ -269,15 +269,105 @@ export function readEnquiryFilters(params: URLSearchParams): EnquiryFilters {
   }
 }
 
-/** 筛选 → 地址栏：缺省值不写，其它参数保留。 */
+/**
+ * 筛选 → 地址栏：缺省值不写，其它参数保留。'all' 只是状态 / 类型的缺省值；
+ * 搜索词或标签写 all 是真的要搜 all，只有空才不写。
+ */
 export function writeEnquiryFilters(params: URLSearchParams, patch: Partial<EnquiryFilters>): URLSearchParams {
   const next = new URLSearchParams(params)
-  for (const [key, value] of Object.entries(patch)) {
+  for (const [key, value] of Object.entries(patch) as [keyof EnquiryFilters, unknown][]) {
     const text = String(value ?? '').trim()
-    if (text === '' || text === 'all') next.delete(key)
+    if (text === '' || text === DEFAULT_ENQUIRY_FILTERS[key]) next.delete(key)
     else next.set(key, text)
   }
   return next
+}
+
+/**
+ * 搜索框跟着地址栏走（返回、侧栏回到 /help-desk 时清掉旧词）；员工正在输入（防抖未到）
+ * 或框里只是同一个词多了空白时，保留框里的原样。
+ */
+export function resyncQuery(input: string, urlQ: string, typing: boolean): string {
+  if (typing) return input
+  return input.trim().slice(0, SEARCH_MAX) === urlQ ? input : urlQ
+}
+
+/** 输入法正在组字（中文 / 日文选词）时的 Enter 属于输入法，不能当作提交。 */
+export function isImeComposing(event: { keyCode: number; nativeEvent: { isComposing?: boolean } }): boolean {
+  return event.nativeEvent.isComposing === true || event.keyCode === 229
+}
+
+/* ---------------------------------- 写操作结果 ---------------------------------- */
+
+export type SettlePlan = {
+  /** 写操作是否在当前打开的这条咨询上生效（调用方据此提示 / 清空草稿）。 */
+  ok: boolean
+  /** 左栏要同步的最新摘要（发给哪条就同步哪条，不管现在打开的是哪条）。 */
+  row: { id: string } | null
+  /** 是否把结果放进中栏 / 右栏：只有还停在发出请求的那条咨询上时。 */
+  adoptTicket: boolean
+  /** 409 STALE_TICKET：重新加载这条咨询。 */
+  reload: boolean
+  notice: 'clear' | 'stale' | 'error' | null
+}
+
+/**
+ * 写操作（回复、Claim、Mark as reviewed、标签）的响应只作用于发出请求的那条咨询：
+ * 员工已切到另一条时，只更新左栏那一行，不把旧咨询换进来、不在新咨询上提示。
+ */
+export function settlePlan<T extends { id: string }>(
+  result: { ok: true; data: T } | { ok: false; code: string; status: number },
+  sentFor: string,
+  current: string | null,
+): SettlePlan {
+  const open = sentFor === current
+  if (result.ok) {
+    return { ok: open, row: result.data, adoptTicket: open, reload: false, notice: open ? 'clear' : null }
+  }
+  if (!open) return { ok: false, row: null, adoptTicket: false, reload: false, notice: null }
+  if (result.code === 'STALE_TICKET') return { ok: false, row: null, adoptTicket: false, reload: true, notice: 'stale' }
+  return { ok: false, row: null, adoptTicket: false, reload: false, notice: 'error' }
+}
+
+export type Busy = { label: string; ticketId: string } | null
+
+/** 进行中的写操作只禁用它所属那条咨询的按钮。 */
+export function visibleBusy(busy: Busy, ticketId: string | null): string | null {
+  return busy !== null && busy.ticketId === ticketId ? busy.label : null
+}
+
+/** 请求结束时只清掉自己设的 busy（切到另一条后那条的 busy 不受影响）。 */
+export function clearBusy(current: Busy, mine: Busy): Busy {
+  return current === mine ? null : current
+}
+
+export type ComposerKey = { key: string; body: string; internal: boolean }
+
+/**
+ * 回复框的 Idempotency-Key：同一份草稿（同正文、同回复 / 内部备注）重试沿用同一个，
+ * 否则换新（Portal 对同一个 key 不同内容回 IDEMPOTENCY_CONFLICT）。
+ */
+export function composerKey(
+  previous: ComposerKey | null,
+  body: string,
+  internal: boolean,
+  make: () => string,
+): ComposerKey {
+  if (previous && previous.body === body && previous.internal === internal) return previous
+  return { key: make(), body, internal }
+}
+
+/** 打开即已读：要调 mark_read 时给出请求体（带员工看到的 sequence），否则 null。 */
+export function markReadOnOpen(
+  ticket: { sequence: number; unreadByAgent: boolean; available: Pick<AvailableActions, 'markRead'> },
+  canWrite: boolean,
+): AgentActionInput | null {
+  return shouldMarkRead(ticket, canWrite) ? markReadInput(ticket) : null
+}
+
+/** 页头写控件：VIEW 没有「+ Add Question」，也不会打开问答弹窗。 */
+export function helpDeskPageControls(canWrite: boolean): { addQuestion: boolean; questionModal: boolean } {
+  return { addQuestion: canWrite, questionModal: canWrite }
 }
 
 /** BackOffice 列表接口的查询串。 */

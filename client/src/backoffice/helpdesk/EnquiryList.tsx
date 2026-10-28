@@ -6,6 +6,7 @@ import {
   activeFilterCount,
   avatarColor,
   initials,
+  isImeComposing,
   listTime,
   type EnquiryFilters,
 } from '../lib/helpdeskView'
@@ -96,7 +97,7 @@ function FilterPanel({
           onChange={(event) => setTag(event.target.value)}
           onBlur={() => onChange({ tag })}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !isImeComposing(event)) {
               event.preventDefault()
               onChange({ tag })
             }

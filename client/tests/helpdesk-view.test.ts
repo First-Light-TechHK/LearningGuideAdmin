@@ -305,6 +305,23 @@ describe('enquiry filters in the address bar', () => {
     assert.equal(params.get('q'), 'refund')
   })
 
+  test('the literal word "all" is a real search or tag, only status / category use it as the default', () => {
+    const params = writeEnquiryFilters(new URLSearchParams('status=OPEN&category=other'), {
+      q: 'all',
+      tag: 'all',
+      status: 'all',
+      category: 'all',
+    })
+    assert.equal(params.get('q'), 'all')
+    assert.equal(params.get('tag'), 'all')
+    assert.equal(params.get('status'), null)
+    assert.equal(params.get('category'), null)
+    assert.deepEqual(readEnquiryFilters(params), { q: 'all', status: 'all', category: 'all', tag: 'all' })
+    const cleared = writeEnquiryFilters(params, { q: '  ', tag: '' })
+    assert.equal(cleared.has('q'), false)
+    assert.equal(cleared.has('tag'), false)
+  })
+
   test('API query: defaults left out, q capped at 120, cursor and limit passed', () => {
     assert.equal(enquiryQuery({ q: '', status: 'all', category: 'all', tag: '' }), 'limit=30')
     const query = new URLSearchParams(

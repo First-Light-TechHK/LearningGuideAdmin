@@ -5,6 +5,7 @@ import {
   attachmentUrl,
   createQuestion,
   getEnquiry,
+  getQuestion,
   listEnquiries,
   listQuestions,
   newIdempotencyKey,
@@ -145,6 +146,14 @@ describe('common questions', () => {
     const result = await listQuestions({ locale: 'en-GB', category: 'all', status: 'all', q: '' })
     assert.equal(calls[0].url, '/api/helpdesk/questions?locale=en-GB&status=all')
     assert.deepEqual(result, { ok: true, data: { questions: [] } })
+  })
+
+  test('one question by encoded id (reloaded after a version conflict)', async () => {
+    reply = async () => envelope({ id: 'q 1', version: 4 })
+    const result = await getQuestion('q 1')
+    assert.equal(calls[0].url, '/api/helpdesk/questions/q%201')
+    assert.equal(calls[0].init.method, undefined)
+    assert.deepEqual(result, { ok: true, data: { id: 'q 1', version: 4 } })
   })
 
   test('create = POST, update = PUT with version', async () => {

@@ -154,3 +154,27 @@ export function questionActions(question: Pick<HelpdeskQuestion, 'status'>, canW
     reorder: status !== 'archived',
   }
 }
+
+/**
+ * 编辑弹窗保存失败后怎么办：版本冲突 → 取最新版本（保留草稿）再让员工重试；
+ * 问题已不存在 → 关掉弹窗；其它错误在弹窗里提示。
+ */
+export function questionSaveFailure(code: string, editing: boolean): 'reload' | 'close' | 'show' {
+  if (!editing) return 'show'
+  if (code === 'VERSION_CONFLICT') return 'reload'
+  if (code === 'QUESTION_NOT_FOUND') return 'close'
+  return 'show'
+}
+
+export type QuestionSaveOutcome = 'saved' | 'conflict' | 'gone'
+
+/** 页面收到弹窗结果：刷新列表、是否关弹窗、提示哪句（saved = 已保存，gone = 问题不存在）。 */
+export function afterQuestionSave(outcome: QuestionSaveOutcome): {
+  refresh: boolean
+  close: boolean
+  toast: 'saved' | 'gone' | null
+} {
+  if (outcome === 'saved') return { refresh: true, close: true, toast: 'saved' }
+  if (outcome === 'gone') return { refresh: true, close: true, toast: 'gone' }
+  return { refresh: true, close: false, toast: null }
+}

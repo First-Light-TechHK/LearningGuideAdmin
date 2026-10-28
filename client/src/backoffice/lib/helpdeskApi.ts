@@ -91,6 +91,11 @@ export function listQuestions(filters: QuestionFilters) {
   return request<{ questions: HelpdeskQuestion[] }>(`/api/helpdesk/questions${query ? `?${query}` : ''}`)
 }
 
+/** 版本冲突后取最新版本（弹窗保留草稿，用新 version 重试）。 */
+export function getQuestion(questionId: string) {
+  return request<HelpdeskQuestion>(questionPath(questionId))
+}
+
 export function createQuestion(body: QuestionCreateBody) {
   return sendJson<HelpdeskQuestion>('POST', '/api/helpdesk/questions', body)
 }

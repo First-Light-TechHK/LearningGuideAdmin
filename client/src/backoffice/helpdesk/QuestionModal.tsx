@@ -8,17 +8,19 @@ import {
   type HelpdeskLocale,
   type HelpdeskQuestion,
 } from '../contracts/helpdesk'
-import { createQuestion, updateQuestion, type HelpdeskResult } from '../lib/helpdeskApi'
+import { createQuestion, getQuestion, updateQuestion, type HelpdeskResult } from '../lib/helpdeskApi'
 import { categoryLabel, contentLocaleLabel, errorMessage } from '../lib/helpdeskFormat'
 import {
   QUESTION_LIMITS,
   draftFromQuestion,
   emptyDraft,
+  questionSaveFailure,
   toCreateBody,
   toUpdateBody,
   validateDraft,
   type DraftErrors,
   type QuestionDraft,
+  type QuestionSaveOutcome,
 } from '../lib/helpdeskQuestions'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
@@ -34,8 +36,11 @@ type Props = {
   question: HelpdeskQuestion | null
   defaultLocale: HelpdeskLocale
   onClose: () => void
-  /** 保存成功；conflict = 版本冲突，调用方需刷新列表。 */
-  onSaved: (question: HelpdeskQuestion | null, outcome: 'saved' | 'conflict') => void
+  /**
+   * saved = 已保存；conflict = 版本冲突（弹窗已换成最新版本、保留草稿，调用方刷新列表）；
+   * gone = 问题已不存在（调用方关弹窗、刷新列表）。
+   */
+  onSaved: (question: HelpdeskQuestion | null, outcome: QuestionSaveOutcome) => void
 }
 
 function Field({
@@ -62,10 +67,12 @@ function Field({
   )
 }
 
-export function QuestionModal({ locale, question, defaultLocale, onClose, onSaved }: Props) {
+export function QuestionModal({ locale, question: initial, defaultLocale, onClose, onSaved }: Props) {
   const [draft, setDraft] = useState<QuestionDraft>(() =>
-    question ? draftFromQuestion(question) : emptyDraft(defaultLocale),
+    initial ? draftFromQuestion(initial) : emptyDraft(defaultLocale),
   )
+  // 正在编辑的版本：版本冲突后换成最新的，草稿保留，再点保存就用新 version
+  const [question, setQuestion] = useState<HelpdeskQuestion | null>(initial)
   const [errors, setErrors] = useState<DraftErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -96,7 +103,18 @@ export function QuestionModal({ locale, question, defaultLocale, onClose, onSave
       onSaved(result.data, 'saved')
       return
     }
-    if (result.code === 'VERSION_CONFLICT' || result.code === 'QUESTION_NOT_FOUND') {
+    const next = questionSaveFailure(result.code, question !== null)
+    if (next === 'close') {
+      onSaved(null, 'gone')
+      return
+    }
+    if (next === 'reload' && question) {
+      const latest = await getQuestion(question.id)
+      if (!latest.ok && latest.code === 'QUESTION_NOT_FOUND') {
+        onSaved(null, 'gone')
+        return
+      }
+      if (latest.ok) setQuestion(latest.data)
       onSaved(null, 'conflict')
     }
     setSubmitError(errorMessage(locale, result.code))

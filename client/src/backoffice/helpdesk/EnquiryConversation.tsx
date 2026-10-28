@@ -9,7 +9,16 @@ import {
 } from '../contracts/helpdesk'
 import { attachmentUrl, newIdempotencyKey } from '../lib/helpdeskApi'
 import { categoryLabel, statusLabel } from '../lib/helpdeskFormat'
-import { dayLabel, fileSize, listTime, splitThread, type EnquiryControls } from '../lib/helpdeskView'
+import {
+  composerKey,
+  dayLabel,
+  fileSize,
+  isImeComposing,
+  listTime,
+  splitThread,
+  type ComposerKey,
+  type EnquiryControls,
+} from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { LearnerAvatar } from './EnquiryList'
@@ -88,7 +97,7 @@ type Props = {
   busy: string | null
   onClaim: () => void
   onMarkReviewed: () => void
-  /** idempotencyKey：同一份草稿重试沿用同一个，草稿变了或发送成功后换新。 */
+  /** idempotencyKey：同一份草稿（正文 + 模式）重试沿用同一个，任何一项变了或发送成功后换新。 */
   onSend: (body: string, internal: boolean, idempotencyKey: string) => Promise<boolean>
 }
 
@@ -96,7 +105,7 @@ export function EnquiryConversation({ locale, ticket, controls, notice, busy, on
   const [mode, setMode] = useState<ComposerMode>('reply')
   const [draft, setDraft] = useState('')
   const threadRef = useRef<HTMLDivElement | null>(null)
-  const draftKey = useRef<string | null>(null)
+  const draftKey = useRef<ComposerKey | null>(null)
   const { enquiry, rest } = splitThread(ticket.messages)
   const effectiveMode: ComposerMode = !controls.reply && controls.internalNote ? 'note' : mode
   const trimmed = draft.trim()
@@ -110,8 +119,10 @@ export function EnquiryConversation({ locale, ticket, controls, notice, busy, on
 
   async function submit() {
     if (busy || trimmed.length === 0 || tooLong) return
-    if (!draftKey.current) draftKey.current = newIdempotencyKey()
-    if (await onSend(trimmed, effectiveMode === 'note', draftKey.current)) {
+    // 同一份草稿（正文 + 回复 / 内部备注）重试沿用同一个 key，任何一项变了就换新
+    const internal = effectiveMode === 'note'
+    draftKey.current = composerKey(draftKey.current, trimmed, internal, newIdempotencyKey)
+    if (await onSend(trimmed, internal, draftKey.current.key)) {
       setDraft('')
       draftKey.current = null
     }
@@ -194,10 +205,7 @@ export function EnquiryConversation({ locale, ticket, controls, notice, busy, on
                 role="radio"
                 aria-checked={effectiveMode === 'reply'}
                 className={`hdMode${effectiveMode === 'reply' ? ' hdModeActive' : ''}`}
-                onClick={() => {
-                  setMode('reply')
-                  draftKey.current = null
-                }}
+                onClick={() => setMode('reply')}
               >
                 {t(locale, 'helpDesk.composer.reply')}
               </button>
@@ -208,10 +216,7 @@ export function EnquiryConversation({ locale, ticket, controls, notice, busy, on
                 role="radio"
                 aria-checked={effectiveMode === 'note'}
                 className={`hdMode${effectiveMode === 'note' ? ' hdModeActive' : ''}`}
-                onClick={() => {
-                  setMode('note')
-                  draftKey.current = null
-                }}
+                onClick={() => setMode('note')}
               >
                 {t(locale, 'helpDesk.composer.note')}
               </button>
@@ -225,12 +230,9 @@ export function EnquiryConversation({ locale, ticket, controls, notice, busy, on
               effectiveMode === 'note' ? 'helpDesk.composer.notePlaceholder' : 'helpDesk.composer.replyPlaceholder',
             )}
             aria-label={t(locale, effectiveMode === 'note' ? 'helpDesk.composer.note' : 'helpDesk.composer.reply')}
-            onChange={(event) => {
-              setDraft(event.target.value)
-              draftKey.current = null
-            }}
+            onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeComposing(event)) {
                 event.preventDefault()
                 void submit()
               }

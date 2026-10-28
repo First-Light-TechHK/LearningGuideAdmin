@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import type { EnquiryDetail } from '../contracts/helpdesk'
 import { billingCycleLabel, subscriptionStatusLabel } from '../lib/helpdeskFormat'
-import { longDate, subscriptionTone, tagAddError, tagColor, normalizeTag } from '../lib/helpdeskView'
+import { isImeComposing, longDate, subscriptionTone, tagAddError, tagColor, normalizeTag } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { HdCalendarIcon, HdCloseIcon } from './icons'
@@ -71,6 +71,8 @@ function TagEditor({
           setError(null)
         }}
         onKeyDown={(event) => {
+          // 输入法组字时的 Enter / Esc 属于输入法
+          if (isImeComposing(event)) return
           if (event.key === 'Enter') {
             event.preventDefault()
             void submit()
