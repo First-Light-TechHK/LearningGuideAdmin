@@ -1,126 +1,340 @@
 /*
- * HelpDesk 工单（设计文档 §4A）。只新增 hd* 类，全部复用 backoffice.css 的 :root 变量，
- * 不改任何既有类。没有 Figma 画板：待视觉验收。
+ * Help Desk（Figma 1324:2「2.2 HelpDesk - 后台管理」，设计文档 §4A.3 / §4A.7）。
+ * 只新增 hd* 类，不改 backoffice.css 里任何已有样式。数值取自 Figma（get_design_context）。
+ * 没有画板的状态（筛选弹层、之后的消息、内部备注、回复框、空态、Common Questions）沿用同一套颜色，待视觉验收。
+ * 页面还会调整：颜色 / 尺寸集中在下面的变量里。
  */
 
-/* ---------------------------------- 看板 ---------------------------------- */
+.hdPage {
+  --hd-blue: #146eff;
+  --hd-blue-tint: #eff6ff;
+  --hd-ink: #1e293b;
+  --hd-body: #475569;
+  --hd-muted: #64748b;
+  --hd-faint: #94a3b8;
+  --hd-line: #e2e8f0;
+  --hd-line-soft: #f1f5f9;
+  --hd-panel: #f8fafc;
+  --hd-red: #ef4444;
+  --hd-amber-bg: #fffbeb;
+  --hd-amber-line: #f59e0b;
+  --hd-amber-ink: #b45309;
+  --hd-list-width: 340px;
+  --hd-side-width: 387px;
 
-.hdTabs {
+  padding: 0;
+  overflow: hidden;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    0 1px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* ---------------------------------- 页头 + Tab ---------------------------------- */
+
+.hdHeader {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-/* 与 .segment 同一套描边 / 选中色，做成紧凑的筛选 Tab */
-.hdTab {
-  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--lg-line-soft);
-  border-radius: 8px;
-  background: var(--lg-white);
-  font-size: 13px;
-  font-weight: 500;
-  font-family: inherit;
-  color: var(--lg-slate-soft);
-  cursor: pointer;
-  white-space: nowrap;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 28px 32px 0;
 }
 
-.hdTab:hover {
-  border-color: #cfd8e5;
-}
-
-.hdTabActive,
-.hdTabActive:hover {
-  border-color: var(--lg-blue-stroke);
-  background: var(--lg-blue-tint);
-  color: var(--lg-blue);
-  font-weight: 600;
-}
-
-.hdTabCount {
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: #f1f5f9;
-  color: var(--lg-muted);
-  font-size: 12px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.hdTabActive .hdTabCount {
-  background: var(--lg-white);
-  color: var(--lg-blue);
-}
-
-.hdBoard {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 2px;
-}
-
-.hdGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.hdCard {
-  position: relative;
+.hdTitleBlock {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  border: 1px solid var(--lg-line-soft);
-  border-radius: 10px;
-  background: var(--lg-white);
-  color: var(--lg-slate);
-  box-shadow: var(--lg-shadow-sm);
-  text-decoration: none;
+  gap: 4px;
   min-width: 0;
 }
 
-.hdCard:hover {
-  border-color: #cfd8e5;
-  box-shadow: var(--lg-shadow-md);
-  text-decoration: none;
+.hdSubtitle {
+  font-size: 13px;
+  color: var(--hd-muted);
 }
 
-.hdCard:focus-visible {
-  outline: none;
-  border-color: var(--lg-blue);
-  box-shadow: 0 0 0 3px rgba(29, 107, 255, 0.12);
+/* Figma AddQuestion：#146eff，内距 9/14，圆角 6，13px Medium */
+.hdPrimaryButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--hd-blue);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: normal;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
-/* 待回复：左侧蓝色强调条 + 浅蓝底 */
-.hdCardNeedsReply {
-  border-color: #c7d7fe;
-  background: #fbfcff;
+.hdPrimaryButton:hover {
+  background: #0f5ee0;
 }
 
-.hdCardNeedsReply::before {
-  content: "";
+.hdPrimaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hdTabs {
+  display: flex;
+  gap: 24px;
+  padding: 20px 32px 0;
+  border-bottom: 1px solid var(--hd-line);
+}
+
+.hdTab {
+  padding: 0 0 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  line-height: normal;
+  color: var(--hd-muted);
+  cursor: pointer;
+}
+
+.hdTabActive {
+  color: var(--hd-blue);
+  font-weight: 600;
+  border-bottom-color: var(--hd-blue);
+}
+
+.hdReadOnly {
+  padding: 8px 32px;
+  background: var(--hd-blue-tint);
+  color: var(--hd-body);
+  font-size: 12px;
+  border-bottom: 1px solid var(--hd-line);
+}
+
+/* ---------------------------------- 三栏 ---------------------------------- */
+
+.hdMain {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左栏 340px */
+.hdList {
+  width: var(--hd-list-width);
+  flex: 0 0 var(--hd-list-width);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--hd-line);
+}
+
+.hdSearchRow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 12px;
+}
+
+.hdSearch {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--hd-faint);
+}
+
+.hdSearch:focus-within {
+  border-color: var(--hd-blue);
+}
+
+.hdSearch input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 14px;
+  color: var(--hd-ink);
+}
+
+.hdSearch input::placeholder {
+  color: var(--hd-faint);
+}
+
+.hdFilterButton {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--hd-muted);
+  cursor: pointer;
+}
+
+.hdFilterButtonActive {
+  border-color: var(--hd-blue);
+  color: var(--hd-blue);
+}
+
+.hdFilterCount {
   position: absolute;
-  left: -1px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--lg-blue);
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--hd-blue);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
 }
 
-.hdCardTop,
-.hdCardFoot {
+.hdFilterPanel {
+  position: absolute;
+  top: calc(100% - 4px);
+  right: 16px;
+  z-index: 20;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--hd-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--lg-shadow-md);
+}
+
+.hdFilterField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--hd-muted);
+}
+
+.hdFilterField select,
+.hdFilterField input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hd-ink);
+}
+
+.hdFilterActions {
+  display: flex;
+  justify-content: space-between;
+}
+
+.hdLinkButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hd-blue);
+  cursor: pointer;
+}
+
+.hdLinkButton:disabled {
+  color: var(--hd-faint);
+  cursor: not-allowed;
+}
+
+.hdLinkDanger {
+  color: #dc2626;
+}
+
+.hdRows {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.hdListNotice {
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--hd-faint);
+  text-align: center;
+}
+
+/* Figma EnquiryItem：内距 12/16，间距 10，分隔 1px #f1f5f9 */
+.hdRow {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--hd-line-soft);
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hdRow:hover {
+  background: #f8fbff;
+}
+
+/* 选中：底 #eff6ff + 左侧 3px 蓝条 */
+.hdRowSelected,
+.hdRowSelected:hover {
+  background: var(--hd-blue-tint);
+  box-shadow: inset 3px 0 0 var(--hd-blue);
+}
+
+.hdAvatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: normal;
+}
+
+.hdAvatarAgent {
+  background: #e8f1ff;
+  color: #1d6bff;
+}
+
+.hdRowBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hdRowTop,
+.hdRowBottom {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -128,301 +342,375 @@
   min-width: 0;
 }
 
-.hdNumber {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  color: var(--lg-muted);
-  white-space: nowrap;
-}
-
-.hdCardSubject {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--lg-heading);
+.hdRowName,
+.hdRowSubject,
+.hdRowPreview {
+  min-width: 0;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  word-break: break-word;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: normal;
 }
 
-.hdCardMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+.hdRowName {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--hd-ink);
 }
 
-.hdChip {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: #f1f5f9;
-  color: var(--lg-slate-soft);
+.hdRowTime {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--hd-faint);
+}
+
+.hdRowSubject {
   font-size: 12px;
   font-weight: 500;
+  color: var(--hd-body);
 }
 
-.hdBadge {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  background: var(--lg-blue-soft);
-  color: var(--lg-blue);
-  font-size: 12px;
+.hdRowUnread .hdRowName {
   font-weight: 600;
 }
 
-.hdLearner {
-  font-size: 13px;
-  color: var(--lg-slate);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.hdRowUnread .hdRowSubject {
+  font-weight: 700;
 }
 
-.hdLearnerEmail {
-  color: var(--lg-muted);
+.hdRowPreview {
+  font-size: 11px;
+  color: var(--hd-faint);
 }
 
-.hdCardFoot {
-  font-size: 12px;
-  color: var(--lg-muted);
-  border-top: 1px solid var(--lg-line-soft);
-  padding-top: 8px;
-  margin-top: 2px;
+/* Figma UnreadDot：8px 框内红点 */
+.hdUnreadDot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin: 1px;
+  border-radius: 50%;
+  background: var(--hd-red);
 }
 
-.hdCardFoot > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hdEmpty {
-  padding: 48px 0;
-  text-align: center;
-  color: var(--lg-muted);
-  font-size: 14px;
-}
-
-.hdBoardFooter {
+/* 中栏：#f8fafc 底 */
+.hdConversation {
+  flex: 1;
+  min-width: 0;
   display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--hd-panel);
+  border-right: 1px solid var(--hd-line);
+}
+
+.hdConversationEmpty {
+  align-items: center;
   justify-content: center;
-  padding-top: 12px;
+  border-right: 0;
 }
 
-/* 状态点：沿用 .statusPill / .dot 的尺寸，只补 HelpDesk 状态的颜色 */
-.hdStatus {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--lg-slate);
-  white-space: nowrap;
-}
-
-.hdDotOPEN {
-  background: var(--lg-blue);
-}
-
-.hdDotASSIGNED {
-  background: var(--lg-amber);
-}
-
-.hdDotWAITING_USER {
-  background: var(--lg-muted);
-}
-
-.hdDotPENDING_CONFIRM {
-  background: var(--lg-white);
-  box-shadow: inset 0 0 0 2px var(--lg-green);
-}
-
-.hdDotCLOSED {
-  background: var(--lg-green);
-}
-
-.hdDotCANCELLED {
-  background: var(--lg-grey);
-}
-
-/* ---------------------------------- 详情 ---------------------------------- */
-
-.hdBack {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 12px;
-}
-
-.hdHeadMeta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 6px;
-}
-
-.hdHeadActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+.hdNotice {
+  margin: 12px 20px 0;
 }
 
 .hdThread {
-  flex: 1 1 auto;
-  min-height: 120px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 4px 2px 12px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px 12px;
 }
 
-.hdMessage {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 78%;
-  align-self: flex-start;
-}
-
-/* 员工端视角：员工（含内部备注）靠右，学员靠左 */
-.hdMessageAgent {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.hdMessageMeta {
-  font-size: 12px;
-  color: var(--lg-muted);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.hdMessageAuthor {
-  font-weight: 600;
-  color: var(--lg-slate);
-}
-
-.hdBubble {
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: #f1f5f9;
-  color: var(--lg-ink);
-  font-size: 14px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.hdMessageAgent .hdBubble {
-  background: var(--lg-blue-tint);
-  border: 1px solid #dbeafe;
-}
-
-/* 内部备注：琥珀色底 + 虚线描边，与公开回复一眼区分 */
-.hdMessageInternal .hdBubble {
-  background: #fffbeb;
-  border: 1px dashed #f59e0b;
-}
-
-.hdInternalTag {
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 5px;
-  background: #fef3c7;
-  color: #92400e;
+.hdDateSep {
+  height: 31px;
+  padding-top: 12px;
   font-size: 11px;
-  font-weight: 600;
+  line-height: normal;
+  color: var(--hd-faint);
+  text-align: center;
 }
 
-.hdSystemLine {
-  align-self: center;
+.hdMsgRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.hdMsgRowAgent {
+  flex-direction: row-reverse;
+}
+
+/* Figma Enquiry Card：白底、1px #e2e8f0、圆角 10、内距 16/16/12、间距 10 */
+.hdEnquiryCard,
+.hdMsgCard {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 16px 12px;
+  border: 1px solid var(--hd-line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.05);
+}
+
+.hdMsgCard {
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.hdMsgCardAgent {
+  background: #f5f9ff;
+}
+
+.hdMsgCardInternal {
+  background: var(--hd-amber-bg);
+  border: 1px dashed var(--hd-amber-line);
+}
+
+.hdCardHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hdCardTitleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hdCardSubject {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: normal;
+  color: var(--hd-ink);
+}
+
+.hdTypeTag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--hd-blue-tint);
+  color: #3b82f6;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: normal;
+}
+
+/* 状态胶囊：Figma 没有，放在卡片标题行最右（待视觉验收） */
+.hdStatusPill {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--hd-line-soft);
+  color: var(--hd-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: normal;
+}
+
+.hdStatusOPEN {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.hdStatusASSIGNED,
+.hdStatusWAITING_USER {
+  background: var(--hd-blue-tint);
+  color: var(--hd-blue);
+}
+
+.hdStatusPENDING_CONFIRM {
+  background: #f3e8ff;
+  color: #9333ea;
+}
+
+.hdStatusCLOSED {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.hdCardMeta {
+  font-size: 11px;
+  line-height: normal;
+  color: var(--hd-faint);
+}
+
+.hdDivider {
+  height: 1px;
+  background: var(--hd-line-soft);
+}
+
+.hdBody {
   font-size: 12px;
-  color: var(--lg-muted);
-  background: #f8fafc;
-  border-radius: 999px;
-  padding: 4px 12px;
-  max-width: 90%;
-  text-align: center;
+  line-height: 18px;
+  color: var(--hd-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hdCardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .hdAttachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
-.hdThumb {
-  display: block;
-  width: 96px;
-  height: 72px;
-  border-radius: 8px;
-  border: 1px solid var(--lg-line-soft);
-  overflow: hidden;
-  background: #f8fafc;
+/* Figma AttachFile：#f8fafc 底、1px #e2e8f0、圆角 6、内距 6/10 */
+.hdPage .hdFileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  background: var(--hd-panel);
+  color: var(--hd-muted);
+  text-decoration: none;
 }
 
-.hdThumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
+.hdPage .hdFileChip:hover {
+  border-color: var(--hd-blue);
+  text-decoration: none;
 }
 
-.hdComposer {
-  border-top: 1px solid var(--lg-line-soft);
-  padding-top: 12px;
+.hdFileText {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  flex: 0 0 auto;
+  gap: 1px;
+  line-height: normal;
 }
 
-.hdComposer .segmented {
-  max-width: 420px;
+.hdFileName {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--hd-ink);
 }
 
-.hdComposer .segment {
-  height: 36px;
-  font-size: 13px;
+.hdFileSize {
+  font-size: 10px;
+  color: var(--hd-faint);
+}
+
+.hdMarkReviewed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: normal;
+  color: var(--hd-blue);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hdMarkReviewed:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hdMsgMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  line-height: normal;
+  color: var(--hd-faint);
+}
+
+.hdMsgAuthor {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hd-ink);
+}
+
+.hdInternalTag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: var(--hd-amber-ink);
+  font-weight: 500;
+}
+
+.hdSystemLine {
+  padding-top: 12px;
+  font-size: 11px;
+  color: var(--hd-faint);
+  text-align: center;
+}
+
+/* 回复框（无画板，待视觉验收） */
+.hdComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--hd-line);
+  background: #fff;
+}
+
+.hdComposerModes {
+  display: flex;
+  gap: 16px;
+}
+
+.hdMode {
+  padding: 0 0 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hd-muted);
+  cursor: pointer;
+}
+
+.hdModeActive {
+  color: var(--hd-blue);
+  font-weight: 600;
+  border-bottom-color: var(--hd-blue);
+}
+
+.hdComposerNote .hdModeActive {
+  color: var(--hd-amber-ink);
+  border-bottom-color: var(--hd-amber-line);
 }
 
 .hdTextarea {
-  width: 100%;
-  min-height: 88px;
-  max-height: 240px;
+  min-height: 72px;
+  max-height: 200px;
+  padding: 8px 10px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--hd-ink);
   resize: vertical;
-  border: 1px solid var(--lg-line-soft);
-  border-radius: 8px;
-  background: var(--lg-white);
-  padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.45;
-  font-family: inherit;
-  color: var(--lg-slate);
 }
 
 .hdTextarea:focus {
-  outline: none;
-  border-color: var(--lg-blue);
-  box-shadow: 0 0 0 3px rgba(29, 107, 255, 0.12);
+  outline: 0;
+  border-color: var(--hd-blue);
 }
 
-.hdComposerInternal .hdTextarea {
-  background: #fffbeb;
-  border-color: #fcd34d;
+.hdComposerNote .hdTextarea {
+  background: var(--hd-amber-bg);
+  border-style: dashed;
+  border-color: var(--hd-amber-line);
 }
 
 .hdComposerFoot {
@@ -430,94 +718,403 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
-  color: var(--lg-muted);
+  font-size: 11px;
+  color: var(--hd-faint);
 }
 
-/* 右栏：学员信息、状态、处理人、时间线 */
-.card.hdSide {
-  width: 320px;
-  flex: 0 0 320px;
-  overflow: auto;
-  gap: 18px;
-  padding: 24px 22px;
+.hdTooLong {
+  color: #dc2626;
 }
 
-.hdSideTitle {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--lg-heading);
-  margin-bottom: 10px;
+/* 右栏 387px */
+.hdSide {
+  width: var(--hd-side-width);
+  flex: 0 1 var(--hd-side-width);
+  min-width: 300px;
+  min-height: 0;
+  overflow-y: auto;
+  background: #fff;
 }
 
-.hdFacts {
-  display: grid;
-  grid-template-columns: 112px 1fr;
-  row-gap: 8px;
-  column-gap: 8px;
-  margin: 0;
-  font-size: 13px;
-}
-
-.hdFacts dt {
-  color: var(--lg-muted);
-}
-
-.hdFacts dd {
-  margin: 0;
-  color: var(--lg-slate);
-  word-break: break-word;
-}
-
-.hdTimeline {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 14px;
-  border-left: 2px solid var(--lg-line-soft);
+.hdSideSection {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--hd-line);
 }
 
-.hdTimeline li {
-  position: relative;
-  font-size: 13px;
-  color: var(--lg-slate);
+.hdSideFirst {
+  padding-top: 20px;
 }
 
-.hdTimeline li::before {
-  content: "";
-  position: absolute;
-  left: -20px;
-  top: 4px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--lg-white);
-  box-shadow: inset 0 0 0 2px var(--lg-blue-stroke);
+.hdStudentName {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: normal;
+  color: var(--hd-ink);
 }
 
-.hdTimelineTime {
-  display: block;
+.hdPage .hdStudentEmail {
   font-size: 12px;
-  color: var(--lg-muted);
-  margin-top: 2px;
+  line-height: normal;
+  color: var(--hd-blue);
 }
 
-@media (max-width: 1100px) {
-  .card.hdSide {
-    width: 280px;
-    flex-basis: 280px;
-  }
+.hdSectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: normal;
+  color: var(--hd-ink);
 }
 
-@media (max-width: 900px) {
-  .card.hdSide {
-    width: 100%;
-    flex-basis: auto;
-  }
+.hdSectionTitleIcon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
-  .hdMessage {
-    max-width: 92%;
-  }
+.hdFacts,
+.hdPlan {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.hdFacts {
+  gap: 8px;
+}
+
+.hdFact,
+.hdPlanRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  line-height: normal;
+}
+
+.hdFact dt,
+.hdPlanRow dt {
+  flex: 0 0 auto;
+  color: var(--hd-faint);
+}
+
+.hdFact dd,
+.hdPlanRow dd {
+  min-width: 0;
+  margin: 0;
+  font-weight: 500;
+  color: var(--hd-ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.hdFact dd.hdFactLink {
+  font-weight: 400;
+  color: var(--hd-blue);
+}
+
+.hdFact dd.hdFactSmall {
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+/* Figma 订阅行：上下 10、底线 1px，标签宽 100 */
+.hdPlanRow {
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hd-line);
+}
+
+.hdPlanRow:last-child {
+  padding: 10px 0 2px;
+  border-bottom: 0;
+}
+
+.hdPlanRow dt {
+  width: 100px;
+}
+
+.hdPill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: normal;
+}
+
+.hdPill-success {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.hdPill-warning {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.hdPill-neutral {
+  background: var(--hd-line-soft);
+  color: var(--hd-muted);
+}
+
+.hdTagsSection {
+  gap: 10px;
+}
+
+.hdTagsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hdAddTag {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--hd-line-soft);
+  font: inherit;
+  font-size: 11px;
+  line-height: normal;
+  color: var(--hd-muted);
+  cursor: pointer;
+}
+
+.hdAddTag:hover {
+  background: #e6ebf2;
+}
+
+.hdTagEditor input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--hd-line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.hdTagEditor input:focus {
+  outline: 0;
+  border-color: var(--hd-blue);
+}
+
+.hdTagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  line-height: normal;
+}
+
+.hdTagRemove {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.hdTagRemove:hover {
+  opacity: 1;
+}
+
+.hdMuted {
+  font-size: 12px;
+  color: var(--hd-faint);
+}
+
+.hdCentered {
+  text-align: center;
+}
+
+.hdFieldError {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: #dc2626;
+}
+
+.hdEmptyState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 32px;
+  text-align: center;
+}
+
+.hdEmptyTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--hd-ink);
+}
+
+/* ------------------------- Common Questions（无画板，待视觉验收） ------------------------- */
+
+.hdQuestions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 32px 24px;
+}
+
+.hdQuestionFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hdReorderHint {
+  margin: 0;
+}
+
+.hdQuestionTable {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.hdOrderCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hdOrderIndex {
+  min-width: 20px;
+  color: var(--hd-muted);
+}
+
+.hdIconButton {
+  display: inline-flex;
+  padding: 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hd-muted);
+  cursor: pointer;
+}
+
+.hdIconButton:hover:not(:disabled) {
+  background: var(--hd-line-soft);
+  color: var(--hd-blue);
+}
+
+.hdIconButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.hdQuestionCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hdQuestionText {
+  font-weight: 600;
+  color: var(--hd-ink);
+}
+
+.hdQuestionAnswer {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--hd-muted);
+  white-space: pre-line;
+}
+
+.hdQuestionKeywords {
+  font-size: 11px;
+  color: var(--hd-faint);
+}
+
+.hdStatusCell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hdStats {
+  font-variant-numeric: tabular-nums;
+  color: var(--hd-body);
+}
+
+.hdRowActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* 弹窗表单（antd Modal 内） */
+.hdFormHint.hdModalIntro {
+  margin: 0 0 16px;
+}
+
+.hdFormGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.hdFormField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.hdFormLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.hdFormHint {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.hdSwitchRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.hdSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+}
+
+.hdModalError {
+  margin-top: 16px;
 }

@@ -23,7 +23,7 @@
 
 - **Knowledge System（知识库）**：管理课程结构（Course -> Lesson -> Page 三级树形），支持 Markdown 编辑（含 LaTeX 公式）、文件导入转 Markdown、版本发布与历史版本查看。
 - **AI Tutor（AI 辅导）**：基于知识库内容，提供 Lecture 模式和 Socratic 模式的 AI 对话交互，支持 System Prompt 和 Welcome Message 自定义配置。
-- **HelpDesk 工单（2026-10-28 新增，Tickets v1）**：学员在 Portal 提交的客服工单在 BackOffice 以卡片看板呈现，员工认领、回复、写内部备注、请学员确认。工单数据归 Portal（唯一写入方），BackOffice 只经 Portal 集成接口读写，见 §4A。
+- **HelpDesk 工单（2026-10-28 新增，Tickets v1）**：学员在 Portal 提交的客服工单在 BackOffice「Help Desk」页以 Enquiries 三栏（Figma 1324:2）呈现，员工回复、写内部备注、打标签、标记已处理（请学员确认）；同页 Common Questions Tab 维护常见问题库。工单数据归 Portal（唯一写入方），BackOffice 只经 Portal 集成接口读写，见 §4A。
 - **HelpDesk Common Questions 与推荐答案（2026-10-28 Figma 对齐）**：问答库归 BackOffice（唯一写入方，§4A.7），Portal 只读已发布的；学员提交前由 Agent 角色从已发布问答里推荐一条（§4A.8）。
 
 ### 1.2 核心对象
@@ -721,7 +721,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 ## 4A. 模块 C：HelpDesk 工单（Tickets v1，2026-10-28 新增）
 
 > 依据：`lg-helpdesk/tickets-v1-spec.md` §1/§4/§5（Integration）/§7（2026-10-28 用户拍板：「每个工单就是一个小卡片在 Back Office 上 … 按原有 UI UX 风格 … TDD 锁住」）。v1 不做：飞书同步、前端埋点、AI 客服、SaaS。
-> **待视觉验收**：本模块没有 Figma 画板，界面沿用 `backoffice.css` 的卡片、按钮、筛选条、状态点与提示条，由用户手动验收。
+> **待视觉验收**：Enquiries 三栏按 Figma 1324:2 实现；没有画板的部分（筛选弹层、之后的消息与内部备注、状态胶囊、回复框、日期分隔文字、空态、只读提示条、Common Questions Tab 与新增 / 编辑弹窗）沿用同一套颜色或 Knowledge / AI Tutor 的 antd 表格与弹窗，由用户手动验收。
 > **2026-10-28 Figma 对齐（`lg-helpdesk/tickets-v1-figma-addendum.md`，与原方案冲突时以它为准）**：Figma 文件 `sxro3x6YXENJvjhGExmlQ7`，BackOffice Enquiries 画板 1324:2。卡片看板改为 Enquiries 三栏（§4A.3），新增 Common Questions 问答库（§4A.7）、Agent 推荐（§4A.8）与 Portal → Admin 集成鉴权（§4A.9）。工单分类改为四个 Enquiry Type：`technical_support` / `course_content` / `payments_subscriptions` / `other`。
 
 ### 4A.1 归属与数据流
@@ -736,7 +736,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
   - `questions/`：Common Questions 数据层（`questionContracts.ts`、`questionRepository.ts` 原生 SQL、`questionService.ts` 业务规则），§4A.7
   - `contracts.ts`：两端共用的类型与常量
   - 控制器 `server/src/backoffice/nest/helpdesk.controller.ts`、`helpdesk-questions.controller.ts`（员工端问答 + Portal 读已发布问答），注册在 `BackofficeModule`；共用的错误转换在 `helpdesk-http.ts`
-  - 前端：`client/src/backoffice/pages/HelpDeskPage.tsx`（看板）、`HelpDeskTicketPage.tsx`（详情）、`lib/helpdeskApi.ts`（接口，保留 HelpDesk 错误码）、`lib/helpdeskFormat.ts`（状态 / 分类 / 事件文案与相对时间）、`contracts/helpdesk.ts`、`helpdesk.css`（只新增 `hd*` 类，复用 `backoffice.css` 变量）；文案在 `messages/en-GB.json`、`zh-CN.json` 的 `helpDesk` 段
+  - 前端（2026-10-28 按 Figma 1324:2 重做，卡片看板与独立详情页已删除）：`client/src/backoffice/pages/HelpDeskPage.tsx`（页头 +「+ Add Question」+ 两个 Tab；路由 `/:locale/help-desk/:ticketId?` 一条，切换咨询不重新挂载）；`client/src/backoffice/helpdesk/`（`EnquiriesView.tsx` 三栏状态与写操作、`EnquiryList.tsx` 左栏、`EnquiryConversation.tsx` 中栏、`StudentPanel.tsx` 右栏、`QuestionsView.tsx` 问答表格、`QuestionModal.tsx` 新增 / 编辑弹窗、`icons.tsx`）；纯逻辑 `lib/helpdeskView.ts`（头像 / 标签配色、首字母、时间、筛选参数、可见操作）与 `lib/helpdeskQuestions.ts`（表单校验、筛选、排序、行操作）；`lib/helpdeskApi.ts`（接口，保留 HelpDesk 错误码）、`lib/helpdeskFormat.ts`（状态 / 类型 / 订阅文案）、`contracts/helpdesk.ts`、`helpdesk.css`（只新增 `hd*` 类，颜色与尺寸集中在 `.hdPage` 变量里，便于随 Figma 调整）；文案在 `messages/en-GB.json`、`zh-CN.json` 的 `helpDesk` 段。前端单测 `client/tests/*.test.ts`（`npm test`，Node 自带 `node:test` + 类型擦除，无新依赖）
 
 ### 4A.2 状态与员工端文案
 
@@ -764,7 +764,9 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 - 附件：图片（png / jpeg / webp / gif）内联显示，其它（pdf / txt / csv / docx / xlsx）一律作为下载；≤10 MB；绝不放行 html / svg。
 - Portal 未配置（Server 缺 `PORTAL_HELPDESK_BASE_URL` / `PORTAL_HELPDESK_TOKEN`，或 Portal 返回 `integration_disabled` / 拒绝令牌）→ 503 `HELPDESK_NOT_CONNECTED`，页面显示「HelpDesk is not connected yet / HelpDesk 尚未接通」。
 
-### 4A.4 工单详情（`/:locale/help-desk/:ticketId`）
+### 4A.4 工单详情（`/:locale/help-desk/:ticketId`，Figma 1324:2 中栏 + 右栏）
+
+> 2026-10-28 起详情不再是独立页面：选中左栏一行即在中栏 / 右栏展开。中栏 = 日期分隔 + Enquiry 卡片（主题、Enquiry Type 标签、`联系邮箱 · 时间`、正文、附件 chip「文件名 + 大小」经代理打开、**Mark as reviewed** = `propose_resolution`）+ 之后的消息 + 回复框；右栏 = 姓名 / 邮箱、Student Information、Current Subscription Plan（Active 绿色胶囊，无订阅显示「—」）、Tags（`+ Add Tag`，× 删除，仅 FULL）。打开即调 `mark_read`（仅 FULL 且确有未读）。Claim 按钮与事件时间线不在 Figma 中，已移除（回复时 Portal 自动认领）。下面几条为原卡片看板时期的描述，以本段为准。
 
 - 左栏对话：学员消息靠左、员工消息靠右（带员工名），**内部备注**用琥珀色底与「Internal note / 内部备注」标记区分（学员永远看不到）；附件图片缩略图经 BackOffice Server 代理 `GET /api/helpdesk/attachments/:id` 加载（浏览器不直连 Portal），点击新窗口打开原图。
 - 底部回复区（仅 FULL）：Reply to learner / Internal note 二选一 + 文本框（1–5000 字）+ Send。

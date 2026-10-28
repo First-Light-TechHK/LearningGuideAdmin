@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-28 ｜ HelpDesk v1（Figma 补充，Admin 前端）：Enquiries 三栏 + Common Questions
+
+- **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 按照我们原有的 UI UX 风格 … 拿 TDD 开发锁住」；「现在先不做埋点」；Figma node 1324-2「QA知识库数据层 / Agent / Student / Backoffice，页面还会有一些变动的」。本条只做 Admin **client**（server 未改）。
+- **用户拍板**：`lg-helpdesk/tickets-v1-figma-addendum.md` §A / §D（与原方案冲突以它为准）：Help Desk 页头 +「+ Add Question」+ Enquiries / Common Questions 两个 Tab；Enquiries 三栏取代卡片看板；VIEW 只读。
+- **设计同步**：开发文档 §1.1、§4A 头注（待视觉验收范围）、§4A.1 前端文件清单、§4A.4（详情并入三栏）。
+- **变更清单（client）**：
+  - 删除卡片看板与 `HelpDeskTicketPage.tsx`；`App.tsx` 两条 help-desk 路由合并为 `help-desk/:ticketId?`（同一 MenuGuard / WorkspaceAccessProvider）。
+  - `pages/HelpDeskPage.tsx` + `backoffice/helpdesk/`：左栏搜索（300ms 防抖写地址栏）、筛选弹层（状态 / 类型 / 标签）、头像（按学员 id 固定配色）、时间（今天 HH:mm，否则「16 May」）、未读红点、选中蓝条、滚动加载；中栏 Enquiry 卡片、附件 chip、Mark as reviewed、之后的消息（内部备注琥珀虚线）、回复 / 内部备注；右栏学员信息、订阅、标签增删；打开即 `mark_read`（仅 FULL）；409 stale 重新加载并提示一次。
+  - Common Questions：antd 表格（语言 / 类型 / 状态筛选 + 搜索、推荐 / 解决 / 未解决计数、编辑、发布 / 下线 / 归档 / 重新发布、单语言下上移下移整表排序）、新增 / 编辑弹窗（语言、类型、问题、答案、关键词、精选、立即发布；版本冲突刷新列表）。
+  - `lib/helpdeskView.ts`、`lib/helpdeskQuestions.ts`（纯逻辑）、`lib/helpdeskApi.ts`（新接口）、`contracts/helpdesk.ts`（与 server 新形状一致）、`helpdesk.css`（只新增 `hd*` 类）、en-GB / zh-CN `helpDesk` 段（只替换该段，其它行不动）。
+  - 测试设施：`client/tests/support/register.mjs`（Node 自带类型擦除 + 补扩展名 / JSON 导入），`package.json` 新增 `npm test`；无新依赖。
+- **TDD 证据**：先写 4 个测试文件（view / questions / api / messages+wiring），运行确认失败（模块不存在、文案与路由未改，11 个用例里 10 个失败）；实现后 62/62 通过。
+- **自测证据**：`client`: `npm test` 62 通过；`npm run build`（tsc -b + vite build）通过；`npx oxlint <改动文件>` 0 错误、4 条 react 规则警告（同类警告仓库已有）。`server`: `npm run build` 通过，`npm test` 39 套件通过 + 2 个 PG 套件跳过（409 通过）。本地桩 API + vite + Playwright（无头）跑了 13 项行为检查并截图（en-GB / zh-CN、FULL / VIEW），截图与 Figma 对比图在 `lg-helpdesk/tickets-v1-shots/`。
+- **待视觉验收**：筛选弹层、日期分隔文字、状态胶囊、之后的消息与内部备注、回复框、空态、只读提示条、Common Questions 表格与弹窗；图标按同名描边图标重画（Figma 资源下载被代理拦截）。
+- **开放问题**：「Mark as reviewed」= propose_resolution（假设，待产品确认）；Claim 按钮与事件时间线不在 Figma，已移除；头像 / 标签颜色按 id / 文本固定取色，与 Figma 示例的具体颜色不会一一对应。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+- **下一步**：用户视觉验收；与 Portal 联调后用真实数据冒烟。
+
+---
+
 ## 2026-10-28 ｜ HelpDesk v1（Figma 补充，Admin 服务端）：常见问题库 + 坐席推荐答案 + Portal 集成接口
 
 - **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 拿 TDD 开发锁住，直接去实现」；「可以发 workflow」；「现在先不做埋点」；Figma（node 1324-2）「QA知识库数据层 / Agent / Student / Backoffice，页面还会有一些变动的」。本条只做 Admin **server**；client 由下一个 Agent 实现。

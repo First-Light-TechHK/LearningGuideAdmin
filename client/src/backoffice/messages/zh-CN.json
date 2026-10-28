@@ -288,26 +288,42 @@
     "managerColumnOnline": "上线"
   },
   "helpDesk": {
-    "title": "HelpDesk",
-    "subtitle": "学员在 Portal 提交的客服工单，每张卡片是一张工单。",
-    "refresh": "刷新",
-    "loadMore": "加载更多",
-    "searchPlaceholder": "搜索工单号、学员邮箱或主题",
-    "empty": "这里还没有工单。",
-    "emptySearch": "没有符合搜索条件的工单。",
-    "readOnly": "你的角色只能查看工单，不能回复或修改。",
+    "title": "服务台",
+    "subtitle": "管理学员咨询与常见问题",
+    "addQuestion": "新增问题",
+    "readOnly": "你的角色只能查看服务台，不能回复或修改。",
     "notConnectedTitle": "HelpDesk 尚未接通",
     "notConnectedBody": "当前环境还没有接通 Portal 工单接口，请联系管理员配置。",
+    "tabs": {
+      "enquiries": "咨询",
+      "questions": "常见问题"
+    },
+    "searchPlaceholder": "搜索学员或咨询...",
+    "filter": "筛选咨询",
+    "filters": {
+      "status": "状态",
+      "category": "咨询类型",
+      "tag": "标签",
+      "tagPlaceholder": "任意标签",
+      "any": "全部",
+      "needsReply": "待回复",
+      "clear": "清除筛选"
+    },
+    "list": {
+      "empty": "还没有咨询。",
+      "emptyFiltered": "没有符合搜索或筛选条件的咨询。",
+      "loadingMore": "正在加载更多…",
+      "unread": "未读"
+    },
+    "selectPrompt": "选择一条咨询查看对话。",
+    "today": "今天",
+    "yesterday": "昨天",
+    "markReviewed": "标记为已处理",
+    "markReviewedHint": "请学员确认问题已解决；{hours} 小时内没有回应将自动结束。",
+    "reviewedNotice": "已标记为已处理，已请学员确认。",
     "needsReply": "待回复",
     "unassigned": "未分配",
-    "updated": "{time}更新",
-    "tabs": {
-      "needsReply": "待回复",
-      "waitingUser": "等待用户",
-      "awaitingConfirm": "待用户确认",
-      "closed": "已结束",
-      "all": "全部"
-    },
+    "assignedTo": "处理人：{name}",
     "status": {
       "OPEN": "待受理",
       "ASSIGNED": "处理中",
@@ -317,79 +333,158 @@
       "CANCELLED": "已撤回"
     },
     "category": {
-      "account": "账号",
-      "billing": "付费",
-      "learning": "学习",
-      "study_group": "学习小组",
-      "other": "其他"
+      "technical_support": "技术支持",
+      "course_content": "课程内容",
+      "payments_subscriptions": "付款与订阅",
+      "other": "其他咨询"
     },
-    "closeReason": {
-      "cancelled": "学员已撤回",
-      "user_confirmed": "学员确认解决",
-      "user_closed": "学员自行结束",
-      "auto_confirmed": "到期自动确认"
-    },
-    "detail": {
-      "back": "返回 HelpDesk",
+    "message": {
       "learner": "学员",
-      "email": "邮箱",
-      "language": "语言",
-      "status": "状态",
-      "assignee": "处理人",
-      "category": "分类",
-      "created": "创建时间",
-      "lastUpdate": "最近更新",
-      "confirmDue": "自动确认时间",
-      "closeReason": "结果",
-      "rating": "评分",
-      "ratingValue": "{rating} / 5",
-      "timeline": "时间线",
-      "noEvents": "暂无事件。",
-      "noMessages": "暂无消息。",
-      "system": "系统",
+      "support": "客服",
       "internalNote": "内部备注",
-      "attachment": "打开附件 {name}",
-      "claim": "认领",
-      "propose": "已处理，请学员确认",
-      "proposeHint": "学员有 {hours} 小时确认，到期后工单自动结束。",
-      "replyMode": "回复学员",
-      "noteMode": "内部备注",
-      "noteHint": "内部备注只有员工可见。",
+      "attachment": "打开附件 {name}"
+    },
+    "composer": {
+      "reply": "回复学员",
+      "note": "内部备注",
       "replyPlaceholder": "输入给学员的回复…",
       "notePlaceholder": "输入内部备注（学员看不到）…",
+      "noteHint": "内部备注只有员工可见。",
       "send": "发送",
       "sending": "发送中…",
-      "characters": "{count} / {max}",
-      "stale": "工单已更新，请重新查看。",
-      "notFoundTitle": "工单不存在",
-      "notFoundBody": "这张工单不存在或已不可用。"
+      "characters": "{count} / {max}"
     },
-    "events": {
-      "created": "学员提交工单",
-      "claimed": "已认领",
-      "agent_replied": "客服已回复",
-      "internal_note_added": "添加内部备注",
-      "learner_replied": "学员回复",
-      "resolution_proposed": "请学员确认",
-      "resolution_rejected": "学员反馈还没解决",
-      "confirmed": "学员确认解决",
-      "auto_confirmed": "到期自动确认",
-      "closed_by_learner": "学员自行结束",
-      "cancelled": "学员已撤回",
-      "reopened": "学员追问，工单重开",
-      "rated": "学员已评分"
+    "stale": "这条咨询已更新，请重新查看。",
+    "notFound": "这条咨询不存在或已不可用。",
+    "student": {
+      "title": "学员信息",
+      "accountEmail": "账号邮箱",
+      "contactEmail": "联系邮箱",
+      "joinedAt": "注册日期",
+      "id": "学员 ID",
+      "totalEnquiries": "咨询总数",
+      "currentCourse": "当前课程"
+    },
+    "subscription": {
+      "title": "当前订阅方案",
+      "planName": "方案名称",
+      "billingCycle": "计费周期",
+      "status": "状态",
+      "renewalDate": "续费日期"
+    },
+    "billingCycle": {
+      "monthly": "按月",
+      "quarterly": "按季",
+      "annual": "按年",
+      "yearly": "按年"
+    },
+    "subscriptionStatus": {
+      "active": "生效中",
+      "trialing": "试用中",
+      "past_due": "逾期未付",
+      "unpaid": "未付款",
+      "incomplete": "未完成",
+      "paused": "已暂停",
+      "cancelled": "已取消",
+      "canceled": "已取消",
+      "expired": "已过期"
+    },
+    "tags": {
+      "title": "标签",
+      "add": "添加标签",
+      "placeholder": "新标签",
+      "remove": "移除标签 {tag}",
+      "empty": "还没有标签。",
+      "invalid": "标签为 1–32 个字符。",
+      "duplicate": "这条咨询已有这个标签。",
+      "limit": "每条咨询最多 10 个标签。"
+    },
+    "localeName": {
+      "en-GB": "英语（英国）",
+      "zh-CN": "简体中文"
+    },
+    "questions": {
+      "search": "搜索问题",
+      "allLocales": "全部语言",
+      "allCategories": "全部咨询类型",
+      "statusFilter": {
+        "active": "草稿与已发布",
+        "all": "全部（含已归档）",
+        "draft": "草稿",
+        "published": "已发布",
+        "archived": "已归档"
+      },
+      "status": {
+        "draft": "草稿",
+        "published": "已发布",
+        "archived": "已归档"
+      },
+      "columns": {
+        "order": "顺序",
+        "question": "问题",
+        "locale": "语言",
+        "category": "咨询类型",
+        "status": "状态",
+        "featured": "精选",
+        "stats": "推荐 / 解决 / 未解决",
+        "updated": "更新时间",
+        "actions": "操作"
+      },
+      "featured": "精选",
+      "statsTitle": "推荐 {shown} 次 · 解决 {solved} · 未解决 {declined}",
+      "actions": {
+        "edit": "编辑",
+        "publish": "发布",
+        "republish": "重新发布",
+        "unpublish": "下线",
+        "archive": "归档",
+        "moveUp": "上移",
+        "moveDown": "下移"
+      },
+      "archiveConfirm": "确定归档这个问题？归档后不再向学员展示或推荐。",
+      "reorderHint": "调整顺序前，请只选一种语言并清除其它筛选。",
+      "empty": "还没有常见问题。",
+      "emptyFiltered": "没有符合筛选条件的问题。",
+      "saved": "问题已保存。",
+      "published": "问题已发布。",
+      "unpublished": "问题已改回草稿。",
+      "archived": "问题已归档。",
+      "reordered": "顺序已保存。"
+    },
+    "modal": {
+      "createTitle": "新增问题",
+      "editTitle": "编辑问题",
+      "subtitle": "已发布的问题会出现在学员的联系客服页，并可被推荐给学员。",
+      "locale": "语言",
+      "category": "咨询类型",
+      "categoryPlaceholder": "选择类型",
+      "question": "问题",
+      "answer": "答案",
+      "answerHint": "纯文本，保留换行；学员端会把链接变成可点击。",
+      "keywords": "关键词",
+      "keywordsPlaceholder": "输入关键词后按回车",
+      "keywordsHint": "用于匹配学员的咨询，最多 20 个。",
+      "featured": "在联系客服页展示",
+      "publish": "立即发布",
+      "save": "保存",
+      "saving": "保存中…",
+      "required": "必填",
+      "tooLong": "内容过长",
+      "tooMany": "最多 20 个关键词"
     },
     "errors": {
       "HELPDESK_NOT_CONNECTED": "HelpDesk 尚未接通。",
-      "HELPDESK_UNAVAILABLE": "HelpDesk 暂时不可用，请稍后重试。",
-      "TICKET_NOT_FOUND": "这张工单不存在或已不可用。",
-      "STALE_TICKET": "工单已更新，请重新查看。",
-      "INVALID_TRANSITION": "工单当前状态不允许这个操作。",
-      "IDEMPOTENCY_CONFLICT": "该请求与之前的提交冲突，请刷新后重试。",
-      "INVALID_INPUT": "请检查输入内容后重试。",
-      "NOT_AUTHORISED": "你的角色只能查看 HelpDesk。",
-      "RATE_LIMITED": "请求过于频繁，请稍后再试。",
-      "generic": "出错了，请重试。"
+      "HELPDESK_UNAVAILABLE": "HelpDesk 暂时不可用，请稍后再试。",
+      "TICKET_NOT_FOUND": "这条咨询不存在或已不可用。",
+      "STALE_TICKET": "这条咨询已更新，请重新查看。",
+      "INVALID_TRANSITION": "当前状态下不能执行这个操作。",
+      "IDEMPOTENCY_CONFLICT": "这次提交与之前的请求冲突，请刷新后重试。",
+      "INVALID_INPUT": "请检查填写内容后重试。",
+      "NOT_AUTHORISED": "你的角色只能查看服务台。",
+      "RATE_LIMITED": "请求太频繁，请稍后再试。",
+      "VERSION_CONFLICT": "这个问题刚被其他人修改，列表已刷新，请重新操作。",
+      "QUESTION_NOT_FOUND": "这个问题已不存在。",
+      "generic": "出了点问题，请重试。"
     }
   }
 }
