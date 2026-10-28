@@ -11,6 +11,7 @@ import {
   type EmployeeRole,
 } from '../../../contracts/employee';
 import {
+  EMPLOYEE_PAGE_MAX,
   EMPLOYEE_PAGE_SIZE_DEFAULT,
   EMPLOYEE_PAGE_SIZE_MAX,
 } from '../../../lib/securityPolicy';
@@ -30,6 +31,7 @@ import {
   resetLink,
   revokeTokensForEmployee,
 } from '../../user-authentication/services/verificationTokens';
+import { reissueActivation } from '../../user-authentication/services/passwordFlows';
 
 export type EmployeeListItem = {
   employeeId: string;
@@ -76,6 +78,15 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/** 非有限数或越界的分页参数夹到 [1, max]，避免巨大 OFFSET 让数据库报错。 */
+function clampInt(value: number | undefined, fallback: number, max: number) {
+  const n =
+    value !== undefined && Number.isFinite(value)
+      ? Math.trunc(value)
+      : fallback;
+  return Math.min(Math.max(1, n), max);
+}
+
 /** PRD PORT-LST-002：邮箱模糊搜索 + 角色/状态筛选 + 分页可组合。 */
 export async function listEmployees(input: {
   email?: string;
@@ -84,11 +95,12 @@ export async function listEmployees(input: {
   page?: number;
   pageSize?: number;
 }): Promise<EmployeeListResult> {
-  const pageSize = Math.min(
-    Math.max(1, Math.trunc(input.pageSize ?? EMPLOYEE_PAGE_SIZE_DEFAULT)),
+  const pageSize = clampInt(
+    input.pageSize,
+    EMPLOYEE_PAGE_SIZE_DEFAULT,
     EMPLOYEE_PAGE_SIZE_MAX,
   );
-  const page = Math.max(1, Math.trunc(input.page ?? 1));
+  const page = clampInt(input.page, 1, EMPLOYEE_PAGE_MAX);
 
   const filter: employeeRepository.EmployeeFilter = {
     limit: pageSize,
@@ -172,7 +184,12 @@ export async function createEmployee(input: {
 }
 
 export type UpdateEmployeeOutcome =
-  | { ok: true; employee: EmployeeListItem; delivery?: string; manualLink?: string }
+  | {
+      ok: true;
+      employee: EmployeeListItem;
+      delivery?: string;
+      manualLink?: string;
+    }
   | { ok: false; code: ErrorCode };
 
 /** PRD PORT-EDT-001~006。 */
@@ -321,6 +338,17 @@ export async function sendAdminPasswordReset(input: {
 }): Promise<AdminActionOutcome> {
   const employee = await employeeRepository.findById(input.employeeId);
   if (!employee) return { ok: false, code: 'INVALID_INPUT' };
+
+  // 还没激活的账号不走重置：改为重发激活邮件，激活仍是唯一的验证途径
+  if (employee.emailVerification !== 'VERIFIED') {
+    return reissueActivation({
+      employeeId: employee.employeeId,
+      actorEmployeeId: input.actorEmployeeId,
+      locale: input.locale,
+      appUrl: input.appUrl,
+      ipAddress: input.ipAddress,
+    });
+  }
 
   const rawToken = await issueResetToken(employee.employeeId);
   const link = resetLink(input.appUrl, input.locale, rawToken);

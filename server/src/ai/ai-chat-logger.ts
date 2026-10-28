@@ -21,6 +21,8 @@ export interface AiChatLogEntry {
   mode: 'LECTURE' | 'SOCRATIC';
   /** 2026-10-22：区分后台测试对话与 Portal 学员对话 */
   channel: 'admin' | 'learner';
+  /** 2026-10-28：Portal 学员 userId；后台测试/直播间不传 */
+  userId?: string;
   provider: string;
   model: string;
   historyCount: number;
@@ -63,6 +65,7 @@ export class AiChatLogger {
         releaseId: entry.releaseId,
         mode: entry.mode,
         channel: entry.channel,
+        ...(entry.userId ? { userId: entry.userId } : {}),
         provider: entry.provider,
         model: entry.model,
         historyCount: entry.historyCount,

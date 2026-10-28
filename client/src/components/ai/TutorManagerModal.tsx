@@ -4,6 +4,7 @@ import type { ColumnsType } from '../ui'
 import { useAiStore } from '../../stores/aiStore'
 import type { AiTutorListView } from '../../api/ai'
 import { tokens } from '../../theme/tokens'
+import { useAiText } from './i18n'
 
 /**
  * 「管理所有 online」弹窗（§4.2.6，2026-10-20）：
@@ -18,6 +19,7 @@ export function TutorManagerModal() {
   const tutors = useAiStore((s) => s.tutors)
   const loading = useAiStore((s) => s.tutorsLoading)
   const setTutorOnline = useAiStore((s) => s.setTutorOnline)
+  const { text } = useAiText()
 
   const [keyword, setKeyword] = useState('')
 
@@ -29,13 +31,13 @@ export function TutorManagerModal() {
 
   const columns: ColumnsType<AiTutorListView> = [
     {
-      title: 'AI Tutor',
+      title: text('managerColumnTutor'),
       dataIndex: 'title',
       key: 'title',
       sorter: (a, b) => a.title.localeCompare(b.title),
     },
     {
-      title: 'Online',
+      title: text('managerColumnOnline'),
       dataIndex: 'online',
       key: 'online',
       width: 120,
@@ -58,7 +60,7 @@ export function TutorManagerModal() {
 
   return (
     <Modal
-      title="管理所有 online"
+      title={text('managerTitle')}
       open={open}
       onCancel={close}
       footer={null}
@@ -74,7 +76,7 @@ export function TutorManagerModal() {
       >
         <Input.Search
           allowClear
-          placeholder="搜索 AI Tutor"
+          placeholder={text('managerSearch')}
           style={{ width: 220 }}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}

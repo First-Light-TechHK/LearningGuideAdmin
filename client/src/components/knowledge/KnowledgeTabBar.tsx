@@ -1,4 +1,5 @@
 import { tokens } from '../../theme/tokens'
+import { useKText } from './i18n'
 
 /** Knowledge 模块顶部 Tab 键 */
 export type KnowledgeTabKey = 'pages' | 'publish'
@@ -8,9 +9,9 @@ interface KnowledgeTabBarProps {
   onChange: (key: KnowledgeTabKey) => void
 }
 
-const TABS: { key: KnowledgeTabKey; label: string }[] = [
-  { key: 'pages', label: 'Knowledge Pages' },
-  { key: 'publish', label: 'Releases' },
+const TABS: { key: KnowledgeTabKey; labelKey: string }[] = [
+  { key: 'pages', labelKey: 'tabs.pages' },
+  { key: 'publish', labelKey: 'tabs.publish' },
 ]
 
 /**
@@ -20,6 +21,7 @@ const TABS: { key: KnowledgeTabKey; label: string }[] = [
  * 激活 Tab 底部 2px 主色下划线（下划线宽度 = 文字宽度）。
  */
 export function KnowledgeTabBar({ active, onChange }: KnowledgeTabBarProps) {
+  const { text } = useKText()
   return (
     <div
       role="tablist"
@@ -57,7 +59,7 @@ export function KnowledgeTabBar({ active, onChange }: KnowledgeTabBarProps) {
               color: on ? tokens.color.primaryDark : '#000000',
             }}
           >
-            {tab.label}
+            {text(tab.labelKey)}
             {on && (
               <span
                 aria-hidden

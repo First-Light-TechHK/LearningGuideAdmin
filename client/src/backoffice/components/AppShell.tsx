@@ -31,6 +31,7 @@ import {
   type MenuKey,
 } from "../rbac/permissions";
 import { boFetch, postJson } from "../lib/api";
+import { clearEmployeeWorkspace } from "../lib/signOutCleanup";
 
 const MENU_ICON: Record<MenuKey, (props: { size?: number }) => React.ReactElement> = {
   course: CourseIcon,
@@ -95,6 +96,7 @@ export function AppShell({
 
   async function signOut() {
     await boFetch("/api/auth/sign-out", { method: "POST" });
+    clearEmployeeWorkspace();
     router.replace(`/${locale}/sign-in`);
     router.refresh();
   }

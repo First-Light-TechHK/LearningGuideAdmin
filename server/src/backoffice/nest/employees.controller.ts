@@ -14,7 +14,7 @@ import {
 import { DEFAULT_LOCALE, isLocale, type Locale } from '../lib/i18n/config';
 import { consume } from '../lib/rateLimit';
 import {
-  EMAIL_SEND_MAX_PER_WINDOW,
+  ADMIN_EMAIL_SEND_MAX_PER_WINDOW,
   RATE_LIMIT_WINDOW_MINUTES,
 } from '../lib/securityPolicy';
 import {
@@ -36,10 +36,12 @@ function admin(request: BackofficeRequest) {
   return employee;
 }
 
-function emailLimit(request: BackofficeRequest, action: string): void {
-  const key = `${action}:${clientIp(request)}`;
+/** 按操作者计数：同一办公室出口 IP 下的多位 Admin 互不占额度。 */
+function emailLimit(actorEmployeeId: string): void {
+  const key = `admin-email:${actorEmployeeId}`;
   if (
-    !consume(key, EMAIL_SEND_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES).allowed
+    !consume(key, ADMIN_EMAIL_SEND_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES)
+      .allowed
   ) {
     throw backofficeError(
       'RATE_LIMITED',
@@ -77,7 +79,7 @@ export class BackofficeEmployeesController {
   @HttpCode(200)
   async create(@Req() request: BackofficeRequest, @Body() raw: unknown) {
     const actor = admin(request);
-    emailLimit(request, 'employee-create');
+    emailLimit(actor.employeeId);
     const body = asBody(raw);
     const outcome = await createEmployee({
       rawEmail: readString(body, 'email'),
@@ -131,7 +133,7 @@ export class BackofficeEmployeesController {
     @Body() raw: unknown,
   ) {
     const actor = admin(request);
-    emailLimit(request, 'admin-reset');
+    emailLimit(actor.employeeId);
     const outcome = await sendAdminPasswordReset({
       employeeId,
       actorEmployeeId: actor.employeeId,
@@ -151,7 +153,7 @@ export class BackofficeEmployeesController {
     @Body() raw: unknown,
   ) {
     const actor = admin(request);
-    emailLimit(request, 'resend-activation');
+    emailLimit(actor.employeeId);
     const outcome = await reissueActivation({
       employeeId,
       actorEmployeeId: actor.employeeId,

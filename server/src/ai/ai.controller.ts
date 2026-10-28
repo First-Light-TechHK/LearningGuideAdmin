@@ -60,7 +60,7 @@ export class AiController {
     @Param('courseId') courseId: string,
     @Body() dto: ResetAiConfigDto,
   ) {
-    return this.configs.resetConfig(courseId, dto.mode);
+    return this.configs.resetConfig(courseId, dto.mode, dto.releaseId);
   }
 
   /** 设置「测试所选 Release」（§4.3.1/§5.2，2026-10-20 新增，持久化 Course.aiTestReleaseId） */

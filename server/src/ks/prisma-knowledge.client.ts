@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { lockCourseRow } from '../prisma/course-lock';
 import { EmbeddingService } from '../ai/embedding/embedding.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
@@ -87,14 +88,25 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
     };
   }
 
+  /** 与删除 Release 共用 Course 行锁，锁内复查版本仍属于该课程（QA 2026-10-27 A7） */
   setTestRelease(
     courseId: string,
     releaseId: string,
   ): Promise<KnowledgeCourse> {
-    return this.prisma.course.update({
-      where: { id: courseId },
-      data: { aiTestReleaseId: releaseId },
-      select: COURSE_FIELDS,
+    return this.prisma.$transaction(async (tx) => {
+      await lockCourseRow(tx, courseId);
+      const release = await tx.release.findUnique({
+        where: { id: releaseId },
+        select: { courseId: true },
+      });
+      if (!release || release.courseId !== courseId) {
+        throw new NotFoundException('发布版本不存在或不属于该课程');
+      }
+      return tx.course.update({
+        where: { id: courseId },
+        data: { aiTestReleaseId: releaseId },
+        select: COURSE_FIELDS,
+      });
     });
   }
 

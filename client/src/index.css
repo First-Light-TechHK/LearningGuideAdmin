@@ -104,18 +104,137 @@ body,
   opacity: 1;
 }
 
-/* BlockNote 编辑器浮层（选中格式化工具栏、链接工具栏等）确保不被裁剪且层级最高 */
-.bn-editor {
-  min-height: 100%;
+/* Markdown 源码编辑器（CodeMirror 6）：撑满容器，滚动交给内部 .cm-scroller */
+.cm-editor {
+  height: 100%;
+  outline: none !important;
 }
-.bn-floating-toolbar,
-.bn-formatting-toolbar,
-.bn-link-toolbar {
-  z-index: 10000 !important;
+.cm-editor .cm-scroller {
+  overflow: auto;
 }
-/* sideMenu 拖拽手柄 hover 可见 */
-.bn-side-menu {
-  z-index: 100;
+
+/* ===== Markdown Live Preview 装饰（2026-10-29，M2）=====
+   底层仍是纯 Markdown 文本；以下仅影响显示，光标进入对应范围时标记会自动回退为源码。 */
+.cm-md-h1 { font-size: 1.6em; font-weight: 700; line-height: 1.5; }
+.cm-md-h2 { font-size: 1.4em; font-weight: 700; line-height: 1.45; }
+.cm-md-h3 { font-size: 1.22em; font-weight: 600; }
+.cm-md-h4 { font-size: 1.1em; font-weight: 600; }
+.cm-md-h5 { font-size: 1em; font-weight: 600; }
+.cm-md-h6 { font-size: 0.95em; font-weight: 600; color: #64748b; }
+.cm-md-strong { font-weight: 700; }
+.cm-md-em { font-style: italic; }
+.cm-md-strike { text-decoration: line-through; color: #94a3b8; }
+.cm-md-code {
+  font-family: monospace;
+  background: #f4f4f5;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+/* 无序列表：隐藏 `- ` 后用 ::before 画项目符号（缩进由保留的空格维持） */
+.cm-md-li::before { content: '• '; color: #94a3b8; }
+/* 有序列表：保留数字、不加 ::before（不覆盖 .cm-line 的基础 padding，避免整行左移） */
+.cm-md-table-row { font-family: monospace; background: #fafafa; }
+.cm-md-fence { color: #94a3b8; }
+
+/* ===== M3 Widget：公式 / 图片 / 表格就地渲染（2026-10-29） ===== */
+.cm-md-math-inline { display: inline-block; vertical-align: middle; padding: 0 2px; }
+.cm-md-math-block {
+  display: block;
+  padding: 8px 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.cm-md-image-inline img { max-height: 1.6em; vertical-align: middle; border-radius: 3px; }
+.cm-md-image-inline .cm-md-image-alt { display: none; }
+.cm-md-image-block { display: block; padding: 6px 0; text-align: center; }
+.cm-md-image-block img { max-width: 100%; border-radius: 6px; }
+.cm-md-image-failed {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px dashed #f5a3a3;
+  border-radius: 4px;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: middle;
+}
+.cm-md-image-block .cm-md-image-alt {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.cm-md-table-widget { position: relative; padding: 6px 0; overflow-x: auto; }
+.cm-md-table-widget .cm-md-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cm-md-table-widget .cm-md-table th,
+.cm-md-table-widget .cm-md-table td {
+  border: 1px solid #e2e8f0;
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.cm-md-table-widget .cm-md-table thead th { background: #f6f8fa; font-weight: 600; }
+.cm-md-table-cell-preview { display: block; }
+
+/* 表格预览态：右上角编辑按钮（hover 显现） */
+.cm-md-table-edit-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0;
+  transition: opacity .15s;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  z-index: 2;
+}
+.cm-md-table-widget:hover .cm-md-table-edit-btn { opacity: 1; }
+.cm-md-table-edit-btn:hover { background: #f3f4f6; }
+
+/* 表格编辑态 */
+.cm-md-table-editing { padding: 8px; border: 1px dashed #93c5fd; border-radius: 6px; background: #fafcff; }
+.cm-md-table-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.cm-md-table-tbtn {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.cm-md-table-tbtn:hover { background: #f3f4f6; }
+.cm-md-table-tbtn-primary {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+.cm-md-table-tbtn-primary:hover { background: #1d4ed8; }
+.cm-md-table-cell-edit {
+  min-width: 60px;
+  min-height: 1.4em;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cm-md-table-cell-edit:focus {
+  box-shadow: inset 0 0 0 2px #93c5fd;
+  background: #fff;
 }
 
 /* AI Tutor 配置面板（§4.2）：用 plain div 直接控制 flex 比例，无需穿透 antd Form.Item */

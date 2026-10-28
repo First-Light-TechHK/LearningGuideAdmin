@@ -250,13 +250,14 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('GET /api/courses/:id/releases 历史列表不含 snapshotData；纯快照发布后 isActive/isTestSelected 均为 false、isEditing=true（§3.4.3）', async () => {
+  it('GET /api/courses/:id/releases 历史列表不含 snapshotData；纯快照发布后 isActive=false、isEditing=true，首个 Release 即测试所选（§3.4.3，QA A6）', async () => {
     const res = await api.get(`/api/courses/${courseId}/releases`).expect(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].snapshotData).toBeUndefined();
     // 纯快照：Create Release 不改动 Live 指针（2026-10-20 改拍）
     expect(res.body.data[0].isActive).toBe(false);
-    expect(res.body.data[0].isTestSelected).toBe(false);
+    // 课程此前没有测试 / Live 版本：首个 Release 自动作为 AI Tutor 测试所选版本（QA 2026-10-27 A6）
+    expect(res.body.data[0].isTestSelected).toBe(true);
     // 新建 Release 落在新版本 → editing（2026-10-20 三次改拍）
     expect(res.body.data[0].isEditing).toBe(true);
   });

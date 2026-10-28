@@ -28,8 +28,10 @@ http.interceptors.response.use(
     return response
   },
   (error) => {
-    // 会话过期 / 被停用：通知 BackOffice 外壳重新读取会话（会跳回登录页）
-    if (error.response?.status === 401) notifySessionChanged()
+    // 会话过期 / 被停用（401）或角色刚被改（403）：通知 BackOffice 外壳重新读取会话，
+    // 401 会跳回登录页，403 会按新角色刷新菜单
+    const status = error.response?.status
+    if (status === 401 || status === 403) notifySessionChanged()
     // 后端错误信封：{ success:false, error:{ code, message } }
     const envelope = error.response?.data as ApiEnvelope<null> | undefined
     if (envelope?.error) {

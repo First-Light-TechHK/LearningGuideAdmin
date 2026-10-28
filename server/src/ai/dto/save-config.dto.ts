@@ -6,20 +6,25 @@ import {
   MaxLength,
 } from 'class-validator';
 
-/** PUT /api/ai/config 请求体（§4.2.5 / §5.2；2026-10-20 二次改拍：新增 mode，只写该模式） */
+/** PUT /api/ai/config 请求体（§4.2.5 / §5.2；2026-10-27 调整：System Prompt 按 mode，Welcome/Model 共享） */
 export class SaveAiConfigDto {
   @IsUUID()
   courseId!: string;
 
-  /** 当前保存的模式：只写该模式的 System Prompt / Welcome Message / Model */
-  @IsIn(['LECTURE', 'SOCRATIC'])
-  mode!: 'LECTURE' | 'SOCRATIC';
+  /** 要写入的 Release（可选）：带了就写这一份，省略时写「测试所选 Release」 */
+  @IsOptional()
+  @IsUUID()
+  releaseId?: string;
+
+  /** 当前保存的模式：只写该模式的 System Prompt */
+  @IsIn(['LECTURE', 'SOCRATIC', 'ASSESSMENT'])
+  mode!: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT';
 
   @IsString()
   @IsIn(['openrouter'])
   llmProvider!: string;
 
-  /** 该模式生效模型 */
+  /** 课程级统一 LLM Model（不随模式区分） */
   @IsString()
   @MaxLength(100)
   llmModel!: string;
@@ -30,7 +35,7 @@ export class SaveAiConfigDto {
   @MaxLength(20000)
   systemPrompt?: string;
 
-  /** 该模式自定义 Welcome Message；省略/空串表示清除 */
+  /** 课程级统一 Welcome Message（不随模式区分）；省略/空串表示清除 */
   @IsOptional()
   @IsString()
   @MaxLength(2000)

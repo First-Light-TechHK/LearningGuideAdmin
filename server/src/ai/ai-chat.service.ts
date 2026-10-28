@@ -16,7 +16,7 @@ import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmMessage } from './providers/llm-provider.interface';
 import { ProviderRegistry } from './providers/provider.registry';
-import { RateLimitService } from './rate-limit.service';
+import { RateLimitService, type AiRateLimitChannel } from './rate-limit.service';
 
 /** 学员端语言指令（2026-10-22；默认模板已包含教学风格，不再追加固定苏格拉底指令） */
 // The language instruction follows the student's own message, not the portal
@@ -61,6 +61,7 @@ export class AiChatService {
       history: dto.history,
       locale: null,
       channel: 'admin',
+      quota: 'admin-test',
       resolve: async () => {
         const course = await this.knowledge.getCourse(dto.courseId);
         if (!course) throw new NotFoundException('课程不存在');
@@ -86,6 +87,7 @@ export class AiChatService {
       locale: dto.locale,
       channel: 'learner',
       quota: dto.channel ?? 'portal',
+      userId: dto.userId,
       resolve: async () => {
         const course = await this.knowledge.getCourseByExternalId(
           dto.externalCourseId,
@@ -111,8 +113,10 @@ export class AiChatService {
     history?: ChatHistoryItemDto[];
     locale: 'en-GB' | 'zh-CN' | null;
     channel: 'admin' | 'learner';
-    /** 限流分桶（2026-10-23）：直播间单独配额，默认按学员个人对话计 */
-    quota?: 'portal' | 'study-group';
+    /** 限流分桶（2026-10-23）：直播间与后台测试各自单独配额，默认按学员个人对话计 */
+    quota?: AiRateLimitChannel;
+    /** Portal 学员 userId（2026-10-28）：用于日志审计和用户级限流分桶；后台测试/直播间不传 */
+    userId?: string;
     resolve: () => Promise<{ courseId: string; releaseId: string | null }>;
   }): AsyncGenerator<string> {
     const startedAt = Date.now();
@@ -130,7 +134,7 @@ export class AiChatService {
       const resolved = await input.resolve();
       courseId = resolved.courseId;
       releaseId = resolved.releaseId;
-      await this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal');
+      await this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal', input.userId);
 
       const [runtime, prompts, context] = await Promise.all([
         this.configs.resolveRuntime(courseId, releaseId, input.mode),
@@ -195,6 +199,7 @@ export class AiChatService {
           releaseId,
           mode: input.mode,
           channel: input.channel,
+          ...(input.userId ? { userId: input.userId } : {}),
           provider: providerName,
           model,
           historyCount: history.length,
