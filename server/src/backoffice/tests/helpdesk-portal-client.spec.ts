@@ -404,6 +404,64 @@ describe('Portal HelpDesk client', () => {
       ).rejects.toMatchObject({ status: 504, code: 'HELPDESK_UNAVAILABLE' });
     });
 
+    it('never follows a redirect (the Bearer token stays with Portal)', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(json(200, { tickets: [], nextCursor: null })),
+        );
+      await client(fetchImpl).listTickets({});
+      fetchImpl.mockResolvedValueOnce(json(200, rawDetail));
+      await client(fetchImpl).getTicket(TICKET_ID);
+      fetchImpl.mockResolvedValueOnce(json(200, rawDetail));
+      await client(fetchImpl).postAction(
+        TICKET_ID,
+        { action: 'claim', agent: AGENT, expectedSequence: 1 },
+        '0192ffff-0000-7000-8000-000000000001',
+      );
+      fetchImpl.mockResolvedValueOnce(
+        new Response(new Uint8Array(1), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      );
+      await client(fetchImpl).getAttachment('a1');
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+      for (let i = 0; i < 4; i++)
+        expect(call(fetchImpl, i).init.redirect).toBe('error');
+    });
+
+    it('waits 5 s for JSON calls and 10 s for attachments by default', async () => {
+      const timeout = jest.spyOn(AbortSignal, 'timeout');
+      try {
+        const fetchImpl = jest
+          .fn()
+          .mockResolvedValueOnce(json(200, { tickets: [], nextCursor: null }))
+          .mockResolvedValueOnce(json(200, rawDetail))
+          .mockResolvedValueOnce(
+            new Response(new Uint8Array(1), {
+              status: 200,
+              headers: { 'content-type': 'image/png' },
+            }),
+          );
+        const portal = createPortalHelpdeskClient({
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+        });
+        await portal.listTickets({});
+        await portal.postMessage(
+          TICKET_ID,
+          { body: 'Hi', internal: false, agent: AGENT, expectedSequence: 1 },
+          '0192ffff-0000-7000-8000-000000000001',
+        );
+        await portal.getAttachment('a1');
+        expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([
+          5_000, 5_000, 10_000,
+        ]);
+      } finally {
+        timeout.mockRestore();
+      }
+    });
+
     it('maps an unparseable success body to 502', async () => {
       const fetchImpl = jest
         .fn()

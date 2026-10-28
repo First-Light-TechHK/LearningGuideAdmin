@@ -108,24 +108,45 @@ describeDb('PrismaHelpdeskSuggestionStore (PostgreSQL)', () => {
     await expect(store.statsFor([])).resolves.toEqual(new Map());
   });
 
-  it('clears query text older than the cut-off and keeps the counters', async () => {
+  it('clears query text older than the cut-off, keeps recent text and the counters', async () => {
     const old = entry(qa1);
-    await store.record(old);
+    const recent = { ...entry(qa1), queryText: 'Still within 90 days' };
+    const edge = { ...entry(qa2), queryText: 'Exactly 89 days old' };
+    for (const r of [old, recent, edge]) await store.record(r);
     await admin.query(
       `UPDATE ${schema}.helpdesk_suggestions SET created_at = now() - interval '91 days' WHERE id = $1`,
       [old.id],
     );
+    await admin.query(
+      `UPDATE ${schema}.helpdesk_suggestions SET created_at = now() - interval '89 days' WHERE id = $1`,
+      [edge.id],
+    );
     const cleared = await store.purgeQueryText(
       new Date(Date.now() - 90 * 86_400_000),
     );
-    expect(cleared).toBeGreaterThanOrEqual(1);
+    // only the 91-day-old row; every other row in the table is younger than 90 days
+    expect(cleared).toBe(1);
     const { rows } = await admin.query<{
+      id: string;
       query_text: string | null;
       qa_id: string;
     }>(
-      `SELECT query_text, qa_id FROM ${schema}.helpdesk_suggestions WHERE id = $1`,
-      [old.id],
+      `SELECT id::text, query_text, qa_id::text FROM ${schema}.helpdesk_suggestions WHERE id = ANY($1::uuid[])`,
+      [[old.id, recent.id, edge.id]],
     );
-    expect(rows[0]).toEqual({ query_text: null, qa_id: qa1 });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(old.id)).toMatchObject({ query_text: null, qa_id: qa1 });
+    expect(byId.get(recent.id)).toMatchObject({
+      query_text: 'Still within 90 days',
+      qa_id: qa1,
+    });
+    expect(byId.get(edge.id)).toMatchObject({
+      query_text: 'Exactly 89 days old',
+      qa_id: qa2,
+    });
+    // a second run finds nothing left to clear
+    await expect(
+      store.purgeQueryText(new Date(Date.now() - 90 * 86_400_000)),
+    ).resolves.toBe(0);
   });
 });

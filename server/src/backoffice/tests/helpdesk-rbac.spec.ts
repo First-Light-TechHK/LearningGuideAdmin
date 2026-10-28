@@ -360,6 +360,8 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
       expect(res.headers['content-type']).toBe('image/png');
       expect(res.headers['cache-control']).toBe('private, no-store');
       expect(res.headers['x-content-type-options']).toBe('nosniff');
+      // a proxied file must never run script in the BackOffice origin
+      expect(res.headers['content-security-policy']).toBe("default-src 'none'");
       expect(Buffer.from(res.body as Buffer)).toEqual(
         Buffer.from([137, 80, 78, 71]),
       );
@@ -389,6 +391,8 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
         `attachment; filename="in_voice _.pdf"; filename*=UTF-8''in%22voice%20%C3%A4.pdf`,
       );
       expect(res.headers['x-content-type-options']).toBe('nosniff');
+      expect(res.headers['content-security-policy']).toBe("default-src 'none'");
+      expect(res.headers['cache-control']).toBe('private, no-store');
     });
 
     it('serves images inline', async () => {
