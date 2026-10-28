@@ -175,6 +175,57 @@ describe('route access classification', () => {
     }
   });
 
+  it('puts Common Questions (HelpDesk addendum §A) behind the HelpDesk menu too', () => {
+    const h = ['helpDesk'];
+    const cases: [string, string, string][] = [
+      ['GET', '/api/helpdesk/questions', 'VIEW'],
+      ['GET', '/api/helpdesk/questions/q1', 'VIEW'],
+      ['GET', '/api/helpdesk/questions/q1/revisions', 'VIEW'],
+      ['POST', '/api/helpdesk/questions', 'CREATE'],
+      ['PUT', '/api/helpdesk/questions/q1', 'CREATE'],
+      ['POST', '/api/helpdesk/questions/q1/publish', 'CREATE'],
+      ['POST', '/api/helpdesk/questions/q1/unpublish', 'CREATE'],
+      ['POST', '/api/helpdesk/questions/q1/archive', 'CREATE'],
+      ['POST', '/api/helpdesk/questions/reorder', 'CREATE'],
+    ];
+    for (const [method, path, action] of cases) {
+      assert.deepEqual(
+        routeAccess(method, path),
+        menu(h, action),
+        `${method} ${path}`,
+      );
+    }
+  });
+
+  it('exempts only the Portal helpdesk integration routes from the employee login (Bearer only)', () => {
+    for (const [method, path] of [
+      ['GET', '/api/integration/helpdesk/questions'],
+      ['GET', '/api/integration/helpdesk/questions?locale=en-GB'],
+      ['POST', '/api/integration/helpdesk/suggest'],
+      ['POST', '/api/integration/helpdesk/suggestions/s1/outcome'],
+      ['GET', '/API/Integration/HelpDesk/questions/'],
+    ]) {
+      assert.deepEqual(
+        routeAccess(method, path.split('?')[0]),
+        { kind: 'helpdeskIntegration' },
+        `${method} ${path}`,
+      );
+    }
+    // 其它 integration 路径、或 helpdesk 前缀的变体都不享受豁免
+    assert.deepEqual(routeAccess('GET', '/api/integration/other'), {
+      kind: 'employeeAdmin',
+    });
+    assert.deepEqual(routeAccess('GET', '/api/integration'), {
+      kind: 'employeeAdmin',
+    });
+    assert.deepEqual(
+      routeAccess('GET', '/api/integration/helpdeskx/questions'),
+      {
+        kind: 'employeeAdmin',
+      },
+    );
+  });
+
   it('gives unregistered endpoints to Admin only', () => {
     assert.deepEqual(routeAccess('GET', '/api/something-new'), {
       kind: 'employeeAdmin',

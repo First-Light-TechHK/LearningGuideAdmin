@@ -40,9 +40,15 @@ const rawSummary = {
   id: TICKET_ID,
   number: 'LG-261028-0001',
   subject: 'Cannot open lesson',
-  category: 'learning',
+  category: 'course_content',
   status: 'OPEN',
+  locale: 'zh-CN',
   learner: { id: 'u1', email: 'learner@example.com', name: 'Lena' },
+  contactEmail: 'lena.contact@example.com',
+  preview: 'Help',
+  unreadByAgent: true,
+  tags: ['login issue', 7, 'payment'],
+  needsReply: true,
   assignee: null,
   sequence: 1,
   createdAt: '2026-10-28T01:00:00Z',
@@ -57,7 +63,21 @@ const rawSummary = {
 
 const rawDetail = {
   ...rawSummary,
-  locale: 'zh-CN',
+  student: {
+    id: 'u1',
+    name: 'Lena',
+    accountEmail: 'learner@example.com',
+    contactEmail: 'lena.contact@example.com',
+    joinedAt: '2024-01-15T00:00:00Z',
+    totalEnquiries: 4,
+    currentCourse: { id: 'c1', title: 'Advanced Web Development' },
+  },
+  subscription: {
+    planName: 'Advanced Web Development',
+    billingCycle: 'annual',
+    status: 'active',
+    renewalDate: '2025-01-15',
+  },
   messages: [
     {
       id: 'm1',
@@ -70,7 +90,13 @@ const rawDetail = {
           id: 'a1',
           fileName: 'shot.png',
           contentType: 'image/png',
-          size: 1234,
+          sizeBytes: 1234,
+        },
+        {
+          id: 'a2',
+          fileName: 'invoice.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 999,
         },
       ],
       createdAt: '2026-10-28T01:00:00Z',
@@ -168,7 +194,7 @@ describe('Portal HelpDesk client', () => {
   });
 
   describe('requests', () => {
-    it('lists tickets with Bearer auth and the status / q / limit / cursor query', async () => {
+    it('lists tickets with Bearer auth and the status / category / tag / q / limit / cursor query', async () => {
       const fetchImpl = jest.fn().mockResolvedValue(
         json(200, {
           tickets: [rawSummary],
@@ -177,14 +203,16 @@ describe('Portal HelpDesk client', () => {
         }),
       );
       const result = await client(fetchImpl).listTickets({
-        statuses: ['OPEN', 'ASSIGNED'],
+        status: 'needs_reply',
+        category: 'technical_support',
+        tag: 'login issue',
         q: 'LG-26 x',
         limit: 20,
         cursor: 'c1',
       });
       const { url, init, headers } = call(fetchImpl);
       expect(url).toBe(
-        'http://portal.test/api/integration/helpdesk/tickets?status=OPEN%2CASSIGNED&q=LG-26+x&limit=20&cursor=c1',
+        'http://portal.test/api/integration/helpdesk/tickets?status=needs_reply&category=technical_support&tag=login+issue&q=LG-26+x&limit=20&cursor=c1',
       );
       expect(init.method).toBe('GET');
       expect(headers.authorization).toBe(`Bearer ${TEST_TOKEN}`);
@@ -254,6 +282,37 @@ describe('Portal HelpDesk client', () => {
         action: 'claim',
         agent: AGENT,
         expectedSequence: 1,
+      });
+    });
+
+    it('sends the tag for tag actions and leaves out a missing expectedSequence', async () => {
+      const fetchImpl = jest
+        .fn()
+        .mockImplementation(() => Promise.resolve(json(200, rawDetail)));
+      await client(fetchImpl).postAction(
+        TICKET_ID,
+        {
+          action: 'add_tag',
+          tag: 'login issue',
+          agent: AGENT,
+          expectedSequence: 2,
+        },
+        'idem-key-3',
+      );
+      await client(fetchImpl).postAction(
+        TICKET_ID,
+        { action: 'mark_read', agent: AGENT },
+        'idem-key-4',
+      );
+      expect(JSON.parse(call(fetchImpl, 0).init.body as string)).toEqual({
+        action: 'add_tag',
+        tag: 'login issue',
+        agent: AGENT,
+        expectedSequence: 2,
+      });
+      expect(JSON.parse(call(fetchImpl, 1).init.body as string)).toEqual({
+        action: 'mark_read',
+        agent: AGENT,
       });
     });
 
@@ -375,17 +434,63 @@ describe('Portal HelpDesk client', () => {
       );
       expect(file.contentType).toBe('image/png');
       expect(file.data.length).toBe(10);
+      expect(file.fileName).toBeNull();
     });
 
-    it('refuses anything that is not png / jpeg / webp', async () => {
-      const fetchImpl = jest.fn().mockResolvedValue(image('text/html', 10));
-      await expect(client(fetchImpl).getAttachment('a1')).rejects.toMatchObject(
-        { status: 502, code: 'HELPDESK_UNAVAILABLE' },
-      );
+    it.each([
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+      'text/plain',
+      'text/csv',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ])('accepts %s (addendum §B file types)', async (type) => {
+      const fetchImpl = jest.fn().mockResolvedValue(image(type, 3));
+      await expect(
+        client(fetchImpl).getAttachment('a1'),
+      ).resolves.toMatchObject({
+        contentType: type,
+      });
     });
 
-    it('refuses files over 5 MB', async () => {
-      const big = 5 * 1024 * 1024 + 1;
+    it('reads the file name from Content-Disposition', async () => {
+      const withName = (value: string) =>
+        new Response(new Uint8Array(2), {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'content-disposition': value,
+          },
+        });
+      const cases: [string, string | null][] = [
+        ['attachment; filename="invoice.pdf"', 'invoice.pdf'],
+        ["attachment; filename*=UTF-8''%E5%8F%91%E7%A5%A8.pdf", '发票.pdf'],
+        ['attachment; filename="../../etc/passwd"', 'passwd'],
+        ['inline', null],
+      ];
+      for (const [header, expected] of cases) {
+        const fetchImpl = jest.fn().mockResolvedValue(withName(header));
+        expect((await client(fetchImpl).getAttachment('a1')).fileName).toBe(
+          expected,
+        );
+      }
+    });
+
+    it.each(['text/html', 'image/svg+xml', 'application/octet-stream', ''])(
+      'refuses %s',
+      async (type) => {
+        const fetchImpl = jest.fn().mockResolvedValue(image(type, 10));
+        await expect(
+          client(fetchImpl).getAttachment('a1'),
+        ).rejects.toMatchObject({ status: 502, code: 'HELPDESK_UNAVAILABLE' });
+      },
+    );
+
+    it('refuses files over 10 MB', async () => {
+      const big = 10 * 1024 * 1024 + 1;
       const fetchImpl = jest
         .fn()
         .mockResolvedValue(image('image/jpeg', 1, String(big)));
@@ -396,6 +501,10 @@ describe('Portal HelpDesk client', () => {
       await expect(client(fetchBody).getAttachment('a1')).rejects.toMatchObject(
         { status: 502 },
       );
+      const fits = jest
+        .fn()
+        .mockResolvedValue(image('image/webp', 10 * 1024 * 1024));
+      await expect(client(fits).getAttachment('a1')).resolves.toBeDefined();
     });
 
     it('maps a missing attachment to 404', async () => {
@@ -413,9 +522,15 @@ describe('Portal HelpDesk client', () => {
         id: TICKET_ID,
         number: 'LG-261028-0001',
         subject: 'Cannot open lesson',
-        category: 'learning',
+        category: 'course_content',
         status: 'OPEN',
+        locale: 'zh-CN',
         learner: { id: 'u1', email: 'learner@example.com', name: 'Lena' },
+        contactEmail: 'lena.contact@example.com',
+        preview: 'Help',
+        unreadByAgent: true,
+        tags: ['login issue', 'payment'],
+        needsReply: true,
         assignee: null,
         sequence: 1,
         createdAt: '2026-10-28T01:00:00Z',
@@ -436,6 +551,9 @@ describe('Portal HelpDesk client', () => {
         subject: 's',
         category: 'other',
         status: 'ASSIGNED',
+        contact_email: 'c@example.com',
+        unread_by_agent: true,
+        needs_reply: false,
         user_id: 'u9',
         user_email: 'x@example.com',
         user_name: 'X',
@@ -458,6 +576,12 @@ describe('Portal HelpDesk client', () => {
       });
       expect(summary.assignee).toEqual({ id: 'emp-2', name: 'bob' });
       expect(summary.lastMessageBy).toBe('agent');
+      expect(summary.contactEmail).toBe('c@example.com');
+      expect(summary.unreadByAgent).toBe(true);
+      expect(summary.needsReply).toBe(false);
+      expect(summary.tags).toEqual([]);
+      expect(summary.preview).toBe('');
+      expect(summary.locale).toBe('en-GB');
       expect(summary.confirmDueAt).toBe('t4');
       expect(summary.rating).toBe(5);
     });
@@ -477,6 +601,85 @@ describe('Portal HelpDesk client', () => {
           reason: null,
           messageId: null,
         },
+      });
+    });
+
+    it('caps the preview at 120 characters', () => {
+      expect(
+        normaliseSummary({ ...rawSummary, preview: 'p'.repeat(300) }).preview,
+      ).toHaveLength(120);
+    });
+
+    it('maps student, subscription and attachment fields', () => {
+      const detail = normaliseDetail(rawDetail);
+      expect(detail.student).toEqual(rawDetail.student);
+      expect(detail.subscription).toEqual(rawDetail.subscription);
+      expect(detail.messages[0].attachments).toEqual([
+        {
+          id: 'a1',
+          fileName: 'shot.png',
+          contentType: 'image/png',
+          size: 1234,
+          inline: true,
+        },
+        {
+          id: 'a2',
+          fileName: 'invoice.pdf',
+          contentType: 'application/pdf',
+          size: 999,
+          inline: false,
+        },
+      ]);
+    });
+
+    it('builds the student panel from the learner when Portal sends no student, and keeps a missing plan as null', () => {
+      const detail = normaliseDetail({
+        ...rawDetail,
+        student: undefined,
+        subscription: null,
+      });
+      expect(detail.student).toEqual({
+        id: 'u1',
+        name: 'Lena',
+        accountEmail: 'learner@example.com',
+        contactEmail: 'lena.contact@example.com',
+        joinedAt: null,
+        totalEnquiries: null,
+        currentCourse: null,
+      });
+      expect(detail.subscription).toBeNull();
+    });
+
+    it('reads snake_case student and subscription fields', () => {
+      const detail = normaliseDetail({
+        ...rawDetail,
+        student: {
+          id: 'u1',
+          name: 'Lena',
+          account_email: 'a@example.com',
+          contact_email: 'c@example.com',
+          joined_at: '2024-01-15T00:00:00Z',
+          total_enquiries: '3',
+          current_course: { id: 'c1', title: 'T' },
+        },
+        subscription: {
+          plan_name: 'P',
+          billing_cycle: 'monthly',
+          status: 'active',
+          renewal_date: '2025-01-01',
+        },
+      });
+      expect(detail.student).toMatchObject({
+        accountEmail: 'a@example.com',
+        contactEmail: 'c@example.com',
+        totalEnquiries: 3,
+        currentCourse: { id: 'c1', title: 'T' },
+      });
+      expect(detail.subscription).toEqual({
+        planName: 'P',
+        billingCycle: 'monthly',
+        status: 'active',
+        renewalDate: '2025-01-01',
       });
     });
 

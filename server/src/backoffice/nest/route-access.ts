@@ -10,6 +10,11 @@ export type RouteAccess =
   | { kind: 'service' }
   /** KS 内部接口（/api/ks/**），只给 Agent 用：Bearer KS_SERVICE_TOKEN。 */
   | { kind: 'internal' }
+  /**
+   * Portal → Admin 的 Helpdesk 集成接口（/api/integration/helpdesk/**，Figma addendum §E）：
+   * 明确豁免员工登录，只认 Bearer ADMIN_HELPDESK_TOKEN（为空 503，错 401，problem+json）。
+   */
+  | { kind: 'helpdeskIntegration' }
   /** 只要求登录（会话、改密、语言偏好）。 */
   | { kind: 'signedIn' }
   /** 员工账号管理：PRD §3.3 仅 Admin。 */
@@ -88,10 +93,13 @@ export function routeAccess(method: string, path: string): RouteAccess {
   }
   if (first === 'user') return { kind: 'service' };
   if (first === 'ks') return { kind: 'internal' };
+  if (first === 'integration' && second === 'helpdesk')
+    return { kind: 'helpdeskIntegration' };
   if (first === 'session' || first === 'preferences')
     return { kind: 'signedIn' };
   if (first === 'admin') return { kind: 'employeeAdmin' };
-  // HelpDesk 工单（Tickets v1 §7）：读 = VIEW；任何写（回复、内部备注、认领、请学员确认）
+  // HelpDesk 工单（Tickets v1 §7）与 Common Questions（Figma addendum §A）：读 = VIEW；
+  // 任何写（回复、内部备注、认领、请学员确认、标签、已读、问答增改 / 发布 / 归档 / 排序）
   // 都按 CREATE 处理，只有该菜单为 Full 的角色可用
   if (first === 'helpdesk') {
     return {

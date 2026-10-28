@@ -8,17 +8,20 @@ import {
   agentFor,
   availableActions,
   createHelpdeskService,
+  enquiryCounts,
   needsReply,
-  TAB_STATUSES,
-  tabCounts,
 } from '../modules/helpdesk/helpdeskService';
 import {
   HelpdeskError,
   type PortalHelpdeskClient,
 } from '../modules/helpdesk/portalHelpdeskClient';
 
-/** HelpDesk Tickets v1 §7：看板 Tab、待回复判定、可用操作、员工身份注入、输入校验。 */
+/**
+ * HelpDesk Tickets v1 §7 + Figma addendum §D：Enquiries 列表筛选、待回复判定、可用操作、
+ * 员工身份注入、标签 / 已读动作、输入校验。
+ */
 const TICKET_ID = '01920000-0000-7000-8000-000000000001';
+const KEY = '0192ffff-0000-7000-8000-000000000001';
 
 const employee: SessionEmployee = {
   employeeId: 'emp-42',
@@ -36,9 +39,15 @@ function summary(overrides: Partial<TicketSummary> = {}): TicketSummary {
     id: TICKET_ID,
     number: 'LG-261028-0001',
     subject: 'Help',
-    category: 'learning',
+    category: 'technical_support',
     status: 'OPEN',
+    locale: 'en-GB',
     learner: { id: 'u1', email: 'l@example.com', name: 'Lena' },
+    contactEmail: 'l@example.com',
+    preview: 'Help',
+    unreadByAgent: true,
+    tags: [],
+    needsReply: null,
     assignee: null,
     sequence: 1,
     createdAt: 't',
@@ -56,7 +65,8 @@ function summary(overrides: Partial<TicketSummary> = {}): TicketSummary {
 function detail(overrides: Partial<TicketDetail> = {}): TicketDetail {
   return {
     ...summary(),
-    locale: 'en-GB',
+    student: null,
+    subscription: null,
     messages: [],
     events: [],
     ...overrides,
@@ -71,9 +81,11 @@ function fakeClient(): jest.Mocked<PortalHelpdeskClient> {
     getTicket: jest.fn().mockResolvedValue(detail()),
     postMessage: jest.fn().mockResolvedValue(detail({ sequence: 2 })),
     postAction: jest.fn().mockResolvedValue(detail({ sequence: 2 })),
-    getAttachment: jest
-      .fn()
-      .mockResolvedValue({ contentType: 'image/png', data: Buffer.from('x') }),
+    getAttachment: jest.fn().mockResolvedValue({
+      contentType: 'image/png',
+      data: Buffer.from('x'),
+      fileName: null,
+    }),
   };
 }
 
@@ -107,46 +119,55 @@ describe('HelpDesk board rules', () => {
     }
   });
 
-  it('maps each tab to the Portal status filter', () => {
-    expect(TAB_STATUSES).toEqual({
-      needsReply: ['OPEN', 'ASSIGNED'],
-      waitingUser: ['WAITING_USER'],
-      awaitingConfirm: ['PENDING_CONFIRM'],
-      closed: ['CLOSED', 'CANCELLED'],
-      all: null,
-    });
+  it('uses the Portal needsReply flag when it sends one', () => {
+    expect(
+      needsReply({
+        status: 'WAITING_USER',
+        lastMessageBy: 'agent',
+        needsReply: true,
+      }),
+    ).toBe(true);
+    expect(
+      needsReply({
+        status: 'OPEN',
+        lastMessageBy: 'learner',
+        needsReply: false,
+      }),
+    ).toBe(false);
   });
 
-  it('derives tab counts from the Portal per-status counts', () => {
+  it('normalises Portal counts (needs_reply / all / per status) and ignores junk', () => {
     expect(
-      tabCounts({
+      enquiryCounts({
         OPEN: 2,
         ASSIGNED: 3,
         WAITING_USER: 4,
         PENDING_CONFIRM: 1,
         CLOSED: 5,
         CANCELLED: 1,
+        needs_reply: 4,
+        all: 16,
       }),
     ).toEqual({
-      needsReply: 5,
-      waitingUser: 4,
-      awaitingConfirm: 1,
-      closed: 6,
-      all: 16,
-    });
-  });
-
-  it('prefers a Portal needsReply count when it sends one, and ignores junk', () => {
-    expect(
-      tabCounts({ OPEN: 2, ASSIGNED: 3, needsReply: 4, WAITING_USER: -1 }),
-    ).toEqual({
       needsReply: 4,
-      waitingUser: 0,
-      awaitingConfirm: 0,
-      closed: 0,
-      all: 5,
+      all: 16,
+      OPEN: 2,
+      ASSIGNED: 3,
+      WAITING_USER: 4,
+      PENDING_CONFIRM: 1,
+      CLOSED: 5,
+      CANCELLED: 1,
     });
-    expect(tabCounts({ needs_reply: 1 }).needsReply).toBe(1);
+    expect(enquiryCounts({ OPEN: 2, ASSIGNED: 1, WAITING_USER: -1 })).toEqual({
+      needsReply: 3,
+      all: 3,
+      OPEN: 2,
+      ASSIGNED: 1,
+      WAITING_USER: 0,
+      PENDING_CONFIRM: 0,
+      CLOSED: 0,
+      CANCELLED: 0,
+    });
   });
 
   it('offers only the actions the state machine allows', () => {
@@ -155,6 +176,8 @@ describe('HelpDesk board rules', () => {
       reply: false,
       internalNote: false,
       proposeResolution: false,
+      tag: true,
+      markRead: true,
     };
     expect(availableActions('OPEN')).toEqual({
       ...none,
@@ -188,63 +211,79 @@ describe('HelpDesk board rules', () => {
 });
 
 describe('HelpDesk service', () => {
-  it('lists a tab with its Portal filter, flags cards and adds tab counts', async () => {
+  it('lists enquiries with the status / category / tag / search filters', async () => {
     const portal = fakeClient();
     portal.listTickets.mockResolvedValue({
       tickets: [
         summary({ id: 'a', status: 'OPEN' }),
         summary({ id: 'b', status: 'ASSIGNED', lastMessageBy: 'agent' }),
-        summary({ id: 'c', status: 'ASSIGNED', lastMessageBy: 'learner' }),
       ],
       nextCursor: 'next',
-      counts: { OPEN: 1, ASSIGNED: 2 },
+      counts: { OPEN: 1, ASSIGNED: 1, needs_reply: 1, all: 2 },
     });
     const result = await createHelpdeskService(portal).list({
-      tab: 'needsReply',
-      q: '  LG-26  ',
+      status: 'needs_reply',
+      category: 'payments_subscriptions',
+      tag: ' login issue ',
+      q: '  emily  ',
       cursor: 'c1',
       limit: '10',
     });
     expect(portal.listTickets).toHaveBeenCalledWith({
-      statuses: ['OPEN', 'ASSIGNED'],
-      q: 'LG-26',
+      status: 'needs_reply',
+      category: 'payments_subscriptions',
+      tag: 'login issue',
+      q: 'emily',
       cursor: 'c1',
       limit: 10,
     });
-    // Needs reply 只保留真正待回复的卡片
     expect(result.tickets.map((t) => [t.id, t.needsReply])).toEqual([
       ['a', true],
-      ['c', true],
+      ['b', false],
     ]);
     expect(result.nextCursor).toBe('next');
-    expect(result.counts.needsReply).toBe(3);
+    expect(result.counts).toMatchObject({ needsReply: 1, all: 2 });
   });
 
-  it('keeps every card on other tabs and flags which need a reply', async () => {
+  it('sends no filters for "all" and uses the default page size', async () => {
     const portal = fakeClient();
-    portal.listTickets.mockResolvedValue({
-      tickets: [
-        summary({ id: 'a', status: 'OPEN' }),
-        summary({ id: 'b', status: 'CLOSED' }),
-      ],
-      nextCursor: null,
-      counts: {},
-    });
-    const result = await createHelpdeskService(portal).list({});
-    expect(portal.listTickets).toHaveBeenCalledWith({
-      statuses: undefined,
-      q: undefined,
-      cursor: undefined,
-      limit: 30,
-    });
-    expect(result.tickets.map((t) => t.needsReply)).toEqual([true, false]);
+    await createHelpdeskService(portal).list({ status: 'all' });
+    await createHelpdeskService(portal).list({});
+    for (const [query] of portal.listTickets.mock.calls) {
+      expect(query).toEqual({
+        status: undefined,
+        category: undefined,
+        tag: undefined,
+        q: undefined,
+        cursor: undefined,
+        limit: 30,
+      });
+    }
   });
 
-  it('rejects an unknown tab, a long search and a bad limit', async () => {
+  it('accepts every single Portal status', async () => {
+    const portal = fakeClient();
+    for (const status of [
+      'OPEN',
+      'ASSIGNED',
+      'WAITING_USER',
+      'PENDING_CONFIRM',
+      'CLOSED',
+      'CANCELLED',
+    ]) {
+      await createHelpdeskService(portal).list({ status });
+    }
+    expect(portal.listTickets).toHaveBeenCalledTimes(6);
+  });
+
+  it('rejects unknown filters, a long search or tag, and a bad limit', async () => {
     const service = createHelpdeskService(fakeClient());
     for (const query of [
-      { tab: 'spam' },
-      { q: 'x'.repeat(201) },
+      { status: 'spam' },
+      { status: 'OPEN,ASSIGNED' },
+      { category: 'billing' },
+      { tag: 't'.repeat(33) },
+      { q: 'x'.repeat(121) },
       { limit: '0' },
       { limit: '101' },
       { limit: 'abc' },
@@ -285,7 +324,7 @@ describe('HelpDesk service', () => {
           expectedSequence: 3,
           agent: { id: 'someone-else', name: 'mallory' },
         },
-        'idem-1',
+        KEY,
       );
       expect(portal.postMessage).toHaveBeenCalledWith(
         TICKET_ID,
@@ -295,7 +334,7 @@ describe('HelpDesk service', () => {
           agent: { id: 'emp-42', name: 'alice' },
           expectedSequence: 3,
         },
-        'idem-1',
+        KEY,
       );
       expect(result.sequence).toBe(2);
       expect(result.available).toBeDefined();
@@ -307,7 +346,7 @@ describe('HelpDesk service', () => {
         employee,
         TICKET_ID,
         { body: 'note', internal: true, expectedSequence: 0 },
-        'idem-2',
+        KEY,
       );
       expect(portal.postMessage.mock.calls[0][1].internal).toBe(true);
     });
@@ -321,12 +360,14 @@ describe('HelpDesk service', () => {
         undefined,
       );
       const key = portal.postMessage.mock.calls[0][2];
-      expect(key).toMatch(/^[0-9a-f-]{36}$/);
+      expect(key).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      );
     });
 
-    it('rejects an Idempotency-Key that is too long or has odd characters', async () => {
+    it('rejects an Idempotency-Key that is not a UUID (Portal only accepts UUIDs)', async () => {
       const service = createHelpdeskService(fakeClient());
-      for (const key of ['x'.repeat(256), 'bad key\n']) {
+      for (const key of ['x'.repeat(256), 'bad key\n', 'idem-1']) {
         const error = await rejection(
           service.reply(
             employee,
@@ -352,7 +393,7 @@ describe('HelpDesk service', () => {
         null,
       ]) {
         const error = await rejection(
-          service.reply(employee, TICKET_ID, body, 'k'),
+          service.reply(employee, TICKET_ID, body, KEY),
         );
         expect(error).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
       }
@@ -362,7 +403,7 @@ describe('HelpDesk service', () => {
         employee,
         TICKET_ID,
         { body: 'x'.repeat(5000), internal: false, expectedSequence: 1 },
-        'k',
+        KEY,
       );
       expect(portal.postMessage).toHaveBeenCalledTimes(1);
     });
@@ -375,7 +416,7 @@ describe('HelpDesk service', () => {
         employee,
         TICKET_ID,
         { body: 'x', internal: false, expectedSequence: 1 },
-        'k',
+        KEY,
       );
       expect(portal.getTicket).toHaveBeenCalledWith(TICKET_ID);
       expect(result.sequence).toBe(9);
@@ -391,7 +432,7 @@ describe('HelpDesk service', () => {
           employee,
           TICKET_ID,
           { body: 'x', internal: false, expectedSequence: 1 },
-          'k',
+          KEY,
         ),
       );
       expect(error).toMatchObject({ status: 409, code: 'STALE_TICKET' });
@@ -407,7 +448,7 @@ describe('HelpDesk service', () => {
           employee,
           TICKET_ID,
           { action, expectedSequence: 2, agent: { id: 'x', name: 'y' } },
-          'idem',
+          KEY,
         );
       }
       expect(portal.postAction.mock.calls).toEqual([
@@ -418,7 +459,7 @@ describe('HelpDesk service', () => {
             agent: { id: 'emp-42', name: 'alice' },
             expectedSequence: 2,
           },
-          'idem',
+          KEY,
         ],
         [
           TICKET_ID,
@@ -427,21 +468,105 @@ describe('HelpDesk service', () => {
             agent: { id: 'emp-42', name: 'alice' },
             expectedSequence: 2,
           },
-          'idem',
+          KEY,
         ],
       ]);
+    });
+
+    it('adds and removes a tag (trimmed, inner spaces collapsed) as the signed-in employee', async () => {
+      const portal = fakeClient();
+      const service = createHelpdeskService(portal);
+      await service.act(
+        employee,
+        TICKET_ID,
+        { action: 'add_tag', tag: '  login   issue ', expectedSequence: 4 },
+        KEY,
+      );
+      await service.act(
+        employee,
+        TICKET_ID,
+        { action: 'remove_tag', tag: 'payment', expectedSequence: 5 },
+        KEY,
+      );
+      expect(portal.postAction.mock.calls.map((c) => c[1])).toEqual([
+        {
+          action: 'add_tag',
+          tag: 'login issue',
+          agent: { id: 'emp-42', name: 'alice' },
+          expectedSequence: 4,
+        },
+        {
+          action: 'remove_tag',
+          tag: 'payment',
+          agent: { id: 'emp-42', name: 'alice' },
+          expectedSequence: 5,
+        },
+      ]);
+    });
+
+    it('validates tags: 1-32 characters, no control characters', async () => {
+      const portal = fakeClient();
+      const service = createHelpdeskService(portal);
+      for (const tag of [undefined, '', '   ', 't'.repeat(33), 'a\u0000b', 7]) {
+        const error = await rejection(
+          service.act(
+            employee,
+            TICKET_ID,
+            { action: 'add_tag', tag, expectedSequence: 1 },
+            KEY,
+          ),
+        );
+        expect(error.code).toBe('INVALID_INPUT');
+      }
+      await service.act(
+        employee,
+        TICKET_ID,
+        { action: 'add_tag', tag: 't'.repeat(32), expectedSequence: 1 },
+        KEY,
+      );
+      expect(portal.postAction).toHaveBeenCalledTimes(1);
+    });
+
+    it('marks a ticket read; expectedSequence is optional only for mark_read', async () => {
+      const portal = fakeClient();
+      const service = createHelpdeskService(portal);
+      await service.act(employee, TICKET_ID, { action: 'mark_read' }, KEY);
+      expect(portal.postAction.mock.calls[0][1]).toEqual({
+        action: 'mark_read',
+        agent: { id: 'emp-42', name: 'alice' },
+      });
+      await service.act(
+        employee,
+        TICKET_ID,
+        { action: 'mark_read', expectedSequence: 3 },
+        KEY,
+      );
+      expect(portal.postAction.mock.calls[1][1]).toMatchObject({
+        expectedSequence: 3,
+      });
+      const error = await rejection(
+        service.act(employee, TICKET_ID, { action: 'claim' }, KEY),
+      );
+      expect(error.code).toBe('INVALID_INPUT');
     });
 
     it('refuses learner-only or unknown actions', async () => {
       const portal = fakeClient();
       const service = createHelpdeskService(portal);
-      for (const action of ['confirm', 'cancel', 'close', 'rate', 'drop']) {
+      for (const action of [
+        'confirm',
+        'cancel',
+        'close',
+        'rate',
+        'drop',
+        'tag',
+      ]) {
         const error = await rejection(
           service.act(
             employee,
             TICKET_ID,
             { action, expectedSequence: 1 },
-            'k',
+            KEY,
           ),
         );
         expect(error.code).toBe('INVALID_INPUT');

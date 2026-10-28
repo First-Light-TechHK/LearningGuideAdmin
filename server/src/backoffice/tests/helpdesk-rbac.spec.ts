@@ -26,6 +26,11 @@ import {
   BackofficeHelpdeskController,
   HELPDESK_SERVICE,
 } from '../nest/helpdesk.controller';
+import {
+  BackofficeHelpdeskQuestionsController,
+  HelpdeskIntegrationQuestionsController,
+} from '../nest/helpdesk-questions.controller';
+import { HELPDESK_SUGGESTION_STATS } from '../../contracts/helpdesk-qa';
 
 /**
  * HelpDesk Tickets v1 §7：菜单 helpDesk 的 VIEW 只能读，FULL 才能写；
@@ -38,6 +43,7 @@ jest.mock('../modules/user-authentication/services/session', () => ({
 
 const TICKET_ID = '01920000-0000-7000-8000-000000000001';
 const TEST_TOKEN = 'test-helpdesk-token-local-only';
+const IDEM = '0192ffff-0000-7000-8000-000000000009';
 
 const ticket = {
   id: TICKET_ID,
@@ -192,11 +198,11 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
       ),
     );
     const list = await request(server())
-      .get('/api/helpdesk/tickets?tab=all')
+      .get('/api/helpdesk/tickets?status=all')
       .set('Cookie', as(role))
       .expect(200);
     expect(envelope(list).success).toBe(true);
-    expect(envelope(list).data.tickets[0].needsReply).toBe(true);
+    expect(envelope(list).data.tickets?.[0].needsReply).toBe(true);
     const one = await request(server())
       .get(`/api/helpdesk/tickets/${TICKET_ID}`)
       .set('Cookie', as(role))
@@ -221,6 +227,15 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
           `/api/helpdesk/tickets/${TICKET_ID}/actions`,
           { action: 'propose_resolution', expectedSequence: 1 },
         ],
+        [
+          `/api/helpdesk/tickets/${TICKET_ID}/actions`,
+          { action: 'add_tag', tag: 'x', expectedSequence: 1 },
+        ],
+        [
+          `/api/helpdesk/tickets/${TICKET_ID}/actions`,
+          { action: 'remove_tag', tag: 'x', expectedSequence: 1 },
+        ],
+        [`/api/helpdesk/tickets/${TICKET_ID}/actions`, { action: 'mark_read' }],
       ] as const) {
         const res = await request(server())
           .post(path)
@@ -239,7 +254,7 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
       const res = await request(server())
         .post(`/api/helpdesk/tickets/${TICKET_ID}/messages`)
         .set('Cookie', as(role))
-        .set('Idempotency-Key', 'idem-from-browser')
+        .set('Idempotency-Key', IDEM)
         .send({ ...message, agent: { id: 'forged', name: 'forged' } })
         .expect(200);
       expect(envelope(res).success).toBe(true);
@@ -248,7 +263,7 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
         `http://portal.test/api/integration/helpdesk/tickets/${TICKET_ID}/messages`,
       );
       const headers = init.headers as Record<string, string>;
-      expect(headers['idempotency-key']).toBe('idem-from-browser');
+      expect(headers['idempotency-key']).toBe(IDEM);
       expect(headers.authorization).toBe(`Bearer ${TEST_TOKEN}`);
       expect(
         (JSON.parse(init.body as string) as { agent: unknown }).agent,
@@ -343,6 +358,45 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
       );
     });
 
+    it('serves non-image files as a download with a safe file name', async () => {
+      fetchMock.mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(new Uint8Array([37, 80, 68, 70]), {
+            status: 200,
+            headers: {
+              'content-type': 'application/pdf',
+              'content-disposition': 'attachment; filename="in\\"voice ä.pdf"',
+            },
+          }),
+        ),
+      );
+      const res = await request(server())
+        .get('/api/helpdesk/attachments/a2')
+        .set('Cookie', as('ADMIN'))
+        .expect(200);
+      expect(res.headers['content-type']).toBe('application/pdf');
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="in_voice _.pdf"; filename*=UTF-8''in%22voice%20%C3%A4.pdf`,
+      );
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+    });
+
+    it('serves images inline', async () => {
+      fetchMock.mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(new Uint8Array([1]), {
+            status: 200,
+            headers: { 'content-type': 'image/gif' },
+          }),
+        ),
+      );
+      const res = await request(server())
+        .get('/api/helpdesk/attachments/a3')
+        .set('Cookie', as('ADMIN'))
+        .expect(200);
+      expect(res.headers['content-disposition']).toBe('inline');
+    });
+
     it('returns the envelope error when Portal has no such attachment', async () => {
       fetchMock.mockImplementationOnce(() =>
         Promise.resolve(new Response('{}', { status: 404 })),
@@ -370,6 +424,32 @@ describe('BackofficeModule wiring', () => {
     );
     const service = moduleRef.get<HelpdeskService>(HELPDESK_SERVICE);
     expect(typeof service.list).toBe('function');
+    await moduleRef.close();
+  });
+});
+
+describe('BackofficeModule.register wiring (Common Questions)', () => {
+  it('registers the Common Questions and Portal integration controllers with the suggestion counters', async () => {
+    const statsFor = jest.fn().mockResolvedValue(new Map());
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        BackofficeModule.register({
+          helpdeskSuggestionStats: {
+            provide: HELPDESK_SUGGESTION_STATS,
+            useValue: { statsFor },
+          },
+        }),
+      ],
+    }).compile();
+    expect(moduleRef.get(BackofficeHelpdeskQuestionsController)).toBeInstanceOf(
+      BackofficeHelpdeskQuestionsController,
+    );
+    expect(
+      moduleRef.get(HelpdeskIntegrationQuestionsController),
+    ).toBeInstanceOf(HelpdeskIntegrationQuestionsController);
+    expect(moduleRef.get(BackofficeHelpdeskController)).toBeInstanceOf(
+      BackofficeHelpdeskController,
+    );
     await moduleRef.close();
   });
 });

@@ -307,3 +307,66 @@ model BackofficeSetting {
 
   @@map("backoffice_settings")
 }
+
+// ==========================================
+// HelpDesk Common Questions（2026-10-28，Figma addendum §A；迁移 20261028090000_helpdesk_questions）
+// 归 BackOffice（唯一写入方），读写走 src/backoffice/modules/helpdesk/questions 的原生 SQL
+// （版本号条件更新 + 修订同事务）；全文索引、CHECK 与只追加触发器见迁移文件，这里只声明表结构。
+// ==========================================
+
+model HelpdeskQuestion {
+  id        String   @id @db.Uuid
+  locale    String
+  category  String
+  question  String
+  answer    String
+  keywords  String[] @default([])
+  status    String   @default("draft")
+  featured  Boolean  @default(false)
+  sortOrder Int      @default(0) @map("sort_order")
+  version   Int      @default(1)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedBy String?  @map("updated_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  revisions HelpdeskQuestionRevision[]
+
+  @@index([locale, status, sortOrder], map: "helpdesk_questions_list_idx")
+  @@map("helpdesk_questions")
+}
+
+model HelpdeskQuestionRevision {
+  id         String   @id @db.Uuid
+  questionId String   @map("question_id") @db.Uuid
+  version    Int
+  snapshot   Json
+  action     String
+  employeeId String?  @map("employee_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  question HelpdeskQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([questionId, version], map: "helpdesk_question_revisions_question_version_key")
+  @@map("helpdesk_question_revisions")
+}
+
+// HelpDesk 推荐日志（2026-10-28，Figma addendum §C；迁移 20261028090100_helpdesk_suggestions）
+// 归 Agent（src/ai/helpdesk）；qaId 指向 helpdesk_questions，跨域不建外键。
+model HelpdeskSuggestion {
+  id           String   @id @db.Uuid
+  learnerId    String   @map("learner_id")
+  locale       String
+  category     String
+  queryText    String?  @map("query_text")
+  candidateIds String[] @default([]) @map("candidate_ids") @db.Uuid
+  qaId         String?  @map("qa_id") @db.Uuid
+  model        String?
+  latencyMs    Int      @default(0) @map("latency_ms")
+  outcome      String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([qaId])
+  @@index([createdAt])
+  @@map("helpdesk_suggestions")
+}

@@ -4,7 +4,6 @@ import {
   Get,
   Headers,
   HttpCode,
-  HttpException,
   Inject,
   Param,
   Post,
@@ -14,34 +13,45 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 
-import { HelpdeskError } from '../modules/helpdesk/portalHelpdeskClient';
+import { ATTACHMENT_INLINE_TYPES } from '../modules/helpdesk/contracts';
 import type { HelpdeskService } from '../modules/helpdesk/helpdeskService';
-import { backofficeError } from './errors';
+import {
+  runHelpdesk as run,
+  signedInEmployee as signedIn,
+} from './helpdesk-http';
 import type { BackofficeRequest } from './request-context';
 
 export const HELPDESK_SERVICE = Symbol('HELPDESK_SERVICE');
 
-/** HelpdeskError → 统一信封 { success:false, error:{ code, message } }。 */
-async function run<T>(work: () => Promise<T>): Promise<T> {
-  try {
-    return await work();
-  } catch (error) {
-    if (error instanceof HelpdeskError) {
-      throw new HttpException(
-        { code: error.code, message: error.message },
-        error.status,
-      );
-    }
-    throw error;
-  }
+function isInlineAttachment(contentType: string): boolean {
+  return (ATTACHMENT_INLINE_TYPES as readonly string[]).includes(contentType);
 }
 
-function signedIn(request: BackofficeRequest) {
-  // BackofficeAccessGuard 已按菜单 helpDesk 校验：GET = VIEW，写 = FULL
-  const employee = request.employee;
-  if (!employee)
-    throw backofficeError('INVALID_EMPLOYEE_ACCOUNT', 'Sign in required');
-  return employee;
+const EXTENSIONS: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    'docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+};
+
+/** 图片 inline；其它 attachment，带 ASCII 兜底名与 RFC 5987 filename*。 */
+export function contentDisposition(
+  contentType: string,
+  fileName: string | null,
+  attachmentId: string,
+): string {
+  if (isInlineAttachment(contentType)) return 'inline';
+  const name =
+    fileName ??
+    `attachment-${attachmentId}.${EXTENSIONS[contentType] ?? 'bin'}`;
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  const encoded = encodeURIComponent(name).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 /**
@@ -56,12 +66,16 @@ export class BackofficeHelpdeskController {
 
   @Get('tickets')
   list(
-    @Query('tab') tab?: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('tag') tag?: string,
     @Query('q') q?: string,
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ) {
-    return run(() => this.helpdesk.list({ tab, q, cursor, limit }));
+    return run(() =>
+      this.helpdesk.list({ status, category, tag, q, cursor, limit }),
+    );
   }
 
   @Get('tickets/:ticketId')
@@ -97,7 +111,10 @@ export class BackofficeHelpdeskController {
     );
   }
 
-  /** 附件图片经本服务代理（浏览器不直连 Portal）；只放行 png / jpeg / webp。 */
+  /**
+   * 附件经本服务代理（浏览器不直连 Portal）。图片内联显示，其余（pdf / txt / csv / docx / xlsx）
+   * 一律作为下载；类型白名单见 contracts.ts，绝不放行 html / svg。
+   */
   @Get('attachments/:attachmentId')
   async attachment(
     @Param('attachmentId') attachmentId: string,
@@ -106,6 +123,10 @@ export class BackofficeHelpdeskController {
     const file = await run(() => this.helpdesk.attachment(attachmentId));
     response.setHeader('Content-Type', file.contentType);
     response.setHeader('Content-Length', String(file.data.length));
+    response.setHeader(
+      'Content-Disposition',
+      contentDisposition(file.contentType, file.fileName, attachmentId),
+    );
     response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Content-Security-Policy', "default-src 'none'");

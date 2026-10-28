@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 
 import {
   ATTACHMENT_CONTENT_TYPES,
+  ATTACHMENT_INLINE_TYPES,
   ATTACHMENT_MAX_BYTES,
   type Agent,
   type AgentAction,
@@ -11,8 +12,11 @@ import {
   type TicketAttachment,
   type TicketDetail,
   type TicketEvent,
+  type ListStatusFilter,
   type TicketMessage,
   type TicketStatus,
+  type TicketStudent,
+  type TicketSubscription,
   type TicketSummary,
 } from './contracts';
 
@@ -30,6 +34,9 @@ const JSON_TIMEOUT_MS = 5_000;
 const ATTACHMENT_TIMEOUT_MS = 10_000;
 const EVENT_TYPE_PREFIX = 'com.ilovelearningguide.helpdesk.ticket.';
 const PROBLEM_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
+const PREVIEW_MAX = 120;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
 
 /** BackOffice 对浏览器抛出的 HelpDesk 错误；控制器转成统一信封。 */
 export class HelpdeskError extends Error {
@@ -76,7 +83,10 @@ export function portalHelpdeskConfig(): PortalHelpdeskConfig | null {
 }
 
 export type ListQuery = {
-  statuses?: TicketStatus[];
+  /** 单个状态或 needs_reply；不传 = 全部（Portal 只接受一个值）。 */
+  status?: Exclude<ListStatusFilter, 'all'>;
+  category?: string;
+  tag?: string;
   q?: string;
   limit?: number;
   cursor?: string;
@@ -92,7 +102,10 @@ export type MessageInput = {
 export type ActionInput = {
   action: AgentAction;
   agent: Agent;
-  expectedSequence: number;
+  /** mark_read 可不带；其余动作必带。 */
+  expectedSequence?: number;
+  /** add_tag / remove_tag 必带。 */
+  tag?: string;
 };
 
 /** 属性写法（而非方法写法）：实现是闭包，不依赖 this。 */
@@ -190,6 +203,18 @@ function normaliseAssignee(raw: Raw): Agent | null {
     : null;
 }
 
+function boolOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function normaliseTags(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (tag): tag is string => typeof tag === 'string' && tag !== '',
+      )
+    : [];
+}
+
 export function normaliseSummary(raw: unknown): TicketSummary {
   const r = isRecord(raw) ? raw : {};
   return {
@@ -198,7 +223,13 @@ export function normaliseSummary(raw: unknown): TicketSummary {
     subject: str(r.subject),
     category: str(r.category),
     status: str(r.status) as TicketStatus,
+    locale: str(r.locale, 'en-GB'),
     learner: normaliseLearner(r),
+    contactEmail: strOrNull(pick(r, 'contactEmail', 'contact_email')),
+    preview: str(r.preview).slice(0, PREVIEW_MAX),
+    unreadByAgent: pick(r, 'unreadByAgent', 'unread_by_agent') === true,
+    tags: normaliseTags(r.tags),
+    needsReply: boolOrNull(pick(r, 'needsReply', 'needs_reply')),
     assignee: normaliseAssignee(r),
     sequence: num(r.sequence),
     createdAt: str(pick(r, 'createdAt', 'created_at')),
@@ -212,12 +243,18 @@ export function normaliseSummary(raw: unknown): TicketSummary {
   };
 }
 
+function isInlineType(contentType: string): boolean {
+  return (ATTACHMENT_INLINE_TYPES as readonly string[]).includes(contentType);
+}
+
 function normaliseAttachment(raw: Raw): TicketAttachment {
+  const contentType = str(pick(raw, 'contentType', 'content_type'));
   return {
     id: str(raw.id),
     fileName: str(pick(raw, 'fileName', 'file_name')),
-    contentType: str(pick(raw, 'contentType', 'content_type')),
+    contentType,
     size: num(pick(raw, 'size', 'sizeBytes', 'size_bytes')),
+    inline: isInlineType(contentType),
   };
 }
 
@@ -263,11 +300,47 @@ function normaliseEvent(raw: Raw): TicketEvent {
   };
 }
 
+/** 右栏学员信息；Portal 没给 student 时用 learner 兜底（其余字段为 null）。 */
+function normaliseStudent(raw: unknown, summary: TicketSummary): TicketStudent {
+  const s = isRecord(raw) ? raw : {};
+  const course = pick(s, 'currentCourse', 'current_course');
+  const total = numOrNull(pick(s, 'totalEnquiries', 'total_enquiries'));
+  return {
+    id: str(s.id, summary.learner.id),
+    name: str(s.name, summary.learner.name),
+    accountEmail: str(
+      pick(s, 'accountEmail', 'account_email'),
+      summary.learner.email,
+    ),
+    contactEmail:
+      strOrNull(pick(s, 'contactEmail', 'contact_email')) ??
+      summary.contactEmail,
+    joinedAt: strOrNull(pick(s, 'joinedAt', 'joined_at')),
+    totalEnquiries: total === null ? null : Math.max(0, Math.floor(total)),
+    currentCourse:
+      isRecord(course) && typeof course.id === 'string'
+        ? { id: course.id, title: str(course.title) }
+        : null,
+  };
+}
+
+function normaliseSubscription(raw: unknown): TicketSubscription | null {
+  if (!isRecord(raw)) return null;
+  return {
+    planName: str(pick(raw, 'planName', 'plan_name')),
+    billingCycle: str(pick(raw, 'billingCycle', 'billing_cycle')),
+    status: str(raw.status),
+    renewalDate: strOrNull(pick(raw, 'renewalDate', 'renewal_date')),
+  };
+}
+
 export function normaliseDetail(raw: unknown): TicketDetail {
   const r = isRecord(raw) ? raw : {};
+  const summary = normaliseSummary(r);
   return {
-    ...normaliseSummary(r),
-    locale: str(r.locale, 'en-GB'),
+    ...summary,
+    student: normaliseStudent(r.student, summary),
+    subscription: normaliseSubscription(r.subscription),
     messages: Array.isArray(r.messages)
       ? r.messages.filter(isRecord).map(normaliseMessage)
       : [],
@@ -293,6 +366,34 @@ function normaliseList(raw: unknown): PortalTicketList {
     nextCursor: strOrNull(pick(r, 'nextCursor', 'next_cursor')),
     counts,
   };
+}
+
+/**
+ * Content-Disposition 里的文件名（RFC 6266：filename* 优先）；去掉路径与控制字符，最长 120。
+ */
+export function dispositionFileName(header: string | null): string | null {
+  if (!header) return null;
+  let name: string | null = null;
+  const extended = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header);
+  if (extended) {
+    try {
+      name = decodeURIComponent(extended[2].trim());
+    } catch {
+      name = null;
+    }
+  }
+  if (name === null) {
+    const plain = /filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;]+))/i.exec(
+      header,
+    );
+    if (plain)
+      name = (plain[1] ?? plain[2] ?? '').replace(/\\(.)/g, '$1').trim();
+  }
+  if (!name) return null;
+  const base = (name.split(/[\\/]/).pop() ?? '').replace(CONTROL_CHARS, '');
+  return base === '' || base === '.' || base === '..'
+    ? null
+    : base.slice(0, 120);
 }
 
 // ------------------------------------------------------------------ 错误映射
@@ -459,8 +560,9 @@ export function createPortalHelpdeskClient(
   return {
     async listTickets(query) {
       const params = new URLSearchParams();
-      if (query.statuses && query.statuses.length > 0)
-        params.set('status', query.statuses.join(','));
+      if (query.status) params.set('status', query.status);
+      if (query.category) params.set('category', query.category);
+      if (query.tag) params.set('tag', query.tag);
       if (query.q) params.set('q', query.q);
       if (query.limit !== undefined) params.set('limit', String(query.limit));
       if (query.cursor) params.set('cursor', query.cursor);
@@ -497,13 +599,14 @@ export function createPortalHelpdeskClient(
     },
 
     postAction(ticketId, input, idempotencyKey) {
+      const body: Record<string, unknown> = { action: input.action };
+      if (input.tag !== undefined) body.tag = input.tag;
+      body.agent = input.agent;
+      if (input.expectedSequence !== undefined)
+        body.expectedSequence = input.expectedSequence;
       return writeTicket(
         `${ticketPath(ticketId)}/actions`,
-        {
-          action: input.action,
-          agent: input.agent,
-          expectedSequence: input.expectedSequence,
-        },
+        body,
         idempotencyKey,
       );
     },
@@ -538,7 +641,13 @@ export function createPortalHelpdeskClient(
         throw unavailable();
       }
       if (data.length > ATTACHMENT_MAX_BYTES) throw unavailable();
-      return { contentType, data };
+      return {
+        contentType,
+        data,
+        fileName: dispositionFileName(
+          response.headers.get('content-disposition'),
+        ),
+      };
     },
   };
 }

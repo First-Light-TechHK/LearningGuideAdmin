@@ -1,17 +1,22 @@
 import { randomUUID } from 'node:crypto';
 
 import type { SessionEmployee } from '../../contracts/employee';
+import { isUuid } from '../../../common/uuidv7';
 import {
   AGENT_ACTIONS,
-  HELPDESK_TABS,
+  LIST_STATUS_FILTERS,
   MESSAGE_BODY_MAX,
+  TAG_MAX_LENGTH,
+  TICKET_CATEGORIES,
+  TICKET_STATUSES,
   type Agent,
   type AgentAction,
   type AttachmentFile,
   type AvailableActions,
-  type BoardResult,
-  type BoardTicketDetail,
-  type HelpdeskTab,
+  type EnquiryCounts,
+  type EnquiryDetail,
+  type EnquiryList,
+  type ListStatusFilter,
   type TicketDetail,
   type TicketStatus,
   type TicketSummary,
@@ -19,36 +24,32 @@ import {
 import {
   createPortalHelpdeskClient,
   HelpdeskError,
+  type ActionInput,
   type PortalHelpdeskClient,
 } from './portalHelpdeskClient';
 
 /**
- * HelpDesk 看板与工单操作（设计文档 §4A）。状态机只在 Portal 执行；
- * 这里负责：Tab → Portal 状态过滤、待回复判定、可用操作提示、输入校验、
+ * HelpDesk Enquiries（设计文档 §4A；Figma addendum §D）。状态机只在 Portal 执行；
+ * 这里负责：筛选参数校验（状态 / 类型 / 标签 / 搜索）、待回复判定、可用操作提示、输入校验、
  * 以及把当前登录员工注入为 agent（请求体里的 agent 一律忽略）。
  */
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
-const MAX_QUERY = 200;
+/** 与 Portal 的 q 上限一致（HELPDESK_LIMITS.queryMax）。 */
+const MAX_QUERY = 120;
 const MAX_CURSOR = 512;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
-/** Idempotency-Key：可见 ASCII，最长 255。 */
-const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/;
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/;
 
-export const TAB_STATUSES: Record<HelpdeskTab, TicketStatus[] | null> = {
-  needsReply: ['OPEN', 'ASSIGNED'],
-  waitingUser: ['WAITING_USER'],
-  awaitingConfirm: ['PENDING_CONFIRM'],
-  closed: ['CLOSED', 'CANCELLED'],
-  all: null,
-};
-
-/** 待回复 = 新工单（OPEN），或已受理且最后一条消息来自学员。 */
+/** 待回复：Portal 给了 needsReply 就用它；否则 OPEN，或 ASSIGNED 且学员最后发言。 */
 export function needsReply(
-  ticket: Pick<TicketSummary, 'status' | 'lastMessageBy'>,
+  ticket: Pick<TicketSummary, 'status' | 'lastMessageBy'> & {
+    needsReply?: boolean | null;
+  },
 ): boolean {
+  if (typeof ticket.needsReply === 'boolean') return ticket.needsReply;
   if (ticket.status === 'OPEN') return true;
   return ticket.status === 'ASSIGNED' && ticket.lastMessageBy === 'learner';
 }
@@ -60,26 +61,20 @@ function count(counts: Record<string, number>, key: string): number {
     : 0;
 }
 
-/** Tab 数量：Portal 按状态计数；若 Portal 直接给出 needsReply 则以它为准。 */
-export function tabCounts(
-  counts: Record<string, number>,
-): Record<HelpdeskTab, number> {
-  const open = count(counts, 'OPEN');
-  const assigned = count(counts, 'ASSIGNED');
-  const waitingUser = count(counts, 'WAITING_USER');
-  const awaitingConfirm = count(counts, 'PENDING_CONFIRM');
-  const closed = count(counts, 'CLOSED') + count(counts, 'CANCELLED');
-  const portalNeedsReply =
-    counts.needsReply !== undefined ? counts.needsReply : counts.needs_reply;
+/** Portal 计数（每个状态 + needs_reply + all）→ 界面用的计数；缺的项推算。 */
+export function enquiryCounts(counts: Record<string, number>): EnquiryCounts {
+  const byStatus = Object.fromEntries(
+    TICKET_STATUSES.map((status) => [status, count(counts, status)]),
+  ) as Record<TicketStatus, number>;
+  const sum = TICKET_STATUSES.reduce((total, s) => total + byStatus[s], 0);
+  const portalNeedsReply = counts.needs_reply ?? counts.needsReply;
   return {
     needsReply:
       portalNeedsReply !== undefined
         ? count({ n: portalNeedsReply }, 'n')
-        : open + assigned,
-    waitingUser,
-    awaitingConfirm,
-    closed,
-    all: open + assigned + waitingUser + awaitingConfirm + closed,
+        : byStatus.OPEN + byStatus.ASSIGNED,
+    all: counts.all !== undefined ? count(counts, 'all') : sum,
+    ...byStatus,
   };
 }
 
@@ -92,6 +87,8 @@ export function availableActions(status: TicketStatus): AvailableActions {
     reply: active,
     internalNote: active || status === 'PENDING_CONFIRM' || status === 'CLOSED',
     proposeResolution: status === 'ASSIGNED' || status === 'WAITING_USER',
+    tag: true,
+    markRead: true,
   };
 }
 
@@ -110,14 +107,15 @@ function record(raw: unknown): Record<string, unknown> {
 }
 
 function ticketId(raw: string): string {
-  if (!UUID.test(raw)) throw invalid('Invalid ticket id');
+  if (!isUuid(raw)) throw invalid('Invalid ticket id');
   return raw;
 }
 
+/** Portal 只接受 UUID 形式的 Idempotency-Key；浏览器没给时这里生成。 */
 function idempotencyKey(raw: string | undefined): string {
   if (raw === undefined || raw === '') return randomUUID();
-  if (!IDEMPOTENCY_KEY.test(raw)) throw invalid('Invalid Idempotency-Key');
-  return raw;
+  if (!isUuid(raw)) throw invalid('Idempotency-Key must be a UUID');
+  return raw.toLowerCase();
 }
 
 function expectedSequence(body: Record<string, unknown>): number {
@@ -127,17 +125,36 @@ function expectedSequence(body: Record<string, unknown>): number {
   return value;
 }
 
+/** 标签：去首尾空白、合并中间空白，1–32 字符，不含控制字符。 */
+function tag(value: unknown): string {
+  if (typeof value !== 'string') throw invalid('tag is required');
+  if (CONTROL.test(value)) throw invalid('tag has invalid characters');
+  const normalised = value.trim().replace(/\s+/g, ' ');
+  if (normalised.length < 1 || normalised.length > TAG_MAX_LENGTH)
+    throw invalid(`tag must be 1-${TAG_MAX_LENGTH} characters`);
+  return normalised;
+}
+
 export type ListInput = {
-  tab?: string;
+  status?: string;
+  category?: string;
+  tag?: string;
   q?: string;
   cursor?: string;
   limit?: string;
 };
 
 function parseList(input: ListInput) {
-  const tab = (input.tab ?? 'all') as HelpdeskTab;
-  if (!(HELPDESK_TABS as readonly string[]).includes(tab))
-    throw invalid('Unknown tab');
+  const status = (input.status || 'all') as ListStatusFilter;
+  if (!(LIST_STATUS_FILTERS as readonly string[]).includes(status))
+    throw invalid('Unknown status');
+  const category = input.category || undefined;
+  if (
+    category !== undefined &&
+    !(TICKET_CATEGORIES as readonly string[]).includes(category)
+  )
+    throw invalid('Unknown enquiry type');
+  const tagFilter = input.tag ? tag(input.tag) : undefined;
   const q = input.q?.trim() ?? '';
   if (q.length > MAX_QUERY) throw invalid('Search is too long');
   const cursor = input.cursor ?? '';
@@ -148,10 +165,17 @@ function parseList(input: ListInput) {
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT)
       throw invalid('limit must be 1-100');
   }
-  return { tab, q, cursor, limit };
+  return {
+    status: status === 'all' ? undefined : status,
+    category,
+    tag: tagFilter,
+    q: q === '' ? undefined : q,
+    cursor: cursor === '' ? undefined : cursor,
+    limit,
+  };
 }
 
-function withBoard(detail: TicketDetail): BoardTicketDetail {
+function withActions(detail: TicketDetail): EnquiryDetail {
   return {
     ...detail,
     needsReply: needsReply(detail),
@@ -167,31 +191,25 @@ export function createHelpdeskService(
   async function refreshed(
     id: string,
     written: TicketDetail | null,
-  ): Promise<BoardTicketDetail> {
-    return withBoard(written ?? (await portal.getTicket(id)));
+  ): Promise<EnquiryDetail> {
+    return withActions(written ?? (await portal.getTicket(id)));
   }
 
   return {
-    async list(input: ListInput): Promise<BoardResult> {
-      const { tab, q, cursor, limit } = parseList(input);
-      const result = await portal.listTickets({
-        statuses: TAB_STATUSES[tab] ?? undefined,
-        q: q === '' ? undefined : q,
-        cursor: cursor === '' ? undefined : cursor,
-        limit,
-      });
-      const tickets = result.tickets
-        .map((ticket) => ({ ...ticket, needsReply: needsReply(ticket) }))
-        .filter((ticket) => tab !== 'needsReply' || ticket.needsReply);
+    async list(input: ListInput): Promise<EnquiryList> {
+      const result = await portal.listTickets(parseList(input));
       return {
-        tickets,
+        tickets: result.tickets.map((ticket) => ({
+          ...ticket,
+          needsReply: needsReply(ticket),
+        })),
         nextCursor: result.nextCursor,
-        counts: tabCounts(result.counts),
+        counts: enquiryCounts(result.counts),
       };
     },
 
-    async detail(rawId: string): Promise<BoardTicketDetail> {
-      return withBoard(await portal.getTicket(ticketId(rawId)));
+    async detail(rawId: string): Promise<EnquiryDetail> {
+      return withActions(await portal.getTicket(ticketId(rawId)));
     },
 
     async reply(
@@ -199,7 +217,7 @@ export function createHelpdeskService(
       rawId: string,
       rawBody: unknown,
       rawKey: string | undefined,
-    ): Promise<BoardTicketDetail> {
+    ): Promise<EnquiryDetail> {
       const id = ticketId(rawId);
       const body = record(rawBody);
       const text = typeof body.body === 'string' ? body.body.trim() : '';
@@ -227,20 +245,20 @@ export function createHelpdeskService(
       rawId: string,
       rawBody: unknown,
       rawKey: string | undefined,
-    ): Promise<BoardTicketDetail> {
+    ): Promise<EnquiryDetail> {
       const id = ticketId(rawId);
       const body = record(rawBody);
       const action = body.action as AgentAction;
       if (!(AGENT_ACTIONS as readonly string[]).includes(action))
         throw invalid('Unknown action');
-      const sequence = expectedSequence(body);
+      const input: ActionInput = { action, agent: agentFor(employee) };
+      if (action === 'add_tag' || action === 'remove_tag')
+        input.tag = tag(body.tag);
+      // mark_read 只清未读标记，可以不带 expectedSequence
+      if (action !== 'mark_read' || body.expectedSequence !== undefined)
+        input.expectedSequence = expectedSequence(body);
       const key = idempotencyKey(rawKey);
-      const written = await portal.postAction(
-        id,
-        { action, agent: agentFor(employee), expectedSequence: sequence },
-        key,
-      );
-      return refreshed(id, written);
+      return refreshed(id, await portal.postAction(id, input, key));
     },
 
     async attachment(rawId: string): Promise<AttachmentFile> {
