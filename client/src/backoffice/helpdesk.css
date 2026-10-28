@@ -114,17 +114,24 @@
 
 /* ---------------------------------- 三栏 ---------------------------------- */
 
+/*
+ * 三栏宽度：Figma 1672 宽时左 340 / 右 387，中栏取剩余（约 643）。更窄的笔记本（1280–1440）
+ * 中栏至少留 420：左右两栏按比例让出宽度，左栏最窄 280、右栏最窄 300；再窄（<1100）
+ * 放不下三栏的最小宽度时横向滚动，不裁掉右栏。1672 宽时没有任何一栏收缩，与 Figma 一致。
+ */
 .hdMain {
   flex: 1;
   display: flex;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
-/* 左栏 340px */
+/* 左栏 340px（窄屏最窄 280） */
 .hdList {
   width: var(--hd-list-width);
-  flex: 0 0 var(--hd-list-width);
+  flex: 0 1 var(--hd-list-width);
+  min-width: 280px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -396,7 +403,7 @@
 /* 中栏：#f8fafc 底 */
 .hdConversation {
   flex: 1;
-  min-width: 0;
+  min-width: 420px;
   display: flex;
   flex-direction: column;
   min-height: 0;
