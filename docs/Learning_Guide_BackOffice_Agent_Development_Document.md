@@ -23,6 +23,7 @@
 
 - **Knowledge System（知识库）**：管理课程结构（Course -> Lesson -> Page 三级树形），支持 Markdown 编辑（含 LaTeX 公式）、文件导入转 Markdown、版本发布与历史版本查看。
 - **AI Tutor（AI 辅导）**：基于知识库内容，提供 Lecture 模式和 Socratic 模式的 AI 对话交互，支持 System Prompt 和 Welcome Message 自定义配置。
+- **HelpDesk 工单（2026-10-28 新增，Tickets v1）**：学员在 Portal 提交的客服工单在 BackOffice 以卡片看板呈现，员工认领、回复、写内部备注、请学员确认。工单数据归 Portal（唯一写入方），BackOffice 只经 Portal 集成接口读写，见 §4A。
 
 ### 1.2 核心对象
 
@@ -56,6 +57,9 @@
 >
 > **2026-10-20 AI 配置改按 Release 维度改拍**（用户裁决）：`CourseAiConfig` 由「每课程一份」（`courseId @unique`）改为**每个 Release 一份**（`@@unique([courseId, releaseId])`；无配置行时按模板默认值运行，新建 Release 不继承）。
 > 同时：① 课程级 Online 开关由 `CourseAiConfig.online` **搬到 `Course.aiTutorOnline`**（online 保持课程级语义）；② `Course` 新增 `aiTestReleaseId`——后台 AI Tutor **测试所选 Release**（null 时回退 `currentReleaseId`）。用户侧 AI Tutor 仍只读 `currentReleaseId`（上线版本）；③ `Course` 新增 `editingReleaseId`（2026-10-20 二次改拍）——**当前编辑版本指针**，历史弹窗 `editing` 标识来源，由「Create Release」与「切换到此版本」写入。
+
+>
+> **2026-10-28 HelpDesk 工单不建表**：工单、消息、附件、事件全部由 Portal 存储（Portal 是唯一写入方，见 §4A 与 `docs/System_Architecture_4_Components.md`）。BackOffice 不新增任何 Prisma 模型或迁移，也不直连 Portal 数据库。
 
 ```prisma
 // ==========================================
@@ -708,6 +712,78 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 ---
 
+## 4A. 模块 C：HelpDesk 工单（Tickets v1，2026-10-28 新增）
+
+> 依据：`lg-helpdesk/tickets-v1-spec.md` §1/§4/§5（Integration）/§7（2026-10-28 用户拍板：「每个工单就是一个小卡片在 Back Office 上 … 按原有 UI UX 风格 … TDD 锁住」）。v1 不做：飞书同步、前端埋点、AI 客服、SaaS。
+> **待视觉验收**：本模块没有 Figma 画板，界面沿用 `backoffice.css` 的卡片、按钮、筛选条、状态点与提示条，由用户手动验收。
+
+### 4A.1 归属与数据流
+
+- **Portal 是工单的唯一写入方**（工单 / 消息 / 附件 / 事件，状态机只在 Portal 服务端执行）。BackOffice 不建表、不直连 Portal 库。
+- 数据流：浏览器 → BackOffice Server `/api/helpdesk/**`（员工会话 + 菜单权限）→ Portal 集成接口 `/api/integration/helpdesk/**`（服务间 `Authorization: Bearer PORTAL_HELPDESK_TOKEN`，RFC 6750）。浏览器从不直连 Portal。
+- 写操作由 BackOffice Server 注入当前登录员工作为 `agent { id: employeeId, name: displayName }`；请求体里的 agent 字段一律忽略，员工无法冒充他人。
+- 幂等：浏览器每次提交生成一个 `Idempotency-Key`（UUID），重试沿用同一个；Server 原样转发给 Portal，未带时 Server 生成一个。并发：写操作携带 `expectedSequence`，Portal 返回 409 `stale_ticket` 时页面重新加载工单并提示。
+- 实现位置：`server/src/backoffice/modules/helpdesk/`
+  - `portalHelpdeskClient.ts`：**唯一**的 Portal 客户端文件（URL、鉴权头、超时、problem+json 映射、字段名归一化都在这里，Portal 字段名有出入只改这一个文件）
+  - `helpdeskService.ts`：看板 Tab、待回复判定、可用操作、输入校验、员工身份注入
+  - `contracts.ts`：两端共用的类型与常量
+  - 控制器 `server/src/backoffice/nest/helpdesk.controller.ts`，注册在 `BackofficeModule`
+
+### 4A.2 状态与员工端文案
+
+| 状态 | 员工端（en-GB / zh-CN） | 员工可做 |
+|---|---|---|
+| OPEN | New / 待受理 | Claim、Reply、Internal note |
+| ASSIGNED | In progress / 处理中 | Reply、Internal note、Handled — ask learner to confirm |
+| WAITING_USER | Waiting for learner / 等待用户 | Reply、Internal note、Handled — ask learner to confirm |
+| PENDING_CONFIRM | Awaiting confirmation / 待用户确认 | Internal note |
+| CLOSED | Closed / 已结束 | Internal note |
+| CANCELLED | Withdrawn / 已撤回 | 只读 |
+
+- 可用操作由 Server 按状态计算后随详情返回（`available`），前端只按它显示按钮；状态是否真的允许仍以 Portal 状态机为准（不允许时 409 `invalid_transition`）。
+- 公开回复会把工单转为 WAITING_USER，未认领时自动认领（Portal 执行）。
+
+### 4A.3 看板（`/:locale/help-desk`）
+
+- 筛选 Tab（带数量）：
+  - **Needs reply / 待回复** = OPEN，或 ASSIGNED 且最后一条消息来自学员（Portal 查询 `status=OPEN,ASSIGNED`，Server 再按此规则过滤；数量优先用 Portal `counts.needsReply`，没有时取 OPEN + ASSIGNED）
+  - **Waiting for learner / 等待用户** = WAITING_USER
+  - **Awaiting confirmation / 待用户确认** = PENDING_CONFIRM
+  - **Closed / 已结束** = CLOSED + CANCELLED
+  - **All / 全部**
+- 搜索框：工单号、学员邮箱、主题（Portal `q`），输入停 300ms 后查询。
+- 卡片网格：工单号、主题、分类、学员姓名 / 邮箱、状态点 + 文案、处理人、相对更新时间；待回复的卡片左侧蓝色强调条 + 「Needs reply」标记。点击进入详情。
+- 「加载更多」按 Portal `nextCursor` 翻页。
+- Portal 未配置（Server 缺 `PORTAL_HELPDESK_BASE_URL` / `PORTAL_HELPDESK_TOKEN`，或 Portal 返回 `integration_disabled` / 拒绝令牌）→ 503 `HELPDESK_NOT_CONNECTED`，页面显示「HelpDesk is not connected yet / HelpDesk 尚未接通」。
+
+### 4A.4 工单详情（`/:locale/help-desk/:ticketId`）
+
+- 左栏对话：学员消息靠左、员工消息靠右（带员工名），**内部备注**用琥珀色底与「Internal note / 内部备注」标记区分（学员永远看不到）；附件图片缩略图经 BackOffice Server 代理 `GET /api/helpdesk/attachments/:id` 加载（浏览器不直连 Portal），点击新窗口打开原图。
+- 底部回复区（仅 FULL）：Reply to learner / Internal note 二选一 + 文本框（1–5000 字）+ Send。
+- 头部操作（仅 FULL）：Claim、Handled — ask learner to confirm（确认窗口 72 小时，到期 Portal 自动结案）。
+- 右栏：学员（姓名、邮箱、语言）、状态、处理人、分类、创建时间、确认截止时间、评分、事件时间线（CloudEvents `type` 去掉 `com.ilovelearningguide.helpdesk.ticket.` 前缀后按事件名显示）。
+- **VIEW 角色看不到任何操作控件**（服务端同样拒绝，见 §4A.5）。
+- 409 `stale_ticket`：重新加载工单并提示「This ticket was updated, please check again」。错误只在操作区内联显示一次。
+
+### 4A.5 权限
+
+- 菜单 `helpDesk`：`GET /api/helpdesk/**` = VIEW；所有写接口（POST）= CREATE，只有 FULL 可用（`route-access.ts` 登记）。当前矩阵：Admin、Operation Admin 为 FULL；其余四个角色为 VIEW（只读）。
+- 未登录 401 `INVALID_EMPLOYEE_ACCOUNT`；只读角色调写接口 403 `NOT_AUTHORISED`，且不会调用 Portal。
+
+### 4A.6 错误码（BackOffice 统一信封 `error.code`）
+
+| Portal 返回 | BackOffice 状态 / code |
+|---|---|
+| Server 未配置 Portal 地址或令牌 | 503 `HELPDESK_NOT_CONNECTED`（不发出请求） |
+| 503 `integration_disabled`、401、403 | 503 `HELPDESK_NOT_CONNECTED`（不把 Portal 的 401 透传成员工会话失效） |
+| 404 | 404 `TICKET_NOT_FOUND` |
+| 409 `stale_ticket` / `invalid_transition` / `idempotency_conflict` / `reopen_window_passed` | 409 `STALE_TICKET` / `INVALID_TRANSITION` / `IDEMPOTENCY_CONFLICT` / `REOPEN_WINDOW_PASSED`（problem `code` 转大写） |
+| 其它 4xx（problem+json） | 同状态码，`code` 取 problem `code` 转大写，缺省 `INVALID_INPUT` |
+| 5xx、无法连接、响应无法解析 | 502 `HELPDESK_UNAVAILABLE` |
+| 超时（JSON 5 秒、附件 10 秒） | 504 `HELPDESK_UNAVAILABLE` |
+
+---
+
 ## 5. API 接口规范
 
 ### 5.1 知识库相关接口
@@ -853,6 +929,18 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
   }
 }
 ```
+
+### 5.4 HelpDesk 工单接口（2026-10-28 新增，§4A）
+
+| 方法 | 路径 | 权限 | 说明 |
+|------|------|------|------|
+| GET | /api/helpdesk/tickets?tab=&q=&cursor=&limit= | helpDesk VIEW | `tab` ∈ `needsReply` / `waitingUser` / `awaitingConfirm` / `closed` / `all`（缺省 all）；`limit` 1–100（缺省 30）；返回 `{ tickets: (TicketSummary & { needsReply })[], nextCursor, counts: { needsReply, waitingUser, awaitingConfirm, closed, all } }` |
+| GET | /api/helpdesk/tickets/:ticketId | helpDesk VIEW | TicketDetail（含内部备注、附件、事件时间线、学员信息）+ `needsReply` + `available: { claim, reply, internalNote, proposeResolution }` |
+| POST | /api/helpdesk/tickets/:ticketId/messages | helpDesk FULL | body `{ body, internal, expectedSequence }`，头 `Idempotency-Key`；Server 注入 `agent`；返回最新 TicketDetail |
+| POST | /api/helpdesk/tickets/:ticketId/actions | helpDesk FULL | body `{ action: "claim" \| "propose_resolution", expectedSequence }`，头 `Idempotency-Key`；Server 注入 `agent`；返回最新 TicketDetail |
+| GET | /api/helpdesk/attachments/:attachmentId | helpDesk VIEW | 代理 Portal 附件图片（仅 image/png、image/jpeg、image/webp，≤ 5 MB），`Cache-Control: private, no-store`、`X-Content-Type-Options: nosniff` |
+
+> 对应 Portal 集成接口：`GET/POST /api/integration/helpdesk/tickets…`、`GET /api/integration/helpdesk/attachments/:id`（Portal 侧成功体为纯 JSON、错误为 RFC 9457 problem+json）；BackOffice 对浏览器仍用 §5.3 统一信封。
 
 ---
 
@@ -1053,6 +1141,11 @@ AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
 # 服务间鉴权（可选；开启后所有 /api 请求需带 X-API-Key）
 AUTH_ENABLED=false
 AUTH_TOKEN=
+
+# HelpDesk 工单（2026-10-28，§4A）：Portal 集成接口地址与服务令牌，每次请求现读（轮换后无需改代码）；
+# 任一为空 → /api/helpdesk/** 返回 503 HELPDESK_NOT_CONNECTED
+PORTAL_HELPDESK_BASE_URL=
+PORTAL_HELPDESK_TOKEN=
 
 # 服务器配置
 PORT=3000

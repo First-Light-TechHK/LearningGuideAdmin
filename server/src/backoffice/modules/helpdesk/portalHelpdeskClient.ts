@@ -1,0 +1,544 @@
+import { Logger } from '@nestjs/common';
+
+import {
+  ATTACHMENT_CONTENT_TYPES,
+  ATTACHMENT_MAX_BYTES,
+  type Agent,
+  type AgentAction,
+  type AttachmentFile,
+  type AuthorKind,
+  type PortalTicketList,
+  type TicketAttachment,
+  type TicketDetail,
+  type TicketEvent,
+  type TicketMessage,
+  type TicketStatus,
+  type TicketSummary,
+} from './contracts';
+
+/**
+ * Portal HelpDesk 集成接口的唯一客户端（Tickets v1 §4 / §5 Integration）。
+ *
+ * - 鉴权：`Authorization: Bearer PORTAL_HELPDESK_TOKEN`（RFC 6750）；地址取
+ *   `PORTAL_HELPDESK_BASE_URL`。两者每次请求现读，令牌轮换后无需改代码或重启。
+ * - 任一未配置：503 HELPDESK_NOT_CONNECTED，且不发出请求。
+ * - Portal 错误为 RFC 9457 problem+json，在这里映射成 BackOffice 统一错误码。
+ * - Portal 字段名与预期有出入时，只改本文件里的 normalise* 函数。
+ */
+
+const JSON_TIMEOUT_MS = 5_000;
+const ATTACHMENT_TIMEOUT_MS = 10_000;
+const EVENT_TYPE_PREFIX = 'com.ilovelearningguide.helpdesk.ticket.';
+const PROBLEM_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
+
+/** BackOffice 对浏览器抛出的 HelpDesk 错误；控制器转成统一信封。 */
+export class HelpdeskError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HelpdeskError';
+  }
+}
+
+export function notConnected(): HelpdeskError {
+  return new HelpdeskError(
+    503,
+    'HELPDESK_NOT_CONNECTED',
+    'HelpDesk is not connected yet',
+  );
+}
+
+function unavailable(status = 502): HelpdeskError {
+  return new HelpdeskError(
+    status,
+    'HELPDESK_UNAVAILABLE',
+    'HelpDesk service is unavailable, please try again',
+  );
+}
+
+export type PortalHelpdeskConfig = { baseUrl: string; token: string };
+
+/** 每次调用现读环境变量；地址必须是 http(s) URL。 */
+export function portalHelpdeskConfig(): PortalHelpdeskConfig | null {
+  const rawBase = process.env.PORTAL_HELPDESK_BASE_URL?.trim() ?? '';
+  const token = process.env.PORTAL_HELPDESK_TOKEN?.trim() ?? '';
+  if (rawBase === '' || token === '') return null;
+  try {
+    const url = new URL(rawBase);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  } catch {
+    return null;
+  }
+  return { baseUrl: rawBase.replace(/\/+$/, ''), token };
+}
+
+export type ListQuery = {
+  statuses?: TicketStatus[];
+  q?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export type MessageInput = {
+  body: string;
+  internal: boolean;
+  agent: Agent;
+  expectedSequence: number;
+};
+
+export type ActionInput = {
+  action: AgentAction;
+  agent: Agent;
+  expectedSequence: number;
+};
+
+/** 属性写法（而非方法写法）：实现是闭包，不依赖 this。 */
+export type PortalHelpdeskClient = {
+  listTickets: (query: ListQuery) => Promise<PortalTicketList>;
+  getTicket: (ticketId: string) => Promise<TicketDetail>;
+  /** Portal 未返回工单体时为 null（调用方再读一次）。 */
+  postMessage: (
+    ticketId: string,
+    input: MessageInput,
+    idempotencyKey: string,
+  ) => Promise<TicketDetail | null>;
+  postAction: (
+    ticketId: string,
+    input: ActionInput,
+    idempotencyKey: string,
+  ) => Promise<TicketDetail | null>;
+  getAttachment: (attachmentId: string) => Promise<AttachmentFile>;
+};
+
+export type PortalHelpdeskClientOptions = {
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  attachmentTimeoutMs?: number;
+};
+
+// ------------------------------------------------------------------ 归一化
+
+type Raw = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Raw {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 依次取第一个存在的字段（camelCase 优先，snake_case 兜底）。 */
+function pick(raw: Raw, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (raw[key] !== undefined) return raw[key];
+  }
+  return undefined;
+}
+
+function str(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function strOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function num(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isFinite(parsed)
+    ? parsed
+    : fallback;
+}
+
+function numOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = num(value, Number.NaN);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function authorKind(value: unknown): AuthorKind | null {
+  return value === 'learner' || value === 'agent' || value === 'system'
+    ? value
+    : null;
+}
+
+function normaliseLearner(raw: Raw): TicketSummary['learner'] {
+  const nested = pick(raw, 'learner', 'user');
+  if (isRecord(nested)) {
+    return {
+      id: str(nested.id),
+      email: str(nested.email),
+      name: str(nested.name),
+    };
+  }
+  return {
+    id: str(pick(raw, 'userId', 'user_id')),
+    email: str(pick(raw, 'userEmail', 'user_email')),
+    name: str(pick(raw, 'userName', 'user_name')),
+  };
+}
+
+function normaliseAssignee(raw: Raw): Agent | null {
+  const nested = raw.assignee;
+  if (isRecord(nested)) {
+    const id = strOrNull(nested.id);
+    return id ? { id, name: str(nested.name) } : null;
+  }
+  const id = strOrNull(pick(raw, 'assigneeId', 'assignee_id'));
+  return id
+    ? { id, name: str(pick(raw, 'assigneeName', 'assignee_name')) }
+    : null;
+}
+
+export function normaliseSummary(raw: unknown): TicketSummary {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: str(r.id),
+    number: str(r.number),
+    subject: str(r.subject),
+    category: str(r.category),
+    status: str(r.status) as TicketStatus,
+    learner: normaliseLearner(r),
+    assignee: normaliseAssignee(r),
+    sequence: num(r.sequence),
+    createdAt: str(pick(r, 'createdAt', 'created_at')),
+    updatedAt: str(pick(r, 'updatedAt', 'updated_at')),
+    lastMessageAt: strOrNull(pick(r, 'lastMessageAt', 'last_message_at')),
+    lastMessageBy: authorKind(pick(r, 'lastMessageBy', 'last_message_by')),
+    confirmDueAt: strOrNull(pick(r, 'confirmDueAt', 'confirm_due_at')),
+    closedAt: strOrNull(pick(r, 'closedAt', 'closed_at')),
+    closeReason: strOrNull(pick(r, 'closeReason', 'close_reason')),
+    rating: numOrNull(r.rating),
+  };
+}
+
+function normaliseAttachment(raw: Raw): TicketAttachment {
+  return {
+    id: str(raw.id),
+    fileName: str(pick(raw, 'fileName', 'file_name')),
+    contentType: str(pick(raw, 'contentType', 'content_type')),
+    size: num(pick(raw, 'size', 'sizeBytes', 'size_bytes')),
+  };
+}
+
+function normaliseMessage(raw: Raw): TicketMessage {
+  const attachments = raw.attachments;
+  return {
+    id: str(raw.id),
+    authorKind: authorKind(pick(raw, 'authorKind', 'author_kind')) ?? 'system',
+    authorName: str(pick(raw, 'authorName', 'author_name')),
+    body: str(raw.body),
+    internal: raw.internal === true,
+    attachments: Array.isArray(attachments)
+      ? attachments.filter(isRecord).map(normaliseAttachment)
+      : [],
+    createdAt: str(pick(raw, 'createdAt', 'created_at')),
+  };
+}
+
+function normaliseEvent(raw: Raw): TicketEvent {
+  const type = str(raw.type);
+  const data = isRecord(raw.data) ? raw.data : {};
+  const actor = data.actor;
+  return {
+    id: str(raw.id),
+    type: type.startsWith(EVENT_TYPE_PREFIX)
+      ? type.slice(EVENT_TYPE_PREFIX.length)
+      : type,
+    time: str(raw.time),
+    sequence: num(raw.sequence),
+    data: {
+      fromState: strOrNull(pick(data, 'fromState', 'from_state')),
+      toState: strOrNull(pick(data, 'toState', 'to_state')),
+      actor: isRecord(actor)
+        ? {
+            kind: str(actor.kind),
+            id: strOrNull(actor.id),
+            name: strOrNull(actor.name),
+          }
+        : null,
+      reason: strOrNull(data.reason),
+      messageId: strOrNull(pick(data, 'messageId', 'message_id')),
+    },
+  };
+}
+
+export function normaliseDetail(raw: unknown): TicketDetail {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    ...normaliseSummary(r),
+    locale: str(r.locale, 'en-GB'),
+    messages: Array.isArray(r.messages)
+      ? r.messages.filter(isRecord).map(normaliseMessage)
+      : [],
+    events: Array.isArray(r.events)
+      ? r.events.filter(isRecord).map(normaliseEvent)
+      : [],
+  };
+}
+
+function normaliseList(raw: unknown): PortalTicketList {
+  const r = isRecord(raw) ? raw : {};
+  const counts: Record<string, number> = {};
+  if (isRecord(r.counts)) {
+    for (const [key, value] of Object.entries(r.counts)) {
+      if (typeof value === 'number' && Number.isFinite(value))
+        counts[key] = value;
+    }
+  }
+  return {
+    tickets: Array.isArray(r.tickets)
+      ? r.tickets.filter(isRecord).map(normaliseSummary)
+      : [],
+    nextCursor: strOrNull(pick(r, 'nextCursor', 'next_cursor')),
+    counts,
+  };
+}
+
+// ------------------------------------------------------------------ 错误映射
+
+type Problem = { code?: unknown; detail?: unknown; title?: unknown };
+
+/** RFC 9457 problem+json → BackOffice 错误；Portal 的 401/403 绝不透传成员工会话失效。 */
+function mapProblem(
+  status: number,
+  problem: Problem,
+  notFoundCode: string,
+  logger: Logger,
+): HelpdeskError {
+  const portalCode =
+    typeof problem.code === 'string' && PROBLEM_CODE.test(problem.code)
+      ? problem.code
+      : null;
+  const message =
+    (typeof problem.detail === 'string' && problem.detail) ||
+    (typeof problem.title === 'string' && problem.title) ||
+    `Portal HelpDesk returned ${status}`;
+
+  if (status === 401 || status === 403) {
+    logger.warn(`Portal rejected the HelpDesk service token (${status})`);
+    return notConnected();
+  }
+  if (status === 503 && portalCode === 'integration_disabled')
+    return notConnected();
+  if (status >= 500) {
+    logger.warn(`Portal HelpDesk failed with ${status}`);
+    return unavailable();
+  }
+  if (status === 404) return new HelpdeskError(404, notFoundCode, 'Not found');
+  const fallback =
+    status === 409
+      ? 'CONFLICT'
+      : status === 429
+        ? 'RATE_LIMITED'
+        : 'INVALID_INPUT';
+  return new HelpdeskError(
+    status,
+    portalCode ? portalCode.toUpperCase() : fallback,
+    message.slice(0, 300),
+  );
+}
+
+async function readProblem(response: Response): Promise<Problem> {
+  try {
+    const parsed: unknown = JSON.parse(await response.text());
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// ------------------------------------------------------------------ 客户端
+
+export function createPortalHelpdeskClient(
+  options: PortalHelpdeskClientOptions = {},
+): PortalHelpdeskClient {
+  const logger = new Logger('PortalHelpdeskClient');
+  // 默认在调用时才取全局 fetch，便于测试替换
+  const fetchImpl: typeof fetch =
+    options.fetchImpl ?? ((input, init) => fetch(input, init));
+  const timeoutMs = options.timeoutMs ?? JSON_TIMEOUT_MS;
+  const attachmentTimeoutMs =
+    options.attachmentTimeoutMs ?? ATTACHMENT_TIMEOUT_MS;
+
+  async function send(
+    method: 'GET' | 'POST',
+    path: string,
+    init: {
+      body?: unknown;
+      idempotencyKey?: string;
+      accept?: string;
+      timeout: number;
+      notFoundCode: string;
+    },
+  ): Promise<Response> {
+    const config = portalHelpdeskConfig();
+    if (!config) throw notConnected();
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${config.token}`,
+      accept: init.accept ?? 'application/json, application/problem+json',
+    };
+    if (init.body !== undefined) headers['content-type'] = 'application/json';
+    if (init.idempotencyKey) headers['idempotency-key'] = init.idempotencyKey;
+
+    let response: Response;
+    try {
+      response = await fetchImpl(
+        `${config.baseUrl}/api/integration/helpdesk${path}`,
+        {
+          method,
+          headers,
+          body: init.body === undefined ? undefined : JSON.stringify(init.body),
+          signal: AbortSignal.timeout(init.timeout),
+          redirect: 'error',
+        },
+      );
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        logger.warn(`Portal HelpDesk timed out after ${init.timeout}ms`);
+        throw unavailable(504);
+      }
+      logger.warn('Portal HelpDesk is unreachable');
+      throw unavailable();
+    }
+    if (!response.ok) {
+      throw mapProblem(
+        response.status,
+        await readProblem(response),
+        init.notFoundCode,
+        logger,
+      );
+    }
+    return response;
+  }
+
+  async function readJson(response: Response): Promise<unknown> {
+    let text: string;
+    try {
+      text = await response.text();
+    } catch {
+      throw unavailable();
+    }
+    if (text.trim() === '') return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw unavailable();
+    }
+  }
+
+  async function readTicket(response: Response): Promise<TicketDetail> {
+    const parsed = await readJson(response);
+    if (!isRecord(parsed) || typeof parsed.id !== 'string') throw unavailable();
+    return normaliseDetail(parsed);
+  }
+
+  async function writeTicket(
+    path: string,
+    body: unknown,
+    idempotencyKey: string,
+  ): Promise<TicketDetail | null> {
+    const response = await send('POST', path, {
+      body,
+      idempotencyKey,
+      timeout: timeoutMs,
+      notFoundCode: 'TICKET_NOT_FOUND',
+    });
+    const parsed = await readJson(response);
+    if (!isRecord(parsed)) return null;
+    // 有的实现会包一层 { ticket }
+    const ticket = isRecord(parsed.ticket) ? parsed.ticket : parsed;
+    return typeof ticket.id === 'string' && Array.isArray(ticket.messages)
+      ? normaliseDetail(ticket)
+      : null;
+  }
+
+  const ticketPath = (id: string) => `/tickets/${encodeURIComponent(id)}`;
+
+  return {
+    async listTickets(query) {
+      const params = new URLSearchParams();
+      if (query.statuses && query.statuses.length > 0)
+        params.set('status', query.statuses.join(','));
+      if (query.q) params.set('q', query.q);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.cursor) params.set('cursor', query.cursor);
+      const search = params.toString();
+      const response = await send(
+        'GET',
+        `/tickets${search ? `?${search}` : ''}`,
+        { timeout: timeoutMs, notFoundCode: 'TICKET_NOT_FOUND' },
+      );
+      const parsed = await readJson(response);
+      if (!isRecord(parsed)) throw unavailable();
+      return normaliseList(parsed);
+    },
+
+    async getTicket(ticketId) {
+      const response = await send('GET', ticketPath(ticketId), {
+        timeout: timeoutMs,
+        notFoundCode: 'TICKET_NOT_FOUND',
+      });
+      return readTicket(response);
+    },
+
+    postMessage(ticketId, input, idempotencyKey) {
+      return writeTicket(
+        `${ticketPath(ticketId)}/messages`,
+        {
+          body: input.body,
+          internal: input.internal,
+          agent: input.agent,
+          expectedSequence: input.expectedSequence,
+        },
+        idempotencyKey,
+      );
+    },
+
+    postAction(ticketId, input, idempotencyKey) {
+      return writeTicket(
+        `${ticketPath(ticketId)}/actions`,
+        {
+          action: input.action,
+          agent: input.agent,
+          expectedSequence: input.expectedSequence,
+        },
+        idempotencyKey,
+      );
+    },
+
+    async getAttachment(attachmentId) {
+      const response = await send(
+        'GET',
+        `/attachments/${encodeURIComponent(attachmentId)}`,
+        {
+          accept: `${ATTACHMENT_CONTENT_TYPES.join(', ')}, application/problem+json`,
+          timeout: attachmentTimeoutMs,
+          notFoundCode: 'ATTACHMENT_NOT_FOUND',
+        },
+      );
+      const contentType = (response.headers.get('content-type') ?? '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+      if (
+        !(ATTACHMENT_CONTENT_TYPES as readonly string[]).includes(contentType)
+      ) {
+        logger.warn(`Portal returned an attachment of type "${contentType}"`);
+        throw unavailable();
+      }
+      const declared = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declared) && declared > ATTACHMENT_MAX_BYTES)
+        throw unavailable();
+      let data: Buffer;
+      try {
+        data = Buffer.from(await response.arrayBuffer());
+      } catch {
+        throw unavailable();
+      }
+      if (data.length > ATTACHMENT_MAX_BYTES) throw unavailable();
+      return { contentType, data };
+    },
+  };
+}

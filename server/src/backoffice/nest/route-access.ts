@@ -91,6 +91,15 @@ export function routeAccess(method: string, path: string): RouteAccess {
   if (first === 'session' || first === 'preferences')
     return { kind: 'signedIn' };
   if (first === 'admin') return { kind: 'employeeAdmin' };
+  // HelpDesk 工单（Tickets v1 §7）：读 = VIEW；任何写（回复、内部备注、认领、请学员确认）
+  // 都按 CREATE 处理，只有该菜单为 Full 的角色可用
+  if (first === 'helpdesk') {
+    return {
+      kind: 'menu',
+      menus: ['helpDesk'],
+      action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'CREATE',
+    };
+  }
   const action = actionFor(verb, segments);
   if (first === 'ai') return { kind: 'menu', menus: ['aiTutor'], action };
   if (sharedWithAiTutor(verb, segments))

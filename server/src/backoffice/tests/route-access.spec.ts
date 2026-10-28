@@ -153,6 +153,28 @@ describe('route access classification', () => {
     });
   });
 
+  it('puts HelpDesk tickets behind the HelpDesk menu: reads are VIEW, every write needs FULL', () => {
+    const h = ['helpDesk'];
+    const cases: [string, string, string][] = [
+      ['GET', '/api/helpdesk/tickets', 'VIEW'],
+      ['GET', '/api/helpdesk/tickets/t1', 'VIEW'],
+      ['GET', '/api/helpdesk/attachments/a1', 'VIEW'],
+      ['POST', '/api/helpdesk/tickets/t1/messages', 'CREATE'],
+      ['POST', '/api/helpdesk/tickets/t1/actions', 'CREATE'],
+      ['PUT', '/api/helpdesk/tickets/t1', 'CREATE'],
+      ['PATCH', '/api/helpdesk/tickets/t1', 'CREATE'],
+      ['DELETE', '/api/helpdesk/tickets/t1', 'CREATE'],
+      ['POST', '/API/HelpDesk/tickets/t1/actions', 'CREATE'],
+    ];
+    for (const [method, path, action] of cases) {
+      assert.deepEqual(
+        routeAccess(method, path),
+        menu(h, action),
+        `${method} ${path}`,
+      );
+    }
+  });
+
   it('gives unregistered endpoints to Admin only', () => {
     assert.deepEqual(routeAccess('GET', '/api/something-new'), {
       kind: 'employeeAdmin',
