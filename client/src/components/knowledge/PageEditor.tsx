@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Dropdown, Empty, Input, Panel, Tag } from '../ui'
+import { Alert, App, Button, Dropdown, Empty, Input, Modal, Panel, Tag } from '../ui'
 import type { MenuProps } from '../ui'
 import { EditOutlined, EyeOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
@@ -14,6 +14,7 @@ import { MarkdownToolbar } from './MarkdownToolbar'
 import { insertSnippet, toggleLinePrefix } from './markdownCommands'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
+import { useKText } from './i18n'
 
 /**
  * Page 编辑器（2026-10-29 改版：Markdown 源码编辑 + 预览）。
@@ -26,14 +27,6 @@ import { tokens } from '../../theme/tokens'
  *  - 跨块选中、撤销/重做、查找都是 CM6 免费能力。
  * 标题栏右侧提供「预览」按钮，用与 Portal 相同的渲染器（remark-math + rehype-katex）展示效果。
  */
-
-const SAVE_LABEL: Record<string, { text: string; color: string }> = {
-  idle: { text: '', color: '' },
-  dirty: { text: '未保存…', color: 'orange' },
-  saving: { text: '保存中…', color: 'blue' },
-  saved: { text: '已保存', color: 'green' },
-  error: { text: '保存失败', color: 'red' },
-}
 
 /** 与 AI Tutor / Portal 一致的 Markdown+KaTeX 渲染插件 */
 const katexPlugins = {
@@ -81,6 +74,7 @@ export function PageEditor() {
   const tocScrollTarget = useKnowledgeStore((s) => s.tocScrollTarget)
   const clearTocScrollTarget = useKnowledgeStore((s) => s.clearTocScrollTarget)
   const { modal } = App.useApp()
+  const { text } = useKText()
   /** PRD §3.2/§3.3：View 角色只读，Edit/Full 才可改既有内容 */
   const access = useWorkspaceAccess()
 
@@ -90,6 +84,10 @@ export function PageEditor() {
   const [view, setView] = useState<EditorView | null>(null)
   /** 标题编辑态（§3.3.1）：默认展示态（大标题 + 常显铅笔），点击铅笔进入编辑态 */
   const [editingTitle, setEditingTitle] = useState(false)
+  /** P2: 插入表格弹窗的行列数 */
+  const [insertTableOpen, setInsertTableOpen] = useState(false)
+  const [insertTableRows, setInsertTableRows] = useState(3)
+  const [insertTableCols, setInsertTableCols] = useState(3)
   const titleBeforeEdit = useRef('')
 
   const viewRef = useRef<EditorView | null>(null)
@@ -229,10 +227,12 @@ export function PageEditor() {
     const pageId = d.pageId
     const when = formatSavedAt(local.savedAt)
     modal.confirm({
-      title: '发现本地未保存的草稿',
-      content: `本地草稿${when ? `（保存于 ${when}）` : ''}与服务器版本不同，可能包含尚未保存的修改，是否恢复？`,
-      okText: '恢复',
-      cancelText: '丢弃',
+      title: text('editor.draftTitle'),
+      content: text('editor.draftContent', {
+        when: when ? text('editor.draftWhen', { time: when }) : '',
+      }),
+      okText: text('editor.restore'),
+      cancelText: text('editor.discard'),
       onOk: () => {
         useKnowledgeStore.getState().editDraft({
           contentMd: local?.contentMd ?? '',
@@ -267,12 +267,19 @@ export function PageEditor() {
       <Panel
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
-        <Empty description="从左侧目录树选择一个页面开始编辑" />
+        <Empty description={text('editor.empty')} />
       </Panel>
     )
   }
 
-  const save = SAVE_LABEL[draft.saveState]
+  const saveStateText: Record<string, { text: string; color: string }> = {
+    idle: { text: '', color: '' },
+    dirty: { text: text('editor.saveState.dirty'), color: 'orange' },
+    saving: { text: text('editor.saveState.saving'), color: 'blue' },
+    saved: { text: text('editor.saveState.saved'), color: 'green' },
+    error: { text: text('editor.saveState.error'), color: 'red' },
+  }
+  const save = saveStateText[draft.saveState]
   const borderStyle: React.CSSProperties = {
     border: `1px solid ${tokens.color.border}`,
     borderRadius: tokens.radius.md,
@@ -290,31 +297,51 @@ export function PageEditor() {
     insertSnippet(target, template, { select: { from: idx, to: idx + marker.length }, block: true })
   }
 
-  /** 右键插入菜单（M1）：表格 / 公式 / 图片 / 代码块 / 引用 / 分割线 */
+  /** 右键插入菜单（M1）：表格 / 公式 / 图片 / 代码块 / 引用 / 分割线。
+   * 图标用 Plan A 「符号前置」风格：Unicode 符号 + 文案，和 MarkdownToolbar（H1/B/¶/$x$）
+   * 保持一致的轻量字符化视觉，不引入额外图标依赖。 */
+  const sym = (s: string) => (
+    <span style={{ fontFamily: 'monospace', fontWeight: 600, display: 'inline-block', width: 18, textAlign: 'center', opacity: 0.85 }}>
+      {s}
+    </span>
+  )
   const insertMenuItems: MenuProps['items'] = [
-    { key: 'table', label: '插入表格' },
-    { key: 'mathBlock', label: '插入公式块 $$…$$' },
-    { key: 'inlineMath', label: '插入行内公式 $…$' },
-    { key: 'image', label: '插入图片 ![](url)' },
-    { key: 'code', label: '插入代码块' },
-    { key: 'quote', label: '插入引用' },
-    { key: 'divider', label: '插入分割线' },
+    { key: 'table',     icon: sym('⊞'), label: text('editor.insert.table') },
+    { key: 'mathBlock', icon: sym('∑'), label: text('editor.insert.mathBlock') },
+    { key: 'inlineMath',icon: sym('ƒ'), label: text('editor.insert.inlineMath') },
+    { key: 'image',     icon: sym('🖼'), label: text('editor.insert.image') },
+    { key: 'code',      icon: sym('⌨'), label: text('editor.insert.code') },
+    { key: 'quote',     icon: sym('❝'), label: text('editor.insert.quote') },
+    { key: 'divider',   icon: sym('―'), label: text('editor.insert.divider') },
   ]
+
+  /** 生成指定行列数的 GFM 表格 Markdown（P2: 插入表格弹窗使用） */
+  const buildTableSnippet = (rows: number, cols: number): string => {
+    const c = Math.max(1, Math.min(50, Math.floor(cols)))
+    const r = Math.max(1, Math.min(50, Math.floor(rows)))
+    const header = '|' + Array.from({ length: c }, (_, i) => ` ${i + 1} `).join('|') + '|'
+    const sep = '|' + Array.from({ length: c }, () => ' --- ').join('|') + '|'
+    const body = Array.from({ length: r }, () => '|' + Array.from({ length: c }, () => '  ').join('|') + '|')
+    return [header, sep, ...body].join('\n')
+  }
 
   const onInsertMenuClick: MenuProps['onClick'] = ({ key }) => {
     const target = viewRef.current
     if (!target) return
     if (key === 'table') {
-      insertWithSelection('| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n| 内容 |  |  |', '列 1')
+      // P2: 打开弹窗让用户选行列数，再插入
+      setInsertTableRows(3)
+      setInsertTableCols(3)
+      setInsertTableOpen(true)
     } else if (key === 'mathBlock') {
       insertWithSelection('$$\nE = mc^2\n$$', 'E = mc^2')
     } else if (key === 'inlineMath') {
       // 行内片段：不补空行，插入 `$x$` 并选中 x
       insertSnippet(target, '$x$', { select: { from: 1, to: 2 } })
     } else if (key === 'image') {
-      insertWithSelection('![图片描述](https://)', 'https://')
+      insertWithSelection(`![${text('editor.snippet.imageAlt')}](https://)`, 'https://')
     } else if (key === 'code') {
-      insertWithSelection('```\n在此写代码\n```', '在此写代码')
+      insertWithSelection(`\`\`\`\n${text('editor.snippet.code')}\n\`\`\``, text('editor.snippet.code'))
     } else if (key === 'quote') {
       toggleLinePrefix(target, () => '> ', /^(\s*)(>)(\s)/)
     } else if (key === 'divider') {
@@ -358,7 +385,7 @@ export function PageEditor() {
                 setEditingTitle(false)
               }
             }}
-            placeholder="未命名页面"
+            placeholder={text('editor.untitled')}
           />
         ) : (
           <>
@@ -374,13 +401,13 @@ export function PageEditor() {
                 whiteSpace: 'nowrap',
               }}
             >
-              {draft.title || '未命名页面'}
+              {draft.title || text('editor.untitled')}
             </div>
             {access.canEdit && (
               <Button
                 type="text"
-                aria-label="编辑标题"
-                title="编辑标题"
+                aria-label={text('editor.editTitle')}
+                title={text('editor.editTitle')}
                 icon={<EditOutlined style={{ fontSize: 16 }} />}
                 onClick={() => {
                   titleBeforeEdit.current = draft.title
@@ -417,7 +444,7 @@ export function PageEditor() {
               setPreview((v) => !v)
             }}
           >
-            {preview ? '编辑' : '预览'}
+            {preview ? text('editor.edit') : text('editor.preview')}
           </Button>
         </div>
       </div>
@@ -433,11 +460,11 @@ export function PageEditor() {
           <Alert
             type="error"
             showIcon
-            message="自动保存失败：切页/切课程会被阻断，避免丢稿（修改仍保留在本地）"
+            message={text('editor.saveFailed')}
             style={{ flex: 1 }}
           />
           <Button size="small" onClick={() => void useKnowledgeStore.getState().flushSave()}>
-            重试
+            {text('common.retry')}
           </Button>
         </div>
       )}
@@ -501,6 +528,51 @@ export function PageEditor() {
           </div>
         </div>
       )}
+      {/* P2: 插入表格弹窗 — 用户选行列数后生成 GFM 表格插入光标位置 */}
+      <Modal
+        open={insertTableOpen}
+        title={text('editor.insertTable.title')}
+        okText={text('common.create')}
+        cancelText={text('common.cancel')}
+        onOk={() => {
+          const target = viewRef.current
+          if (!target) {
+            setInsertTableOpen(false)
+            return
+          }
+          const snippet = buildTableSnippet(insertTableRows, insertTableCols)
+          insertWithSelection(snippet)
+          setInsertTableOpen(false)
+        }}
+        onCancel={() => setInsertTableOpen(false)}
+      >
+        <div style={{ display: 'flex', gap: tokens.spacing.md }}>
+          <label style={{ flex: 1 }}>
+            <div style={{ marginBottom: 4, fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
+              {text('editor.insertTable.rows')}
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={50}
+              value={insertTableRows}
+              onChange={(e) => setInsertTableRows(Number(e.target.value) || 3)}
+            />
+          </label>
+          <label style={{ flex: 1 }}>
+            <div style={{ marginBottom: 4, fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
+              {text('editor.insertTable.cols')}
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={50}
+              value={insertTableCols}
+              onChange={(e) => setInsertTableCols(Number(e.target.value) || 3)}
+            />
+          </label>
+        </div>
+      </Modal>
     </Panel>
   )
 }

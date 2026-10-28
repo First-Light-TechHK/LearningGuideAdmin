@@ -126,32 +126,34 @@ export class ImageWidget extends WidgetType {
   readonly src: string
   readonly alt: string
   readonly block: boolean
+  readonly text: TextFn
+  readonly locale: string
 
-  constructor(src: string, alt: string, block: boolean) {
+  constructor(src: string, alt: string, block: boolean, text: TextFn, locale: string) {
     super()
     this.src = src
     this.alt = alt
     this.block = block
+    this.text = text
+    this.locale = locale
   }
 
   eq(other: ImageWidget) {
-    return other.src === this.src && other.alt === this.alt && other.block === this.block
+    return other.src === this.src && other.alt === this.alt && other.block === this.block && other.locale === this.locale
   }
 
   toDOM() {
     const wrap = document.createElement(this.block ? 'div' : 'span')
     wrap.className = this.block ? 'cm-md-image-block' : 'cm-md-image-inline'
     const img = document.createElement('img')
-    // 外链图片常有防盗链（按 Referer 拒绝），不带 Referer 请求（BUG-0224）
     img.referrerPolicy = 'no-referrer'
     img.src = this.src
     img.alt = this.alt
     img.loading = 'lazy'
-    // 加载失败：不显示浏览器的破图图标，改为明确的失败提示 + 链接，便于作者检查地址
     img.addEventListener('error', () => {
       const failed = document.createElement('span')
       failed.className = 'cm-md-image-failed'
-      failed.textContent = `图片加载失败：${this.src}`
+      failed.textContent = this.text('table.imageFailed', { src: this.src })
       failed.title = this.src
       img.replaceWith(failed)
     })
@@ -173,6 +175,8 @@ export class ImageWidget extends WidgetType {
 // ========================== 表格：解析 / 序列化 / 渲染 ==========================
 
 export type Align = 'left' | 'right' | 'center' | null
+
+export type TextFn = (key: string, vars?: Record<string, string | number>) => string
 
 export interface ParsedTable {
   header: string[]
@@ -429,6 +433,8 @@ export class TableWidget extends WidgetType {
   readonly getView: () => EditorView | null
   readonly setEditing: (range: { from: number; to: number } | null) => void
   readonly applyChange: (opts: { from: number; to: number; md: string; keepEditing: boolean }) => void
+  readonly text: (key: string, vars?: Record<string, string | number>) => string
+  readonly locale: string
 
   constructor(
     markdown: string,
@@ -439,6 +445,8 @@ export class TableWidget extends WidgetType {
     getView: () => EditorView | null,
     setEditing: (range: { from: number; to: number } | null) => void,
     applyChange: (opts: { from: number; to: number; md: string; keepEditing: boolean }) => void,
+    text: (key: string, vars?: Record<string, string | number>) => string,
+    locale: string,
   ) {
     super()
     this.markdown = markdown
@@ -449,14 +457,16 @@ export class TableWidget extends WidgetType {
     this.getView = getView
     this.setEditing = setEditing
     this.applyChange = applyChange
+    this.text = text
+    this.locale = locale
   }
 
   eq(other: TableWidget) {
-    // markdown / editing / readOnly 任一变化都重建 DOM
     return (
       other.markdown === this.markdown &&
       other.editing === this.editing &&
-      other.readOnly === this.readOnly
+      other.readOnly === this.readOnly &&
+      other.locale === this.locale
     )
   }
 
@@ -555,12 +565,12 @@ export class TableWidget extends WidgetType {
         focused = { row, col }
         editingFocusHint = { row, col }
       })
-      // 实时同步 + 提交到文档（B4：外部文档变更/切页时不丢单元格输入）
+      // 输入只更新内存中的 table，**不 commit 到 CM6**——避免 Widget 重建导致 caret 丢失
+      // 提交时机：Done 按钮 / focusout / 结构变更（±行/列）
       div.addEventListener('input', () => {
         const val = div.textContent ?? ''
         if (row < 0) table.header[col] = val
         else table.rows[row][col] = val
-        commit(true)
       })
       div.addEventListener('keydown', (e) => onCellKey(e, row, col, div))
       return div
@@ -582,9 +592,8 @@ export class TableWidget extends WidgetType {
           prev?.focus()
         } else {
           if (idx === cells.length - 1) {
+            // P1: 最后一格 Tab —— addRow 会在当前行下方插入
             addRow()
-            // addRow 已 commit(true) 重建 Widget，直接设焦点记忆，新 Widget 的 rAF 会聚焦新行首格
-            editingFocusHint = { row: table.rows.length - 1, col: 0 }
           } else {
             cells[idx + 1]?.focus()
           }
@@ -597,9 +606,8 @@ export class TableWidget extends WidgetType {
         if (e.shiftKey) return // Shift+Enter：不插入换行（GFM 单元格不支持换行）
         const next = row + 1
         if (row === table.rows.length - 1) {
+          // P1: 最后一行 Enter —— addRow 会在当前行下方插入
           addRow()
-          // 同上：重建后靠焦点记忆定位
-          editingFocusHint = { row: next, col }
         } else {
           const cells = collectEditCells()
           const target = cells[table.header.length + next * table.header.length + col]
@@ -619,32 +627,44 @@ export class TableWidget extends WidgetType {
       return Array.from(wrap.querySelectorAll('.cm-md-table-cell-edit')) as HTMLDivElement[]
     }
 
-    // ---- 行列操作 ----
-    const addRow = () => {
-      table.rows.push(new Array(table.header.length).fill(''))
+    // ---- 行列操作（P1: +行/+列 在光标位置下方/右侧插入，-行/-列 删除光标所在行/列） ----
+    const addRow = (count = 1, at?: number) => {
+      const insertAt = at ?? (focused.row >= 0 ? focused.row + 1 : 0)
+      const n = table.header.length
+      for (let i = 0; i < count; i++) {
+        table.rows.splice(insertAt + i, 0, new Array(n).fill(''))
+      }
+      editingFocusHint = { row: Math.min(insertAt, table.rows.length - 1), col: Math.max(focused.col, 0) }
       refreshTable()
     }
-    const addCol = () => {
-      table.header.push('')
-      table.align.push(null)
-      table.rows.forEach((r) => r.push(''))
+    const addCol = (count = 1, at?: number) => {
+      const insertAt = at ?? Math.max(focused.col, 0) + 1
+      for (let i = 0; i < count; i++) {
+        table.header.splice(insertAt + i, 0, '')
+        table.align.splice(insertAt + i, 0, null)
+        table.rows.forEach((r) => r.splice(insertAt + i, 0, ''))
+      }
+      editingFocusHint = { row: focused.row, col: Math.min(insertAt, table.header.length - 1) }
       refreshTable()
     }
-    const removeRow = () => {
+    const removeRow = (count = 1) => {
       if (focused.row < 0 || table.rows.length <= 1) return
-      table.rows.splice(focused.row, 1)
-      focused = { row: -1, col: -1 }
-      editingFocusHint = null
+      const from = focused.row
+      const del = Math.min(count, table.rows.length - from)
+      table.rows.splice(from, del)
+      const newRow = Math.min(from, table.rows.length - 1)
+      editingFocusHint = newRow >= 0 ? { row: newRow, col: focused.col } : null
       refreshTable()
     }
-    const removeCol = () => {
+    const removeCol = (count = 1) => {
       if (table.header.length <= 1) return
-      const ci = focused.col >= 0 ? focused.col : table.header.length - 1
-      table.header.splice(ci, 1)
-      table.align.splice(ci, 1)
-      table.rows.forEach((r) => r.splice(ci, 1))
-      focused = { row: -1, col: -1 }
-      editingFocusHint = null
+      const from = Math.max(focused.col, 0)
+      const del = Math.min(count, table.header.length - from)
+      table.header.splice(from, del)
+      table.align.splice(from, del)
+      table.rows.forEach((r) => r.splice(from, del))
+      const newCol = Math.min(from, table.header.length - 1)
+      editingFocusHint = { row: focused.row, col: newCol }
       refreshTable()
     }
 
@@ -680,11 +700,75 @@ export class TableWidget extends WidgetType {
         })
         return b
       }
-      bar.appendChild(mkBtn('＋行', '在末尾添加一行', addRow))
-      bar.appendChild(mkBtn('＋列', '在末尾添加一列', addCol))
-      bar.appendChild(mkBtn('－行', '删除当前行', removeRow))
-      bar.appendChild(mkBtn('－列', '删除当前列', removeCol))
-      const done = mkBtn('完成', '写回 Markdown 并退出编辑', () => {
+      bar.appendChild(mkBtn(this.text('table.addRow'), this.text('table.addRowTitle'), addRow))
+      bar.appendChild(mkBtn(this.text('table.addCol'), this.text('table.addColTitle'), addCol))
+      bar.appendChild(mkBtn(this.text('table.removeRow'), this.text('table.removeRowTitle'), () => removeRow(1)))
+      bar.appendChild(mkBtn(this.text('table.removeCol'), this.text('table.removeColTitle'), () => removeCol(1)))
+
+      // ---- P3: 批量操作（方案 C）—— select + 数字输入 + 执行按钮 ----
+      const batch = document.createElement('div')
+      batch.className = 'cm-md-table-batch'
+      batch.style.display = 'inline-flex'
+      batch.style.alignItems = 'center'
+      batch.style.gap = '4px'
+      batch.style.marginLeft = '4px'
+
+      const select = document.createElement('select')
+      select.className = 'cm-md-table-tbtn'
+      select.style.padding = '2px 4px'
+      select.style.fontSize = '12px'
+      select.style.cursor = 'pointer'
+      const addRowOpt = document.createElement('option')
+      addRowOpt.value = 'addRow'
+      addRowOpt.textContent = this.text('table.batchAddRow')
+      const addColOpt = document.createElement('option')
+      addColOpt.value = 'addCol'
+      addColOpt.textContent = this.text('table.batchAddCol')
+      const rmRowOpt = document.createElement('option')
+      rmRowOpt.value = 'removeRow'
+      rmRowOpt.textContent = this.text('table.batchRemoveRow')
+      const rmColOpt = document.createElement('option')
+      rmColOpt.value = 'removeCol'
+      rmColOpt.textContent = this.text('table.batchRemoveCol')
+      select.append(addRowOpt, addColOpt, rmRowOpt, rmColOpt)
+
+      const numInput = document.createElement('input')
+      numInput.type = 'number'
+      numInput.min = '1'
+      numInput.max = '50'
+      numInput.value = '3'
+      numInput.title = this.text('table.batchCount')
+      numInput.style.width = '46px'
+      numInput.style.padding = '2px 4px'
+      numInput.style.fontSize = '12px'
+      numInput.style.border = '1px solid var(--antd-color-border, #d9d9d9)'
+      numInput.style.borderRadius = '4px'
+
+      const goBtn = document.createElement('button')
+      goBtn.type = 'button'
+      goBtn.textContent = '›'
+      goBtn.title = this.text('table.batchTitle')
+      goBtn.className = 'cm-md-table-tbtn'
+      goBtn.style.fontWeight = 'bold'
+      goBtn.addEventListener('mousedown', (e) => { e.preventDefault(); suppressCommit = true })
+      goBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        const count = Math.max(1, Math.min(50, Number(numInput.value) || 1))
+        const action = select.value
+        if (action === 'addRow') addRow(count)
+        else if (action === 'addCol') addCol(count)
+        else if (action === 'removeRow') {
+          if (focused.row >= 0 && table.rows.length > 1) removeRow(count)
+        } else if (action === 'removeCol') {
+          if (table.header.length > 1) removeCol(count)
+        }
+        window.setTimeout(() => { suppressCommit = false }, 0)
+      })
+
+      batch.append(select, numInput, goBtn)
+      bar.appendChild(batch)
+
+      const done = mkBtn(this.text('table.done'), this.text('table.doneTitle'), () => {
         // 先把当前聚焦单元格的 textContent 同步回 table（contentEditable 已改 DOM）
         syncCellsToTable()
         commit()
@@ -697,8 +781,8 @@ export class TableWidget extends WidgetType {
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'cm-md-table-edit-btn'
-      btn.textContent = '✎ 编辑表格'
-      btn.title = '编辑表格'
+      btn.textContent = this.text('table.edit')
+      btn.title = this.text('table.editTitle')
       btn.addEventListener('mousedown', (e) => e.preventDefault())
       btn.addEventListener('click', (e) => {
         e.preventDefault()

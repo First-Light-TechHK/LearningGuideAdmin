@@ -10,6 +10,7 @@ import {
   toggleWrap,
 } from './markdownCommands'
 import { tokens } from '../../theme/tokens'
+import { useKText } from './i18n'
 
 /**
  * Markdown 常驻格式工具条（2026-10-29，M1）。
@@ -69,6 +70,7 @@ function computeActive(view: EditorView): ActiveState {
 
 export function MarkdownToolbar({ view, disabled }: Props) {
   const [active, setActive] = useState<ActiveState>(EMPTY_ACTIVE)
+  const { text } = useKText()
 
   // 选区/光标变化时刷新高亮（CM6 无 React 状态，这里用原生事件兜住）
   useEffect(() => {
@@ -126,26 +128,26 @@ export function MarkdownToolbar({ view, disabled }: Props) {
       }}
     >
       <Space size={2}>
-        {btn('H1', '一级标题', active.heading === 1, () => view && setHeading(view, 1))}
-        {btn('H2', '二级标题', active.heading === 2, () => view && setHeading(view, 2))}
-        {btn('H3', '三级标题', active.heading === 3, () => view && setHeading(view, 3))}
-        {btn('¶', '恢复为普通段落', active.heading === 0, () => view && setHeading(view, 0))}
+        {btn('H1', text('toolbar.h1'), active.heading === 1, () => view && setHeading(view, 1))}
+        {btn('H2', text('toolbar.h2'), active.heading === 2, () => view && setHeading(view, 2))}
+        {btn('H3', text('toolbar.h3'), active.heading === 3, () => view && setHeading(view, 3))}
+        {btn('¶', text('toolbar.paragraph'), active.heading === 0, () => view && setHeading(view, 0))}
       </Space>
       <Space size={2}>
-        {btn('B', '粗体（Ctrl+B，再次点击取消）', active.strong, () => view && toggleWrap(view, '**'), {
+        {btn('B', text('toolbar.bold'), active.strong, () => view && toggleWrap(view, '**'), {
           fontFamily: 'serif',
         })}
-        {btn('I', '斜体（Ctrl+I，再次点击取消）', active.em, () => view && toggleWrap(view, '*'), {
+        {btn('I', text('toolbar.italic'), active.em, () => view && toggleWrap(view, '*'), {
           fontStyle: 'italic',
           fontFamily: 'serif',
         })}
-        {btn('S', '删除线（再次点击取消）', active.strike, () => view && toggleWrap(view, '~~'), {
+        {btn('S', text('toolbar.strike'), active.strike, () => view && toggleWrap(view, '~~'), {
           textDecoration: 'line-through',
         })}
-        {btn('</>', '行内代码（再次点击取消）', active.code, () => view && toggleWrap(view, '`'))}
+        {btn('</>', text('toolbar.inlineCode'), active.code, () => view && toggleWrap(view, '`'))}
       </Space>
       <Space size={2}>
-        {btn('$x$', '行内公式 $…$（有选区则切换包裹）', false, () => {
+        {btn('$x$', text('toolbar.inlineMath'), false, () => {
           if (!view) return
           // 有选区 → toggle $…$；无选区 → 插入占位 $x$ 并选中 x（避免产生空公式 `$$`）
           if (view.state.selection.main.empty) {
@@ -155,28 +157,37 @@ export function MarkdownToolbar({ view, disabled }: Props) {
           }
         })}
         {btn(
-          '链接',
-          '插入链接 [文字](url)',
+          text('toolbar.linkLabel'),
+          text('toolbar.link'),
           false,
-          () => view && insertSnippet(view, '[文字](https://)', { select: { from: 1, to: 3 } }),
+          () => {
+            if (!view) return
+            const linkText = text('editor.snippet.linkText')
+            insertSnippet(view, `[${linkText}](https://)`, { select: { from: 1, to: 1 + linkText.length } })
+          },
         )}
         {btn(
-          '图片',
-          '插入外链图片 ![说明](图片 URL)',
+          text('toolbar.imageLabel'),
+          text('toolbar.image'),
           false,
           // 编辑器换成 Markdown 后保留「外链 URL 插图」入口（BUG-0224）；选中 URL 占位便于直接粘贴
-          () => view && insertSnippet(view, '![图片](https://)', { block: true, select: { from: 6, to: 14 } }),
+          () => {
+            if (!view) return
+            const alt = text('editor.snippet.toolbarImageAlt')
+            const urlFrom = 4 + alt.length
+            insertSnippet(view, `![${alt}](https://)`, { block: true, select: { from: urlFrom, to: urlFrom + 8 } })
+          },
         )}
       </Space>
       <Space size={2}>
-        {btn('•', '无序列表', active.bullet, () => view && toggleLinePrefix(view, () => '- ', /^(\s*)([-*+])(\s)/))}
+        {btn('•', text('toolbar.bullet'), active.bullet, () => view && toggleLinePrefix(view, () => '- ', /^(\s*)([-*+])(\s)/))}
         {btn(
           '1.',
-          '有序列表',
+          text('toolbar.ordered'),
           active.ordered,
           () => view && toggleLinePrefix(view, (i) => `${i + 1}. `, /^(\s*)(\d+[.)])(\s)/),
         )}
-        {btn('❝', '引用', active.quote, () => view && toggleLinePrefix(view, () => '> ', /^(\s*)(>)(\s)/))}
+        {btn('❝', text('toolbar.quote'), active.quote, () => view && toggleLinePrefix(view, () => '> ', /^(\s*)(>)(\s)/))}
       </Space>
     </div>
   )

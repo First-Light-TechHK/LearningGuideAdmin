@@ -11,6 +11,7 @@ import { UploadDocumentModal } from './UploadDocumentModal'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 import { PageFileIcon } from '../icons'
+import { useKText } from './i18n'
 
 /** heading 信息：层级(1-6) + 文本 */
 interface HeadingInfo {
@@ -45,6 +46,7 @@ function parseHeadings(contentMd: string): HeadingInfo[] {
  */
 export function CourseTree({ keyword }: { keyword: string }) {
   const { message, modal } = App.useApp()
+  const { text } = useKText()
   /** PRD §3.2/§3.3：新建/删除是 CREATE/DELETE 级写操作，View/Edit 角色不显示 */
   const access = useWorkspaceAccess()
   const courses = useKnowledgeStore((s) => s.courses)
@@ -283,7 +285,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
     try {
       await reorderPages(visibleCourseId, next)
     } catch (e) {
-      message.error((e as Error).message || '排序保存失败')
+      message.error((e as Error).message || text('tree.sortFailed'))
     }
   }
 
@@ -305,15 +307,15 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   const confirmDelete = (label: string, action: () => Promise<void>) => {
     modal.confirm({
-      title: `删除${label}？`,
-      content: '该操作不可撤销。',
-      okText: '删除',
+      title: text('tree.deleteConfirmTitle', { label }),
+      content: text('tree.deleteConfirmContent'),
+      okText: text('tree.delete'),
       okButtonProps: { danger: true },
-      cancelText: '取消',
+      cancelText: text('common.cancel'),
       onOk: async () => {
         try {
           await action()
-          message.success('已删除')
+          message.success(text('tree.deleted'))
         } catch (e) {
           message.error((e as Error).message)
         }
@@ -336,20 +338,20 @@ export function CourseTree({ keyword }: { keyword: string }) {
     if (ops.pageId) {
       if (!access.canDelete) return null
       return {
-        items: [{ key: 'del-page', label: '删除页面', danger: true }],
+        items: [{ key: 'del-page', label: text('tree.deletePage'), danger: true }],
         onClick: ({ key }: { key: string }) => {
           if (key === 'del-page')
-            confirmDelete('页面', () => deletePage(ops.courseId, ops.pageId!))
+            confirmDelete(text('tree.labelPage'), () => deletePage(ops.courseId, ops.pageId!))
         },
       }
     }
     const courseItems: { key: string; label: string; danger?: boolean }[] = []
     if (access.canCreate) {
-      courseItems.push({ key: 'new-page', label: '新建页面' })
-      courseItems.push({ key: 'upload', label: '上传文档建页' })
+      courseItems.push({ key: 'new-page', label: text('tree.newPage') })
+      courseItems.push({ key: 'upload', label: text('tree.uploadDoc') })
     }
     if (access.canDelete) {
-      courseItems.push({ key: 'del-course', label: '删除课程', danger: true })
+      courseItems.push({ key: 'del-course', label: text('tree.deleteCourse'), danger: true })
     }
     if (courseItems.length === 0) return null
     return {
@@ -358,7 +360,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
         if (key === 'new-page') openCreate(ops.courseId)
         if (key === 'upload') openUpload(ops.courseId, node.title as string)
         if (key === 'del-course')
-          confirmDelete('课程', () => deleteCourse(ops.courseId))
+          confirmDelete(text('tree.labelCourse'), () => deleteCourse(ops.courseId))
       },
     }
   }
@@ -366,7 +368,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
   if (showAll && courses.length === 0) {
     return (
       <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
-        暂无课件，请在上方选择同步目标后 Sync
+        {text('tree.emptyAll')}
       </span>
     )
   }
@@ -376,7 +378,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description={
           <span style={{ fontSize: tokens.fontSize.md }}>
-            该课程尚未同步，点击下方 Sync 拉取
+            {text('tree.emptyCourse')}
           </span>
         }
       />
@@ -390,7 +392,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
-              <span style={{ fontSize: tokens.fontSize.md }}>无匹配结果</span>
+              <span style={{ fontSize: tokens.fontSize.md }}>{text('tree.noMatch')}</span>
             }
           />
         ) : (
@@ -546,7 +548,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     <span
                       className="page-drag-handle"
                       draggable
-                      title="拖拽调整顺序"
+                      title={text('tree.dragReorder')}
                       onClick={(e) => e.stopPropagation()}
                       onDragStart={(e) => {
                         e.stopPropagation()
@@ -581,7 +583,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     />
                   ) : null}
                   {stale ? (
-                    <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用">
+                    <Tooltip title={text('tree.staleTooltip')}>
                       <span
                         style={{
                           display: 'block',
@@ -642,16 +644,16 @@ export function CourseTree({ keyword }: { keyword: string }) {
       />
       <Modal
         open={!!inputState}
-        title="新建页面"
-        okText="创建"
-        cancelText="取消"
+        title={text('tree.newPageModalTitle')}
+        okText={text('common.create')}
+        cancelText={text('common.cancel')}
         onOk={submitCreate}
         onCancel={() => setInputState(null)}
         destroyOnHidden
       >
         <Input
           autoFocus
-          placeholder="页面名称"
+          placeholder={text('tree.pageNamePlaceholder')}
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onPressEnter={submitCreate}
