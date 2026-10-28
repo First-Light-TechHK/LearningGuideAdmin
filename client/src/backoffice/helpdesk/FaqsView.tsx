@@ -75,10 +75,18 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
     [],
   )
 
+  // 最新的地址栏参数：react-router 的 setSearchParams 函数式更新拿到的是「创建它那次渲染」的参数，
+  // 防抖 300ms 后的搜索若用它，会把这期间改过的分类 / 热门筛选覆盖掉（跨应用联调发现）
+  const latestParams = useRef(searchParams)
+  useEffect(() => {
+    latestParams.current = searchParams
+  }, [searchParams])
+
   function update(patch: Partial<FaqFilters>, replace = false) {
     // 换筛选回到第一页；只翻页时保留其它筛选
-    // 用函数式更新：防抖后的搜索不会覆盖这 300ms 里改过的其它筛选
-    setSearchParams((current) => writeFaqFilters(current, 'page' in patch ? patch : { ...patch, page: 1 }), { replace })
+    const next = writeFaqFilters(latestParams.current, 'page' in patch ? patch : { ...patch, page: 1 })
+    latestParams.current = next
+    setSearchParams(next, { replace })
   }
 
   function onSearch(value: string) {

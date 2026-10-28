@@ -175,6 +175,25 @@ describe('FAQs tab (Figma 1379:2)', () => {
     assert.match(location.current, /popular=not_popular/)
   })
 
+  test('a filter changed while the search is still debouncing is kept when the search lands', async () => {
+    // Found in the cross-app run: clearing the search and picking "Popular" within 300 ms
+    // lost the Popular filter, because the debounced write used the address bar of the
+    // render in which the search was typed.
+    serveFaqs(faq('f1'))
+    await openFaqs({ query: '&q=reset' })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search questions, answers or keywords...' }), {
+      target: { value: '' },
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Popular' }), { target: { value: 'popular' } })
+    await waitFor(() => assert.equal(lastListQuery().popular, 'true'))
+    // The debounced search write (300 ms) must not undo the Popular filter.
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    await waitFor(() => assert.equal(lastListQuery().q, undefined))
+    assert.equal(lastListQuery().popular, 'true')
+    assert.match(location.current, /popular=popular/)
+    assert.doesNotMatch(location.current, /q=reset/)
+  })
+
   test('the category filter lists every category with its label', async () => {
     serveFaqs()
     await openFaqs()

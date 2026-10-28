@@ -213,16 +213,29 @@ function Composer({ locale, internal, hint, draft, busy, onDraft, onSend }: Comp
 export function EnquiryTimeline(props: Props) {
   const { locale, entries, selectedId, canWrite, notice, busy, panel } = props
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const selectedRef = useRef<HTMLDivElement | null>(null)
+  const selectedRef = useRef<HTMLElement | null>(null)
   const groups = groupByDay(
     entries.map((entry) => ({ ...entry, createdAt: entry.row.createdAt })),
     locale,
   )
 
-  // 选中的工单滚到可见处（只滚中栏自身）
+  // 选中的工单滚到可见处（只滚中栏自身），跨应用联调发现的三处：
+  // - 滚的是卡片本身而不是连同 AI 块与对话的整段：整段比中栏高时会被顶到最上面，
+  //   把第一张卡片上方的日期分隔挡住；
+  // - 等卡片真的渲染出来再滚：直接打开链接时卡片要等数据回来才出现，之前那次滚动落空；
+  // - 它上面的卡片预取到详情（正文、AI 块）会变高，把选中的卡片挤出中栏，所以上面每多一张
+  //   载好的卡片再滚一次（只在比上次滚时多的时候）；下面的卡片、刷新数据都不会再滚。
+  const selectedIndex = entries.findIndex((entry) => entry.row.id === selectedId)
+  const shown = selectedIndex >= 0
+  const loadedAbove = shown ? entries.slice(0, selectedIndex).filter((entry) => entry.detail).length : 0
+  const scrolledFor = useRef<{ id: string; above: number } | null>(null)
   useEffect(() => {
-    selectedRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [selectedId])
+    if (!shown || !selectedRef.current) return
+    const last = scrolledFor.current
+    if (last && last.id === selectedId && last.above >= loadedAbove) return
+    scrolledFor.current = { id: selectedId, above: loadedAbove }
+    selectedRef.current.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedId, shown, loadedAbove])
 
   function togglePanel(id: string, kind: 'reply' | 'notes') {
     const open = panel?.id === id && panel.kind === kind
@@ -252,7 +265,6 @@ export function EnquiryTimeline(props: Props) {
             return (
               <div
                 key={row.id}
-                ref={selected ? selectedRef : undefined}
                 className={`hdTimelineItem${selected ? ' hdTimelineItemCurrent' : ''}`}
               >
                 <div className="hdMsgRow hdCardRow">
@@ -264,6 +276,7 @@ export function EnquiryTimeline(props: Props) {
                     {initials(ticket.learner.name, ticket.learner.email)}
                   </span>
                   <article
+                    ref={selected ? selectedRef : undefined}
                     className={`hdEnquiryCard${selected ? ' hdEnquiryCardCurrent' : ''}`}
                     aria-label={ticket.subject}
                     aria-current={selected ? 'true' : undefined}

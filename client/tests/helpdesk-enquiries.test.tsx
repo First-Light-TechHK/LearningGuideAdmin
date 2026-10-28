@@ -136,6 +136,26 @@ describe('list and URL filters', () => {
     await waitFor(() => assert.equal(server.callsTo('GET', LIST).at(-1)?.query.get('q'), 'all'))
   })
 
+  test('a filter changed while the search is still debouncing is kept when the search lands', async () => {
+    // Same race the cross-app run found on the FAQs tab: the debounced search must write
+    // onto the latest address bar, not the one from the render it was typed in.
+    serve(detail('a'))
+    await renderHelpDesk(server, { path: '/en-GB/help-desk' })
+    await screen.findByText('Subject a')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'reset' } })
+    fireEvent.click(screen.getByRole('button', { name: /Filter enquiries/ }))
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'OPEN' } })
+    await waitFor(() => assert.match(location.current, /status=OPEN/))
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    await waitFor(() => assert.match(location.current, /q=reset/))
+    assert.match(location.current, /status=OPEN/)
+    await waitFor(() => {
+      const last = server.callsTo('GET', LIST).at(-1) as Call
+      assert.equal(last.query.get('q'), 'reset')
+      assert.equal(last.query.get('status'), 'OPEN')
+    })
+  })
+
   test('choosing status "All" removes status from the URL and the request; other filters stay', async () => {
     serve(detail('a'))
     await renderHelpDesk(server, { path: '/en-GB/help-desk?status=OPEN&tag=vip' })
@@ -845,6 +865,71 @@ describe('student timeline (Figma 1324:2 middle column)', () => {
     assert.ok(within(older).getByText('Payments & Subscriptions'))
     assert.equal(within(older).getByText(/^l@example\.com · /).textContent, 'l@example.com · 09:15')
     assert.ok(within(older).getByText('Body of b'))
+  })
+
+  test('the selected card itself is scrolled into view (nearest), not the card with its AI blocks and conversation', async () => {
+    // Found in the cross-app run: with real data (several AI blocks, a conversation) the card's
+    // whole timeline item is taller than the column, so scrolling the item put its top at the
+    // column top and hid the "28 Oct 2026" date separator above the first card.
+    const scrolled: { element: Element; options: unknown }[] = []
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+      scrolled.push({ element: this, options })
+    } as typeof HTMLElement.prototype.scrollIntoView
+    try {
+      serve(...threeForLena())
+      await renderHelpDesk(server, { path: '/en-GB/help-desk/b' })
+      const older = await card('Older same day')
+      await waitFor(() => assert.ok(scrolled.length >= 1))
+      assert.equal(scrolled.at(-1)?.element, older)
+      assert.deepEqual(scrolled.at(-1)?.options, { block: 'nearest' })
+      // The card above finishes loading its detail: one more scroll to the same card (see the next test).
+      assert.ok(await within(item(await card('Newest'))).findByText('Body of a'))
+      await waitFor(() => assert.equal(scrolled.length, 2))
+      assert.equal(scrolled.at(-1)?.element, await card('Older same day'))
+      // Once per selection: data refreshes do not scroll again; selecting another card does.
+      const count = scrolled.length
+      fireEvent.click(within(await card('Newest')).getByRole('button', { name: 'Newest' }))
+      await waitFor(async () => assert.equal((await card('Newest')).getAttribute('aria-current'), 'true'))
+      await waitFor(() => assert.equal(scrolled.length, count + 1))
+      assert.equal(scrolled.at(-1)?.element, await card('Newest'))
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+
+  test('a deep link to an older card scrolls it into view again once the cards above it have loaded', async () => {
+    // Found in the cross-app run (VIEW role, /help-desk/<older id>): the older card was scrolled to
+    // while the newer card above it was still a bare row; its body and four AI blocks then arrived
+    // and pushed the selected card out of the column (0.1 % visible).
+    const scrolled: Element[] = []
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this)
+    } as typeof HTMLElement.prototype.scrollIntoView
+    try {
+      const [a, b, c, z] = threeForLena()
+      serve(a, b, c, z)
+      const above = deferred<Reply>()
+      const below = deferred<Reply>()
+      server.on('GET', /\/tickets\/a$/, () => above.promise)
+      server.on('GET', /\/tickets\/c$/, () => below.promise)
+      await renderHelpDesk(server, { path: '/en-GB/help-desk/b' })
+      const older = await card('Older same day')
+      await waitFor(() => assert.equal(scrolled.length, 1))
+      assert.equal(scrolled[0], older)
+      // A card below the selected one cannot move it: no second scroll.
+      await act(async () => below.resolve({ data: c }))
+      assert.ok(await within(item(await card('Last week'))).findByText('Body of c'))
+      assert.equal(scrolled.length, 1)
+      // The card above gets taller: the selected card is scrolled to again.
+      await act(async () => above.resolve({ data: a }))
+      assert.ok(await within(item(await card('Newest'))).findByText('Body of a'))
+      await waitFor(() => assert.equal(scrolled.length, 2))
+      assert.equal(scrolled[1], await card('Older same day'))
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
   })
 
   test('the other cards load their detail once (read only, no mark_read) to show body and AI blocks', async () => {

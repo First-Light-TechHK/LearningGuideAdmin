@@ -137,9 +137,18 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     [],
   )
 
-  // 以当时最新的地址栏为准（防抖期间改了状态 / 类型也不会被覆盖）
+  // 以当时最新的地址栏为准（防抖期间改了状态 / 类型也不会被覆盖）。react-router 的函数式
+  // setSearchParams 拿到的是创建它那次渲染的参数，防抖回调里用它会覆盖新筛选（跨应用联调发现），
+  // 所以自己记住最新的参数。
+  const latestParams = useRef(searchParams)
+  useEffect(() => {
+    latestParams.current = searchParams
+  }, [searchParams])
+
   function updateFilters(patch: Partial<EnquiryFilters>) {
-    setSearchParams((current) => writeEnquiryFilters(current, patch), { replace: true })
+    const next = writeEnquiryFilters(latestParams.current, patch)
+    latestParams.current = next
+    setSearchParams(next, { replace: true })
   }
 
   // 与员工列表一致：输入停 300ms 后自动查询
