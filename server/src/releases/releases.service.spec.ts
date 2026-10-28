@@ -19,6 +19,7 @@ describe('ReleasesService', () => {
       delete: jest.fn(),
     },
     page: { deleteMany: jest.fn(), create: jest.fn() },
+    knowledgeChunk: { count: jest.fn() },
   };
   const mockPrisma = {
     course: { findUnique: jest.fn() },
