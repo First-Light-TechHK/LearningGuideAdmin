@@ -285,7 +285,12 @@
     "managerTitle": "管理所有上线状态",
     "managerSearch": "搜索 AI 导师",
     "managerColumnTutor": "AI 导师",
-    "managerColumnOnline": "上线"
+    "managerColumnOnline": "上线",
+    "managerColumnLearner": "学员端",
+    "learnerAvailable": "已上线",
+    "learnerNotSynced": "未同步到 Portal",
+    "learnerNoLiveRelease": "无上线版本",
+    "learnerNotOnline": "未开启"
   },
   "knowledge": {
     "common": {

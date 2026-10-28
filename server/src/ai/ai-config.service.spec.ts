@@ -92,17 +92,36 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
 
   it('listTutors：返回全部课程及 online 状态', async () => {
     mockKnowledge.listCourses.mockResolvedValue([
-      { id: 'c1', title: 'A', aiTutorOnline: true },
-      { id: 'c2', title: 'B', aiTutorOnline: false },
+      { id: 'c1', title: 'A', aiTutorOnline: true, externalId: 'a', currentReleaseId: 'r1' },
+      { id: 'c2', title: 'B', aiTutorOnline: false, externalId: 'b', currentReleaseId: 'r2' },
     ] as never);
     const list = await service.listTutors();
     expect(list).toEqual([
-      { courseId: 'c1', title: 'A', online: true },
-      { courseId: 'c2', title: 'B', online: false },
+      { courseId: 'c1', title: 'A', online: true, externalId: 'a', hasLiveRelease: true, available: true, blockedReason: null },
+      { courseId: 'c2', title: 'B', online: false, externalId: 'b', hasLiveRelease: true, available: false, blockedReason: 'not-online' },
     ]);
   });
 
-  it('getConfig：releaseId==currentReleaseId 时 isLive=true', async () => {
+  // 2026-10-28 复盘 A1：后台必须能解释"开了 Online 但学员端没入口"。
+  it('listTutors：给出 blockedReason，区分未同步 / 无上线版本 / 未开启', async () => {
+    mockKnowledge.listCourses.mockResolvedValue([
+      { id: 'unsynced', title: 'Unsynced', aiTutorOnline: true, externalId: null, currentReleaseId: 'r1' },
+      { id: 'norelease', title: 'NoRelease', aiTutorOnline: true, externalId: 'c', currentReleaseId: null },
+      { id: 'off', title: 'Off', aiTutorOnline: false, externalId: 'd', currentReleaseId: 'r2' },
+      { id: 'ok', title: 'Ok', aiTutorOnline: true, externalId: 'e', currentReleaseId: 'r3' },
+    ] as never);
+    const byId = Object.fromEntries(
+      (await service.listTutors()).map((row) => [row.courseId, row]),
+    );
+    expect(byId.unsynced.blockedReason).toBe('not-synced');
+    expect(byId.unsynced.available).toBe(false);
+    expect(byId.norelease.blockedReason).toBe('no-live-release');
+    expect(byId.norelease.hasLiveRelease).toBe(false);
+    expect(byId.off.blockedReason).toBe('not-online');
+    expect(byId.ok).toMatchObject({ available: true, blockedReason: null });
+  });
+
+  it('getConfig：回退 currentReleaseId，releaseId==currentReleaseId 时 isLive=true', async () => {
     mockKnowledge.getCourse.mockResolvedValue({
       id: 'c1', title: '课程', externalId: null,
       currentReleaseId: 'r1', aiTestReleaseId: null, aiTutorOnline: false,
