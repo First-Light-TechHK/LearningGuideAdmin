@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-10-28 ｜ HelpDesk v1 完整审查修复（Admin client + server + CI）
+
+- **任务（用户）**：「在fork上跑一遍ci 完整review一遍」「不要引入新的问题 查uiux 后端 打边角用例 看测试锁住功能没有 测试覆盖面」。本条修完整审查里 repo = backoffice 的已核实问题，每条先写失败用例再改。
+- **用户拍板（不改）**：OPEN 咨询显示 Claim / 接单；Mark as reviewed = propose_resolution 一次点击、不加确认框；Student ID = Portal 用户 id；不做埋点；界面跟 Figma，不改样式，布局只在问题需要时改，且 1672 宽必须与现状一致。
+- **变更清单**：
+  - server：列表查询参数重复 / 非文本一律 400（控制器参数改为 `unknown`，全局 ValidationPipe 不再把数组 String() 成 `a,b`）；问题 / 答案 / 关键词与推荐的学员原文拒绝控制字符（400，不再 500 / 白调模型）；推荐 3.5 秒总期限（Portal 等 4 秒），过期答案不记 `qa_id`；`CANDIDATES_SQL` 改为全文分支（走 GIN）UNION 关键词 / 双字分支再打分（5000 行本地实测 63 ms → 10 ms），PG 用例对真实 SQL 做 EXPLAIN；90 天清理用例断言新行保留原文；Portal 客户端锁住不跟随重定向、5 / 10 秒超时，附件代理锁住 `Content-Security-Policy: default-src 'none'`。
+  - client：写操作结果只作用于发出请求的那条咨询（切走后不再把旧咨询换进来、不在新咨询上提示），busy 按咨询区分；回复框 Idempotency-Key 只在正文与模式都没变时沿用；搜索框跟随地址栏、防抖用最新参数；搜索词 / 标签 all 不再被吞；标签输入与 Ctrl+Enter 在输入法组字时不提交；编辑弹窗 409 后取最新版本并保留草稿、404 关闭；保存成功 toast；中栏最小 420px（1672 宽像素级不变）；删除卡片看板遗留文案。组件逻辑抽成 `lib/helpdeskView.ts` / `lib/helpdeskQuestions.ts` 的纯函数，`tests/helpdesk-flows.test.ts` 锁住（未引入 jsdom）。
+  - CI：server job 加 `postgres:16` 服务与 `HELPDESK_TEST_DATABASE_URL`（PG 用例在 CI=true 且没库时直接失败，不再静默跳过）；client job 加 `npm test`；job 名不变；`scripts/ci-workflow.test.mjs` 锁住。
+- **未改**：Mark as reviewed 不加确认（用户拍板）。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送。
+
+---
+
 ## 2026-10-28 ｜ HelpDesk v1 审查修复（Admin client + server）：Claim 接单、mark_read 带 sequence、全文索引表达式
 
 - **任务**：协调方转来的审查结论，逐条先核实再修；用户原话见下方各条（「拿 TDD 开发锁住」「现在先不做埋点」）。

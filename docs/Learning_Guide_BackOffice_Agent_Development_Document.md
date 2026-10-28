@@ -729,7 +729,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 - **Portal 是工单的唯一写入方**（工单 / 消息 / 附件 / 事件，状态机只在 Portal 服务端执行）。BackOffice 不建表、不直连 Portal 库。
 - 数据流：浏览器 → BackOffice Server `/api/helpdesk/**`（员工会话 + 菜单权限）→ Portal 集成接口 `/api/integration/helpdesk/**`（服务间 `Authorization: Bearer PORTAL_HELPDESK_TOKEN`，RFC 6750）。浏览器从不直连 Portal。
 - 写操作由 BackOffice Server 注入当前登录员工作为 `agent { id: employeeId, name: displayName }`；请求体里的 agent 字段一律忽略，员工无法冒充他人。
-- 幂等：浏览器每次提交生成一个 `Idempotency-Key`（UUID），重试沿用同一个；Server 原样转发给 Portal，未带时 Server 生成一个。Portal 只接受 UUID，Server 对非 UUID 的键直接 400 `INVALID_INPUT`。并发：写操作携带 `expectedSequence`，Portal 返回 409 `stale_ticket` 时页面重新加载工单并提示。
+- 幂等：浏览器每次提交生成一个 `Idempotency-Key`（UUID），重试沿用同一个（回复框：正文与回复 / 内部备注都没变才沿用，任何一项变了就换新）；写操作的结果只作用于发出请求的那条咨询，员工已切到别的咨询时只同步左栏那一行；Server 原样转发给 Portal，未带时 Server 生成一个。Portal 只接受 UUID，Server 对非 UUID 的键直接 400 `INVALID_INPUT`。并发：写操作携带 `expectedSequence`，Portal 返回 409 `stale_ticket` 时页面重新加载工单并提示。
 - 实现位置：`server/src/backoffice/modules/helpdesk/`
   - `portalHelpdeskClient.ts`：**唯一**的 Portal 客户端文件（URL、鉴权头、超时、problem+json 映射、字段名归一化都在这里，Portal 字段名有出入只改这一个文件）
   - `helpdeskService.ts`：Enquiries 筛选（状态 / 类型 / 标签 / 搜索）、待回复判定、可用操作、输入校验、员工身份注入
@@ -755,8 +755,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 ### 4A.3 Enquiries（`/:locale/help-desk`，Figma 1324:2；2026-10-28 取代卡片看板）
 
 - 页头「Help Desk」+ 副标题「Manage student enquiries and common questions」+「+ Add Question」按钮；两个 Tab：Enquiries、Common Questions（§4A.7）。
-- 三栏：左 340px 列表（搜索「Search students or enquiries…」匹配姓名、邮箱、主题、工单号；筛选按钮：状态 / Enquiry Type / 标签）；中间对话；右 387px 学员信息、订阅、标签。界面细节由前端按 Figma 实现，此处只定 Server 行为。
-- 列表接口：`GET /api/helpdesk/tickets?status=&category=&tag=&q=&cursor=&limit=`（§5.4）。Portal 只接受**一个**状态值，所以 `status` 取 `all`（缺省）/ `needs_reply` / 六个状态之一；`category` 为四个 Enquiry Type 之一；`tag` ≤32 字；`q` ≤120 字（与 Portal 一致）；`limit` 1–100（缺省 30），按 `nextCursor` 滚动加载。
+- 三栏：左 340px 列表（搜索「Search students or enquiries…」匹配姓名、邮箱、主题、工单号；筛选按钮：状态 / Enquiry Type / 标签）；中间对话；右 387px 学员信息、订阅、标签。界面细节由前端按 Figma 实现，此处只定 Server 行为。（2026-10-28 审查修复）Figma 宽 1672 时三栏与设计稿一致；1280–1440 的笔记本上中栏至少 420px，左右两栏按比例让出、最窄 280 / 300；再窄时三栏横向滚动。
+- 列表接口：`GET /api/helpdesk/tickets?status=&category=&tag=&q=&cursor=&limit=`（§5.4）。Portal 只接受**一个**状态值，所以 `status` 取 `all`（缺省）/ `needs_reply` / 六个状态之一；`category` 为四个 Enquiry Type 之一；`tag` ≤32 字；`q` ≤120 字（与 Portal 一致）；`limit` 1–100（缺省 30），按 `nextCursor` 滚动加载。每个参数只能出现一次且是文本：`?q=a&q=b` 之类重复参数一律 400 `INVALID_INPUT`（Common Questions 列表与 Portal 读问题接口同样处理）。地址栏里 `all` 只是状态 / 类型的缺省值，搜索词或标签为 all 照常筛选。
 - 每行：`contactEmail`、`preview`（首条消息前 120 字）、`unreadByAgent`（未读圆点）、`tags`、`needsReply`（Portal 给了就用，否则 OPEN 或「ASSIGNED 且学员最后发言」）。
 - 计数 `counts`：`{ needsReply, all, OPEN, ASSIGNED, WAITING_USER, PENDING_CONFIRM, CLOSED, CANCELLED }`（Portal `needs_reply` / `all` / 各状态，缺项由 Server 推算）。
 - 打开工单时前端调 `mark_read`（仅 FULL；VIEW 打开不清未读）。「Mark as reviewed」= `propose_resolution`（工单进 PENDING_CONFIRM，请学员确认）——**这是假设，待产品确认**。回复未认领工单时 Portal 自动认领。
@@ -804,9 +804,9 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 ### 4A.7 Common Questions 问答库（Figma addendum §A）
 
 - **归属**：BackOffice 是唯一写入方（四组件「一份数据一个写入方」）；Portal 只经 `GET /api/integration/helpdesk/questions` 读已发布的；Agent 经契约 `HelpdeskQaSource`（`server/src/contracts/helpdesk-qa.ts`）读候选。
-- **字段**：`locale`（en-GB / zh-CN）、`category`（四个 Enquiry Type）、`question`（1–200）、`answer`（纯文本保留换行，1–4000，URL 渲染时自动成链接）、`keywords`（≤20 个，每个 ≤40，去重并转小写）、`status`（draft / published / archived）、`featured`（Portal 右栏展示）、`sort_order`、`version`、`created_by` / `updated_by`（员工 id）、时间戳。
+- **字段**：`locale`（en-GB / zh-CN）、`category`（四个 Enquiry Type）、`question`（1–200）、`answer`（纯文本保留换行，1–4000，URL 渲染时自动成链接）、`keywords`（≤20 个，每个 ≤40，去重并转小写）（问题、答案、关键词不得含控制字符，制表符与换行除外，否则 400 `INVALID_INPUT`；PostgreSQL TEXT 不收 U+0000）、`status`（draft / published / archived）、`featured`（Portal 右栏展示）、`sort_order`、`version`、`created_by` / `updated_by`（员工 id）、时间戳。
 - **状态**：draft ⇄ published（publish / unpublish）；draft / published → archived；archived → published（恢复）。归档后不能编辑；没有删除。
-- **并发**：每次修改带 `version`；SQL 为 `UPDATE … WHERE id = $1 AND version = $2`，不一致 409 `VERSION_CONFLICT`、什么都不改；成功 `version + 1`。
+- **并发**：每次修改带 `version`；SQL 为 `UPDATE … WHERE id = $1 AND version = $2`，不一致 409 `VERSION_CONFLICT`、什么都不改；成功 `version + 1`。编辑弹窗收到 409 后取最新版本（`GET /api/helpdesk/questions/:id`），保留员工已输入的草稿并提示，再点保存即用新版本；问题已不存在（404）则关闭弹窗并刷新列表。新增 / 编辑保存成功以 toast「Question saved.」确认。
 - **修订**：每次修改在同一事务里追加一行 `helpdesk_question_revisions`（`create` / `update` / `publish` / `unpublish` / `archive`，`snapshot` 为修改后的整行）；排序变化记 `update`。
 - **排序**：`POST /api/helpdesk/questions/reorder { items: [{ id, version }] }` 按给定顺序设为 10、20、30…，任一行版本不符整体不改；只有位置变化的行 `version + 1`。新建时排在该语言最后（最大值 + 10）。
 - **计数**：列表与详情的 `stats { shown, solved, declined }` 来自 Agent 的 `helpdesk_suggestions`（经契约 `HelpdeskSuggestionStats`，由 AppModule 注入）；读不到时为 0，不影响页面。
@@ -816,7 +816,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 ### 4A.8 推荐答案（Agent 角色，Figma addendum §C）
 
 - 代码：`server/src/ai/helpdesk/`（`helpdesk-suggest.service.ts`、`helpdesk-suggestion.store.ts`、`helpdesk-suggest.controller.ts`），只在 `agent` 角色挂载（`AiModule.register({ learnerApi: true, helpdeskQa })`）。候选来源实现在 BackOffice（`createPgHelpdeskQaSource`），由 `app.module.ts` 组装注入；双方互不 import（eslint 边界不变）。
-- 流程：①每学员每小时 10 次（共用 `ai_rate_limit_hits`，key `helpdesk-suggest:<learnerId>`），超出返回 null；②候选 = 该语言已发布问题，英文全文（`english` 配置，OR 连接、去停用词）+ 关键词出现在学员原文中 + 中文双字片段命中问题，同类 ×1.25，取前 8；没有候选**不调模型**；③经 `ProviderRegistry` 的 OpenRouter `complete()` 要结构化输出 `{"qaId": string|null}`（`response_format: json_schema`，枚举限定候选 id），回答不是候选 id 一律按 null；模型 `HELPDESK_SUGGEST_MODEL`，缺省取 `AI_AVAILABLE_MODELS` 里第一个名字含 flash / mini / haiku / lite / nano / small 的模型；超时 3 秒；没有 `OPENROUTER_API_KEY` 或任何错误都返回 null（永不阻塞学员提交）；④返回库里的原答案，模型从不写给学员看的文字；学员原文只放在 user 消息里，system 提示要求忽略其中指令。
+- 流程：①每学员每小时 10 次（共用 `ai_rate_limit_hits`，key `helpdesk-suggest:<learnerId>`），超出返回 null；②候选 = 该语言已发布问题，英文全文（`english` 配置，OR 连接、去停用词）+ 关键词出现在学员原文中 + 中文双字片段命中问题，同类 ×1.25，取前 8（SQL 先取两路命中再打分：全文一路的 WHERE 就是索引表达式 `@@ to_tsquery`，走 GIN 索引 `helpdesk_questions_search_idx`，PG 用例对真实 `CANDIDATES_SQL` 做 EXPLAIN 锁定；关键词 / 双字一路是「片段出现在原文里」，只能扫该语言已发布的行）；没有候选**不调模型**；③经 `ProviderRegistry` 的 OpenRouter `complete()` 要结构化输出 `{"qaId": string|null}`（`response_format: json_schema`，枚举限定候选 id），回答不是候选 id 一律按 null；模型 `HELPDESK_SUGGEST_MODEL`，缺省取 `AI_AVAILABLE_MODELS` 里第一个名字含 flash / mini / haiku / lite / nano / small 的模型；超时 3 秒；整次推荐（限流 + 检索 + 模型）另有 3.5 秒总期限，低于 Portal 的 4 秒等待：模型只拿剩余时间，过了期限才定下的答案不返回、日志不记 `qa_id`（学员没看到，不计入 shown）；学员原文含控制字符（制表符与换行除外）400 `invalid_request`，不调模型；没有 `OPENROUTER_API_KEY` 或任何错误都返回 null（永不阻塞学员提交）；④返回库里的原答案，模型从不写给学员看的文字；学员原文只放在 user 消息里，system 提示要求忽略其中指令。
 - 日志：每次检索写一行 `helpdesk_suggestions`（`id` UUIDv7、`learner_id`、`locale`、`category`、`query_text`、`candidate_ids`、`qa_id|null`、`model|null`、`latency_ms`、`outcome`）。
 - 结果：`POST …/suggestions/:id/outcome { outcome: solved | declined | edited }` 幂等，**首个为准**（条件更新 `WHERE outcome IS NULL`）；同值重复返回 `changed: false`，不同值不覆盖也不报错。
 - 保留：没有定时任务，`query_text` 90 天后由推荐流程顺手清空（每个实例每小时最多一次，失败不影响推荐）；运维也可手动执行 `UPDATE helpdesk_suggestions SET query_text = NULL WHERE created_at < now() - interval '90 days' AND query_text IS NOT NULL`。
