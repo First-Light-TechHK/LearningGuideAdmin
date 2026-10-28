@@ -728,6 +728,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
   - `helpdeskService.ts`：看板 Tab、待回复判定、可用操作、输入校验、员工身份注入
   - `contracts.ts`：两端共用的类型与常量
   - 控制器 `server/src/backoffice/nest/helpdesk.controller.ts`，注册在 `BackofficeModule`
+  - 前端：`client/src/backoffice/pages/HelpDeskPage.tsx`（看板）、`HelpDeskTicketPage.tsx`（详情）、`lib/helpdeskApi.ts`（接口，保留 HelpDesk 错误码）、`lib/helpdeskFormat.ts`（状态 / 分类 / 事件文案与相对时间）、`contracts/helpdesk.ts`、`helpdesk.css`（只新增 `hd*` 类，复用 `backoffice.css` 变量）；文案在 `messages/en-GB.json`、`zh-CN.json` 的 `helpDesk` 段
 
 ### 4A.2 状态与员工端文案
 

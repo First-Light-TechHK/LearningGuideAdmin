@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-28 ｜ HelpDesk 工单 v1（BackOffice 部分）：工单卡片看板 + 详情 + Portal 集成客户端
+
+- **任务（用户）**：「把工单这个流程做好，页面做好，UI 做好，每个工单就是一个小卡片在 Back Office 上 … 按照我们原有的 UI UX 风格去做设计 … 拿 TDD 开发锁住」；「现在先不做埋点」。v1 不做飞书同步、前端埋点、AI 客服。
+- **用户拍板**：方案 `lg-helpdesk/tickets-v1-spec.md`（2026-10-28 批准）：Portal 是工单唯一写入方；BackOffice 只经 Portal 集成接口（Bearer 服务令牌）读写并注入员工身份；菜单 helpDesk VIEW 只读、FULL 可写。
+- **设计同步（先改文档）**：开发文档新增 §4A（模块 C：HelpDesk 工单）、§5.4（接口）、§8（`PORTAL_HELPDESK_BASE_URL` / `PORTAL_HELPDESK_TOKEN`），§1.1 / §2 注明不建表。
+- **变更清单**：
+  - `server/src/backoffice/modules/helpdesk/portalHelpdeskClient.ts`：唯一 Portal 客户端；环境变量每次请求现读；5 秒 / 附件 10 秒超时；RFC 9457 problem+json → 统一错误码（Portal 401/403/`integration_disabled` → 503 `HELPDESK_NOT_CONNECTED`，不透传成员工会话失效）；字段名 camelCase / snake_case 归一化；附件只放行 png / jpeg / webp 且 ≤ 5 MB。
+  - `helpdeskService.ts`：Tab → Portal 状态过滤、待回复判定（OPEN，或 ASSIGNED 且学员最后发言）、Tab 数量、各状态可用操作、输入校验（正文 1–5000、expectedSequence、工单 id 必须是 UUID、Idempotency-Key 格式）、注入当前员工为 agent（忽略请求体里的 agent）。
+  - `server/src/backoffice/nest/helpdesk.controller.ts` + `backoffice.module.ts`：`/api/helpdesk/tickets…`、`/api/helpdesk/attachments/:id`（图片代理，`Cache-Control: private, no-store`、`nosniff`）。
+  - `route-access.ts`：`/api/helpdesk/**` 归菜单 helpDesk，GET = VIEW，任何写 = CREATE（仅 FULL）。
+  - 前端：`App.tsx` 用看板 / 详情替换 help-desk 占位页；新增 `HelpDeskPage.tsx`、`HelpDeskTicketPage.tsx`、`lib/helpdeskApi.ts`、`lib/helpdeskFormat.ts`、`contracts/helpdesk.ts`、`helpdesk.css`；en-GB / zh-CN `helpDesk` 文案。VIEW 角色不渲染任何操作控件。
+  - `server/.env.example`：两个新变量（留空）。
+- **TDD 证据**：先写 `helpdesk-portal-client.spec.ts`、`helpdesk-service.spec.ts`、`helpdesk-rbac.spec.ts` 与 `route-access.spec.ts` 新用例，运行确认失败（模块不存在 / 路由归 Admin-only）后再实现；变异检查：把 helpdesk 写接口改成 VIEW，RBAC 用例 4 条失败。
+- **自测证据**：`server`: `npm run build` 通过；`npm test` 全部通过；`npx eslint <改动文件>` 0 问题；本地假 Portal（node http）冒烟：鉴权头、Idempotency-Key、409 stale 映射、附件代理、超时 504 均符合预期。`client`: `npm run build`（tsc -b + vite build）通过。
+- **待视觉验收**：无 Figma 画板，界面沿用 backoffice.css 的卡片 / 按钮 / 筛选条 / 状态点 / 提示条，由用户手动验收。
+- **开放问题**：Portal 集成接口由另一线程并行实现，`status=` 多值按逗号分隔、`counts` 按状态计数的约定需联调确认；字段名差异只需改 `portalHelpdeskClient.ts`。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+- **下一步**：与 Portal 集成接口联调；用户手动冒烟（Admin / Operation Admin 可认领、回复、内部备注、请学员确认；其余角色只读）。
+
+---
+
 ## 2026-10-27 ｜ M5：行内格式按钮 toggle（再次点击取消）
 
 - **任务（用户）**：工具栏粗体/斜体/删除线/行内代码/行内公式按钮只会无限叠加标记（如连续点加粗变成 `****text****`），要求「已处于该格式时再次点击取消」。

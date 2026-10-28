@@ -13,11 +13,15 @@ import {
   type EmployeeRole,
   type SessionEmployee,
 } from '../contracts/employee';
-import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
+import {
+  createHelpdeskService,
+  type HelpdeskService,
+} from '../modules/helpdesk/helpdeskService';
 import { createPortalHelpdeskClient } from '../modules/helpdesk/portalHelpdeskClient';
 import { levelFor } from '../modules/rbac/permissions';
 import { resolveSession } from '../modules/user-authentication/services/session';
 import { BackofficeAccessGuard } from '../nest/backoffice-access.guard';
+import { BackofficeModule } from '../nest/backoffice.module';
 import {
   BackofficeHelpdeskController,
   HELPDESK_SERVICE,
@@ -353,5 +357,19 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
     it('requires a session', async () => {
       await request(server()).get('/api/helpdesk/attachments/a1').expect(401);
     });
+  });
+});
+
+describe('BackofficeModule wiring', () => {
+  it('registers the HelpDesk controller with a real service (no DB needed to compile)', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [BackofficeModule],
+    }).compile();
+    expect(moduleRef.get(BackofficeHelpdeskController)).toBeInstanceOf(
+      BackofficeHelpdeskController,
+    );
+    const service = moduleRef.get<HelpdeskService>(HELPDESK_SERVICE);
+    expect(typeof service.list).toBe('function');
+    await moduleRef.close();
   });
 });

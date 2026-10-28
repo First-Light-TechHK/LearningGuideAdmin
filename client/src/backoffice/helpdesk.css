@@ -1,0 +1,523 @@
+/*
+ * HelpDesk 工单（设计文档 §4A）。只新增 hd* 类，全部复用 backoffice.css 的 :root 变量，
+ * 不改任何既有类。没有 Figma 画板：待视觉验收。
+ */
+
+/* ---------------------------------- 看板 ---------------------------------- */
+
+.hdTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* 与 .segment 同一套描边 / 选中色，做成紧凑的筛选 Tab */
+.hdTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: var(--lg-white);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--lg-slate-soft);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hdTab:hover {
+  border-color: #cfd8e5;
+}
+
+.hdTabActive,
+.hdTabActive:hover {
+  border-color: var(--lg-blue-stroke);
+  background: var(--lg-blue-tint);
+  color: var(--lg-blue);
+  font-weight: 600;
+}
+
+.hdTabCount {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: var(--lg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hdTabActive .hdTabCount {
+  background: var(--lg-white);
+  color: var(--lg-blue);
+}
+
+.hdBoard {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 2px;
+}
+
+.hdGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.hdCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 10px;
+  background: var(--lg-white);
+  color: var(--lg-slate);
+  box-shadow: var(--lg-shadow-sm);
+  text-decoration: none;
+  min-width: 0;
+}
+
+.hdCard:hover {
+  border-color: #cfd8e5;
+  box-shadow: var(--lg-shadow-md);
+  text-decoration: none;
+}
+
+.hdCard:focus-visible {
+  outline: none;
+  border-color: var(--lg-blue);
+  box-shadow: 0 0 0 3px rgba(29, 107, 255, 0.12);
+}
+
+/* 待回复：左侧蓝色强调条 + 浅蓝底 */
+.hdCardNeedsReply {
+  border-color: #c7d7fe;
+  background: #fbfcff;
+}
+
+.hdCardNeedsReply::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--lg-blue);
+}
+
+.hdCardTop,
+.hdCardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hdNumber {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--lg-muted);
+  white-space: nowrap;
+}
+
+.hdCardSubject {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--lg-heading);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.hdCardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.hdChip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: var(--lg-slate-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.hdBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--lg-blue-soft);
+  color: var(--lg-blue);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hdLearner {
+  font-size: 13px;
+  color: var(--lg-slate);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdLearnerEmail {
+  color: var(--lg-muted);
+}
+
+.hdCardFoot {
+  font-size: 12px;
+  color: var(--lg-muted);
+  border-top: 1px solid var(--lg-line-soft);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.hdCardFoot > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdEmpty {
+  padding: 48px 0;
+  text-align: center;
+  color: var(--lg-muted);
+  font-size: 14px;
+}
+
+.hdBoardFooter {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+/* 状态点：沿用 .statusPill / .dot 的尺寸，只补 HelpDesk 状态的颜色 */
+.hdStatus {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--lg-slate);
+  white-space: nowrap;
+}
+
+.hdDotOPEN {
+  background: var(--lg-blue);
+}
+
+.hdDotASSIGNED {
+  background: var(--lg-amber);
+}
+
+.hdDotWAITING_USER {
+  background: var(--lg-muted);
+}
+
+.hdDotPENDING_CONFIRM {
+  background: var(--lg-white);
+  box-shadow: inset 0 0 0 2px var(--lg-green);
+}
+
+.hdDotCLOSED {
+  background: var(--lg-green);
+}
+
+.hdDotCANCELLED {
+  background: var(--lg-grey);
+}
+
+/* ---------------------------------- 详情 ---------------------------------- */
+
+.hdBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.hdHeadMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.hdHeadActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hdThread {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 12px;
+}
+
+.hdMessage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 78%;
+  align-self: flex-start;
+}
+
+/* 员工端视角：员工（含内部备注）靠右，学员靠左 */
+.hdMessageAgent {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.hdMessageMeta {
+  font-size: 12px;
+  color: var(--lg-muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hdMessageAuthor {
+  font-weight: 600;
+  color: var(--lg-slate);
+}
+
+.hdBubble {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  color: var(--lg-ink);
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hdMessageAgent .hdBubble {
+  background: var(--lg-blue-tint);
+  border: 1px solid #dbeafe;
+}
+
+/* 内部备注：琥珀色底 + 虚线描边，与公开回复一眼区分 */
+.hdMessageInternal .hdBubble {
+  background: #fffbeb;
+  border: 1px dashed #f59e0b;
+}
+
+.hdInternalTag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hdSystemLine {
+  align-self: center;
+  font-size: 12px;
+  color: var(--lg-muted);
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 4px 12px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.hdAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hdThumb {
+  display: block;
+  width: 96px;
+  height: 72px;
+  border-radius: 8px;
+  border: 1px solid var(--lg-line-soft);
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.hdThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hdComposer {
+  border-top: 1px solid var(--lg-line-soft);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.hdComposer .segmented {
+  max-width: 420px;
+}
+
+.hdComposer .segment {
+  height: 36px;
+  font-size: 13px;
+}
+
+.hdTextarea {
+  width: 100%;
+  min-height: 88px;
+  max-height: 240px;
+  resize: vertical;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  background: var(--lg-white);
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  font-family: inherit;
+  color: var(--lg-slate);
+}
+
+.hdTextarea:focus {
+  outline: none;
+  border-color: var(--lg-blue);
+  box-shadow: 0 0 0 3px rgba(29, 107, 255, 0.12);
+}
+
+.hdComposerInternal .hdTextarea {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.hdComposerFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--lg-muted);
+}
+
+/* 右栏：学员信息、状态、处理人、时间线 */
+.card.hdSide {
+  width: 320px;
+  flex: 0 0 320px;
+  overflow: auto;
+  gap: 18px;
+  padding: 24px 22px;
+}
+
+.hdSideTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--lg-heading);
+  margin-bottom: 10px;
+}
+
+.hdFacts {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  row-gap: 8px;
+  column-gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.hdFacts dt {
+  color: var(--lg-muted);
+}
+
+.hdFacts dd {
+  margin: 0;
+  color: var(--lg-slate);
+  word-break: break-word;
+}
+
+.hdTimeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--lg-line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hdTimeline li {
+  position: relative;
+  font-size: 13px;
+  color: var(--lg-slate);
+}
+
+.hdTimeline li::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--lg-white);
+  box-shadow: inset 0 0 0 2px var(--lg-blue-stroke);
+}
+
+.hdTimelineTime {
+  display: block;
+  font-size: 12px;
+  color: var(--lg-muted);
+  margin-top: 2px;
+}
+
+@media (max-width: 1100px) {
+  .card.hdSide {
+    width: 280px;
+    flex-basis: 280px;
+  }
+}
+
+@media (max-width: 900px) {
+  .card.hdSide {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .hdMessage {
+    max-width: 92%;
+  }
+}

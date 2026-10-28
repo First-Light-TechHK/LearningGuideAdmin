@@ -14,6 +14,8 @@ import ActivatePage from './backoffice/pages/ActivatePage'
 import ForgotPasswordPage from './backoffice/pages/ForgotPasswordPage'
 import ResetPasswordPage from './backoffice/pages/ResetPasswordPage'
 import SignInPage from './backoffice/pages/SignInPage'
+import HelpDeskPage from './backoffice/pages/HelpDeskPage'
+import HelpDeskTicketPage from './backoffice/pages/HelpDeskTicketPage'
 import {
   CoursePage,
   EmployeeAccountSettingsPage,
@@ -147,7 +149,26 @@ function App() {
               <Route path="order" element={<PlaceholderPage menu="order" />} />
               <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
               <Route path="student" element={<PlaceholderPage menu="student" />} />
-              <Route path="help-desk" element={<PlaceholderPage menu="helpDesk" />} />
+              <Route
+                path="help-desk"
+                element={
+                  <MenuGuard menu="helpDesk">
+                    <WorkspaceAccessProvider menu="helpDesk">
+                      <HelpDeskPage />
+                    </WorkspaceAccessProvider>
+                  </MenuGuard>
+                }
+              />
+              <Route
+                path="help-desk/:ticketId"
+                element={
+                  <MenuGuard menu="helpDesk">
+                    <WorkspaceAccessProvider menu="helpDesk">
+                      <HelpDeskTicketPage />
+                    </WorkspaceAccessProvider>
+                  </MenuGuard>
+                }
+              />
               <Route path="settings" element={<SettingsIndexPage />} />
               <Route path="settings/employee-account" element={<EmployeeAccountSettingsPage />} />
               <Route
