@@ -13,6 +13,9 @@ import { PrismaHelpdeskSuggestionStore } from './helpdesk-suggestion.store';
  * 需要 HELPDESK_TEST_DATABASE_URL；未设置时跳过。
  */
 const url = process.env.HELPDESK_TEST_DATABASE_URL;
+// CI 必须真的跑这些用例（.github/workflows/ci.yml 的 postgres 服务）：没给库就失败，不是静默跳过
+if (!url && process.env.CI === 'true')
+  throw new Error('HELPDESK_TEST_DATABASE_URL is required when CI=true');
 const describeDb = url ? describe : describe.skip;
 const MIGRATIONS = join(__dirname, '../../../prisma/migrations');
 
