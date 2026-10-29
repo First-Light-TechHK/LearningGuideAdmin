@@ -9,4 +9,3 @@ type Tx = Prisma.TransactionClient;
 export async function lockCourseRow(tx: Tx, courseId: string): Promise<void> {
   await tx.$executeRaw`SELECT 1 FROM "Course" WHERE id = ${courseId} FOR UPDATE`;
 }
-

@@ -70,8 +70,14 @@ export class RateLimitService {
     if (channel === 'portal') return RateLimitService.LIMIT;
     const [envName, fallback] =
       channel === 'study-group'
-        ? ['AI_RATE_LIMIT_STUDY_GROUP_PER_MINUTE', RateLimitService.STUDY_GROUP_LIMIT]
-        : ['AI_RATE_LIMIT_ADMIN_TEST_PER_MINUTE', RateLimitService.ADMIN_TEST_LIMIT];
+        ? [
+            'AI_RATE_LIMIT_STUDY_GROUP_PER_MINUTE',
+            RateLimitService.STUDY_GROUP_LIMIT,
+          ]
+        : [
+            'AI_RATE_LIMIT_ADMIN_TEST_PER_MINUTE',
+            RateLimitService.ADMIN_TEST_LIMIT,
+          ];
     const raw = Number.parseInt(process.env[envName]?.trim() || '', 10);
     return Number.isSafeInteger(raw) && raw > 0 ? raw : fallback;
   }

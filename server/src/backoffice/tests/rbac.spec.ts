@@ -51,7 +51,10 @@ describe('action level', () => {
       isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'EDIT_EXISTING'),
       true,
     );
-    assert.equal(isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'VIEW'), true);
+    assert.equal(
+      isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'VIEW'),
+      true,
+    );
     assert.equal(
       isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'CREATE'),
       false,

@@ -74,8 +74,10 @@ describe('ReleasesService', () => {
     });
     expect(mockTx.courseAiConfig.create).not.toHaveBeenCalled();
     // 快照仅收录 SYNCED 节点：事务内查询条件应带 syncState 过滤
-    const courseQuery = mockTx.course.findUnique.mock
-      .calls[0][0] as Record<string, never>;
+    const courseQuery = mockTx.course.findUnique.mock.calls[0][0] as Record<
+      string,
+      never
+    >;
     expect(JSON.stringify(courseQuery)).toContain('SYNCED');
   });
 
@@ -88,7 +90,12 @@ describe('ReleasesService', () => {
       pages: [],
     });
     mockTx.release.create.mockResolvedValue({ id: 'r9' });
-    const source = { lectureSystemPrompt: 'L', welcomeMsg: 'W', model: 'm', llmProvider: 'openrouter' };
+    const source = {
+      // lectureSystemPrompt 不再随 Release 复制（2026-10-29 A），新 Release 走模板兜底
+      welcomeMsg: 'W',
+      model: 'm',
+      llmProvider: 'openrouter',
+    };
     mockTx.courseAiConfig.findUnique.mockResolvedValue(source);
 
     await service.publish('c1', { revisionNotes: 'v2' });
@@ -106,8 +113,16 @@ describe('ReleasesService', () => {
   });
 
   it('setLive / remove：校验前先锁 Course 行（QA A7）', async () => {
-    mockTx.course.findUnique.mockResolvedValue({ id: 'c1', currentReleaseId: null, aiTestReleaseId: null });
-    mockTx.release.findUnique.mockResolvedValue({ id: 'r1', courseId: 'c1', versionTag: 'v1' });
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      currentReleaseId: null,
+      aiTestReleaseId: null,
+    });
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+      versionTag: 'v1',
+    });
     await service.setLive('c1', { releaseId: 'r1' });
     expect(mockTx.$executeRaw).toHaveBeenCalledTimes(1);
     await service.remove('r1');
@@ -257,7 +272,12 @@ describe('ReleasesService', () => {
       snapshotData: {
         pages: [
           { id: 'p1', title: '第一章', contentMd: '# old', sectionTags: null },
-          { id: 'p2', title: '第二章', contentMd: '# keep', sectionTags: { 'h1-sec': ['tag'] } },
+          {
+            id: 'p2',
+            title: '第二章',
+            contentMd: '# keep',
+            sectionTags: { 'h1-sec': ['tag'] },
+          },
         ],
       },
     });
@@ -292,9 +312,9 @@ describe('ReleasesService', () => {
       id: 'r9',
       courseId: 'other',
     });
-    await expect(
-      service.activate('c1', { releaseId: 'r9' }),
-    ).rejects.toThrow(NotFoundException);
+    await expect(service.activate('c1', { releaseId: 'r9' })).rejects.toThrow(
+      NotFoundException,
+    );
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });

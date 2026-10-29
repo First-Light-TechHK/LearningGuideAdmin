@@ -13,7 +13,7 @@ export function serviceTokenAllows(
   authorization: string | string[] | undefined,
   expected: string | undefined,
   deployed: boolean,
-  apiKeyHeader?: string | string[] | undefined,
+  apiKeyHeader?: string | string[],
 ): boolean {
   const token = expected?.trim();
   if (!token) return !deployed;
@@ -21,7 +21,9 @@ export function serviceTokenAllows(
     ? authorization[0]
     : authorization;
   const match = /^Bearer\s+(.+)$/i.exec(header?.trim() ?? '');
-  const apiKey = (Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader)?.trim();
+  const apiKey = (
+    Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader
+  )?.trim();
   const providedRaw = match?.[1]?.trim() || apiKey;
   if (!providedRaw) return false;
   const provided = Buffer.from(providedRaw);

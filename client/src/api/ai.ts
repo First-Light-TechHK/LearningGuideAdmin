@@ -3,11 +3,14 @@ import { notifySessionChanged } from '../backoffice/lib/navigation'
 
 /** AI Tutor 接口封装（§5.2；chat-stream 为 SSE，在 aiStore 中经 fetch 处理） */
 
+/** 对话模式（用于 chatStream 和对话渲染，不含 MAIN） */
 export type AiMode = 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT'
+/** 配置分段项（用于 ConfigPanel 分段控件，含 MAIN=主提示词） */
+export type AiSegmentKey = 'MAIN' | AiMode
 
-/** 单模式的 AI 配置（2026-10-27：仅含 System Prompt；Welcome / Model 已提升为课程级共享） */
+/** 单配置块的 System Prompt 视图 */
 export interface AiModeView {
-  /** 该模式自定义 System Prompt 覆盖值（null = 未自定义，前端回退该模式模板默认值） */
+  /** 自定义 System Prompt 覆盖值（null = 未自定义） */
   systemPrompt: string | null
 }
 
@@ -23,10 +26,18 @@ export interface AiConfigView {
   hasApiKey: boolean
   /** 是否对用户侧开放（课程级，§4.2.6） */
   online: boolean
+  /** Portal course.slug；null 表示还没和 Portal 课程对应（Online 开开关联前提 1） */
+  externalId: string | null
+  /** 是否存在上线版本 Online 开开关联前提 2） */
+  hasLiveRelease: boolean
   /** 课程级统一 Welcome Message（2026-10-27 起不再按模式区分） */
   welcomeMsg: string | null
   /** 课程级统一 LLM Model（2026-10-27 起不再按模式区分） */
   model: string
+  /** 主提示词（讲授/苏格拉底共享；2026-10-29 新增） */
+  main: AiModeView
+  /** MAIN 分段项的默认值（main.md 文件内容），前端 Reset / 新建 Release 时用此值填充 textarea */
+  defaultMainSystemPrompt: string
   /** Lecture 模式 System Prompt */
   lecture: AiModeView
   /** Socratic 模式 System Prompt */
@@ -62,19 +73,19 @@ export const aiApi = {
     http.get<PromptTemplate[]>('/ai/prompts').then((r) => r.data),
   getConfig: (courseId: string) =>
     http.get<AiConfigView>(`/ai/config/${courseId}`).then((r) => r.data),
-  /** 保存配置（§4.2.5；2026-10-27：System Prompt 按 mode 写入；Welcome / Model 写入课程级共享列） */
+  /** 保存配置（§4.2.5；2026-10-29 新增 MAIN 分段项） */
   saveConfig: (data: {
     courseId: string
     /** 写入的 Release：传当前界面上看到的版本，避免他人刚切换测试版本时写错版本 */
     releaseId?: string
-    mode: AiMode
+    mode: AiSegmentKey
     llmProvider: string
     systemPrompt?: string
     welcomeMsg?: string
     llmModel: string
   }) => http.put<AiConfigView>('/ai/config', data).then((r) => r.data),
-  /** 重置为默认模板（§4.2.4；2026-10-27：只重置该模式的 System Prompt，不动共享 Welcome / Model） */
-  resetConfig: (courseId: string, mode: AiMode) =>
+  /** 重置为默认值（§4.2.4；2026-10-29 新增 MAIN） */
+  resetConfig: (courseId: string, mode: AiSegmentKey) =>
     http
       .post<AiConfigView>(`/ai/config/${courseId}/reset`, { mode })
       .then((r) => r.data),

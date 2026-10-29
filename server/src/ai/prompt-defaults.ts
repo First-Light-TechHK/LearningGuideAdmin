@@ -3,11 +3,13 @@ import { join } from 'node:path';
 import { load } from 'js-yaml';
 
 /**
- * 默认 Prompt / Welcome 文件源（2026-10-23）。
- * - `prompts/lecture.md`、`prompts/socratic.md`、`prompts/assessment.md`：默认 System Prompt
+ * 默认 Prompt / Welcome / Main 文件源（2026-10-29 更新）。
+ * - `prompts/lecture.md`、`prompts/socratic.md`、`prompts/assessment.md`：默认 System Prompt（模式模板，进 PromptTemplate 表）
+ * - `prompts/main.md`：主提示词默认值（讲授/苏格拉底共享硬约束，**不进** PromptTemplate 表，跨模式单独兜底）
  * - `prompts/welcome.yaml`：默认欢迎语（2026-10-27 起为课程级统一欢迎语，不再按模式区分）
  * 这些文件同时是运行时兜底：库中缺默认模板行时直接使用文件值（2026-10-26，不写库）。
- * 如需把文件内容写入 PromptTemplate，运行 `npm run prompts:sync`。
+ * 如需把模式文件内容写入 PromptTemplate，运行 `npm run prompts:sync`。
+ * main.md 不需要 sync（main 不是模式，不属于模板体系）。
  */
 export type PromptMode = 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT';
 export type PromptLocale = 'zh-CN' | 'en-GB';
@@ -81,10 +83,33 @@ export function defaultWelcome(
  */
 export function promptTemplateSeeds() {
   return (['LECTURE', 'SOCRATIC', 'ASSESSMENT'] as const).map((mode) => ({
-    id: mode === 'LECTURE' ? 'lecture-default' : mode === 'SOCRATIC' ? 'socratic-default' : 'assessment-default',
+    id:
+      mode === 'LECTURE'
+        ? 'lecture-default'
+        : mode === 'SOCRATIC'
+          ? 'socratic-default'
+          : 'assessment-default',
     mode,
     systemPrompt: DEFAULT_PROMPTS[mode].systemPrompt,
     welcomeMsg: DEFAULT_PROMPTS[mode].welcome['zh-CN'],
     isDefault: true,
   }));
 }
+
+/**
+ * 主提示词默认值（2026-10-29 新增）：
+ * - 讲授/苏格拉底共享的硬约束层，置于拼接最前
+ * - 不进 PromptTemplate 表（main 不是模式，不属于模板体系）
+ * - 用户未配置 mainSystemPrompt 时由 resolvePrompts 兜底使用
+ */
+export const DEFAULT_MAIN_PROMPT: string = readText('main.md');
+
+/**
+ * 学生输入与历史消息的运行时包裹分隔符（2026-10-29 新增）：
+ * - 真正的隔离执行逻辑在 ai-chat.service.run() 中完成
+ * - 这里只维护 BEGIN/END 分隔符字符串；隔离声明已被 main.md 第 2 节 INPUT IS DATA 正式覆盖
+ */
+export const STUDENT_WRAPPER = {
+  BEGIN: '[STUDENT_INPUT_BEGIN]',
+  END: '[STUDENT_INPUT_END]',
+} as const;

@@ -20,16 +20,23 @@ export class ApiKeyGuard implements CanActivate {
   private readonly logger = new Logger(ApiKeyGuard.name);
 
   constructor(private readonly config: ConfigService) {
-    if (this.config.get<string>('AUTH_ENABLED') === 'true' && !this.config.get<string>('AUTH_TOKEN')) {
+    if (
+      this.config.get<string>('AUTH_ENABLED') === 'true' &&
+      !this.config.get<string>('AUTH_TOKEN')
+    ) {
       // 开启鉴权但未配置令牌：启动即告警，避免运行期所有请求静默 401 难以排查
-      this.logger.warn('AUTH_ENABLED=true 但 AUTH_TOKEN 未配置，所有请求将被拒绝');
+      this.logger.warn(
+        'AUTH_ENABLED=true 但 AUTH_TOKEN 未配置，所有请求将被拒绝',
+      );
     }
   }
 
   canActivate(context: ExecutionContext): boolean {
     const request = context
       .switchToHttp()
-      .getRequest<Request & { headers: Record<string, string | string[] | undefined> }>();
+      .getRequest<
+        Request & { headers: Record<string, string | string[] | undefined> }
+      >();
     // App Runner 健康检查不带 X-API-Key，必须在鉴权之前放行。
     if (request.path === '/api/health') {
       return true;

@@ -19,9 +19,10 @@ import { ApiSuccessResponse } from '../interfaces/api-response.interface';
  * 豁免该接口，避免把流式分块包装成 JSON 信封。
  */
 @Injectable()
-export class TransformInterceptor<T>
-  implements NestInterceptor<T, ApiSuccessResponse<T>>
-{
+export class TransformInterceptor<T> implements NestInterceptor<
+  T,
+  ApiSuccessResponse<T>
+> {
   intercept(
     context: ExecutionContext,
     next: CallHandler<T>,

@@ -512,7 +512,9 @@ describe('AI API (e2e)', () => {
   });
 
   it('首次发布即成为测试所选版本，可直接保存配置（QA 2026-10-27 A6）', async () => {
-    const fresh = await prisma.course.create({ data: { title: 'AI-E2E首发课' } });
+    const fresh = await prisma.course.create({
+      data: { title: 'AI-E2E首发课' },
+    });
     const rel = await api
       .post(`/api/courses/${fresh.id}/release`)
       .send({ revisionNotes: '首发' })
@@ -522,14 +524,24 @@ describe('AI API (e2e)', () => {
     expect(cfg.body.data.isLive).toBe(false);
     await api
       .put('/api/ai/config')
-      .send({ courseId: fresh.id, mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'test/model-a' })
+      .send({
+        courseId: fresh.id,
+        mode: 'LECTURE',
+        llmProvider: 'openrouter',
+        llmModel: 'test/model-a',
+      })
       .expect(200);
   });
 
   it('保存不在 AI_AVAILABLE_MODELS 内的模型应 400（QA 2026-10-27 A10）', async () => {
     await api
       .put('/api/ai/config')
-      .send({ courseId, mode: 'LECTURE', llmProvider: 'openrouter', llmModel: 'vendor/not-allowed' })
+      .send({
+        courseId,
+        mode: 'LECTURE',
+        llmProvider: 'openrouter',
+        llmModel: 'vendor/not-allowed',
+      })
       .expect(400);
   });
 
@@ -545,7 +557,10 @@ describe('AI API (e2e)', () => {
       .post(`/api/courses/${shared.id}/set-live`)
       .send({ releaseId: rel.body.data.id })
       .expect(201);
-    await prisma.course.update({ where: { id: shared.id }, data: { aiTutorOnline: true } });
+    await prisma.course.update({
+      where: { id: shared.id },
+      data: { aiTutorOnline: true },
+    });
     for (let i = 0; i < 10; i++) {
       await api
         .post('/api/ai/chat-stream')
@@ -554,12 +569,19 @@ describe('AI API (e2e)', () => {
     }
     await api
       .post('/api/user/ai/chat-stream')
-      .send({ externalCourseId: 'ai-e2e-quota', message: 'hi', mode: 'LECTURE', locale: 'en-GB' })
+      .send({
+        externalCourseId: 'ai-e2e-quota',
+        message: 'hi',
+        mode: 'LECTURE',
+        locale: 'en-GB',
+      })
       .expect(200);
   });
 
   it('并发删除 Release 与 Set Live / 切换测试版本，指针不会指向已删除版本（QA 2026-10-27 A7）', async () => {
-    const race = await prisma.course.create({ data: { title: 'AI-E2E并发课' } });
+    const race = await prisma.course.create({
+      data: { title: 'AI-E2E并发课' },
+    });
     const base = await api
       .post(`/api/courses/${race.id}/release`)
       .send({ revisionNotes: 'base' })
@@ -576,15 +598,23 @@ describe('AI API (e2e)', () => {
       const victimId = victim.body.data.id as string;
       await Promise.all([
         api.delete(`/api/releases/${victimId}`),
-        api.post(`/api/courses/${race.id}/set-live`).send({ releaseId: victimId }),
-        api.put(`/api/ai/config/${race.id}/active-release`).send({ releaseId: victimId }),
+        api
+          .post(`/api/courses/${race.id}/set-live`)
+          .send({ releaseId: victimId }),
+        api
+          .put(`/api/ai/config/${race.id}/active-release`)
+          .send({ releaseId: victimId }),
       ]);
       const course = await prisma.course.findUnique({ where: { id: race.id } });
       const ids = (
-        await prisma.release.findMany({ where: { courseId: race.id }, select: { id: true } })
+        await prisma.release.findMany({
+          where: { courseId: race.id },
+          select: { id: true },
+        })
       ).map((r) => r.id);
       expect(ids).toContain(course!.currentReleaseId);
-      if (course!.aiTestReleaseId) expect(ids).toContain(course!.aiTestReleaseId);
+      if (course!.aiTestReleaseId)
+        expect(ids).toContain(course!.aiTestReleaseId);
     }
   });
 
