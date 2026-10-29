@@ -1032,7 +1032,7 @@ describe('model and budget settings', () => {
     });
     expect(chooseModel({ OPENROUTER_API_KEY: 'k' })).toEqual({
       kind: 'real',
-      model: 'openai/gpt-4o-mini',
+      model: 'google/gemini-2.5-flash',
     });
     expect(
       chooseModel({
@@ -1078,8 +1078,11 @@ function payingRunner(costUsd: number | null, tokens = 100): AgentStepRunner {
         callId: 'c',
         name: 'pick_faq',
       });
-      const [first] = Object.values(spec.tool.enumArgs)[0];
-      return Promise.resolve({ kind: 'called', args: { faqId: first } });
+      const [first] = spec.tool.enumArgs.faqId;
+      return Promise.resolve({
+        kind: 'called',
+        args: { intent: 'question', faqId: first },
+      });
     },
   };
 }

@@ -69,7 +69,8 @@ export const QUERY_TEXT_RETENTION_DAYS = 90;
 /** 聊天面板（chat + chip）每学员每小时的额度，与 submit 分开计。 */
 export const ASSIST_RATE_LIMIT = { limit: 30, windowMs: 3_600_000 } as const;
 const PURGE_EVERY_MS = 3_600_000;
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+// 2026-10-29 真模型评测（qa10k dev 难例）：比 gpt-4o-mini 答错少、更快
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 // OPENROUTER_BASE_URL 是 AI Tutor 已有的变量，这里同样每次现读
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 /** 便宜模型的识别（名字里带这些词）；只用于没设 HELPDESK_SUGGEST_MODEL 时的缺省。 */

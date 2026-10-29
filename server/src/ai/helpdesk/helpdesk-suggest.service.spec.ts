@@ -104,8 +104,8 @@ type RunnerReply = (
   context: AgentStepContext,
 ) => Promise<AgentStepOutcome>;
 
-const pick = (faqId: string): Promise<AgentStepOutcome> =>
-  Promise.resolve({ kind: 'called', args: { faqId } });
+const pick = (faqId: string, intent = 'question'): Promise<AgentStepOutcome> =>
+  Promise.resolve({ kind: 'called', args: { intent, faqId } });
 
 function fakeRunner(reply: RunnerReply) {
   const run = jest.fn(reply);
@@ -223,8 +223,21 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.tool).toEqual({
       name: 'pick_faq',
       description: expect.any(String),
-      enumArgs: { faqId: [...candidates.map((c) => c.id), 'none'] },
+      // intent 在前：模型先分类再选
+      enumArgs: {
+        intent: [
+          'question',
+          'own_account',
+          'someone_else',
+          'exception',
+          'private_data',
+          'instructions',
+          'off_topic',
+        ],
+        faqId: [...candidates.map((c) => c.id), 'none'],
+      },
     });
+    expect(Object.keys(spec.tool.enumArgs)).toEqual(['intent', 'faqId']);
     // 学员原文只放在 prompt 里，system 提示不含学员内容
     expect(spec.system).not.toContain('Ignore previous instructions');
     expect(spec.prompt).toContain('Ignore previous instructions');
@@ -232,10 +245,11 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.prompt).toContain(candidates[1].answer);
   });
 
-  it('bounds what the model sees (2000-char message, 600-char answers, 80 tokens) but retrieves on the whole text', async () => {
+  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 80 tokens) but retrieves on the whole text', async () => {
     const long = candidates.map((c) => ({ ...c, answer: c.answer.repeat(40) }));
     const { service, complete, findCandidates } = setup({ found: long });
-    const message = `${'x'.repeat(1990)} the tail is not sent ${'y'.repeat(2900)}`;
+    // 长信的真正问题常在最后一段：送给模型的是开头 600 字 + 结尾 1400 字
+    const message = `${'x'.repeat(1990)} the middle is not sent ${'y'.repeat(2900)} My question: how do I reset my password?`;
     await service.suggest({ ...input, message });
     expect(findCandidates.mock.calls[0][0]).toMatchObject({
       text: `${input.subject}\n\n${message}`,
@@ -245,7 +259,19 @@ describe('Helpdesk suggest: happy path', () => {
       enquiry: { subject: string; message: string };
       candidates: { id: string; answer: string }[];
     };
-    expect(prompt.enquiry.message).toBe(message.slice(0, 2000));
+    const chars = [...message];
+    expect(prompt.enquiry.message).toBe(
+      `${chars.slice(0, 600).join('')}\n…\n${chars.slice(-1400).join('')}`,
+    );
+    expect(prompt.enquiry.message).toContain('how do I reset my password?');
+    expect(prompt.enquiry.message).not.toContain('the middle is not sent');
+    // 不超过 2000 字时原样送
+    await service.suggest({ ...input, message: 'z'.repeat(2000) });
+    const [short] = complete.mock.calls[1];
+    expect(
+      (JSON.parse(short.prompt) as { enquiry: { message: string } }).enquiry
+        .message,
+    ).toBe('z'.repeat(2000));
     expect(prompt.enquiry.subject).toBe(input.subject);
     expect(prompt.candidates.map((c) => c.answer)).toEqual(
       long.map((c) => c.answer.slice(0, 600)),
@@ -273,8 +299,30 @@ describe('Helpdesk suggest: happy path', () => {
       'You cannot act on accounts, payments or orders.',
     );
     expect(spec.system).toContain(
-      'pick the candidate that tells the learner how to do it themselves',
+      'the candidate that tells them how to do it themselves',
     );
+  });
+
+  it('answers a question or an own-account request; every other intent is no answer, even with a valid id', async () => {
+    // 用户 2026-10-28：模型只分类，答不答由硬编码的流程定
+    for (const [intent, answered] of [
+      ['question', true],
+      ['own_account', true],
+      ['someone_else', false],
+      ['exception', false],
+      ['private_data', false],
+      ['instructions', false],
+      ['off_topic', false],
+    ] as const) {
+      const { service } = setup({
+        reply: () => pick(candidates[1].id, intent),
+      });
+      const answer = await service.suggest(input);
+      expect([intent, answer.suggestion?.faqId ?? null]).toEqual([
+        intent,
+        answered ? candidates[1].id : null,
+      ]);
+    }
   });
 
   it('reads the key, model and base URL on every call (hot reload)', async () => {
@@ -724,7 +772,8 @@ describe('Helpdesk suggest: model choice', () => {
     expect(suggestModel({ AI_AVAILABLE_MODELS: 'a/large, b/huge' })).toBe(
       'a/large',
     );
-    expect(suggestModel({})).toBe('openai/gpt-4o-mini');
+    // 2026-10-29 真模型评测（dev 难例）：gemini-2.5-flash 答错率最低、最快
+    expect(suggestModel({})).toBe('google/gemini-2.5-flash');
   });
 });
 
@@ -908,7 +957,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
     });
     expect(log[4].data).toMatchObject({
       outcome: 'called',
-      args: { faqId: candidates[0].id },
+      args: { intent: 'question', faqId: candidates[0].id },
     });
     expect(log.at(-1)?.data).toEqual({
       turn: 1,

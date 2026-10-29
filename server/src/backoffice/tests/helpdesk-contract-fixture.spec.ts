@@ -474,7 +474,7 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
     const complete = jest.fn(() =>
       Promise.resolve({
         kind: 'called' as const,
-        args: { faqId: candidate.id },
+        args: { intent: 'question', faqId: candidate.id },
       }),
     );
     const events = createMemoryAgentEventLog();

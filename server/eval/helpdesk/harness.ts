@@ -415,7 +415,12 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
             : content.map((part) => ('text' in part ? part.text : '')).join('');
         const [first] = candidateIds(prompt);
         return pi.ai.fauxAssistantMessage(
-          [pi.ai.fauxToolCall('pick_faq', { faqId: first ?? 'none' })],
+          [
+            pi.ai.fauxToolCall('pick_faq', {
+              intent: 'question',
+              faqId: first ?? 'none',
+            }),
+          ],
           { stopReason: 'toolUse' },
         );
       },
