@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
 
+import type {
+  ConfidenceLevel,
+  SuggestGuard,
+  SuggestIntent,
+  SuggestKind,
+} from '../../contracts/helpdesk-qa';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -37,6 +43,23 @@ export function outcomeFits(
   return allowed.includes(outcome);
 }
 
+/**
+ * v5（迁移 20261030100000_helpdesk_suggestion_turns，增量）：请求带 context 的一轮记下 kind、intent、
+ * confidence、屏幕上 / 回包的节点、摘录块、守卫结果、clarify 是否讲成、会话与发布版本。只有代码与枚举，
+ * 从不记模型写的文字。旧请求没有这些（列为 NULL / 空）。
+ */
+export type SuggestionTurnLog = {
+  kind: SuggestKind;
+  intent: SuggestIntent | null;
+  confidence: ConfidenceLevel | null;
+  nodeId: string | null;
+  blocks: string[];
+  guard: SuggestGuard | null;
+  covered: boolean | null;
+  sessionId: string | null;
+  releaseVersion: number | null;
+};
+
 export type SuggestionLogEntry = {
   id: string;
   learnerId: string;
@@ -51,6 +74,8 @@ export type SuggestionLogEntry = {
   /** 没调模型（无候选、chip）时为 null。 */
   model: string | null;
   latencyMs: number;
+  /** v5 的一轮；旧请求没有。 */
+  turn?: SuggestionTurnLog;
 };
 
 export type OutcomeResult =
@@ -87,6 +112,21 @@ export class PrismaHelpdeskSuggestionStore implements HelpdeskSuggestionLog {
         faqId: entry.faqId,
         model: entry.model,
         latencyMs: Math.max(0, Math.round(entry.latencyMs)),
+        ...(entry.turn
+          ? {
+              kind: entry.turn.kind,
+              intent: entry.turn.intent,
+              confidence: entry.turn.confidence,
+              nodeId: entry.turn.nodeId,
+              blocks: entry.turn.blocks,
+              guardResult: entry.turn.guard?.result ?? null,
+              guardReason: entry.turn.guard?.reason ?? null,
+              guardFallback: entry.turn.guard?.fallback ?? [],
+              covered: entry.turn.covered,
+              sessionId: entry.turn.sessionId,
+              releaseVersion: entry.turn.releaseVersion,
+            }
+          : {}),
       },
     });
   }

@@ -376,6 +376,18 @@ model HelpdeskSuggestion {
   latencyMs    Int      @default(0) @map("latency_ms")
   outcome      String?
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  // v5（迁移 20261030100000_helpdesk_suggestion_turns）：请求带 context 的一轮；CHECK 与部分索引只在迁移里
+  kind           String?
+  intent         String?
+  confidence     String?
+  nodeId         String?  @map("node_id") @db.Uuid
+  blocks         String[] @default([])
+  guardResult    String?  @map("guard_result")
+  guardReason    String?  @map("guard_reason")
+  guardFallback  String[] @default([]) @map("guard_fallback")
+  covered        Boolean?
+  sessionId      String?  @map("session_id") @db.Uuid
+  releaseVersion Int?     @map("release_version")
 
   @@index([qaId])
   @@index([faqId])

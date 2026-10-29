@@ -407,20 +407,30 @@ export function chooseModel(env: NodeJS.ProcessEnv): EvalModel {
   return { kind: 'fake', model: FAKE_MODEL_ID };
 }
 
-/** 从 pick_faq 的提示里取出候选 id（按检索顺序）。 */
-function candidateIds(prompt: string): string[] {
+/** 提示是哪一种：v2 的 pick_faq（enquiry）、v5 的 pick_faq（message）、v5 的 explain（card）。 */
+type PromptShape = { kind: 'pick' | 'pick_v5' | 'explain'; ids: string[] };
+
+/** 从提示里取出候选 id（按检索顺序）与提示的种类。 */
+function promptShape(prompt: string): PromptShape {
   try {
-    const body = JSON.parse(prompt) as { candidates?: { id?: unknown }[] };
-    return (body.candidates ?? [])
+    const body = JSON.parse(prompt) as {
+      candidates?: { id?: unknown }[];
+      card?: unknown;
+      message?: unknown;
+    };
+    const ids = (body.candidates ?? [])
       .map((item) => item.id)
       .filter((id): id is string => typeof id === 'string');
+    if (body.card !== undefined) return { kind: 'explain', ids };
+    return { kind: body.message !== undefined ? 'pick_v5' : 'pick', ids };
   } catch {
-    return [];
+    return { kind: 'pick', ids: [] };
   }
 }
 
 /**
- * 假模型：pi 自带的 faux provider，每一步都调用 pick_faq 选第一个候选（检索排第一的那条）。
+ * 假模型：pi 自带的 faux provider，每一步都调用 pick_faq 选第一个候选（检索排第一的那条）；
+ * v5 的提示（请求带 context）同样选第一个、confidence sure、不写短句（于是用模板），explain 一律 covered false。
  * 走的是同一个 PiStepRunner（同样的工具、枚举、闸），只是不连网、不花钱。
  */
 export async function fakeTopCandidateSource(): Promise<ModelSource> {
@@ -437,16 +447,17 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
           typeof content === 'string'
             ? content
             : content.map((part) => ('text' in part ? part.text : '')).join('');
-        const [first] = candidateIds(prompt);
-        return pi.ai.fauxAssistantMessage(
-          [
-            pi.ai.fauxToolCall('pick_faq', {
-              intent: 'question',
-              faqId: first ?? 'none',
-            }),
-          ],
-          { stopReason: 'toolUse' },
-        );
+        const shape = promptShape(prompt);
+        const [first] = shape.ids;
+        const call =
+          shape.kind === 'explain'
+            ? pi.ai.fauxToolCall('explain', { covered: false })
+            : pi.ai.fauxToolCall('pick_faq', {
+                intent: 'question',
+                faqId: first ?? 'none',
+                ...(shape.kind === 'pick_v5' ? { confidence: 'sure' } : {}),
+              });
+        return pi.ai.fauxAssistantMessage([call], { stopReason: 'toolUse' });
       },
     ]);
     return { models, model: handle.getModel() };

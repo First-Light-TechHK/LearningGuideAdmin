@@ -17,6 +17,12 @@ import {
   summarizeRetrieval,
   writeReport,
 } from './harness';
+import {
+  loadConversations,
+  runConversations,
+  summarizeConversations,
+  writeConversationReport,
+} from './conversations';
 
 /**
  * npm run eval:helpdesk -- [--out report.json|report.md] [--pg <postgres url>] [--limit N]
@@ -24,6 +30,8 @@ import {
  *
  * --retrieval-only：只跑检索（--pg 时是生产的候选 SQL），报 recall@1 / @3 / @8 与检索耗时，
  * 从不问模型（有 key 也不问）、不花钱，退出码 0。
+ * --conversations <file.jsonl | dir>：v5 对话评测（conversations.ts，Part F 的多轮与寒暄集），按 Portal 的
+ * 方式带 context 逐轮问；同样的模型选择、预算与 --pg / --faqs / --limit（按对话数）；真模型闸门不过退出码 1。
  *
  * 有 OPENROUTER_API_KEY：真模型（和生产选同一个），按次计费，花费上限 HELPDESK_EVAL_BUDGET_USD
  *（缺省 5 美元），闸门不过退出码 1；只有整套用例 + --pg 才可能过闸。没有 key：假模型，报告标明
@@ -37,6 +45,7 @@ export type CliDeps = {
   pgQaSource?: typeof pgQaSource;
   callCeilingUsd?: typeof callCeilingUsd;
   writeReport?: typeof writeReport;
+  writeConversationReport?: typeof writeConversationReport;
 };
 
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
@@ -59,10 +68,18 @@ async function run(argv: string[], deps: CliDeps): Promise<number> {
       limit: { type: 'string' },
       concurrency: { type: 'string', default: '1' },
       'retrieval-only': { type: 'boolean', default: false },
+      conversations: { type: 'string' },
     },
   });
   const budgetUsd = budgetFrom(deps.env);
   const faqs = loadFaqs(resolve(deps.cwd, values.faqs));
+  if (values.conversations !== undefined)
+    return conversationsRun(
+      { ...values, conversations: values.conversations },
+      faqs,
+      budgetUsd,
+      deps,
+    );
   const all = loadCases(resolve(deps.cwd, values.cases));
   const limit = values.limit === undefined ? all.length : Number(values.limit);
   if (!Number.isInteger(limit) || limit <= 0)
@@ -177,6 +194,77 @@ async function retrievalOnly(
     );
     deps.log(`report: ${out}`);
     return 0;
+  } finally {
+    await pg?.close();
+  }
+}
+
+async function conversationsRun(
+  values: { out: string; pg?: string; limit?: string; conversations: string },
+  faqs: ReturnType<typeof loadFaqs>,
+  budgetUsd: number,
+  deps: CliDeps,
+): Promise<number> {
+  const all = loadConversations(resolve(deps.cwd, values.conversations));
+  const limit = values.limit === undefined ? all.length : Number(values.limit);
+  if (!Number.isInteger(limit) || limit <= 0)
+    throw new Error('--limit must be a positive integer');
+  const conversations = all.slice(0, limit);
+  const model = chooseModel(deps.env);
+  const { runner, env } = await (deps.runnerFor ?? runnerFor)(model);
+  const callCeiling =
+    model.kind === 'real'
+      ? await (deps.callCeilingUsd ?? callCeilingUsd)(model.model)
+      : 0;
+  const pg = values.pg
+    ? await (deps.pgQaSource ?? pgQaSource)(
+        values.pg,
+        faqs,
+        helpdeskMigrationSql(),
+      )
+    : null;
+  deps.log(
+    `Helpdesk v5 conversation eval: ${conversations.length} of ${all.length} conversations, ` +
+      `${model.kind} model ${model.model}, ${pg ? 'PostgreSQL' : 'in-memory'} retrieval, budget $${budgetUsd}`,
+  );
+  try {
+    const outcome = await runConversations({
+      conversations,
+      qa: pg?.qa ?? memoryQaSource(faqs),
+      runner,
+      env: env(deps.env),
+      budgetUsd,
+      paid: model.kind === 'real',
+      callCeilingUsd: callCeiling,
+      onConversation: (turns, index) => {
+        const ok = turns.every((t) => t.right !== false) ? 'ok  ' : 'FAIL';
+        deps.log(
+          `${String(index + 1).padStart(3)}/${conversations.length} ${ok} ${turns[0]?.conversationId ?? ''}`,
+        );
+      },
+    });
+    const report = summarizeConversations({
+      outcome,
+      totalConversations: all.length,
+      model,
+      retrieval: pg ? 'postgresql' : 'memory',
+      budgetUsd,
+    });
+    const out = resolve(deps.cwd, values.out);
+    (deps.writeConversationReport ?? writeConversationReport)(out, report);
+    const m = report.metrics;
+    const pct = (v: number | null) =>
+      v === null ? 'n/a' : `${(v * 100).toFixed(1)}%`;
+    deps.log(
+      `turn accuracy ${pct(m.accuracy)}, wrong FAQ ${pct(m.wrongFaqRate)}, small-talk intent ` +
+        `${pct(m.smalltalkIntentAccuracy)}, clarify grounded ${pct(m.clarifyGrounded)}, ` +
+        `guard escapes ${m.guardEscapes}, cost $${m.costUsd.toFixed(4)}`,
+    );
+    deps.log(
+      `gate ${report.gate.pass ? 'PASS' : 'FAIL'}${report.gate.reasons.length ? `: ${report.gate.reasons.join('; ')}` : ''}`,
+    );
+    deps.log(`report: ${out}`);
+    return model.kind === 'real' && !report.gate.pass ? 1 : 0;
   } finally {
     await pg?.close();
   }

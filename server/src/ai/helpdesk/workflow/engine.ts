@@ -24,17 +24,41 @@ export type AgentStepSpec = {
   system: string;
   /** 学员原文只放在这里（不可信输入）。 */
   prompt: string;
-  /** 这一步唯一的工具；参数全部是枚举锁定的字符串。 */
+  /** 这一步唯一的工具；enumArgs 全部是枚举锁定的字符串（必填）。 */
   tool: {
     name: string;
     description: string;
     enumArgs: Record<string, readonly string[]>;
+    /**
+     * v5（可选）：枚举值的列表（例如答案块 id）。模型可以不给；给了每项都必须在枚举里，
+     * 是否合用（子集、连续、条数）由工作流的代码再核。
+     */
+    listArgs?: Record<string, readonly string[]>;
+    /**
+     * v5（可选）：模型写的短句（参数名 → 给模型的说明）。可以不给；从不原样展示，
+     * 一律先过 guard.ts 的代码守卫。日志里只记长度（文字按学员原文对待）。
+     */
+    textArgs?: Record<string, string>;
+    /** v5：必填的真 / 假（参数名 → 说明），例如 explain 的 covered。 */
+    flagArgs?: Record<string, string>;
   };
   maxTokens: number;
 };
 
+/** 工具调用里枚举以外的参数（v5）；没有这类参数的步骤为 undefined。 */
+export type AgentCallExtras = {
+  lists: Record<string, string[]>;
+  texts: Record<string, string>;
+  flags: Record<string, boolean>;
+};
+
 export type AgentStepOutcome =
-  | { kind: 'called'; args: Record<string, string> }
+  | {
+      kind: 'called';
+      args: Record<string, string>;
+      /** v5：spec 有 listArgs / textArgs / flagArgs 时才有。 */
+      extras?: AgentCallExtras;
+    }
   | { kind: 'no_call' }
   | { kind: 'error'; message: string }
   | { kind: 'aborted' };
@@ -67,10 +91,11 @@ export type CodeStep<S> = {
 export type AgentStep<S> = {
   kind: 'agent';
   prepare(state: S): AgentStepSpec;
-  /** args 是 runner 校验过的工具参数；没有有效调用时为 null。 */
+  /** args 是 runner 校验过的工具参数；没有有效调用时为 null。extras 是 v5 的列表、短句与真 / 假。 */
   decide(
     state: S,
     args: Record<string, string> | null,
+    extras?: AgentCallExtras,
   ): { state: S; then: Transition };
 };
 
@@ -92,6 +117,20 @@ export type WorkflowDeps = {
 };
 
 const ABORTED: AgentStepOutcome = { kind: 'aborted' };
+
+/** 日志里的 extras：列表与真 / 假原样，短句只有长度。 */
+export function extrasLog(extras: AgentCallExtras): JsonObject {
+  return {
+    lists: extras.lists,
+    flags: extras.flags,
+    texts: Object.fromEntries(
+      Object.entries(extras.texts).map(([key, text]) => [
+        key,
+        { length: [...text].length },
+      ]),
+    ),
+  };
+}
 
 /** runner 不理 signal 也不等它：abort 一到就当 aborted 处理。 */
 function untilAborted(
@@ -195,6 +234,7 @@ export async function runWorkflow<S>(
         const decided = step.decide(
           state,
           outcome.kind === 'called' ? outcome.args : null,
+          outcome.kind === 'called' ? outcome.extras : undefined,
         );
         state = decided.state;
         then = decided.then;
@@ -206,6 +246,10 @@ export async function runWorkflow<S>(
         kind: 'agent',
         outcome: outcome.kind,
         ...(outcome.kind === 'called' ? { args: outcome.args } : {}),
+        // 模型写的短句只记长度（文字可能复述学员原文）；列表与真 / 假是枚举，原样记
+        ...(outcome.kind === 'called' && outcome.extras
+          ? extrasLog(outcome.extras)
+          : {}),
         then,
       });
     }

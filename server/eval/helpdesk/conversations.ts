@@ -1,0 +1,860 @@
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+import { performance } from 'node:perf_hooks';
+
+import { HelpdeskSuggestService } from '../../src/ai/helpdesk/helpdesk-suggest.service';
+import type { HelpdeskSuggestionLog } from '../../src/ai/helpdesk/helpdesk-suggestion.store';
+import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-event.store';
+import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
+import {
+  guardExplanation,
+  guardShortText,
+  learnerOf,
+  ungroundedToken,
+} from '../../src/ai/helpdesk/workflow/guard';
+import { MemoryRateLimitStore } from '../../src/ai/rate-limit.service';
+import { uuidv7 } from '../../src/common/uuidv7';
+import {
+  SUGGEST_CONTEXT_LIMITS,
+  type GuardedField,
+  type HelpdeskQaSource,
+  type SuggestGuard,
+  type SuggestIntent,
+  type SuggestKind,
+} from '../../src/contracts/helpdesk-qa';
+import {
+  EVAL_LOCALES,
+  percentile,
+  serviceLocale,
+  type EvalLocale,
+  type EvalModel,
+} from './harness';
+
+/**
+ * v5 对话评测（helpdesk-v5-context-chips-and-smalltalk Part F）：每条用例是一段对话（3–8 轮），每一轮标着
+ * 期望的结果——answer（faqId，可另给 acceptableFaqIds；choice 卡片也是 answer）、clarify（faqId + covered）、
+ * smalltalk（intent）、no_match、handover。评测像 Portal 一样跑：同一个会话 id；屏幕上的卡片（context.nodeId）
+ * = 最近一次出的卡片或点的追问 / 选项；recentTurns = 之前最多 3 句学员原文；点追问 / 选项（click）只换卡片，
+ * 不调 Admin（graph design §4：点击只由代码处理）；学员明说要人工（v4 的关键词，Portal 代码判）也不调 Admin。
+ *
+ * 文件格式（JSONL，一行一段对话；--conversations 给一个文件或一个目录，目录里的 *.jsonl 全读）：
+ *   {"id":"mt-0001","set":"multi_turn"|"casual","locale":"zh-CN"|"zh-TW"|"en-GB","language":"mixed"?,
+ *    "persona":"student","flow":"clarify_clause"?,"note":"…"?,
+ *    "turns":[{"message":"…","expect":{"kind":"answer","faqId":"<uuid>"}},
+ *             {"message":"没看懂","expect":{"kind":"clarify","faqId":"<uuid>","covered":true}},
+ *             {"click":"<uuid>"},
+ *             {"message":"谢谢","expect":{"kind":"smalltalk","intent":"farewell"}},
+ *             {"message":"转人工","expect":{"kind":"handover"}}]}
+ * 一轮可以不标 expect（只推进对话，例如第 8 问的回访卡由 Portal 判）。
+ *
+ * 报告：逐轮准确率（按期望的 kind 拆）、答错 FAQ 的比例、寒暄意图准确率、clarify 接地率、守卫逃逸
+ * （展示出去的短句没过守卫——应当永远是 0）、守卫回退率，按 set / locale / 语言 / persona / flow 切片。
+ * 闸门（Part F，真模型）：0 逃逸、clarify 接地 100%、答错 ≤ 2%、寒暄意图 ≥ 95%。语气与摘录覆盖由另一个
+ * LLM 评审单独打分（不在这里）。假模型（没有 key）的数字只说明评测能跑。
+ */
+
+export const CONVERSATION_SETS = ['multi_turn', 'casual'] as const;
+export type ConversationSet = (typeof CONVERSATION_SETS)[number];
+
+export const EXPECTED_KINDS = [
+  'answer',
+  'clarify',
+  'smalltalk',
+  'no_match',
+  'handover',
+] as const;
+export type ExpectedKind = (typeof EXPECTED_KINDS)[number];
+
+const SMALLTALK_INTENTS = [
+  'greeting',
+  'farewell',
+  'vague',
+  'off_topic',
+] as const;
+type SmalltalkIntent = (typeof SMALLTALK_INTENTS)[number];
+
+export type TurnExpectation =
+  | { kind: 'answer'; faqId: string; acceptableFaqIds?: string[] }
+  | { kind: 'clarify'; faqId: string; covered: boolean }
+  | { kind: 'smalltalk'; intent?: SmalltalkIntent }
+  | { kind: 'no_match' }
+  | { kind: 'handover' };
+
+export type ConversationTurn =
+  { message: string; expect?: TurnExpectation } | { click: string };
+
+export type EvalConversation = {
+  id: string;
+  set: ConversationSet;
+  locale: EvalLocale;
+  /** 中英混写的对话。 */
+  language?: 'mixed';
+  persona: string;
+  /** 对话的走法（clarify_clause、not_covered、topic_switch、thanks_end …），只用于切片。 */
+  flow?: string;
+  note?: string;
+  turns: ConversationTurn[];
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const filled = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim() !== '';
+
+function validExpectation(raw: unknown): raw is TurnExpectation {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const e = raw as Record<string, unknown>;
+  switch (e.kind) {
+    case 'answer':
+      return (
+        typeof e.faqId === 'string' &&
+        UUID.test(e.faqId) &&
+        (e.acceptableFaqIds === undefined ||
+          (Array.isArray(e.acceptableFaqIds) &&
+            e.acceptableFaqIds.every(
+              (id) => typeof id === 'string' && UUID.test(id),
+            )))
+      );
+    case 'clarify':
+      return (
+        typeof e.faqId === 'string' &&
+        UUID.test(e.faqId) &&
+        typeof e.covered === 'boolean'
+      );
+    case 'smalltalk':
+      return (
+        e.intent === undefined ||
+        (SMALLTALK_INTENTS as readonly unknown[]).includes(e.intent)
+      );
+    case 'no_match':
+    case 'handover':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function validTurn(raw: unknown): raw is ConversationTurn {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const t = raw as Record<string, unknown>;
+  if ('click' in t)
+    return (
+      typeof t.click === 'string' && UUID.test(t.click) && !('message' in t)
+    );
+  return (
+    filled(t.message) && (t.expect === undefined || validExpectation(t.expect))
+  );
+}
+
+function parseConversations(path: string): EvalConversation[] {
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .map((line, index) => ({ line: line.trim(), at: index + 1 }))
+    .filter(({ line }) => line !== '')
+    .map(({ line, at }) => {
+      let value: EvalConversation;
+      try {
+        value = JSON.parse(line) as EvalConversation;
+      } catch {
+        throw new Error(`${path}:${at}: not JSON`);
+      }
+      const ok =
+        filled(value.id) &&
+        CONVERSATION_SETS.includes(value.set) &&
+        EVAL_LOCALES.includes(value.locale) &&
+        (value.language === undefined || value.language === 'mixed') &&
+        filled(value.persona) &&
+        (value.flow === undefined || filled(value.flow)) &&
+        Array.isArray(value.turns) &&
+        value.turns.length >= 1 &&
+        value.turns.every(validTurn) &&
+        // 第一轮总是学员打字（点追问之前屏幕上得先有卡片）
+        'message' in value.turns[0];
+      if (!ok) throw new Error(`${path}:${at}: malformed conversation`);
+      return value;
+    });
+}
+
+/** 读一个 .jsonl 文件，或一个目录里所有的 .jsonl（按文件名）；id 必须唯一。 */
+export function loadConversations(path: string): EvalConversation[] {
+  const files = statSync(path).isDirectory()
+    ? readdirSync(path)
+        .filter((name) => name.endsWith('.jsonl'))
+        .sort()
+        .map((name) => join(path, name))
+    : [path];
+  const all = files.flatMap(parseConversations);
+  if (all.length === 0) throw new Error(`${path}: no conversations`);
+  const seen = new Set<string>();
+  for (const c of all) {
+    if (seen.has(c.id))
+      throw new Error(`${path}: duplicate conversation ${c.id}`);
+    seen.add(c.id);
+  }
+  return all;
+}
+
+/**
+ * 学员明说要人工（helpdesk-v4 Part B §1）：Portal 用代码按这张词表判，不调 Admin、不问模型。
+ * 这里是评测用的副本（真正的表在 Portal 的 v4 配置里）；大小写不敏感，含繁体。
+ */
+export const PORTAL_HANDOVER_KEYWORDS: readonly string[] = [
+  '人工',
+  '真人',
+  '客服',
+  '转人工',
+  '轉人工',
+  '投诉',
+  '投訴',
+  'human',
+  'agent',
+  'real person',
+  'complaint',
+  'speak to someone',
+];
+
+export function isHandoverRequest(message: string): boolean {
+  const text = message.toLowerCase();
+  return PORTAL_HANDOVER_KEYWORDS.some((word) => text.includes(word));
+}
+
+/** Portal v4：连续两轮没解决 → 给转人工卡。寒暄不计（Part B §3）。 */
+export const UNSOLVED_HANDOVER_STREAK = 2;
+
+export type GotTurn = {
+  /** Admin 的 kind；handover = Portal 按关键词直接转人工；click = 点追问 / 选项。 */
+  kind: SuggestKind | 'handover' | 'click';
+  intent: SuggestIntent | null;
+  nodeId: string | null;
+  covered: boolean | null;
+  guard: SuggestGuard | null;
+  blocks: string[];
+};
+
+export type TurnResult = {
+  conversationId: string;
+  set: ConversationSet;
+  locale: EvalLocale;
+  language: EvalLocale | 'mixed';
+  persona: string;
+  flow: string | null;
+  /** 第几轮（从 1 起）。 */
+  turn: number;
+  message: string | null;
+  expect: TurnExpectation | null;
+  got: GotTurn;
+  /** null：这一轮不打分（没有 expect，或是点击）。 */
+  right: boolean | null;
+  /** 出了一张不该出的 FAQ / choice 卡片（答错）。 */
+  wrongFaq: boolean;
+  /** 出了解释（covered）时它是否接地；没有解释为 null。 */
+  grounded: boolean | null;
+  /** 展示出去却没过守卫的字段（应当永远为空）。 */
+  escapes: GuardedField[];
+  unsolvedStreak: number;
+  latencyMs: number;
+  costUsd: number;
+  /** 发出了却没有带价格回复的请求。 */
+  unpricedCalls: number;
+  calledAdmin: boolean;
+};
+
+export type ConversationRunOptions = {
+  conversations: EvalConversation[];
+  qa: HelpdeskQaSource;
+  runner: AgentStepRunner;
+  env: NodeJS.ProcessEnv;
+  budgetUsd: number;
+  paid?: boolean;
+  callCeilingUsd?: number | null;
+  onConversation?: (results: TurnResult[], index: number) => void;
+};
+
+export type ConversationOutcome = {
+  results: TurnResult[];
+  conversationsRun: number;
+  spentUsd: number;
+  stopped: null | 'budget' | 'unknown_cost';
+};
+
+const noopLog: HelpdeskSuggestionLog = {
+  record: () => Promise.resolve(),
+  setOutcome: () =>
+    Promise.resolve({ kind: 'recorded', outcome: 'helpful', changed: false }),
+  purgeQueryText: () => Promise.resolve(0),
+};
+
+const num = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+type V5Reply = {
+  suggestion: { faqId: string } | null;
+  kind?: SuggestKind;
+  intent?: SuggestIntent | null;
+  nodeId?: string | null;
+  covered?: boolean | null;
+  guard?: SuggestGuard | null;
+  blocks?: string[];
+  opening?: string | null;
+  closing?: string | null;
+  reply?: string | null;
+  explanation?: string | null;
+};
+
+function score(
+  expect: TurnExpectation,
+  got: GotTurn,
+  streak: number,
+): { right: boolean; wrongFaq: boolean } {
+  const shownCard = got.kind === 'answer' ? got.nodeId : null;
+  const wrong = (allowed: string[]) =>
+    shownCard !== null && !allowed.includes(shownCard);
+  switch (expect.kind) {
+    case 'answer': {
+      const allowed = [expect.faqId, ...(expect.acceptableFaqIds ?? [])];
+      return {
+        right: shownCard !== null && allowed.includes(shownCard),
+        wrongFaq: wrong(allowed),
+      };
+    }
+    case 'clarify':
+      return {
+        right:
+          got.kind === 'clarify' &&
+          got.nodeId === expect.faqId &&
+          got.covered === expect.covered,
+        wrongFaq: shownCard !== null,
+      };
+    case 'smalltalk':
+      return {
+        right:
+          got.kind === 'smalltalk' &&
+          (expect.intent === undefined || got.intent === expect.intent),
+        wrongFaq: false,
+      };
+    case 'no_match':
+      return {
+        right:
+          got.kind === 'no_match' ||
+          (got.kind === 'clarify' && got.covered === false),
+        wrongFaq: shownCard !== null,
+      };
+    case 'handover':
+      return {
+        right:
+          got.kind === 'handover' ||
+          (got.kind === 'clarify' && got.covered === false) ||
+          (got.kind === 'no_match' && streak >= UNSOLVED_HANDOVER_STREAK),
+        wrongFaq: false,
+      };
+  }
+}
+
+/** 展示出去的短句再过一遍守卫（同一套规则）：不过的就是逃逸。 */
+function escapesOf(
+  reply: V5Reply,
+  message: string,
+  locale: string,
+  shownAnswer: string | null,
+): GuardedField[] {
+  const learner = learnerOf(message, locale);
+  const out: GuardedField[] = [];
+  for (const field of ['opening', 'closing', 'reply'] as const) {
+    const text = reply[field];
+    if (typeof text === 'string' && !guardShortText(field, text, learner).ok)
+      out.push(field);
+  }
+  if (typeof reply.explanation === 'string') {
+    const ok =
+      shownAnswer !== null &&
+      ungroundedToken(reply.explanation, shownAnswer) === null &&
+      guardExplanation(reply.explanation, shownAnswer, learner).ok;
+    if (!ok) out.push('explanation');
+  }
+  return out;
+}
+
+export async function runConversations(
+  options: ConversationRunOptions,
+): Promise<ConversationOutcome> {
+  const events = createMemoryAgentEventLog();
+  const service = new HelpdeskSuggestService({
+    qa: options.qa,
+    runner: options.runner,
+    rateLimit: new MemoryRateLimitStore(),
+    log: noopLog,
+    events,
+    env: () => options.env,
+  });
+  const results: TurnResult[] = [];
+  let spentUsd = 0;
+  let stopped: ConversationOutcome['stopped'] = null;
+  let conversationsRun = 0;
+  for (const [index, conversation] of options.conversations.entries()) {
+    if (spentUsd >= options.budgetUsd) {
+      stopped = 'budget';
+      break;
+    }
+    const locale = serviceLocale(conversation.locale);
+    const sessionId = uuidv7();
+    const said: string[] = [];
+    const shownIds: string[] = [];
+    let shown: string | null = null;
+    let streak = 0;
+    let rootRunId: string | null = null;
+    const turns: TurnResult[] = [];
+    for (const [i, turn] of conversation.turns.entries()) {
+      const base = {
+        conversationId: conversation.id,
+        set: conversation.set,
+        locale: conversation.locale,
+        language: conversation.language ?? conversation.locale,
+        persona: conversation.persona,
+        flow: conversation.flow ?? null,
+        turn: i + 1,
+      };
+      const none: GotTurn = {
+        kind: 'click',
+        intent: null,
+        nodeId: null,
+        covered: null,
+        guard: null,
+        blocks: [],
+      };
+      if ('click' in turn) {
+        shown = turn.click;
+        shownIds.push(turn.click);
+        streak = 0;
+        turns.push({
+          ...base,
+          message: null,
+          expect: null,
+          got: { ...none, nodeId: turn.click },
+          right: null,
+          wrongFaq: false,
+          grounded: null,
+          escapes: [],
+          unsolvedStreak: streak,
+          latencyMs: 0,
+          costUsd: 0,
+          unpricedCalls: 0,
+          calledAdmin: false,
+        });
+        continue;
+      }
+      const expect = turn.expect ?? null;
+      if (isHandoverRequest(turn.message)) {
+        const got: GotTurn = { ...none, kind: 'handover' };
+        turns.push({
+          ...base,
+          message: turn.message,
+          expect,
+          got,
+          right: expect ? score(expect, got, streak).right : null,
+          wrongFaq: false,
+          grounded: null,
+          escapes: [],
+          unsolvedStreak: streak,
+          latencyMs: 0,
+          costUsd: 0,
+          unpricedCalls: 0,
+          calledAdmin: false,
+        });
+        said.push(turn.message);
+        continue;
+      }
+      const runId = uuidv7();
+      rootRunId ??= runId;
+      const started = performance.now();
+      const reply = (await service.suggest({
+        learnerId: `eval-${conversation.id}`,
+        locale,
+        source: 'chat',
+        message: turn.message,
+        runId,
+        parentRunId: rootRunId === runId ? null : rootRunId,
+        shownFaqIds: shownIds.slice(-20),
+        context: {
+          ...(shown ? { nodeId: shown } : {}),
+          sessionId,
+          recentTurns: said
+            .slice(-SUGGEST_CONTEXT_LIMITS.recentTurnsMax)
+            .map((text) =>
+              [...text].slice(0, SUGGEST_CONTEXT_LIMITS.recentTurnMax).join(''),
+            ),
+        },
+      })) as V5Reply;
+      const latencyMs = performance.now() - started;
+      await service.flushTraces();
+      const log = await events.read(runId);
+      const replies = log.filter((e) => e.type === 'assistant/message');
+      const requests = log.filter((e) => e.type === 'request/context').length;
+      const priced = replies.filter(
+        (e) => typeof e.data.costUsd === 'number',
+      ).length;
+      const costUsd = replies.reduce((sum, e) => sum + num(e.data.costUsd), 0);
+      const unpricedCalls = Math.max(0, requests - priced);
+      const got: GotTurn = {
+        kind: reply.kind ?? (reply.suggestion ? 'answer' : 'no_match'),
+        intent: reply.intent ?? null,
+        nodeId: reply.nodeId ?? reply.suggestion?.faqId ?? null,
+        covered: reply.covered ?? null,
+        guard: reply.guard ?? null,
+        blocks: reply.blocks ?? [],
+      };
+      const unsolved =
+        got.kind === 'no_match' ||
+        (got.kind === 'clarify' && got.covered === false);
+      if (unsolved) streak += 1;
+      else if (got.kind !== 'smalltalk') streak = 0;
+      const shownAnswer =
+        got.kind === 'clarify' && got.nodeId
+          ? ((await options.qa.findPublished(got.nodeId, locale))?.answer ??
+            null)
+          : null;
+      const grounded =
+        typeof reply.explanation === 'string'
+          ? shownAnswer !== null &&
+            ungroundedToken(reply.explanation, shownAnswer) === null
+          : null;
+      const scored = expect ? score(expect, got, streak) : null;
+      turns.push({
+        ...base,
+        message: turn.message,
+        expect,
+        got,
+        right: scored ? scored.right : null,
+        wrongFaq: scored ? scored.wrongFaq : false,
+        grounded,
+        escapes: escapesOf(reply, turn.message, locale, shownAnswer),
+        unsolvedStreak: streak,
+        latencyMs,
+        costUsd,
+        unpricedCalls,
+        calledAdmin: true,
+      });
+      if (got.kind === 'answer' && got.nodeId) {
+        shown = got.nodeId;
+        shownIds.push(got.nodeId);
+      }
+      said.push(turn.message);
+      const ceiling = options.callCeilingUsd ?? null;
+      spentUsd += costUsd + unpricedCalls * (ceiling ?? 0);
+      if ((options.paid ?? true) && unpricedCalls > 0 && ceiling === null)
+        stopped = 'unknown_cost';
+    }
+    results.push(...turns);
+    conversationsRun += 1;
+    options.onConversation?.(turns, index);
+    if (stopped) break;
+  }
+  return { results, conversationsRun, spentUsd, stopped };
+}
+
+/* ---------------------------------- 报告 ---------------------------------- */
+
+/** Part F 的闸门（真模型）。 */
+export const CONVERSATION_GATE = {
+  guardEscapesMax: 0,
+  clarifyGroundedMin: 1,
+  wrongFaqRateMax: 0.02,
+  smalltalkIntentMin: 0.95,
+} as const;
+
+export type ConversationSlice = {
+  turns: number;
+  accuracy: number | null;
+  wrongFaqRate: number | null;
+};
+
+export type ConversationReport = {
+  generatedAt: string;
+  model: EvalModel & { note: string | null };
+  retrieval: 'memory' | 'postgresql';
+  budget: {
+    capUsd: number;
+    spentUsd: number;
+    stopped: ConversationOutcome['stopped'];
+  };
+  conversations: { total: number; run: number; allRight: number };
+  metrics: {
+    turns: number;
+    scoredTurns: number;
+    accuracy: number | null;
+    byKind: Record<ExpectedKind, { turns: number; right: number }>;
+    wrongFaqRate: number | null;
+    smalltalkIntentAccuracy: number | null;
+    clarifyGrounded: number | null;
+    clarifyExplanations: number;
+    guardEscapes: number;
+    guardFallbackRate: number | null;
+    latencyMs: { p50: number; p95: number };
+    costUsd: number;
+  };
+  slices: Record<
+    'set' | 'locale' | 'language' | 'persona' | 'flow',
+    Record<string, ConversationSlice>
+  >;
+  failures: {
+    conversationId: string;
+    turn: number;
+    message: string | null;
+    expect: TurnExpectation | null;
+    got: GotTurn;
+    escapes: GuardedField[];
+  }[];
+  gate: { pass: boolean; reasons: string[] };
+};
+
+const round = (value: number, digits = 4) =>
+  Math.round(value * 10 ** digits) / 10 ** digits;
+const share = (part: number, whole: number) =>
+  whole === 0 ? null : round(part / whole);
+
+function sliceOf(results: TurnResult[]): ConversationSlice {
+  const scored = results.filter((r) => r.right !== null);
+  return {
+    turns: results.length,
+    accuracy: share(scored.filter((r) => r.right).length, scored.length),
+    wrongFaqRate: share(
+      results.filter((r) => r.wrongFaq).length,
+      results.filter((r) => r.calledAdmin && r.right !== null).length,
+    ),
+  };
+}
+
+function slicesBy(
+  results: TurnResult[],
+  key: (r: TurnResult) => string,
+): Record<string, ConversationSlice> {
+  const groups = new Map<string, TurnResult[]>();
+  for (const r of results) {
+    const name = key(r);
+    groups.set(name, [...(groups.get(name) ?? []), r]);
+  }
+  return Object.fromEntries(
+    [...groups.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, group]) => [name, sliceOf(group)]),
+  );
+}
+
+export function summarizeConversations(input: {
+  outcome: ConversationOutcome;
+  totalConversations: number;
+  model: EvalModel;
+  retrieval: 'memory' | 'postgresql';
+  budgetUsd: number;
+  now?: Date;
+}): ConversationReport {
+  const { results } = input.outcome;
+  const scored = results.filter((r) => r.right !== null);
+  const byKind = Object.fromEntries(
+    EXPECTED_KINDS.map((kind) => {
+      const of = scored.filter((r) => r.expect?.kind === kind);
+      return [
+        kind,
+        { turns: of.length, right: of.filter((r) => r.right).length },
+      ];
+    }),
+  ) as Record<ExpectedKind, { turns: number; right: number }>;
+  const adminScored = scored.filter((r) => r.calledAdmin);
+  const smalltalk = scored.filter(
+    (r) => r.expect?.kind === 'smalltalk' && r.expect.intent !== undefined,
+  );
+  const explanations = results.filter((r) => r.grounded !== null);
+  const guarded = results.filter((r) => r.got.guard !== null);
+  const latencies = results
+    .filter((r) => r.calledAdmin)
+    .map((r) => r.latencyMs);
+  const metrics: ConversationReport['metrics'] = {
+    turns: results.length,
+    scoredTurns: scored.length,
+    accuracy: share(scored.filter((r) => r.right).length, scored.length),
+    byKind,
+    wrongFaqRate: share(
+      adminScored.filter((r) => r.wrongFaq).length,
+      adminScored.length,
+    ),
+    smalltalkIntentAccuracy: share(
+      smalltalk.filter(
+        (r) =>
+          r.got.kind === 'smalltalk' &&
+          r.expect?.kind === 'smalltalk' &&
+          r.got.intent === r.expect.intent,
+      ).length,
+      smalltalk.length,
+    ),
+    clarifyGrounded: share(
+      explanations.filter((r) => r.grounded).length,
+      explanations.length,
+    ),
+    clarifyExplanations: explanations.length,
+    guardEscapes: results.reduce((sum, r) => sum + r.escapes.length, 0),
+    guardFallbackRate: share(
+      guarded.filter((r) => r.got.guard?.result === 'fallback').length,
+      guarded.length,
+    ),
+    latencyMs: {
+      p50: Math.round(percentile(latencies, 0.5)),
+      p95: Math.round(percentile(latencies, 0.95)),
+    },
+    costUsd: round(input.outcome.spentUsd, 6),
+  };
+  const byConversation = new Map<string, TurnResult[]>();
+  for (const r of results)
+    byConversation.set(r.conversationId, [
+      ...(byConversation.get(r.conversationId) ?? []),
+      r,
+    ]);
+  const allRight = [...byConversation.values()].filter((turns) =>
+    turns.every((t) => t.right !== false),
+  ).length;
+
+  const reasons: string[] = [];
+  if (input.model.kind !== 'real')
+    reasons.push('fake model: these numbers only show the eval runs');
+  if (input.outcome.stopped)
+    reasons.push(`stopped early (${input.outcome.stopped})`);
+  if (input.outcome.conversationsRun < input.totalConversations)
+    reasons.push(
+      `ran ${input.outcome.conversationsRun} of ${input.totalConversations} conversations`,
+    );
+  if (metrics.guardEscapes > CONVERSATION_GATE.guardEscapesMax)
+    reasons.push(`${metrics.guardEscapes} guard escapes`);
+  if (
+    metrics.clarifyGrounded !== null &&
+    metrics.clarifyGrounded < CONVERSATION_GATE.clarifyGroundedMin
+  )
+    reasons.push(`clarify grounded ${metrics.clarifyGrounded} < 100%`);
+  if (
+    metrics.wrongFaqRate !== null &&
+    metrics.wrongFaqRate > CONVERSATION_GATE.wrongFaqRateMax
+  )
+    reasons.push(`wrong FAQ ${metrics.wrongFaqRate} > 2%`);
+  if (
+    metrics.smalltalkIntentAccuracy !== null &&
+    metrics.smalltalkIntentAccuracy < CONVERSATION_GATE.smalltalkIntentMin
+  )
+    reasons.push(`small-talk intent ${metrics.smalltalkIntentAccuracy} < 95%`);
+
+  return {
+    generatedAt: (input.now ?? new Date()).toISOString(),
+    model: {
+      ...input.model,
+      note:
+        input.model.kind === 'fake'
+          ? 'Fake model (no API key): it always picks the first candidate and never explains. Not a model score.'
+          : null,
+    },
+    retrieval: input.retrieval,
+    budget: {
+      capUsd: input.budgetUsd,
+      spentUsd: round(input.outcome.spentUsd, 6),
+      stopped: input.outcome.stopped,
+    },
+    conversations: {
+      total: input.totalConversations,
+      run: input.outcome.conversationsRun,
+      allRight,
+    },
+    metrics,
+    slices: {
+      set: slicesBy(results, (r) => r.set),
+      locale: slicesBy(results, (r) => r.locale),
+      language: slicesBy(results, (r) => r.language),
+      persona: slicesBy(results, (r) => r.persona),
+      flow: slicesBy(results, (r) => r.flow ?? 'none'),
+    },
+    failures: results
+      .filter((r) => r.right === false || r.escapes.length > 0)
+      .slice(0, 200)
+      .map((r) => ({
+        conversationId: r.conversationId,
+        turn: r.turn,
+        message: r.message,
+        expect: r.expect,
+        got: r.got,
+        escapes: r.escapes,
+      })),
+    gate: { pass: reasons.length === 0, reasons },
+  };
+}
+
+const pct = (value: number | null) =>
+  value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+
+export function markdownConversationReport(report: ConversationReport): string {
+  const m = report.metrics;
+  const lines = [
+    '# Helpdesk v5 conversation eval',
+    '',
+    `Generated ${report.generatedAt}. Model: ${report.model.kind} ${report.model.model}. Retrieval: ${report.retrieval}.`,
+    ...(report.model.note ? ['', `> ${report.model.note}`] : []),
+    '',
+    `Conversations: ${report.conversations.run} of ${report.conversations.total} run, ${report.conversations.allRight} fully right.`,
+    `Budget: $${report.budget.spentUsd} of $${report.budget.capUsd}${report.budget.stopped ? ` (stopped: ${report.budget.stopped})` : ''}.`,
+    '',
+    '| Metric | Value |',
+    '| --- | --- |',
+    `| Turn accuracy | ${pct(m.accuracy)} (${m.scoredTurns} scored of ${m.turns}) |`,
+    `| Wrong FAQ | ${pct(m.wrongFaqRate)} |`,
+    `| Small-talk intent | ${pct(m.smalltalkIntentAccuracy)} |`,
+    `| Clarify grounded | ${pct(m.clarifyGrounded)} (${m.clarifyExplanations} explanations) |`,
+    `| Guard escapes | ${m.guardEscapes} |`,
+    `| Guard fallback rate | ${pct(m.guardFallbackRate)} |`,
+    `| Latency p50 / p95 | ${m.latencyMs.p50} / ${m.latencyMs.p95} ms |`,
+    `| Cost | $${m.costUsd} |`,
+    '',
+    '## By expected kind',
+    '',
+    '| Kind | Turns | Right |',
+    '| --- | --- | --- |',
+    ...EXPECTED_KINDS.map(
+      (k) => `| ${k} | ${m.byKind[k].turns} | ${m.byKind[k].right} |`,
+    ),
+  ];
+  for (const [key, slices] of Object.entries(report.slices)) {
+    lines.push(
+      '',
+      `## By ${key}`,
+      '',
+      '| Slice | Turns | Accuracy | Wrong FAQ |',
+      '| --- | --- | --- | --- |',
+    );
+    for (const [name, s] of Object.entries(slices))
+      lines.push(
+        `| ${name} | ${s.turns} | ${pct(s.accuracy)} | ${pct(s.wrongFaqRate)} |`,
+      );
+  }
+  lines.push('', `## Failures (${report.failures.length})`, '');
+  for (const f of report.failures)
+    lines.push(
+      `- ${f.conversationId} #${f.turn}: expected ${f.expect ? JSON.stringify(f.expect) : '—'}, got ${f.got.kind}${f.got.nodeId ? ` ${f.got.nodeId}` : ''}${f.got.intent ? ` (${f.got.intent})` : ''}${f.escapes.length ? `, escapes ${f.escapes.join(', ')}` : ''}`,
+    );
+  lines.push(
+    '',
+    `Gate: ${report.gate.pass ? 'PASS' : 'FAIL'}${report.gate.reasons.length ? ` — ${report.gate.reasons.join('; ')}` : ''}`,
+    '',
+  );
+  return lines.join('\n');
+}
+
+/** .md 写 Markdown，其余写 JSON。 */
+export function writeConversationReport(
+  path: string,
+  report: ConversationReport,
+): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(
+    path,
+    path.endsWith('.md')
+      ? markdownConversationReport(report)
+      : `${JSON.stringify(report, null, 2)}\n`,
+  );
+}

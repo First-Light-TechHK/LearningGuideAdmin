@@ -6,10 +6,13 @@ import {
   faqCategoryFor,
   isHelpdeskLocale,
   parseSuggestContext,
+  type ConfidenceLevel,
   type FaqCategory,
   type HelpdeskQaCandidate,
   type HelpdeskQaSource,
+  type SuggestIntent,
   type SuggestRequestContext,
+  type SuggestTurnFields,
 } from '../../contracts/helpdesk-qa';
 import type { TurnEndReason } from '../../contracts/helpdesk-trace';
 import type { RateLimitStore } from '../rate-limit.service';
@@ -33,10 +36,19 @@ import {
   type WorkflowTemplate,
 } from './workflow/engine';
 import {
+  answerTurn,
+  assistWorkflow,
+  initialAssistState,
+  NO_MATCH_TURN,
+  uncoveredTurn,
+  type AssistTurn,
+} from './workflow/assist-workflow';
+import {
   chipWorkflow,
   faqWorkflow,
   initialFaqState,
 } from './workflow/faq-workflow';
+import { learnerOf } from './workflow/guard';
 
 /**
  * Helpdesk 推荐答案（Figma addendum §C；Tickets v2 §2；helpdesk-agent-v2-pi-dsh，Agent 角色）。
@@ -61,6 +73,13 @@ import {
  *    { faqId, question }）：检索到的候选按检索顺序前 3 个，没有候选就取该语言的热门已发布 FAQ
  *    （工单的 FAQ 分类在前）；从不含刚给学员看过的 FAQ（chip 的 faqId 与 Portal 给的 shownFaqIds）；
  *    rate_limited 与 aborted 为 []，参数不合法照旧 400。turn/end 记下给出的 faqId。
+ * 8. v5（契约 fixture v6；helpdesk-v5 Part B / D / H、graph design §4）：chat / chip 请求带 context
+ *    （v5 的 Portal）时，chat 走 assist 工作流（workflow/assist-workflow.ts：寒暄、clarify 的 explain 步、
+ *    choice 卡片、摘录块与开头结尾，模型写的短句全部过 workflow/guard.ts），chip 不问模型、开头结尾用模板；
+ *    回包在 suggestion / alternatives 旁加 SuggestTurnFields（kind、intent、confidence、nodeId、blocks、
+ *    opening、closing、reply、explanation、covered、guard、releaseVersion）。没有 context 的请求
+ *    （旧的 Portal、提交工单）回包与 v5 逐字相同。kind / intent / confidence / guard / blocks 记进
+ *    helpdesk_suggestions 与 turn/end；给学员看的短句只进 turn/end.output（学员原文字段，90 天清空、导出脱敏）。
  */
 
 export const SUGGEST_TIMEOUT_MS = 3_000;
@@ -107,7 +126,7 @@ export type SuggestResult = {
   suggestion: Suggestion | null;
   /** 只在 suggestion 为 null 时可能非空（v3 §1）；旧的 Portal 不读它。 */
   alternatives: Alternative[];
-};
+} & Partial<SuggestTurnFields>;
 
 type SuggestInput = {
   learnerId: string;
@@ -263,13 +282,30 @@ function suggestContext(raw: unknown): SuggestRequestContext | null {
 }
 
 /** 跑过的检索候选（decide 中途出错时也留得住，给 alternatives 用）。 */
-type Retrieved = { candidates: HelpdeskQaCandidate[] };
+type Retrieved = {
+  candidates: HelpdeskQaCandidate[];
+  /** v5：运行时读的发布版本（与检索并行地查；记进 helpdesk_suggestions 与回包）。 */
+  release: Promise<number | null>;
+};
+
+/** v5 的一轮（只在请求带 context 的 chat / chip 里有）。 */
+type Assisted = {
+  turn: AssistTurn;
+  intent: SuggestIntent | null;
+  confidence: ConfidenceLevel | null;
+};
 
 type Decided = {
   chosen: HelpdeskQaCandidate | null;
   reason: TurnEndReason;
   model: string | null;
+  assisted?: Assisted;
 };
+
+/** v5 回包：context 只对聊天面板（chat / chip）有意义；提交工单的回包不变。 */
+function isV5(input: SuggestInput): boolean {
+  return input.context !== null && input.source !== 'submit';
+}
 
 export class HelpdeskSuggestService implements OnModuleDestroy {
   readonly timeoutMs: number;
@@ -336,11 +372,29 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       traceId: trace.traceId,
       spanId: trace.spanId,
       parentSpanId: trace.parentId,
-      input: { subject: input.subject, message: input.message },
+      // 学员原文只在 input 里（90 天清空、导出脱敏）；context 的 id 不是原文
+      input: {
+        subject: input.subject,
+        message: input.message,
+        ...(input.context?.recentTurns
+          ? { recentTurns: input.context.recentTurns }
+          : {}),
+      },
+      ...(input.context
+        ? {
+            context: {
+              nodeId: input.context.nodeId ?? null,
+              sessionId: input.context.sessionId ?? null,
+              recentTurns: input.context.recentTurns?.length ?? 0,
+            },
+          }
+        : {}),
     });
+    const v5 = isV5(input);
+    const release = v5 ? this.releaseVersion() : Promise.resolve(null);
     let decided: Decided = { chosen: null, reason: 'error', model: null };
     let suggestion: Suggestion | null = null;
-    const retrieved: Retrieved = { candidates: [] };
+    const retrieved: Retrieved = { candidates: [], release };
     try {
       decided = await this.decide(
         input,
@@ -362,14 +416,39 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       decided = { chosen: null, reason: 'error', model: decided.model };
       this.warn('Suggestion skipped', error);
     }
-    const alternatives = suggestion
-      ? []
-      : await this.alternatives(
-          input,
-          decided.reason,
-          retrieved.candidates,
-          context.signal,
-        );
+    const turn: AssistTurn = v5
+      ? (decided.assisted?.turn ?? NO_MATCH_TURN)
+      : NO_MATCH_TURN;
+    // 寒暄与 clarify 不给「你可能想问」（契约 suggestTurnProblems）
+    const alternatives =
+      suggestion || turn.kind === 'smalltalk' || turn.kind === 'clarify'
+        ? []
+        : await this.alternatives(
+            input,
+            decided.reason,
+            retrieved.candidates,
+            context.signal,
+          );
+    const fields: SuggestTurnFields | null = v5
+      ? {
+          kind: turn.kind,
+          intent: decided.assisted?.intent ?? null,
+          // 寒暄不涉及选卡片：没有 confidence（契约 fixture 的 smalltalk 例子）
+          confidence:
+            turn.kind === 'smalltalk'
+              ? null
+              : (decided.assisted?.confidence ?? null),
+          nodeId: turn.nodeId,
+          blocks: turn.blocks,
+          opening: turn.opening,
+          closing: turn.closing,
+          reply: turn.reply,
+          explanation: turn.explanation,
+          covered: turn.covered,
+          guard: turn.guard,
+          releaseVersion: await release,
+        }
+      : null;
     run.emit('turn/end', {
       turn: run.turn,
       reason: decided.reason,
@@ -377,9 +456,40 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       model: decided.model,
       latencyMs: this.now() - started,
       alternatives: alternatives.map((a) => a.faqId),
+      ...(fields
+        ? {
+            kind: fields.kind,
+            intent: fields.intent,
+            confidence: fields.confidence,
+            nodeId: fields.nodeId,
+            blocks: fields.blocks,
+            covered: fields.covered,
+            guard: fields.guard,
+            releaseVersion: fields.releaseVersion,
+            // 给学员看的短句（模型写的过了守卫，或模板）：按学员原文对待（LEARNER_TEXT_FIELDS）
+            output: {
+              opening: fields.opening,
+              closing: fields.closing,
+              reply: fields.reply,
+              explanation: fields.explanation,
+            },
+          }
+        : {}),
     });
     this.background('Agent event log write failed', run.flush());
-    return { suggestion, alternatives };
+    return fields
+      ? { suggestion, alternatives, ...fields }
+      : { suggestion, alternatives };
+  }
+
+  /** 运行时读的发布版本（第一版发布之前、旧的来源、出错都是 null）。 */
+  private async releaseVersion(): Promise<number | null> {
+    try {
+      return (await this.deps.qa.releaseVersion?.()) ?? null;
+    } catch (error) {
+      this.warn('Release version unavailable', error);
+      return null;
+    }
   }
 
   /**
@@ -401,6 +511,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       return [];
     const excluded = new Set(input.shownFaqIds);
     if (input.faqId) excluded.add(input.faqId);
+    if (input.context?.nodeId) excluded.add(input.context.nodeId);
     const usable = (list: HelpdeskQaCandidate[]): Alternative[] => {
       const seen = new Set(excluded);
       const picked: Alternative[] = [];
@@ -480,6 +591,17 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         { faqId, locale: input.locale, chosen: null },
         steps,
       );
+      // v5：点 chip 不问模型，开头结尾用固定模板（choice 卡片没有）
+      const assisted: Assisted | undefined = isV5(input)
+        ? {
+            turn: state.chosen
+              ? // chip 的文字就是界面语言的 FAQ 问题：按界面语言（与学员写的字）选模板
+                answerTurn(state.chosen, learnerOf(input.message, input.locale))
+              : NO_MATCH_TURN,
+            intent: null,
+            confidence: null,
+          }
+        : undefined;
       return this.logAndDecide(input, runId, {
         queryText: input.message || state.chosen?.question || '',
         candidateIds: [faqId],
@@ -488,10 +610,58 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         model: null,
         started,
         left,
+        assisted,
+        release: retrieved.release,
       });
     }
 
     const model = suggestModel(env);
+    const modelTarget = {
+      provider: 'openrouter' as const,
+      model,
+      apiKey,
+      baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
+    };
+    if (isV5(input)) {
+      const { state, reason, trail } = await runWorkflow(
+        assistWorkflow({ qa: this.deps.qa, limit: SUGGEST_CANDIDATES, left }),
+        initialAssistState({
+          locale: input.locale,
+          category: input.faqCategory,
+          message: input.message,
+          context: input.context as SuggestRequestContext,
+        }),
+        { ...steps, runner: this.deps.runner, model: modelTarget },
+      );
+      retrieved.candidates = state.candidates;
+      // explain 步没走完（超时、出错）：clarify 照样回，covered:false（Portal 给转人工卡）
+      const turn =
+        state.turn ??
+        (state.clarifying && state.shown
+          ? uncoveredTurn(
+              state.shown.id,
+              reason === 'timeout' || reason === 'aborted'
+                ? 'timeout'
+                : 'error',
+            )
+          : NO_MATCH_TURN);
+      return this.logAndDecide(input, runId, {
+        queryText: state.queryText,
+        candidateIds: state.candidates.map((c) => c.id),
+        chosen: turn.kind === 'answer' ? state.chosen : null,
+        reason,
+        model: trail.includes('pick_faq') ? model : null,
+        started,
+        left,
+        assisted: {
+          turn,
+          intent: state.intent,
+          confidence: state.confidence,
+        },
+        release: retrieved.release,
+      });
+    }
+
     const template: WorkflowTemplate<ReturnType<typeof initialFaqState>> =
       faqWorkflow({ qa: this.deps.qa, limit: SUGGEST_CANDIDATES, left });
     const { state, reason, trail } = await runWorkflow(
@@ -502,16 +672,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         subject: input.subject,
         message: input.message,
       }),
-      {
-        ...steps,
-        runner: this.deps.runner,
-        model: {
-          provider: 'openrouter',
-          model,
-          apiKey,
-          baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
-        },
-      },
+      { ...steps, runner: this.deps.runner, model: modelTarget },
     );
     retrieved.candidates = state.candidates;
     // 走到了 pick_faq 才算问过模型
@@ -538,14 +699,21 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       model: string | null;
       started: number;
       left: () => number;
+      assisted?: Assisted;
+      release?: Promise<number | null>;
     },
   ): Promise<Decided> {
-    let { chosen, reason } = result;
-    // 过了期限才定下来的答案学员看不到：记一行检索，但不记 faq_id
-    if (chosen && result.left() <= 0) {
+    let { chosen, reason, assisted } = result;
+    // 过了期限才定下来的答案学员看不到：记一行检索，但不记 faq_id（v5 的寒暄、解释同样作废）
+    if (
+      (chosen || (assisted && assisted.turn.kind !== 'no_match')) &&
+      result.left() <= 0
+    ) {
       chosen = null;
       reason = 'timeout';
+      if (assisted) assisted = { ...assisted, turn: NO_MATCH_TURN };
     }
+    const turn = assisted?.turn;
     await this.deps.log.record({
       id: runId,
       learnerId: input.learnerId,
@@ -557,9 +725,25 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       faqId: chosen?.id ?? null,
       model: result.model,
       latencyMs: this.now() - result.started,
+      ...(assisted && turn
+        ? {
+            turn: {
+              kind: turn.kind,
+              intent: assisted.intent,
+              confidence:
+                turn.kind === 'smalltalk' ? null : assisted.confidence,
+              nodeId: turn.nodeId,
+              blocks: turn.blocks,
+              guard: turn.guard,
+              covered: turn.covered,
+              sessionId: input.context?.sessionId ?? null,
+              releaseVersion: (await result.release) ?? null,
+            },
+          }
+        : {}),
     });
     this.purgeLater();
-    return { chosen, reason, model: result.model };
+    return { chosen, reason, model: result.model, assisted };
   }
 
   /** 没有定时任务：每个实例每小时最多顺手清一次 90 天前的学员原文（失败不影响推荐）。 */
