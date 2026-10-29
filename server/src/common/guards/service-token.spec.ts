@@ -19,7 +19,11 @@ describe('serviceTokenAllows', () => {
   it('接受 Portal 的 X-API-Key 写法', () => {
     expect(serviceTokenAllows(undefined, 's3cret', true, 's3cret')).toBe(true);
     expect(serviceTokenAllows(undefined, 's3cret', true, 'wrong')).toBe(false);
-    expect(serviceTokenAllows(undefined, 's3cret', true, undefined)).toBe(false);
-    expect(serviceTokenAllows('Bearer s3cret', 's3cret', true, 'ignored')).toBe(true);
+    expect(serviceTokenAllows(undefined, 's3cret', true, undefined)).toBe(
+      false,
+    );
+    expect(serviceTokenAllows('Bearer s3cret', 's3cret', true, 'ignored')).toBe(
+      true,
+    );
   });
 });

@@ -239,32 +239,32 @@ body,
 
 /* AI Tutor 配置面板（§4.2）：用 plain div 直接控制 flex 比例，无需穿透 antd Form.Item */
 
-/* AI Tutor 模式切换 Segmented（§4.3.1/§4.3.2）：胶囊型分段控件——
-   整体 1px 主色描边 + 白底 + 全圆角；选中项实心主色底白字，未选中项白底主色字 */
-.ai-mode-segmented {
+/* AI Tutor 分段控件（配置面板编辑分段 + 对话模式切换，2026-10-29 统一命名为 ai-segmented）：
+   胶囊型分段控件——整体 1px 主色描边 + 白底 + 全圆角；选中项实心主色底白字，未选中项白底主色字 */
+.ai-segmented {
   background: var(--color-bg-container);
   border: 1px solid var(--color-primary);
   border-radius: 999px;
 }
-.ai-mode-segmented .ant-segmented-item {
+.ai-segmented .ant-segmented-item {
   border-radius: 999px;
   color: var(--color-primary);
   font-weight: 600;
   transition: color 0.15s ease, background-color 0.15s ease;
 }
-.ai-mode-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover {
+.ai-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover {
   background-color: var(--color-primary-bg);
   /* 提权覆盖 AntD 更高特异性的 hover 文本色规则，保持 hover 时仍为主色字 */
   color: var(--color-primary) !important;
 }
-.ai-mode-segmented .ant-segmented-item-selected {
+.ai-segmented .ant-segmented-item-selected {
   background-color: var(--color-primary) !important;
   color: var(--color-bg-container) !important;
 }
-.ai-mode-segmented .ant-segmented-item-selected .ant-segmented-item-label {
+.ai-segmented .ant-segmented-item-selected .ant-segmented-item-label {
   color: var(--color-bg-container) !important;
 }
-.ai-mode-segmented .ant-segmented-thumb {
+.ai-segmented .ant-segmented-thumb {
   background-color: var(--color-primary) !important;
   border-radius: 999px !important;
 }

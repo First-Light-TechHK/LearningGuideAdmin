@@ -22,8 +22,7 @@ export class EmbeddingService {
     this.model =
       this.config.get<string>('EMBEDDING_MODEL') ??
       'openai/text-embedding-3-small';
-    this.batchSize =
-      this.config.get<number>('EMBEDDING_BATCH_SIZE') ?? 100;
+    this.batchSize = this.config.get<number>('EMBEDDING_BATCH_SIZE') ?? 100;
   }
 
   /**
@@ -33,9 +32,7 @@ export class EmbeddingService {
   async embedTexts(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
     if (!this.apiKey) {
-      throw new Error(
-        '未配置 OPENROUTER_API_KEY，无法调用 embedding 服务',
-      );
+      throw new Error('未配置 OPENROUTER_API_KEY，无法调用 embedding 服务');
     }
 
     const results: number[][] = [];

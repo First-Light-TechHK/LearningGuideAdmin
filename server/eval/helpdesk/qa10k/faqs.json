@@ -1,0 +1,726 @@
+{
+  "$comment": [
+    "Evaluation FAQ library for the 10k QA run (server/eval/helpdesk/qa10k). Example content written for the eval, not the production FAQ library.",
+    "Ids ...001-...014 are the seed library (../faqs.json) unchanged; ids ...015-...035 are added and grounded in Portal copy (messages/en-GB.json, zh-CN.json), Portal components and the Phase 1 PRDs. Where the PRD and the live Portal disagree, the Portal wording is used (e.g. email activation by link, not a 6-digit code).",
+    "Ids are fixed so qa10k cases can name the expected FAQ."
+  ],
+  "faqs": [
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000001",
+      "category": "account_technical",
+      "popular": true,
+      "questionEn": "How do I reset my password?",
+      "answerEn": "1. Check your spam folder for the reset email from Learning Guide.\n2. Make sure you use the email address you signed up with.\n3. Go to the sign-in page and choose **Forgot password?** to send a new link.",
+      "questionZh": "如何重置密码？",
+      "answerZh": "1. 在垃圾邮件文件夹中查找来自 Learning Guide 的重置邮件。\n2. 确认使用的是注册时的邮箱。\n3. 前往登录页，点击**忘记密码？**重新发送链接。",
+      "keywords": [
+        "password",
+        "reset",
+        "forgot",
+        "密码",
+        "重置",
+        "忘记密码"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000002",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I change the email address on my account?",
+      "answerEn": "Open **Account settings**, choose **Email**, enter the new address and confirm it from the email we send you.",
+      "questionZh": "如何更改账号的邮箱？",
+      "answerZh": "打开**账号设置**，选择**邮箱**，输入新邮箱，并在我们发送的邮件中确认。",
+      "keywords": [
+        "email",
+        "change email",
+        "邮箱",
+        "更改邮箱"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000003",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I delete my account?",
+      "answerEn": "Email [support@ilovelearningguide.com](mailto:support@ilovelearningguide.com) from the address on your account. We confirm before deleting, and deletion cannot be undone.",
+      "questionZh": "如何注销账号？",
+      "answerZh": "请用账号绑定的邮箱发送邮件到 [support@ilovelearningguide.com](mailto:support@ilovelearningguide.com)。我们会先与你确认，注销后无法恢复。",
+      "keywords": [
+        "delete account",
+        "close account",
+        "注销",
+        "删除账号"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000004",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "The site is not loading or videos will not play. What can I do?",
+      "answerEn": "- Refresh the page and sign in again\n- Try another browser (Chrome, Edge, Safari or Firefox, latest version)\n- Turn off browser extensions that block scripts\n- Check your connection; videos need about 5 Mbps",
+      "questionZh": "网站打不开或视频无法播放怎么办？",
+      "answerZh": "- 刷新页面并重新登录\n- 换一个浏览器（最新版 Chrome、Edge、Safari 或 Firefox）\n- 关闭会拦截脚本的浏览器插件\n- 检查网络，视频大约需要 5 Mbps",
+      "keywords": [
+        "video",
+        "not loading",
+        "buffering",
+        "视频",
+        "打不开",
+        "卡顿",
+        "播放"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000005",
+      "category": "courses_learning",
+      "popular": true,
+      "questionEn": "How can I access my course materials?",
+      "answerEn": "Open **My Learning** and choose your course. Lessons and resources you are enrolled in are listed there.",
+      "questionZh": "如何访问我的课程资料？",
+      "answerZh": "打开**我的学习**并选择课程，已报名的课节和资料都在那里。",
+      "keywords": [
+        "course materials",
+        "lessons",
+        "resources",
+        "课程资料",
+        "课节",
+        "资料"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000006",
+      "category": "courses_learning",
+      "popular": true,
+      "questionEn": "How do I join a live session?",
+      "answerEn": "Open **My Learning**, choose the course and select **Join** on the session. The button appears 10 minutes before it starts.",
+      "questionZh": "如何加入直播课？",
+      "answerZh": "打开**我的学习**，选择课程，点击直播课上的**加入**。按钮在开课前 10 分钟出现。",
+      "keywords": [
+        "live",
+        "live session",
+        "join",
+        "直播",
+        "直播课",
+        "加入"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000007",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "Do I get a certificate when I finish a course?",
+      "answerEn": "Yes. When every lesson is complete, a certificate appears under **My Learning > Certificates** and can be downloaded as a PDF.",
+      "questionZh": "完成课程后有证书吗？",
+      "answerZh": "有。完成全部课节后，证书会出现在**我的学习 > 证书**中，可以下载 PDF。",
+      "keywords": [
+        "certificate",
+        "证书",
+        "结业"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000008",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "Can I download lessons to watch offline?",
+      "answerEn": "Not at the moment. Lessons stream online only; downloaded copies are not available.",
+      "questionZh": "可以下载课程离线观看吗？",
+      "answerZh": "目前不可以。课程只能在线观看，不提供下载。",
+      "keywords": [
+        "download",
+        "offline",
+        "下载",
+        "离线"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000009",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "How do I change my subscription?",
+      "answerEn": "Go to **My Subscription** and choose **Change plan**. An upgrade applies at once; a downgrade applies at the next renewal.",
+      "questionZh": "如何更改我的订阅？",
+      "answerZh": "前往**我的订阅**并选择**更改方案**。升级立即生效，降级在下次续费时生效。",
+      "keywords": [
+        "subscription",
+        "plan",
+        "upgrade",
+        "downgrade",
+        "订阅",
+        "方案",
+        "升级",
+        "降级"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000010",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "Where can I find my invoice?",
+      "answerEn": "- Open **My Subscription**\n- Choose **Records**\n- Select **Download invoice** next to the payment",
+      "questionZh": "在哪里可以找到发票？",
+      "answerZh": "- 打开**我的订阅**\n- 选择**记录**\n- 在对应付款旁点击**下载发票**",
+      "keywords": [
+        "invoice",
+        "receipt",
+        "billing",
+        "发票",
+        "收据",
+        "账单",
+        "orders",
+        "order history",
+        "订单",
+        "我的订单"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000011",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "Why did my payment fail?",
+      "answerEn": "Common causes are an expired card, a bank security check or not enough funds. Check the card details in **My Subscription > Payment method**, or try another card.",
+      "questionZh": "为什么我的付款失败了？",
+      "answerZh": "常见原因是卡片过期、银行安全验证或余额不足。请在**我的订阅 > 支付方式**中检查卡片信息，或换一张卡。",
+      "keywords": [
+        "payment failed",
+        "declined",
+        "card",
+        "付款失败",
+        "扣款失败",
+        "银行卡"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000012",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "How do I cancel my subscription?",
+      "answerEn": "Go to **My Subscription** and choose **Cancel subscription**. You keep access until the end of the period you paid for.",
+      "questionZh": "如何取消订阅？",
+      "answerZh": "前往**我的订阅**并选择**取消订阅**。已付费的周期结束前仍可使用。",
+      "keywords": [
+        "cancel",
+        "cancel subscription",
+        "取消订阅",
+        "退订"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000013",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "Can I get a refund?",
+      "answerEn": "You can ask for a refund within 14 days of your first payment if you have completed fewer than two lessons. Submit an enquiry under **Payments & Subscriptions**.",
+      "questionZh": "可以退款吗？",
+      "answerZh": "首次付款 14 天内、且完成的课节少于两节时可以申请退款。请在**付款与订阅**下提交问题。",
+      "keywords": [
+        "refund",
+        "money back",
+        "退款",
+        "退钱",
+        "refund me",
+        "退回",
+        "退给我",
+        "钱退回"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000014",
+      "category": "other",
+      "popular": false,
+      "questionEn": "Can I suggest a new feature?",
+      "answerEn": "Yes. Choose **Other Enquiries** on the Contact Support form and tell us your idea.",
+      "questionZh": "可以提出新功能建议吗？",
+      "answerZh": "可以。在联系客服表单中选择**其他问题**，告诉我们你的想法。",
+      "keywords": [
+        "feature",
+        "suggestion",
+        "idea",
+        "建议",
+        "功能"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000015",
+      "category": "account_technical",
+      "popular": true,
+      "questionEn": "How do I create an account?",
+      "answerEn": "1. Select **Sign In**, enter your email and select **Continue**.\n2. If the email is not registered yet, you go to **Create your account**. Enter your name (1 to 50 characters) and a password of 8 to 72 characters, and accept the Terms of Use and Privacy Notice.\n3. We email you an activation link. Open it within 24 hours to activate your account, then sign in.\n\nYou can also continue with **Google** or **WeChat**.",
+      "questionZh": "如何注册账号？",
+      "answerZh": "1. 点击**登录**，输入邮箱后点**继续**。\n2. 如果该邮箱还没有注册，会进入**创建账号**页面。填写姓名（1 到 50 个字符）和 8 到 72 个字符的密码，并同意使用条款和隐私声明。\n3. 我们会向你的邮箱发送激活链接。请在 24 小时内打开链接激活账号，然后再登录。\n\n你也可以使用 **Google** 或**微信**继续。",
+      "keywords": [
+        "sign up",
+        "register",
+        "create account",
+        "new account",
+        "注册",
+        "创建账号",
+        "开户",
+        "新用户",
+        "註冊",
+        "建立帳號"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000016",
+      "category": "account_technical",
+      "popular": true,
+      "questionEn": "I did not get the activation email, or the activation link has expired",
+      "answerEn": "- Check your spam or junk folder.\n- On the **Check your email** page, select **Resend activation email**. You can send up to 10 verification emails a day.\n- Activation links are valid for 24 hours. If yours has expired, resend the email and use the link in the newest one.\n\nYou need to activate your email before you can sign in with email and password.",
+      "questionZh": "收不到激活邮件或激活链接已失效怎么办？",
+      "answerZh": "- 先查看邮箱的垃圾邮件文件夹。\n- 在**请检查邮箱**页面点**重新发送激活邮件**。每天最多可发送 10 封验证邮件。\n- 激活链接 24 小时内有效。如果已经过期，请重新发送，并使用最新一封邮件里的链接。\n\n使用邮箱和密码登录前，需要先完成邮箱激活。",
+      "keywords": [
+        "activation email",
+        "activate",
+        "verify email",
+        "verification email",
+        "resend",
+        "link expired",
+        "激活",
+        "激活邮件",
+        "验证邮件",
+        "重新发送",
+        "链接失效",
+        "啟用",
+        "驗證郵件"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000017",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "Can I sign in with Google?",
+      "answerEn": "Yes. On the sign-in page, select **Google** under **Or continue with** and choose your Google account.\n\nIf your email is already registered with a password, sign in with your email and password first, then open **My Learning** > **Personal settings** > **Sign-in methods** and select **Connect Google**. Your courses, subscription and progress stay in the same account.\n\nAccounts that sign in with Google or WeChat do not need a password.",
+      "questionZh": "可以用 Google 账号登录吗？",
+      "answerZh": "可以。在登录页的**或使用以下方式继续**下点 **Google**，然后选择你的 Google 账号。\n\n如果你的邮箱已经用邮箱和密码注册过，请先用邮箱和密码登录，再打开**我的学习** > **个人设置** > **登录方式**，点**绑定 Google**。你的课程、订阅和学习进度都会保留在同一个账号里。\n\n使用 Google 或微信登录的账号不需要设置密码。",
+      "keywords": [
+        "google",
+        "sign in with google",
+        "link google",
+        "connect google",
+        "谷歌",
+        "Google 登录",
+        "绑定 Google",
+        "第三方登录",
+        "谷歌登入"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000018",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "Why do I need to add an email when I sign in with WeChat?",
+      "answerEn": "The first time you sign in with WeChat, you bind an email address to finish setting up your account so you can continue learning or purchasing.\n1. Enter your email and select **Send verification email**.\n2. Open the binding link in that email within 24 hours. You can resend after 60 seconds.\n\nIf it says the email is already used by another account, use a different email or sign in to that account instead.",
+      "questionZh": "第一次用微信登录，为什么要绑定邮箱？",
+      "answerZh": "第一次使用微信登录时，需要绑定一个邮箱来完成账号设置，之后才能继续学习或购买。\n1. 输入邮箱后点**发送验证邮件**。\n2. 在 24 小时内打开邮件里的绑定链接。两次发送之间需要等待 60 秒。\n\n如果提示该邮箱已被其他账号使用，请换一个邮箱，或直接登录那个账号。",
+      "keywords": [
+        "wechat",
+        "bind email",
+        "email binding",
+        "email already used",
+        "微信",
+        "微信登录",
+        "绑定邮箱",
+        "邮箱已被使用",
+        "綁定郵箱",
+        "微信登入"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000019",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I change my password?",
+      "answerEn": "1. Open **My Learning** > **Personal settings**.\n2. Enter your **Current password**, then enter the new password twice.\n3. Select **Save changes**.\n\nThe new password needs at least 8 characters. If you have forgotten your current password, use **Forgot password?** on the sign-in page instead.",
+      "questionZh": "如何修改密码？",
+      "answerZh": "1. 打开**我的学习** > **个人设置**。\n2. 输入**当前密码**，再输入两次新密码。\n3. 点**保存修改**。\n\n新密码至少 8 个字符。如果忘记了当前密码，请改用登录页的**忘记密码？**。",
+      "keywords": [
+        "change password",
+        "new password",
+        "update password",
+        "修改密码",
+        "更改密码",
+        "换密码",
+        "新密码",
+        "修改密碼",
+        "更改密碼"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000020",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I change my name, profile picture or personal details?",
+      "answerEn": "Open **My Learning** > **Personal settings**.\n- **Profile image**: upload a JPG or PNG of up to 5 MB. A square image works best.\n- **Name**: 1 to 50 characters.\n- **Personal details**: Country/Region is required. Age range and education level are optional, and you can choose up to five areas of interest.\n\nSelect **Save changes** when you are done.",
+      "questionZh": "如何修改姓名、头像或个人信息？",
+      "answerZh": "打开**我的学习** > **个人设置**。\n- **头像**：上传 JPG 或 PNG 图片，最大 5 MB，建议使用正方形图片。\n- **姓名**：1 到 50 个字符。\n- **个人信息**：国家/地区为必填项，年龄段和教育程度为选填项，感兴趣的领域最多选择 5 项。\n\n完成后点**保存修改**。",
+      "keywords": [
+        "profile",
+        "avatar",
+        "profile picture",
+        "name",
+        "nickname",
+        "personal details",
+        "头像",
+        "个人资料",
+        "昵称",
+        "姓名",
+        "个人信息",
+        "頭像",
+        "個人資料"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000021",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I change the language of the site?",
+      "answerEn": "- Use the language switch (**EN** / **中**) in the top navigation, or\n- open **My Learning** > **Personal settings** > **Language**, choose **English (UK)** or **简体中文** and save. The site switches straight away.\n\nCourse materials are available in both English and Chinese.",
+      "questionZh": "如何切换网站语言？",
+      "answerZh": "- 使用顶部导航里的语言切换（**EN** / **中**），或者\n- 打开**我的学习** > **个人设置** > **语言**，选择 **English (UK)** 或**简体中文**并保存，页面会立即切换。\n\n课程材料提供中英双语版本。",
+      "keywords": [
+        "language",
+        "switch language",
+        "chinese",
+        "english",
+        "display language",
+        "语言",
+        "切换语言",
+        "中文",
+        "英文",
+        "界面语言",
+        "語言",
+        "切換語言",
+        "繁體"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000022",
+      "category": "courses_learning",
+      "popular": true,
+      "questionEn": "How do I continue a course and keep my progress?",
+      "answerEn": "Open **My Learning** and select **Continue learning** on the course. When you finish a lesson, select **Mark lesson complete**. Your progress is saved to your account, so you can pick up where you left off.",
+      "questionZh": "如何继续上次的课程并保存进度？",
+      "answerZh": "打开**我的学习**，在课程上点**继续学习**。学完一节课后点**标记课程完成**。学习进度会保存在你的账号里，下次可以从上次停下的地方继续。",
+      "keywords": [
+        "continue",
+        "progress",
+        "resume course",
+        "mark complete",
+        "where I left off",
+        "继续学习",
+        "学习进度",
+        "进度",
+        "标记完成",
+        "上次",
+        "繼續學習",
+        "進度"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000023",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "Can I try a course before I subscribe?",
+      "answerEn": "Yes, where a course offers a free preview. Open the course page and select **Preview** to watch the public first lesson for free.\n\nTo unlock the full course, choose a plan that includes it. You can also start a three-day trial.",
+      "questionZh": "订阅前可以先试看课程吗？",
+      "answerZh": "可以，前提是这门课程开放了免费试看。打开课程详情页，点**试看**即可免费观看公开的第一课。\n\n如需解锁完整课程，请选择包含这门课的订阅方案，也可以先开始三天试用。",
+      "keywords": [
+        "preview",
+        "free lesson",
+        "try",
+        "first lesson",
+        "sample",
+        "试看",
+        "免费",
+        "第一课",
+        "试听",
+        "公开课",
+        "試看",
+        "免費"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000024",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "Can I read lessons instead of watching videos?",
+      "answerEn": "Yes. Every course offers **Video Mode** and **Text Mode**. When you open a course you can choose your preferred mode, and you can switch at any time. Your choice is saved in My Learning for that course.",
+      "questionZh": "可以看文字版课程，而不是看视频吗？",
+      "answerZh": "可以。每门课程都提供**视频模式**和**文本模式**。打开课程时可以选择偏好的学习模式，之后也可以随时切换。你的选择会保存在“我的学习”中。",
+      "keywords": [
+        "text mode",
+        "video mode",
+        "read",
+        "transcript",
+        "no video",
+        "learning mode",
+        "文本模式",
+        "视频模式",
+        "文字版",
+        "阅读",
+        "学习模式",
+        "文字模式",
+        "影片"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000025",
+      "category": "courses_learning",
+      "popular": true,
+      "questionEn": "What is the AI Tutor and how do I use it?",
+      "answerEn": "The AI Tutor is a learning assistant inside each course. It answers using the course and lesson you are studying.\n- **Lecture** explains the topic directly.\n- **Socratic** guides you with questions so you work it out yourself.\n\nYou can switch modes in the conversation or start a **New chat**. AI Tutor answers support your learning and are not professional, legal, medical or financial advice.",
+      "questionZh": "AI Tutor 是什么，怎么用？",
+      "answerZh": "AI Tutor 是每门课程里的学习助手，会结合你正在学习的课程和课时内容回答问题。\n- **Lecture**（讲解）直接解释知识点。\n- **Socratic**（苏格拉底式）通过提问引导你自己想明白。\n\n你可以在对话中切换模式，或点**新对话**重新开始。AI Tutor 的回答用于辅助学习，不能代替专业、法律、医疗或财务建议。",
+      "keywords": [
+        "ai tutor",
+        "tutor",
+        "ai assistant",
+        "lecture",
+        "socratic",
+        "ask questions",
+        "AI 导师",
+        "AI 助教",
+        "人工智能",
+        "苏格拉底",
+        "讲解",
+        "AI 導師",
+        "蘇格拉底"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000026",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "What are study groups and how do I join one?",
+      "answerEn": "Study groups let learners on the same course study together in live sessions of up to 6 people, with voice, camera, screen sharing, chat and a shared AI Tutor.\n1. Open **Study Groups** and browse **Discover Study Groups**.\n2. Open a group and select **Join Now**. No host approval is needed.\n\nYou need access to the group's course to join. Members can enter a live session from 10 minutes before it starts.",
+      "questionZh": "学习小组是什么？怎么加入？",
+      "answerZh": "学习小组让学习同一门课程的同学通过直播课一起学习，每场最多 6 人，可以语音、开摄像头、共享屏幕、聊天，并一起使用 AI Tutor。\n1. 打开**学习小组**，在**发现学习小组**中浏览。\n2. 打开一个小组，点**立即加入**，不需要组长审核。\n\n加入小组需要拥有该小组关联课程的访问权限。成员可以在直播课开始前 10 分钟进入。",
+      "keywords": [
+        "study group",
+        "join group",
+        "group study",
+        "learn together",
+        "学习小组",
+        "加入小组",
+        "小组学习",
+        "一起学习",
+        "學習小組",
+        "加入小組"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000027",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "How do I create a study group and schedule a live session?",
+      "answerEn": "1. Open **Study Groups** and select **Create Study Group**.\n2. Choose a course you have access to, then enter a title and description. You become the group's host.\n3. In your group, select **Schedule Live Session** and set the date, start time, duration (30, 45, 60 or 90 minutes) and maximum participants (up to 6, including you).\n\nTitles can be up to 50 characters. The AI Tutor is on by default for new sessions. You and members who choose **Plan to Attend** get a reminder before the session starts.",
+      "questionZh": "如何创建学习小组并安排直播课？",
+      "answerZh": "1. 打开**学习小组**，点**创建学习小组**。\n2. 选择一门你有访问权限的课程，填写标题和简介，你会成为小组的组长。\n3. 在小组里点**安排直播课**，设置日期、开始时间、时长（30、45、60 或 90 分钟）和人数上限（最多 6 人，包括你自己）。\n\n标题最多 50 个字符。新的直播课默认启用 AI Tutor。你和选择了**计划参加**的成员会在开始前收到提醒。",
+      "keywords": [
+        "create group",
+        "host",
+        "schedule session",
+        "live session",
+        "study group",
+        "创建小组",
+        "创建学习小组",
+        "安排直播",
+        "直播课",
+        "组长",
+        "建立小組"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000028",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "My microphone or camera does not work in a live session",
+      "answerEn": "- Allow the microphone and camera in your browser's site settings (usually the icon beside the address bar), then try again.\n- If it is still blocked, allow your browser to use the camera and microphone in your device's privacy settings.\n- Close other apps that might be using the camera or microphone.\n- If you cannot hear anyone, select the notice to turn on sound. Some browsers block audio until you click.",
+      "questionZh": "直播课里麦克风或摄像头用不了怎么办？",
+      "answerZh": "- 在浏览器的网站设置中允许本站使用麦克风和摄像头（通常在地址栏旁的图标里），然后重试。\n- 如果仍被阻止，请在设备的隐私设置中允许浏览器使用摄像头和麦克风。\n- 关闭可能正在占用摄像头或麦克风的其他应用。\n- 如果听不到声音，请点击页面上的提示开启声音，有些浏览器在你点击前会拦截声音。",
+      "keywords": [
+        "microphone",
+        "mic",
+        "camera",
+        "no sound",
+        "audio",
+        "webcam",
+        "麦克风",
+        "摄像头",
+        "没声音",
+        "听不到",
+        "麥克風",
+        "攝像頭",
+        "沒聲音"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000029",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "What plans are available?",
+      "answerEn": "There are two plans:\n- **Everything**: every course in all categories, plus new courses and categories added during your plan.\n- **Category**: all courses in one category of your choice.\n\nBoth come in 6-month or 12-month terms, include AI Tutor points and bilingual course materials, and let you study on 1 PC and 1 mobile device. Current prices are on the [Subscription page](https://ilovelearningguide.com/en-GB/subscription).",
+      "questionZh": "有哪些订阅方案？",
+      "answerZh": "共有两种方案：\n- **全部课程（Everything）**：所有分类的全部课程，以及订阅期间新增的课程和分类。\n- **分类课程（Category）**：任选一个分类下的全部课程。\n\n两种方案都可以选择 6 个月或 12 个月，包含 AI 导师积分和中英双语课程材料，支持 1 台电脑和 1 台移动设备。当前价格请查看[订阅页面](https://ilovelearningguide.com/zh-CN/subscription)。",
+      "keywords": [
+        "plans",
+        "pricing",
+        "price",
+        "everything",
+        "category",
+        "how much",
+        "套餐",
+        "方案",
+        "价格",
+        "多少钱",
+        "订阅方案",
+        "價格",
+        "訂閱"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000030",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "How does the free trial work?",
+      "answerEn": "- The trial gives you three days of full access within the plan you choose.\n- To start it, choose a plan, add a payment method and agree to auto-renewal. You pay USD 0.00 during the trial.\n- If you do not cancel, your paid subscription starts when the trial ends and the first payment is taken.\n- Cancelling during the trial removes full access straight away. Each account can use one trial.",
+      "questionZh": "免费试用是怎么回事？",
+      "answerZh": "- 试用期为三天，可完整使用你所选方案范围内的课程。\n- 开始试用前需要选择方案、添加支付方式并同意自动续订。试用期间费用为 USD 0.00。\n- 如果你没有取消，试用结束时会开始付费订阅并扣除首期费用。\n- 试用期间取消会立即失去完整访问权限。每个账号只能试用一次。",
+      "keywords": [
+        "trial",
+        "free trial",
+        "three-day trial",
+        "3 day trial",
+        "试用",
+        "免费试用",
+        "三天试用",
+        "试用期",
+        "試用",
+        "免費試用"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000031",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "I paid but my course is not unlocked yet",
+      "answerEn": "Access opens once Stripe confirms your payment, which can take a short while. If you see **Payment is being confirmed**, return to **My Learning** and refresh shortly.\n\nIf it says **Payment was not completed**, no access was granted and you can start a new purchase from the course page. You can check your payments in **My Subscription** > **Payment history**.",
+      "questionZh": "付款后课程还没开通怎么办？",
+      "answerZh": "Stripe 确认付款后才会开通课程，这可能需要一点时间。如果看到**支付正在确认**，请返回**我的学习**，稍后刷新页面。\n\n如果显示**支付未完成**，说明没有开通新的课程权限，你可以从课程页面重新发起购买。你可以在**我的订阅** > **付款记录**中查看付款情况。",
+      "keywords": [
+        "paid but locked",
+        "payment pending",
+        "not unlocked",
+        "no access after payment",
+        "processing",
+        "付了钱",
+        "没开通",
+        "支付处理中",
+        "付款后",
+        "看不了课",
+        "付款確認",
+        "沒開通"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000032",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "Which payment methods can I use, and is my card safe?",
+      "answerEn": "The payment methods you can use are shown at secure checkout, which is hosted by Stripe. Stripe handles your card details; Learning Guide does not store full card numbers or CVCs.",
+      "questionZh": "支持哪些付款方式？银行卡信息安全吗？",
+      "answerZh": "可用的付款方式会在由 Stripe 托管的安全结账页面显示。银行卡信息由 Stripe 处理，Learning Guide 不保存完整卡号或 CVC。",
+      "keywords": [
+        "payment methods",
+        "pay",
+        "credit card",
+        "card safe",
+        "stripe",
+        "security",
+        "付款方式",
+        "支付方式",
+        "信用卡",
+        "银行卡",
+        "安全",
+        "信用卡安全"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000033",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "How does auto-renewal work, and can I turn it back on?",
+      "answerEn": "- Your subscription renews automatically unless you cancel auto-renewal before the renewal date.\n- We email you at least 5 days before each payment. The renewal price may change, and we tell you by email in advance.\n- If you turned auto-renewal off and your subscription has not expired yet, open **My Subscription** and select **Turn on auto-renewal**.\n- After a subscription has expired, select **Subscribe again** to start a new one.",
+      "questionZh": "自动续订是怎么回事？关掉后还能重新开启吗？",
+      "answerZh": "- 除非你在续订日期前取消自动续订，否则订阅会自动续订。\n- 每次付款前至少 5 天我们会发邮件通知你。续订价格可能变化，我们会提前通过邮件告知。\n- 如果你关闭了自动续订且订阅尚未到期，可以打开**我的订阅**，点**开启自动续费**。\n- 订阅到期后，请点**重新订阅**开始新的订阅。",
+      "keywords": [
+        "auto-renewal",
+        "auto renew",
+        "renewal",
+        "turn on renewal",
+        "renewal price",
+        "自动续订",
+        "自动续费",
+        "续费",
+        "续订",
+        "开启续费",
+        "續訂",
+        "自動續費"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000034",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How many devices can I use, and can I study on my phone?",
+      "answerEn": "Each plan lets you study on 1 PC and 1 mobile device. On a phone or tablet, use a supported mobile browser.",
+      "questionZh": "可以在几台设备上学习？能用手机学吗？",
+      "answerZh": "每个方案支持 1 台电脑和 1 台移动设备。在手机或平板上，请使用受支持的移动浏览器访问。",
+      "keywords": [
+        "devices",
+        "mobile",
+        "phone",
+        "tablet",
+        "how many devices",
+        "设备",
+        "手机",
+        "平板",
+        "几台设备",
+        "移动端",
+        "裝置",
+        "手機",
+        "app",
+        "app store",
+        "download app",
+        "下载app",
+        "手机app"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000035",
+      "category": "other",
+      "popular": true,
+      "questionEn": "How do I contact support?",
+      "answerEn": "1. Go to **Contact Support** (from the Help Centre, or **Contact support** in My Learning).\n2. Choose an enquiry type: **Technical Support**, **Course Content**, **Payments & Subscriptions** or **Other Enquiries**.\n3. Add a subject and your message. You can attach up to 5 files of 10 MB each.\n\nOur support team replies by email, and you can follow your enquiry in **My enquiries**. Please do not share sensitive payment details in your message.",
+      "questionZh": "如何联系客服？",
+      "answerZh": "1. 打开**联系客服**（从帮助中心进入，或在“我的学习”中点**联系客服**）。\n2. 选择问题类型：**技术支持**、**课程内容**、**支付与订阅**或**其他问题**。\n3. 填写主题和详细描述，最多可上传 5 个附件，每个不超过 10 MB。\n\n客服团队会通过邮件回复你，你也可以在**我的工单**中查看进度。请不要在消息中填写敏感的支付信息。",
+      "keywords": [
+        "contact",
+        "support",
+        "help",
+        "human",
+        "customer service",
+        "enquiry",
+        "ticket",
+        "联系客服",
+        "客服",
+        "人工",
+        "工单",
+        "联系我们",
+        "聯繫客服",
+        "人工客服"
+      ]
+    }
+  ]
+}

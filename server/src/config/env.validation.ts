@@ -3,7 +3,9 @@
  * 由 ConfigModule.forRoot 的 validate 钩子调用：缺失关键变量时抛出明确错误，
  * 使进程在启动阶段即失败退出，避免运行期出现难以定位的连接错误。
  */
-export function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
+export function validateEnv(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
   if (!config.DATABASE_URL) {
     throw new Error(
       '环境变量 DATABASE_URL 缺失：请在 server/.env 中配置 PostgreSQL 连接串（可参考 .env.example）',

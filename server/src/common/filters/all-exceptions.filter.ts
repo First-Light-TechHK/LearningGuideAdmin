@@ -7,8 +7,12 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { ApiErrorResponse } from '../interfaces/api-response.interface';
+import { ProblemJsonFilter } from './problem-json.filter';
+
+/** Portal → Admin 的 Helpdesk 集成接口：错误一律 RFC 9457（即使在进入控制器前就失败）。 */
+const HELPDESK_INTEGRATION_PATH = /^\/api\/integration\/helpdesk(\/|$)/i;
 
 /**
  * 全局异常过滤器（开发文档 §5.3、§7 Phase 2 第 5 项、§9 安全注意事项）。
@@ -21,10 +25,21 @@ import { ApiErrorResponse } from '../interfaces/api-response.interface';
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+  private readonly problemFilter = new ProblemJsonFilter();
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
+    // 2026-10-28：请求体解析失败、路由不存在等发生在控制器之外的错误，
+    // 对 Helpdesk 集成接口同样输出 problem+json（其余接口行为不变）
+    const path =
+      typeof ctx.getRequest === 'function'
+        ? ctx.getRequest<Request | undefined>()?.path
+        : undefined;
+    if (typeof path === 'string' && HELPDESK_INTEGRATION_PATH.test(path)) {
+      this.problemFilter.catch(exception, host);
+      return;
+    }
 
     let status: number = HttpStatus.INTERNAL_SERVER_ERROR;
     let code = 'INTERNAL_ERROR';

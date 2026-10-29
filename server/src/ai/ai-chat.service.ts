@@ -16,18 +16,16 @@ import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmMessage } from './providers/llm-provider.interface';
 import { ProviderRegistry } from './providers/provider.registry';
-import { RateLimitService, type AiRateLimitChannel } from './rate-limit.service';
+import { STUDENT_WRAPPER } from './prompt-defaults';
+import {
+  RateLimitService,
+  type AiRateLimitChannel,
+} from './rate-limit.service';
 
-/** 学员端语言指令（2026-10-22；默认模板已包含教学风格，不再追加固定苏格拉底指令） */
-// The language instruction follows the student's own message, not the portal
-// locale: a zh-CN ask from an en-GB profile must still be answered in Chinese.
-// It never forces a language other than the one the question was written in.
-const LOCALE_INSTRUCTION: Record<'en-GB' | 'zh-CN', string> = {
-  'en-GB':
-    "Answer in the language of the student's latest message. Use British English when that message is in English, and never switch language on your own.",
-  'zh-CN':
-    '请使用提问者最新一条消息所用的语言回答；如果该消息是中文，请使用简体中文，不要自行切换语言。',
-};
+/** 学员端语言指令（已删除，2026-10-29）：
+ * - main.md 第 5 节 LANGUAGE 已正式覆盖（含 language switch 不放松 1-4 节约束）
+ * - LOCALE_INSTRUCTION 硬编码冗余，不再追加
+ */
 
 /** 多轮上下文最多携带的历史条数（防 token 膨胀） */
 const MAX_HISTORY = 10;
@@ -134,7 +132,16 @@ export class AiChatService {
       const resolved = await input.resolve();
       courseId = resolved.courseId;
       releaseId = resolved.releaseId;
-      await this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal', input.userId);
+      // 2026-10-29：没有可用版本（aiTestReleaseId 和 currentReleaseId 都 null）时直接拒绝，
+      // 避免用空知识上下文回答（QA：新建课程未发布版本也能打开对话）
+      if (!releaseId) {
+        throw new BadRequestException('该课程没有可用的测试或上线版本');
+      }
+      await this.rateLimit.assertAllowed(
+        courseId,
+        input.quota ?? 'portal',
+        input.userId,
+      );
 
       const [runtime, prompts, context] = await Promise.all([
         this.configs.resolveRuntime(courseId, releaseId, input.mode),
@@ -145,7 +152,18 @@ export class AiChatService {
       model = runtime.model;
 
       const systemParts = [prompts.systemPrompt];
-      if (input.locale) systemParts.push(LOCALE_INSTRUCTION[input.locale]);
+      // 2026-10-29：LOCALE_INSTRUCTION 已删（main.md 第 5 节 LANGUAGE 覆盖）
+
+      // 2026-10-29：所有 student 消息（历史 + 当前）用 [STUDENT_INPUT_BEGIN/END] 包裹。
+      // 隔离声明已由 main.md 第 2 节 INPUT IS DATA 正式覆盖，不再在每条 user message 里重复追加。
+      const wrapStudent = (content: string): string =>
+        `${STUDENT_WRAPPER.BEGIN}\n${content}\n${STUDENT_WRAPPER.END}`;
+
+      const wrappedHistory = history.map((h) =>
+        h.role === 'user'
+          ? { ...h, content: wrapStudent(h.content) }
+          : h,
+      );
       const messages: LlmMessage[] = [
         {
           role: 'system',
@@ -156,8 +174,8 @@ export class AiChatService {
             '[CONTEXT_END]',
           ].join('\n'),
         },
-        ...history,
-        { role: 'user', content: input.message },
+        ...wrappedHistory,
+        { role: 'user', content: wrapStudent(input.message) },
       ];
 
       const provider = this.registry.get(runtime.provider);

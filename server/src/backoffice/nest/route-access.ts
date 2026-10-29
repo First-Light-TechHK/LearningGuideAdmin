@@ -10,6 +10,11 @@ export type RouteAccess =
   | { kind: 'service' }
   /** KS 内部接口（/api/ks/**），只给 Agent 用：Bearer KS_SERVICE_TOKEN。 */
   | { kind: 'internal' }
+  /**
+   * Portal → Admin 的 Helpdesk 集成接口（/api/integration/helpdesk/**，Figma addendum §E）：
+   * 明确豁免员工登录，只认 Bearer ADMIN_HELPDESK_TOKEN（为空 503，错 401，problem+json）。
+   */
+  | { kind: 'helpdeskIntegration' }
   /** 只要求登录（会话、改密、语言偏好）。 */
   | { kind: 'signedIn' }
   /** 员工账号管理：PRD §3.3 仅 Admin。 */
@@ -70,6 +75,29 @@ function actionFor(method: string, segments: string[]): ActionKind {
   return 'CREATE';
 }
 
+/**
+ * /api/backoffice/courses/** 的操作类型：
+ * - GET 一律 VIEW；
+ * - import/export/confirm/publish-uat/approve/go-live/live-status/restore = PUBLISH；
+ * - 其余写操作按 CREATE。
+ */
+function backofficeCourseAction(method: string, segments: string[]): ActionKind {
+  if (method === 'GET' || method === 'HEAD') return 'VIEW';
+  const publishSegments = new Set([
+    'import',
+    'export',
+    'confirm',
+    'cancel',
+    'publish-uat',
+    'approve',
+    'go-live',
+    'live-status',
+    'restore',
+  ]);
+  if (segments.some((seg) => publishSegments.has(seg))) return 'PUBLISH';
+  return 'CREATE';
+}
+
 export function routeAccess(method: string, path: string): RouteAccess {
   // Express 路由默认不区分大小写（/API/courses 也会命中 /api/courses），
   // 这里同样按小写判定，否则大写路径会被当成非 /api 放行
@@ -87,10 +115,28 @@ export function routeAccess(method: string, path: string): RouteAccess {
       : { kind: 'signedIn' };
   }
   if (first === 'user') return { kind: 'service' };
+  if (first === 'portal') return { kind: 'service' };
   if (first === 'ks') return { kind: 'internal' };
+  if (first === 'integration' && second === 'helpdesk')
+    return { kind: 'helpdeskIntegration' };
   if (first === 'session' || first === 'preferences')
     return { kind: 'signedIn' };
   if (first === 'admin') return { kind: 'employeeAdmin' };
+  // HelpDesk 工单（Tickets v1 §7）与 Common Questions（Figma addendum §A）：读 = VIEW；
+  // 任何写（回复、内部备注、认领、请学员确认、标签、已读、问答增改 / 发布 / 归档 / 排序）
+  // 都按 CREATE 处理，只有该菜单为 Full 的角色可用
+  if (first === 'helpdesk') {
+    return {
+      kind: 'menu',
+      menus: ['helpDesk'],
+      action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'CREATE',
+    };
+  }
+  if (first === 'backoffice') {
+    // 商品课程 v2（/api/backoffice/courses/**）：导入/导出/发布=发布级动作
+    const action = backofficeCourseAction(verb, segments);
+    return { kind: 'menu', menus: ['course'], action };
+  }
   const action = actionFor(verb, segments);
   if (first === 'ai') return { kind: 'menu', menus: ['aiTutor'], action };
   if (sharedWithAiTutor(verb, segments))

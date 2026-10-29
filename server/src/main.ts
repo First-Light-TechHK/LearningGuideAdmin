@@ -58,6 +58,8 @@ async function bootstrap() {
     createAppModule(roles),
   );
   Logger.log(`启动角色：${roles.join(', ')}`, 'Bootstrap');
+  // 发布时的 SIGTERM：先跑各模块的停机钩子（写完 Helpdesk 推荐的事件日志、关连接池）再退出
+  app.enableShutdownHooks();
   // 不改行为、不阻止启动：只把漏配醒目地写进日志，便于上线检查发现
   const openLearnerApi = learnerApiOpenWarning(process.env, roles);
   if (openLearnerApi) Logger.error(openLearnerApi, 'Bootstrap');
@@ -71,7 +73,21 @@ async function bootstrap() {
   // PORT 经 ConfigService 读取，缺省 3000（开发文档 §7 Phase 2 第 6 项、§8）
   const configService = app.get(ConfigService);
   const port = Number(configService.get<string>('PORT') ?? 3000);
-  await app.listen(port);
+  const server = await app.listen(port);
+  // 大文件上传（课程包/原始素材可达数百 MB）放宽 Node HTTP 超时，
+  // 避免慢速上传被默认 requestTimeout/headersTimeout 提前中断（表现为浏览器 “Error: aborted”）。
+  if (server && typeof server === 'object') {
+    const httpServer = server as unknown as {
+      requestTimeout?: number;
+      headersTimeout?: number;
+      keepAliveTimeout?: number;
+      timeout?: number;
+    };
+    httpServer.requestTimeout = 0;
+    httpServer.headersTimeout = 120_000;
+    httpServer.keepAliveTimeout = 120_000;
+    httpServer.timeout = 0;
+  }
 }
 
 // 启动失败（如 DATABASE_URL 缺失）时明确报错并退出进程

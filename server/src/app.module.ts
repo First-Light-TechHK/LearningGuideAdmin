@@ -11,11 +11,18 @@ import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { BackofficeModule } from './backoffice/nest/backoffice.module';
+import { CommerceCoursesModule } from './commerce-courses/commerce-courses.module';
 import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
 import { ALL_ROLES, type AppRole } from './app-roles';
 import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
 import { KsModule } from './ks/ks.module';
 import { PrismaKnowledgeClient } from './ks/prisma-knowledge.client';
+import { HELPDESK_QA_SOURCE } from './contracts/helpdesk-qa';
+import { HELPDESK_TRACE_SOURCE } from './contracts/helpdesk-trace';
+import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
+import { createTraceSource } from './ai/helpdesk/trace/trace-query';
+import { PrismaService } from './prisma/prisma.service';
+import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqRepository';
 
 /**
  * Agent 读 KS 的方式：同进程起了 ks 角色、或没配 KS_BASE_URL 时直接读库；
@@ -65,11 +72,30 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
               adminApi: admin,
               learnerApi: agent,
               knowledge: knowledgeProvider(roles),
+              // Helpdesk 推荐的候选：读 BackOffice 的已发布 FAQ（同库直读，契约见 src/contracts）
+              helpdeskQa: {
+                provide: HELPDESK_QA_SOURCE,
+                useFactory: () => createPgHelpdeskQaSource(),
+              },
             }),
           ]
         : []),
-      // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）
-      ...(admin ? [BackofficeModule] : []),
+      // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）；HelpDesk 工单与 FAQ 库
+      // 「查看链路」读 Agent 的事件日志（同库直读，契约见 src/contracts/helpdesk-trace.ts）
+      ...(admin
+        ? [
+            BackofficeModule.register({
+              helpdeskTrace: {
+                provide: HELPDESK_TRACE_SOURCE,
+                useFactory: (prisma: PrismaService) =>
+                  createTraceSource(new PrismaAgentEventLog(prisma)),
+                inject: [PrismaService],
+              },
+            }),
+          ]
+        : []),
+      // 商品课程 v2：课程管理 + 课程包导入导出 + Portal v1 投影（P1a）
+      ...(admin ? [CommerceCoursesModule] : []),
     ],
     controllers: [AppController, HealthController],
     providers: [
@@ -79,7 +105,8 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
       // 全局错误处理（§5.3、§7 Phase 2 第 5 项）
       { provide: APP_FILTER, useClass: AllExceptionsFilter },
       // 员工会话 + 菜单级权限；Portal 学员端 /api/user/** 仍走 X-API-Key（ApiKeyGuard 规则），
-      // KS 内部接口 /api/ks/** 走 KS_SERVICE_TOKEN
+      // KS 内部接口 /api/ks/** 走 KS_SERVICE_TOKEN；Portal Helpdesk 集成 /api/integration/helpdesk/**
+      // 走 ADMIN_HELPDESK_TOKEN
       { provide: APP_GUARD, useClass: BackofficeAccessGuard },
     ],
   };

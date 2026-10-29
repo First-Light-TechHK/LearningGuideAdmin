@@ -20,7 +20,11 @@ const logger = new Logger('AccessLog');
 /** 健康检查每秒一次，记录它会淹没真正的业务请求。 */
 const SILENT_PATHS = new Set(['/api/health', '/health']);
 
-export function accessLog(req: Request, res: Response, next: NextFunction): void {
+export function accessLog(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   if (process.env.ACCESS_LOG === '0') {
     next();
     return;

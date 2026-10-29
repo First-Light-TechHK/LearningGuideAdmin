@@ -28,4 +28,3 @@ export class CreatePageDto {
   @Min(0)
   sortOrder?: number;
 }
-

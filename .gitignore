@@ -7,6 +7,8 @@ desktop.ini
 .vs/
 .idea/
 *.swp
+# 多根工作区（含本机绝对路径，不入库）
+*.code-workspace
 
 # 密钥与环境（.env.example 除外）
 .env
@@ -28,6 +30,9 @@ next-env.d.ts
 *.log
 *.tmp
 
+# AI/脚本的本地临时产物目录（约定写入仓库内，避免越出工作区）
+.tmp/
+
 # AI 对话运行日志（§4.4.2 第 7 步，本地运行产物）
 app-logs/
 
@@ -39,3 +44,18 @@ test_files/
 
 # 设计走查用的临时页面快照
 docs/design/figma/preview/
+
+# Helpdesk 推荐评测报告（npm run eval:helpdesk 的缺省输出）
+helpdesk-eval-report.*
+
+# Figma 整页几何缓存（体积大，可由 scripts/figma-icons.mjs 重新拉取）
+docs/design/figma/course-management/*.geometry.json
+
+# 课程媒体与原始素材（大文件，超过 GitHub 100MB 单文件限制，不入库；媒体存放于 server/storage）
+server/storage/
+docs/*.zip
+docs/modeling-life/
+docs/Modeling Life Data/
+
+# Cursor 本地会话/缓存（机器相关，不入库）
+.cursor/

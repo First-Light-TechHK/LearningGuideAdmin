@@ -40,7 +40,7 @@ client/      前端（React + Vite + Ant Design 5.x，Phase 1 已搭建）
 
 本项目为 **Node.js** 工程（**无 Python / venv**）：依赖版本由 `server/package-lock.json`、`client/package-lock.json` 锁定，Node 版本见 `.nvmrc` 与各 `package.json` 的 `engines`；JS 依赖就地隔离在各自的 `node_modules`（等价于 Python 的 venv）。
 
-前置要求：Node.js ≥ 22.12（`nvm use` 自动读取 `.nvmrc`）、npm ≥ 10；数据库二选一——本机 PostgreSQL，或 Docker 一键起库。
+前置要求：Node.js ≥ 22.19（server 的 pi-agent-core 需要；`nvm use` 自动读取 `.nvmrc`）、npm ≥ 10；数据库二选一——本机 PostgreSQL，或 Docker 一键起库。
 
 ```powershell
 # Windows
@@ -67,6 +67,8 @@ npx prisma migrate dev   # 应用迁移
 npx prisma db seed       # 种子数据（幂等）
 npm run start:dev        # http://localhost:3000
 ```
+
+Helpdesk 推荐评测（设计文档 §4A.11）：`npm run eval:helpdesk -- --out helpdesk-eval-report.md`。有 `OPENROUTER_API_KEY` 时用真模型、花费上限 `HELPDESK_EVAL_BUDGET_USD`（缺省 5 美元）；没有 key 时用假模型，报告注明不是模型成绩。只有真模型、整套用例且加 `--pg <DATABASE_URL>` 的运行才可能过闸（退出码 0）。10,000 条的 qa10k 集（`server/eval/helpdesk/qa10k/`，dev / test 各 5,000，见其中 `STATS.md`）：`--cases eval/helpdesk/qa10k/test.jsonl --faqs eval/helpdesk/qa10k/faqs.json`；`--retrieval-only`（可加 `--pg`）只跑检索、报 recall@1 / @3 / @8，从不问模型。
 
 ### 前端（client/）
 

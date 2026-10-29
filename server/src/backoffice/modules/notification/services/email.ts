@@ -56,7 +56,8 @@ function fromAddress(): string {
 
 async function sendViaSmtp(message: EmailMessage): Promise<void> {
   const from = fromAddress();
-  if (from === '') throw new Error('SMTP_FROM / SES_FROM_EMAIL is not configured');
+  if (from === '')
+    throw new Error('SMTP_FROM / SES_FROM_EMAIL is not configured');
 
   const port = Number(process.env.SMTP_PORT?.trim() || '465');
   const transport = createTransport({
@@ -178,9 +179,11 @@ export async function sendActivationEmail(input: {
         ])}`
       : `${paragraphs([
           'Set your initial password and activate your Learning Guide BackOffice account with the link below. It expires in 48 hours.',
-        ])}<p><a href="${safeLink}">Set password and activate</a></p>${paragraphs([
-          'If the link has expired, please contact an administrator for a new one.',
-        ])}`,
+        ])}<p><a href="${safeLink}">Set password and activate</a></p>${paragraphs(
+          [
+            'If the link has expired, please contact an administrator for a new one.',
+          ],
+        )}`,
   });
 }
 
@@ -204,7 +207,9 @@ export async function sendPasswordResetEmail(input: {
           ['如非本人操作，请忽略本邮件并联系管理员。'],
         )}`
       : `${paragraphs(['Use the single-use link below to set a new password.'])}<p><a href="${safeLink}">Reset password</a></p>${paragraphs(
-          ['If you did not request this, ignore this email and contact an administrator.'],
+          [
+            'If you did not request this, ignore this email and contact an administrator.',
+          ],
         )}`,
   });
 }
@@ -223,7 +228,9 @@ export async function sendPasswordChangedEmail(input: {
       ? '您的账号密码刚刚被修改或重置。如非本人操作，请立即联系管理员。'
       : 'The password for your account has just been changed or reset. If this was not you, contact an administrator immediately.',
     html: zh
-      ? paragraphs(['您的账号密码刚刚被修改或重置。如非本人操作，请立即联系管理员。'])
+      ? paragraphs([
+          '您的账号密码刚刚被修改或重置。如非本人操作，请立即联系管理员。',
+        ])
       : paragraphs([
           'The password for your account has just been changed or reset. If this was not you, contact an administrator immediately.',
         ]),

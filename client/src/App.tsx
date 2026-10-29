@@ -14,14 +14,17 @@ import ActivatePage from './backoffice/pages/ActivatePage'
 import ForgotPasswordPage from './backoffice/pages/ForgotPasswordPage'
 import ResetPasswordPage from './backoffice/pages/ResetPasswordPage'
 import SignInPage from './backoffice/pages/SignInPage'
+import HelpDeskPage from './backoffice/pages/HelpDeskPage'
 import {
-  CoursePage,
   EmployeeAccountSettingsPage,
   MenuGuard,
   PlaceholderPage,
   SettingsEntryPage,
   SettingsIndexPage,
 } from './backoffice/pages/ModulePages'
+import { CourseManagementPage } from './backoffice/pages/CourseManagementPage'
+import { CourseEditorPage } from './backoffice/pages/CourseEditorPage'
+import { CoursePreviewPage } from './backoffice/pages/CoursePreviewPage'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
@@ -123,7 +126,9 @@ function App() {
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route element={<ShellRoute />}>
               <Route index element={<Navigate to="course" replace />} />
-              <Route path="course" element={<CoursePage />} />
+              <Route path="course" element={<CourseManagementPage />} />
+              <Route path="course/:courseId" element={<CourseEditorPage />} />
+              <Route path="course/:courseId/preview" element={<CoursePreviewPage />} />
               <Route
                 path="knowledge"
                 element={
@@ -147,7 +152,17 @@ function App() {
               <Route path="order" element={<PlaceholderPage menu="order" />} />
               <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
               <Route path="student" element={<PlaceholderPage menu="student" />} />
-              <Route path="help-desk" element={<PlaceholderPage menu="helpDesk" />} />
+              <Route
+                // 一条路由带可选的 :ticketId：切换咨询时页面不重新挂载，左栏列表与滚动位置保持不变
+                path="help-desk/:ticketId?"
+                element={
+                  <MenuGuard menu="helpDesk">
+                    <WorkspaceAccessProvider menu="helpDesk">
+                      <HelpDeskPage />
+                    </WorkspaceAccessProvider>
+                  </MenuGuard>
+                }
+              />
               <Route path="settings" element={<SettingsIndexPage />} />
               <Route path="settings/employee-account" element={<EmployeeAccountSettingsPage />} />
               <Route

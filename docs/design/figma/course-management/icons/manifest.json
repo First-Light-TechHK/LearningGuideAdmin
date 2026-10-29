@@ -1,0 +1,2628 @@
+[
+  {
+    "file": "alert-circle.svg",
+    "name": "alert-circle",
+    "nodeId": "55:227",
+    "allNodeIds": [
+      "55:227"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "warnbox",
+    "colors": [
+      "#b54708"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM02 Create course"
+    ]
+  },
+  {
+    "file": "alert-circle-red.svg",
+    "name": "alert-circle-red",
+    "nodeId": "32:41",
+    "allNodeIds": [
+      "32:41",
+      "60:201"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "section Title and descriptions",
+    "colors": [
+      "#b42318"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "alert-triangle.svg",
+    "name": "alert-triangle",
+    "nodeId": "54:374",
+    "allNodeIds": [
+      "54:374"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "banner",
+    "colors": [
+      "#b54708"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM06 Trial"
+    ]
+  },
+  {
+    "file": "alert-triangle-sm.svg",
+    "name": "alert-triangle-sm",
+    "nodeId": "60:455",
+    "allNodeIds": [
+      "60:455"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "warnbox",
+    "colors": [
+      "#b54708"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "brand-cap.svg",
+    "name": "brand-cap",
+    "nodeId": "1:40",
+    "allNodeIds": [
+      "1:40"
+    ],
+    "width": 24,
+    "height": 24,
+    "figmaName": "Icon",
+    "parent": "Frame",
+    "colors": [
+      "#ffffff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "brand-logo.svg",
+    "name": "brand-logo",
+    "nodeId": "1:38",
+    "allNodeIds": [
+      "1:38",
+      "1:39"
+    ],
+    "width": 42,
+    "height": 42,
+    "figmaName": "Frame 41",
+    "parent": "Group 1",
+    "colors": [
+      "#1d6bff",
+      "#ffffff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "check-circle-green.svg",
+    "name": "check-circle-green",
+    "nodeId": "106:121",
+    "allNodeIds": [
+      "106:121"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "div",
+    "colors": [
+      "#067647"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S13 Knowledge Test · import from sheet"
+    ]
+  },
+  {
+    "file": "check-step.svg",
+    "name": "check-step",
+    "nodeId": "31:57",
+    "allNodeIds": [
+      "31:57",
+      "31:64",
+      "37:124",
+      "37:131",
+      "40:124",
+      "40:131",
+      "45:124",
+      "45:131",
+      "49:129",
+      "49:136",
+      "50:124",
+      "50:131",
+      "54:124",
+      "54:131",
+      "60:124",
+      "60:131"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "steps",
+    "colors": [
+      "#d1d5db"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "checkbox-check.svg",
+    "name": "checkbox-check",
+    "nodeId": "55:220",
+    "allNodeIds": [
+      "55:220",
+      "60:441"
+    ],
+    "width": 10,
+    "height": 10,
+    "figmaName": "icon",
+    "parent": "box",
+    "colors": [
+      "#ffffff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM02 Create course",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "checkbox-checked.svg",
+    "name": "checkbox-checked",
+    "nodeId": "55:219",
+    "allNodeIds": [
+      "55:219",
+      "60:440"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "box",
+    "parent": "chk",
+    "colors": [
+      "#1d6bff",
+      "#ffffff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM02 Create course",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "chevron-down.svg",
+    "name": "chevron-down",
+    "nodeId": "30:12",
+    "allNodeIds": [
+      "30:12",
+      "31:85",
+      "50:499",
+      "50:542",
+      "50:558",
+      "50:573",
+      "55:79",
+      "60:152"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "select",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM05 Course Content · Understanding",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "chevron-down-sm.svg",
+    "name": "chevron-down-sm",
+    "nodeId": "55:192",
+    "allNodeIds": [
+      "55:192",
+      "67:205"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "input",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM02 Create course",
+      "CM13 Discovery Banner"
+    ]
+  },
+  {
+    "file": "chevron-down-xs.svg",
+    "name": "chevron-down-xs",
+    "nodeId": "106:64",
+    "allNodeIds": [
+      "106:64",
+      "106:170"
+    ],
+    "width": 12,
+    "height": 12,
+    "figmaName": "icon",
+    "parent": "sel",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S11 Recommended reading · adding a row",
+      "S15 Discovery Banner · choose course"
+    ]
+  },
+  {
+    "file": "chevron-left.svg",
+    "name": "chevron-left",
+    "nodeId": "31:3",
+    "allNodeIds": [
+      "31:3",
+      "37:70",
+      "40:70",
+      "45:70",
+      "49:75",
+      "50:70",
+      "54:70",
+      "60:70",
+      "64:70",
+      "102:75",
+      "102:81",
+      "147:65",
+      "147:306",
+      "147:574",
+      "147:799"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "crumb",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "chevron-up.svg",
+    "name": "chevron-up",
+    "nodeId": "50:514",
+    "allNodeIds": [
+      "50:514"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "Q2 (expanded)",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM05 Course Content · Understanding"
+    ]
+  },
+  {
+    "file": "chip-icon.svg",
+    "name": "chip-icon",
+    "nodeId": "31:13",
+    "allNodeIds": [
+      "31:13",
+      "37:80",
+      "40:80",
+      "45:80",
+      "49:85",
+      "50:80",
+      "54:80",
+      "60:80",
+      "64:80",
+      "147:74",
+      "147:315",
+      "147:583",
+      "147:808"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "chips",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "close.svg",
+    "name": "close",
+    "nodeId": "45:471",
+    "allNodeIds": [
+      "45:471",
+      "49:485",
+      "55:186",
+      "60:436",
+      "105:45",
+      "106:113",
+      "130:70",
+      "130:86",
+      "147:229",
+      "147:496",
+      "103:637",
+      "147:963"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "header",
+    "colors": [
+      "#6b7280",
+      "#374151"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM02 Create course",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM11 Change status",
+      "CM14 Restore version",
+      "S06 Add exhibit · uploading",
+      "S13 Knowledge Test · import from sheet",
+      "S19 Import Understanding · all lessons"
+    ]
+  },
+  {
+    "file": "close-circle-lg.svg",
+    "name": "close-circle-lg",
+    "nodeId": "49:484",
+    "allNodeIds": [
+      "49:484"
+    ],
+    "width": 48,
+    "height": 48,
+    "figmaName": "close",
+    "parent": "header",
+    "colors": [
+      "#f3f4f6",
+      "#374151"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM04e Exhibit preview (as learner)"
+    ]
+  },
+  {
+    "file": "course-settings-info.svg",
+    "name": "course-settings-info",
+    "nodeId": "52:3",
+    "allNodeIds": [
+      "52:3",
+      "52:9",
+      "52:14",
+      "52:20",
+      "52:25",
+      "52:31",
+      "52:36",
+      "52:42",
+      "52:47",
+      "52:53",
+      "54:155",
+      "54:161"
+    ],
+    "width": 13,
+    "height": 13,
+    "figmaName": "Frame",
+    "parent": "course settings",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial"
+    ]
+  },
+  {
+    "file": "drag-grip.svg",
+    "name": "drag-grip",
+    "nodeId": "33:11",
+    "allNodeIds": [
+      "33:11",
+      "33:25",
+      "33:39",
+      "33:54",
+      "33:68",
+      "33:82",
+      "60:214",
+      "60:228",
+      "60:242",
+      "60:257",
+      "60:271",
+      "60:285",
+      "60:327",
+      "60:346",
+      "60:366",
+      "60:384",
+      "60:403"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "section What you'll learn",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "exhibit-card-icon.svg",
+    "name": "exhibit-card-icon",
+    "nodeId": "103:179",
+    "allNodeIds": [
+      "103:179",
+      "66:209",
+      "66:226",
+      "66:244",
+      "66:261",
+      "66:278"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "excard",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM12 Popular Courses"
+    ]
+  },
+  {
+    "file": "exhibit-file.svg",
+    "name": "exhibit-file",
+    "nodeId": "105:156",
+    "allNodeIds": [
+      "105:156"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "th",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S07 Exhibits · after batch upload"
+    ]
+  },
+  {
+    "file": "exhibit-thumb.svg",
+    "name": "exhibit-thumb",
+    "nodeId": "105:155",
+    "allNodeIds": [
+      "105:155"
+    ],
+    "width": 44,
+    "height": 44,
+    "figmaName": "th",
+    "parent": "exrow",
+    "colors": [
+      "#f3f4f6",
+      "#9ca3af"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "S07 Exhibits · after batch upload"
+    ]
+  },
+  {
+    "file": "eye.svg",
+    "name": "eye",
+    "nodeId": "49:3",
+    "allNodeIds": [
+      "49:3"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "Frame",
+    "parent": "preview as learner",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04c Exhibit drawer (Edit / Upload)"
+    ]
+  },
+  {
+    "file": "import-chevron.svg",
+    "name": "import-chevron",
+    "nodeId": "127:19",
+    "allNodeIds": [
+      "127:19",
+      "127:46",
+      "127:73",
+      "127:100",
+      "127:127"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "Frame",
+    "parent": "import menu",
+    "colors": [
+      "#374151"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding"
+    ]
+  },
+  {
+    "file": "import-chevron-sm.svg",
+    "name": "import-chevron-sm",
+    "nodeId": "143:2",
+    "allNodeIds": [
+      "143:2",
+      "39:90",
+      "39:100",
+      "143:4",
+      "143:6",
+      "45:412",
+      "45:422",
+      "143:8",
+      "49:417",
+      "49:427",
+      "143:10",
+      "54:404",
+      "54:422"
+    ],
+    "width": 12,
+    "height": 12,
+    "figmaName": "Frame",
+    "parent": "import menu",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial"
+    ]
+  },
+  {
+    "file": "import-docx-chevron.svg",
+    "name": "import-docx-chevron",
+    "nodeId": "44:18",
+    "allNodeIds": [
+      "44:18",
+      "50:482"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "import docx",
+    "colors": [
+      "#374151"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM05 Course Content · Understanding"
+    ]
+  },
+  {
+    "file": "info-circle.svg",
+    "name": "info-circle",
+    "nodeId": "34:92",
+    "allNodeIds": [
+      "34:92",
+      "60:426",
+      "60:445"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "info",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "info-sm.svg",
+    "name": "info-sm",
+    "nodeId": "67:243",
+    "allNodeIds": [
+      "67:243",
+      "67:249"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "ro",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM13 Discovery Banner"
+    ]
+  },
+  {
+    "file": "item-badge.svg",
+    "name": "item-badge",
+    "nodeId": "106:194",
+    "allNodeIds": [
+      "106:194"
+    ],
+    "width": 34,
+    "height": 34,
+    "figmaName": "icon B",
+    "parent": "sec",
+    "colors": [
+      "#ffffff",
+      "#d1d5db",
+      "#9ca3af"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "item-badge-selected.svg",
+    "name": "item-badge-selected",
+    "nodeId": "106:191",
+    "allNodeIds": [
+      "106:191"
+    ],
+    "width": 34,
+    "height": 34,
+    "figmaName": "icon A (selected)",
+    "parent": "sec",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "item-icon.svg",
+    "name": "item-icon",
+    "nodeId": "106:195",
+    "allNodeIds": [
+      "106:195"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "Frame",
+    "parent": "icon B",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "item-icon-selected.svg",
+    "name": "item-icon-selected",
+    "nodeId": "106:192",
+    "allNodeIds": [
+      "106:192"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "Frame",
+    "parent": "icon A (selected)",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "lesson-id-icon.svg",
+    "name": "lesson-id-icon",
+    "nodeId": "38:6",
+    "allNodeIds": [
+      "38:6",
+      "40:218",
+      "45:218",
+      "45:476",
+      "49:223"
+    ],
+    "width": 12,
+    "height": 12,
+    "figmaName": "icon",
+    "parent": "lesson id",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)"
+    ]
+  },
+  {
+    "file": "media-1.svg",
+    "name": "media-1",
+    "nodeId": "104:127",
+    "allNodeIds": [
+      "104:127"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "mi",
+    "colors": [
+      "#c0c4cc"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "media-1-active.svg",
+    "name": "media-1-active",
+    "nodeId": "104:147",
+    "allNodeIds": [
+      "104:147"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "mi",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "media-2.svg",
+    "name": "media-2",
+    "nodeId": "104:134",
+    "allNodeIds": [
+      "104:134"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "mi",
+    "colors": [
+      "#c0c4cc"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "media-2-active.svg",
+    "name": "media-2-active",
+    "nodeId": "104:158",
+    "allNodeIds": [
+      "104:158"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "mi",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "media-3.svg",
+    "name": "media-3",
+    "nodeId": "104:140",
+    "allNodeIds": [
+      "104:140"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "mi",
+    "colors": [
+      "#c0c4cc"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "media-4.svg",
+    "name": "media-4",
+    "nodeId": "104:152",
+    "allNodeIds": [
+      "104:152"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "mi",
+    "colors": [
+      "#c0c4cc"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S04 This course provides · add item / full"
+    ]
+  },
+  {
+    "file": "more-vertical.svg",
+    "name": "more-vertical",
+    "nodeId": "30:38",
+    "allNodeIds": [
+      "30:38",
+      "30:55",
+      "30:72",
+      "30:90",
+      "55:105",
+      "55:122",
+      "55:139",
+      "55:157"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "tr",
+    "colors": [
+      "#1d6bff",
+      "#9ca3af"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course"
+    ]
+  },
+  {
+    "file": "nav-ai-tutor.svg",
+    "name": "nav-ai-tutor",
+    "nodeId": "29:34",
+    "allNodeIds": [
+      "29:34",
+      "29:101",
+      "37:34",
+      "40:34",
+      "45:34",
+      "49:39",
+      "50:34",
+      "54:34",
+      "55:34",
+      "60:34",
+      "64:34",
+      "66:34",
+      "67:34",
+      "147:34",
+      "147:275",
+      "147:543",
+      "147:768"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-course-active.svg",
+    "name": "nav-course-active",
+    "nodeId": "29:24",
+    "allNodeIds": [
+      "29:24",
+      "29:91",
+      "37:24",
+      "40:24",
+      "45:24",
+      "49:29",
+      "50:24",
+      "54:24",
+      "55:24",
+      "60:24",
+      "64:24",
+      "66:24",
+      "67:24",
+      "147:24",
+      "147:265",
+      "147:533",
+      "147:758"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-helpdesk.svg",
+    "name": "nav-helpdesk",
+    "nodeId": "29:54",
+    "allNodeIds": [
+      "29:54",
+      "29:121",
+      "37:54",
+      "40:54",
+      "45:54",
+      "49:59",
+      "50:54",
+      "54:54",
+      "55:54",
+      "60:54",
+      "64:54",
+      "66:54",
+      "67:54",
+      "147:54",
+      "147:295",
+      "147:563",
+      "147:788"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-knowledge.svg",
+    "name": "nav-knowledge",
+    "nodeId": "29:29",
+    "allNodeIds": [
+      "29:29",
+      "29:96",
+      "37:29",
+      "40:29",
+      "45:29",
+      "49:34",
+      "50:29",
+      "54:29",
+      "55:29",
+      "60:29",
+      "64:29",
+      "66:29",
+      "67:29",
+      "147:29",
+      "147:270",
+      "147:538",
+      "147:763"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-order.svg",
+    "name": "nav-order",
+    "nodeId": "29:38",
+    "allNodeIds": [
+      "29:38",
+      "29:105",
+      "37:38",
+      "40:38",
+      "45:38",
+      "49:43",
+      "50:38",
+      "54:38",
+      "55:38",
+      "60:38",
+      "64:38",
+      "66:38",
+      "67:38",
+      "147:38",
+      "147:279",
+      "147:547",
+      "147:772"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-ref-ai-tutor.svg",
+    "name": "nav-ref-ai-tutor",
+    "nodeId": "1:31",
+    "allNodeIds": [
+      "1:31"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "loader-fill",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-course.svg",
+    "name": "nav-ref-course",
+    "nodeId": "1:21",
+    "allNodeIds": [
+      "1:21"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "book-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-helpdesk.svg",
+    "name": "nav-ref-helpdesk",
+    "nodeId": "1:25",
+    "allNodeIds": [
+      "1:25"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "book-read-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-knowledge.svg",
+    "name": "nav-ref-knowledge",
+    "nodeId": "1:33",
+    "allNodeIds": [
+      "1:33"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "stack-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-order.svg",
+    "name": "nav-ref-order",
+    "nodeId": "1:23",
+    "allNodeIds": [
+      "1:23"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "booklet-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-reporting.svg",
+    "name": "nav-ref-reporting",
+    "nodeId": "1:19",
+    "allNodeIds": [
+      "1:19"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "dashboard-2-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-settings.svg",
+    "name": "nav-ref-settings",
+    "nodeId": "1:29",
+    "allNodeIds": [
+      "1:29"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "settings-2-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-ref-student.svg",
+    "name": "nav-ref-student",
+    "nodeId": "1:27",
+    "allNodeIds": [
+      "1:27"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "user-settings-line",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#000000"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "nav-reporting.svg",
+    "name": "nav-reporting",
+    "nodeId": "29:43",
+    "allNodeIds": [
+      "29:43",
+      "29:110",
+      "37:43",
+      "40:43",
+      "45:43",
+      "49:48",
+      "50:43",
+      "54:43",
+      "55:43",
+      "60:43",
+      "64:43",
+      "66:43",
+      "67:43",
+      "147:43",
+      "147:284",
+      "147:552",
+      "147:777"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-settings.svg",
+    "name": "nav-settings",
+    "nodeId": "29:59",
+    "allNodeIds": [
+      "29:59",
+      "29:126",
+      "37:59",
+      "40:59",
+      "45:59",
+      "49:64",
+      "50:59",
+      "54:59",
+      "55:59",
+      "60:59",
+      "64:59",
+      "66:59",
+      "67:59",
+      "147:59",
+      "147:300",
+      "147:568",
+      "147:793"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "nav-student.svg",
+    "name": "nav-student",
+    "nodeId": "29:48",
+    "allNodeIds": [
+      "29:48",
+      "29:115",
+      "37:48",
+      "40:48",
+      "45:48",
+      "49:53",
+      "50:48",
+      "54:48",
+      "55:48",
+      "60:48",
+      "64:48",
+      "66:48",
+      "67:48",
+      "147:48",
+      "147:289",
+      "147:557",
+      "147:782"
+    ],
+    "width": 20,
+    "height": 20,
+    "figmaName": "icon",
+    "parent": "nav",
+    "colors": [
+      "#111827"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "notification-bell.svg",
+    "name": "notification-bell",
+    "nodeId": "1:56",
+    "allNodeIds": [
+      "1:56"
+    ],
+    "width": 24,
+    "height": 24,
+    "figmaName": "Notification",
+    "parent": "Group 1",
+    "colors": [
+      "#1d1b20"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "play-white.svg",
+    "name": "play-white",
+    "nodeId": "39:20",
+    "allNodeIds": [
+      "39:20",
+      "45:342",
+      "49:347"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "vic",
+    "colors": [
+      "#ffffff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)"
+    ]
+  },
+  {
+    "file": "play-white-sm.svg",
+    "name": "play-white-sm",
+    "nodeId": "105:184",
+    "allNodeIds": [
+      "105:184"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "span",
+    "colors": [
+      "#ffffff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S08 Video · uploading / adding a learning point"
+    ]
+  },
+  {
+    "file": "plus.svg",
+    "name": "plus",
+    "nodeId": "36:21",
+    "allNodeIds": [
+      "36:21",
+      "60:318",
+      "60:422"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "Frame",
+    "parent": "add item",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-1.svg",
+    "name": "preset-1",
+    "nodeId": "60:335",
+    "allNodeIds": [
+      "60:335"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "picon",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-1-badge.svg",
+    "name": "preset-1-badge",
+    "nodeId": "60:334",
+    "allNodeIds": [
+      "60:334"
+    ],
+    "width": 36,
+    "height": 36,
+    "figmaName": "picon",
+    "parent": "pcard",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-2.svg",
+    "name": "preset-2",
+    "nodeId": "60:354",
+    "allNodeIds": [
+      "60:354"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "picon",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-2-badge.svg",
+    "name": "preset-2-badge",
+    "nodeId": "60:353",
+    "allNodeIds": [
+      "60:353"
+    ],
+    "width": 36,
+    "height": 36,
+    "figmaName": "picon",
+    "parent": "pcard",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-3.svg",
+    "name": "preset-3",
+    "nodeId": "60:374",
+    "allNodeIds": [
+      "60:374"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "picon",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-3-badge.svg",
+    "name": "preset-3-badge",
+    "nodeId": "60:373",
+    "allNodeIds": [
+      "60:373"
+    ],
+    "width": 36,
+    "height": 36,
+    "figmaName": "picon",
+    "parent": "pcard",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-4.svg",
+    "name": "preset-4",
+    "nodeId": "60:392",
+    "allNodeIds": [
+      "60:392"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "picon",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-4-badge.svg",
+    "name": "preset-4-badge",
+    "nodeId": "60:391",
+    "allNodeIds": [
+      "60:391"
+    ],
+    "width": 36,
+    "height": 36,
+    "figmaName": "picon",
+    "parent": "pcard",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-error.svg",
+    "name": "preset-error",
+    "nodeId": "60:411",
+    "allNodeIds": [
+      "60:411"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "picon",
+    "colors": [
+      "#5925dc"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "preset-error-badge.svg",
+    "name": "preset-error-badge",
+    "nodeId": "60:410",
+    "allNodeIds": [
+      "60:410"
+    ],
+    "width": 36,
+    "height": 36,
+    "figmaName": "picon",
+    "parent": "pcard error",
+    "colors": [
+      "#f4f3ff",
+      "#5925dc"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "provides-badge-certificate.svg",
+    "name": "provides-badge-certificate",
+    "nodeId": "103:111",
+    "allNodeIds": [
+      "103:111"
+    ],
+    "width": 34,
+    "height": 34,
+    "figmaName": "ico",
+    "parent": "section This course provides",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-badge-device.svg",
+    "name": "provides-badge-device",
+    "nodeId": "103:91",
+    "allNodeIds": [
+      "103:91"
+    ],
+    "width": 34,
+    "height": 34,
+    "figmaName": "ico",
+    "parent": "section This course provides",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-badge-download.svg",
+    "name": "provides-badge-download",
+    "nodeId": "103:72",
+    "allNodeIds": [
+      "103:72"
+    ],
+    "width": 34,
+    "height": 34,
+    "figmaName": "ico",
+    "parent": "section This course provides",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-badge-target.svg",
+    "name": "provides-badge-target",
+    "nodeId": "103:52",
+    "allNodeIds": [
+      "103:52"
+    ],
+    "width": 34,
+    "height": 34,
+    "figmaName": "ico",
+    "parent": "section This course provides",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-certificate.svg",
+    "name": "provides-certificate",
+    "nodeId": "103:112",
+    "allNodeIds": [
+      "103:112"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "ico",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-device.svg",
+    "name": "provides-device",
+    "nodeId": "103:92",
+    "allNodeIds": [
+      "103:92"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "ico",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-download.svg",
+    "name": "provides-download",
+    "nodeId": "103:73",
+    "allNodeIds": [
+      "103:73"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "ico",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "provides-drag-grip.svg",
+    "name": "provides-drag-grip",
+    "nodeId": "103:45",
+    "allNodeIds": [
+      "103:45",
+      "103:65",
+      "103:84",
+      "103:104",
+      "103:123",
+      "38:43",
+      "38:61",
+      "38:79",
+      "38:97",
+      "40:255",
+      "40:273",
+      "40:291",
+      "40:309",
+      "45:255",
+      "45:272",
+      "45:289",
+      "45:306",
+      "49:260",
+      "49:277",
+      "49:294",
+      "49:311",
+      "66:195",
+      "66:212",
+      "66:229",
+      "66:247",
+      "66:264",
+      "105:106",
+      "105:120",
+      "105:134",
+      "105:148"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "section This course provides",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM12 Popular Courses",
+      "S07 Exhibits · after batch upload"
+    ]
+  },
+  {
+    "file": "provides-drag-grip-sm.svg",
+    "name": "provides-drag-grip-sm",
+    "nodeId": "103:62",
+    "allNodeIds": [
+      "103:62",
+      "103:81",
+      "103:101",
+      "103:120",
+      "103:143",
+      "39:40",
+      "39:49",
+      "39:58",
+      "39:67",
+      "39:76",
+      "39:92",
+      "39:102",
+      "39:130",
+      "39:140",
+      "40:455",
+      "40:465",
+      "45:362",
+      "45:371",
+      "45:380",
+      "45:389",
+      "45:398",
+      "45:414",
+      "45:424",
+      "45:452",
+      "45:462",
+      "49:367",
+      "49:376",
+      "49:385",
+      "49:394",
+      "49:403",
+      "49:419",
+      "49:429",
+      "49:457",
+      "49:467",
+      "104:96",
+      "104:104",
+      "104:112",
+      "106:204",
+      "105:203",
+      "105:211",
+      "106:58",
+      "106:79"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "section This course provides",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "S03 What you'll learn · adding an item",
+      "S04 This course provides · add item / full",
+      "S08 Video · uploading / adding a learning point",
+      "S11 Recommended reading · adding a row"
+    ]
+  },
+  {
+    "file": "provides-target.svg",
+    "name": "provides-target",
+    "nodeId": "103:53",
+    "allNodeIds": [
+      "103:53"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "icon",
+    "parent": "ico",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "rating-stars.svg",
+    "name": "rating-stars",
+    "nodeId": "103:130",
+    "allNodeIds": [
+      "103:130"
+    ],
+    "width": 68,
+    "height": 36,
+    "figmaName": "icop",
+    "parent": "section This course provides",
+    "colors": [
+      "#d1d5db",
+      "#eef4ff",
+      "#1d6bff",
+      "#6b7280"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "remove-circle.svg",
+    "name": "remove-circle",
+    "nodeId": "36:2",
+    "allNodeIds": [
+      "36:2",
+      "36:5",
+      "36:8",
+      "36:11",
+      "36:14",
+      "36:17",
+      "38:57",
+      "38:75",
+      "38:93",
+      "38:110",
+      "40:269",
+      "40:287",
+      "40:305",
+      "40:322",
+      "45:268",
+      "45:285",
+      "45:302",
+      "45:319",
+      "49:273",
+      "49:290",
+      "49:307",
+      "49:324",
+      "60:299",
+      "60:302",
+      "60:305",
+      "60:308",
+      "60:311",
+      "60:314",
+      "60:342",
+      "60:362",
+      "60:380",
+      "60:399",
+      "60:418"
+    ],
+    "width": 18,
+    "height": 18,
+    "figmaName": "remove",
+    "parent": "section What you'll learn",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM07 Add learning language"
+    ]
+  },
+  {
+    "file": "search.svg",
+    "name": "search",
+    "nodeId": "105:250",
+    "allNodeIds": [
+      "105:250",
+      "106:137"
+    ],
+    "width": 14,
+    "height": 14,
+    "figmaName": "icon",
+    "parent": "search",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S10 Text · Insert exhibit",
+      "S14 Popular Courses · add course"
+    ]
+  },
+  {
+    "file": "sidebar-collapse.svg",
+    "name": "sidebar-collapse",
+    "nodeId": "1:69",
+    "allNodeIds": [
+      "1:69"
+    ],
+    "width": 24,
+    "height": 24,
+    "figmaName": "Collapse Sidebar / Left",
+    "parent": "1 Backoffice Menu & Role",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "sidebar-collapse-glyph.svg",
+    "name": "sidebar-collapse-glyph",
+    "nodeId": "1:70",
+    "allNodeIds": [
+      "1:70"
+    ],
+    "width": 18,
+    "height": 16,
+    "figmaName": "Group",
+    "parent": "Collapse Sidebar / Left",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "1 Backoffice Menu & Role"
+    ]
+  },
+  {
+    "file": "star-badge-off.svg",
+    "name": "star-badge-off",
+    "nodeId": "103:134",
+    "allNodeIds": [
+      "103:134"
+    ],
+    "width": 28,
+    "height": 28,
+    "figmaName": "span",
+    "parent": "icop",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "star-badge-on.svg",
+    "name": "star-badge-on",
+    "nodeId": "103:131",
+    "allNodeIds": [
+      "103:131"
+    ],
+    "width": 28,
+    "height": 28,
+    "figmaName": "on",
+    "parent": "icop",
+    "colors": [
+      "#eef4ff",
+      "#1d6bff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "star-off.svg",
+    "name": "star-off",
+    "nodeId": "103:135",
+    "allNodeIds": [
+      "103:135"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "span",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "star-on.svg",
+    "name": "star-on",
+    "nodeId": "103:132",
+    "allNodeIds": [
+      "103:132"
+    ],
+    "width": 16,
+    "height": 16,
+    "figmaName": "icon",
+    "parent": "on",
+    "colors": [
+      "#1d6bff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM03 Course Information"
+    ]
+  },
+  {
+    "file": "text-ok.svg",
+    "name": "text-ok",
+    "nodeId": "39:16",
+    "allNodeIds": [
+      "39:16",
+      "44:15",
+      "45:338",
+      "49:343"
+    ],
+    "width": 12,
+    "height": 12,
+    "figmaName": "icon",
+    "parent": "mode tabs",
+    "colors": [
+      "#067647"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)"
+    ]
+  },
+  {
+    "file": "toggle-on.svg",
+    "name": "toggle-on",
+    "nodeId": "129:890",
+    "allNodeIds": [
+      "129:890"
+    ],
+    "width": 32,
+    "height": 18,
+    "figmaName": "toggle on",
+    "parent": "state",
+    "colors": [
+      "#1d6bff",
+      "#ffffff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "S12 Knowledge Test · adding a question"
+    ]
+  },
+  {
+    "file": "topbar-collapse.svg",
+    "name": "topbar-collapse",
+    "nodeId": "29:20",
+    "allNodeIds": [
+      "29:20",
+      "29:87",
+      "37:20",
+      "40:20",
+      "45:20",
+      "49:25",
+      "50:20",
+      "54:20",
+      "55:20",
+      "60:20",
+      "64:20",
+      "66:20",
+      "67:20",
+      "147:20",
+      "147:261",
+      "147:529",
+      "147:754"
+    ],
+    "width": 24,
+    "height": 24,
+    "figmaName": "icon",
+    "parent": "collapse",
+    "colors": [
+      "#6b7280"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "topbar-logo.svg",
+    "name": "topbar-logo",
+    "nodeId": "29:4",
+    "allNodeIds": [
+      "29:4",
+      "29:71",
+      "37:4",
+      "40:4",
+      "45:4",
+      "49:9",
+      "50:4",
+      "54:4",
+      "55:4",
+      "60:4",
+      "64:4",
+      "66:4",
+      "67:4",
+      "147:4",
+      "147:245",
+      "147:513",
+      "147:738"
+    ],
+    "width": 42,
+    "height": 42,
+    "figmaName": "logo",
+    "parent": "topbar",
+    "colors": [
+      "#1d6bff",
+      "#ffffff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "topbar-logo-cap.svg",
+    "name": "topbar-logo-cap",
+    "nodeId": "29:5",
+    "allNodeIds": [
+      "29:5",
+      "29:72",
+      "37:5",
+      "40:5",
+      "45:5",
+      "49:10",
+      "50:5",
+      "54:5",
+      "55:5",
+      "60:5",
+      "64:5",
+      "66:5",
+      "67:5",
+      "147:5",
+      "147:246",
+      "147:514",
+      "147:739"
+    ],
+    "width": 24,
+    "height": 24,
+    "figmaName": "icon",
+    "parent": "logo",
+    "colors": [
+      "#ffffff"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM01 Course Overview",
+      "CM02 Create course",
+      "CM03 Course Information",
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)",
+      "CM05 Course Content · Understanding",
+      "CM06 Trial",
+      "CM07 Add learning language",
+      "CM08 Approve for release",
+      "CM09 Go Live confirm",
+      "CM10 Publishing",
+      "CM11 Change status",
+      "CM12 Popular Courses",
+      "CM13 Discovery Banner",
+      "CM14 Restore version"
+    ]
+  },
+  {
+    "file": "upload-cloud.svg",
+    "name": "upload-cloud",
+    "nodeId": "104:61",
+    "allNodeIds": [
+      "104:61"
+    ],
+    "width": 22,
+    "height": 22,
+    "figmaName": "icon",
+    "parent": "drop",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S02 Course cover · upload states"
+    ]
+  },
+  {
+    "file": "upload-cloud-2.svg",
+    "name": "upload-cloud-2",
+    "nodeId": "106:116",
+    "allNodeIds": [
+      "106:116"
+    ],
+    "width": 22,
+    "height": 22,
+    "figmaName": "icon",
+    "parent": "drop",
+    "colors": [
+      "#9ca3af"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "S13 Knowledge Test · import from sheet"
+    ]
+  },
+  {
+    "file": "video-error.svg",
+    "name": "video-error",
+    "nodeId": "39:12",
+    "allNodeIds": [
+      "39:12",
+      "44:10",
+      "45:334",
+      "49:339"
+    ],
+    "width": 12,
+    "height": 12,
+    "figmaName": "icon",
+    "parent": "Video (active)",
+    "colors": [
+      "#b42318"
+    ],
+    "themeable": true,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04b Course Content · Study & Exploration – Text",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)"
+    ]
+  },
+  {
+    "file": "video-thumb.svg",
+    "name": "video-thumb",
+    "nodeId": "39:19",
+    "allNodeIds": [
+      "39:19",
+      "45:341",
+      "49:346"
+    ],
+    "width": 40,
+    "height": 40,
+    "figmaName": "vic",
+    "parent": "video file",
+    "colors": [
+      "#111827",
+      "#ffffff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "CM04a Course Content · Study & Exploration – Video",
+      "CM04c Exhibit drawer (Edit / Upload)",
+      "CM04e Exhibit preview (as learner)"
+    ]
+  },
+  {
+    "file": "video-thumb-play.svg",
+    "name": "video-thumb-play",
+    "nodeId": "105:183",
+    "allNodeIds": [
+      "105:183"
+    ],
+    "width": 40,
+    "height": 40,
+    "figmaName": "span",
+    "parent": "div",
+    "colors": [
+      "#111827",
+      "#ffffff"
+    ],
+    "themeable": false,
+    "usedIn": [
+      "S08 Video · uploading / adding a learning point"
+    ]
+  }
+]

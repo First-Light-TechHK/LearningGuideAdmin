@@ -92,35 +92,40 @@ export class IndexingService {
       // 3. 写入数据库（先删旧的，保证幂等）
       // Prisma 交互式事务默认 5s 超时；长文本课程（Modeling life 74k 字符）
       // 的分块插入会超过它并被回滚，导致检索长期为空。显式放大超时。
-      await this.prisma.$transaction(async (tx) => {
-        await tx.knowledgeChunk.deleteMany({ where: { releaseId } });
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.knowledgeChunk.deleteMany({ where: { releaseId } });
 
-        // 用 $queryRaw 批量插入向量（Prisma 不支持 vector 类型参数）
-        // 分批插入。单条向量 1536 维 ≈ 18KB SQL 文本，100 条一批在
-        // db.t4g.micro 上会超过 5s 事务上限（2026-10-28 实测），故降为 20。
-        const batchSize = 20;
-        for (let i = 0; i < allChunks.length; i += batchSize) {
-          const batch = allChunks.slice(i, i + batchSize);
-          const batchEmbeddings = embeddings.slice(i, i + batchSize);
+          // 用 $queryRaw 批量插入向量（Prisma 不支持 vector 类型参数）
+          // 分批插入。单条向量 1536 维 ≈ 18KB SQL 文本，100 条一批在
+          // db.t4g.micro 上会超过 5s 事务上限（2026-10-28 实测），故降为 20。
+          const batchSize = 20;
+          for (let i = 0; i < allChunks.length; i += batchSize) {
+            const batch = allChunks.slice(i, i + batchSize);
+            const batchEmbeddings = embeddings.slice(i, i + batchSize);
 
-          const values = batch
-            .map((c, idx) => {
-              const vec = `[${batchEmbeddings[idx].join(',')}]`;
-              const pageId = c.pageId ? `'${c.pageId.replace(/'/g, "''")}'` : 'NULL';
-              const heading = c.heading
-                ? `'${c.heading.replace(/'/g, "''")}'`
-                : 'NULL';
-              return `(gen_random_uuid(), '${releaseId}', ${pageId}, '${c.pageTitle.replace(/'/g, "''")}', ${heading}, '${c.content.replace(/'/g, "''")}', '${vec}'::vector(1536), ${c.sortOrder}, ${c.tokenCount}, now())`;
-            })
-            .join(',');
+            const values = batch
+              .map((c, idx) => {
+                const vec = `[${batchEmbeddings[idx].join(',')}]`;
+                const pageId = c.pageId
+                  ? `'${c.pageId.replace(/'/g, "''")}'`
+                  : 'NULL';
+                const heading = c.heading
+                  ? `'${c.heading.replace(/'/g, "''")}'`
+                  : 'NULL';
+                return `(gen_random_uuid(), '${releaseId}', ${pageId}, '${c.pageTitle.replace(/'/g, "''")}', ${heading}, '${c.content.replace(/'/g, "''")}', '${vec}'::vector(1536), ${c.sortOrder}, ${c.tokenCount}, now())`;
+              })
+              .join(',');
 
-          await tx.$executeRawUnsafe(`
+            await tx.$executeRawUnsafe(`
             INSERT INTO "KnowledgeChunk"
             ("id", "releaseId", "pageId", "pageTitle", "heading", "content", "embedding", "sortOrder", "tokenCount", "createdAt")
             VALUES ${values}
           `);
-        }
-      }, { timeout: 120_000, maxWait: 15_000 });
+          }
+        },
+        { timeout: 120_000, maxWait: 15_000 },
+      );
 
       const elapsed = Date.now() - startedAt;
       this.logger.log(
@@ -128,7 +133,8 @@ export class IndexingService {
       );
     } catch (err) {
       // Prisma 的错误信息首行常为空，原先只记录 message 会得到一条空白错误。
-      const detail = err instanceof Error ? (err.stack || err.message) : String(err);
+      const detail =
+        err instanceof Error ? err.stack || err.message : String(err);
       this.logger.error(
         `Release ${releaseId} 索引失败：${detail.replace(/\s+/g, ' ').slice(0, 500)}`,
       );

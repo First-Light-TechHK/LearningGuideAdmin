@@ -1,0 +1,440 @@
+import { INestApplication, Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import type { App } from 'supertest/types';
+
+import { configureApp } from '../../common/app-setup';
+import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
+import { TransformInterceptor } from '../../common/interceptors/transform.interceptor';
+import {
+  EMPLOYEE_ROLES,
+  type EmployeeRole,
+  type SessionEmployee,
+} from '../contracts/employee';
+import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
+import { createFaqService } from '../modules/helpdesk/faqs/faqService';
+import { levelFor } from '../modules/rbac/permissions';
+import { resolveSession } from '../modules/user-authentication/services/session';
+import { BackofficeAccessGuard } from '../nest/backoffice-access.guard';
+import {
+  BackofficeHelpdeskFaqsController,
+  HelpdeskIntegrationFaqsController,
+  HELPDESK_FAQ_SERVICE,
+} from '../nest/helpdesk-faqs.controller';
+import { createMemoryFaqRepository } from './helpers/memoryFaqRepository';
+
+/**
+ * Tickets v2 §2 / §3：
+ * - 员工端 FAQs：菜单 helpDesk VIEW 只读（列表、打开、预览、修订），FULL 才能新增 / 编辑 / 删除；
+ * - Portal 读已发布 FAQ：只认 Bearer ADMIN_HELPDESK_TOKEN（不要员工登录），
+ *   缺失 / 错误 401、环境变量为空 503，错误体是 RFC 9457 problem+json；支持 ETag / If-None-Match。
+ * 会话 mock；令牌是本地测试值。
+ */
+jest.mock('../modules/user-authentication/services/session', () => ({
+  resolveSession: jest.fn(),
+}));
+
+const TOKEN = 'test-admin-helpdesk-token-local-only';
+const FID = '0192bbbb-0000-7000-8000-000000000001';
+
+const seed: HelpdeskFaq = {
+  id: FID,
+  category: 'account_technical',
+  popular: true,
+  questionEn: 'How do I reset my password?',
+  answerEn: 'Use **Forgot password**.',
+  questionZh: '如何重置密码？',
+  answerZh: '点击**忘记密码**。',
+  keywords: ['password'],
+  status: 'published',
+  version: 1,
+  createdBy: null,
+  updatedBy: null,
+  createdAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-01T00:00:00.000Z',
+};
+
+let repository = createMemoryFaqRepository([seed]);
+
+function employeeFor(role: EmployeeRole): SessionEmployee {
+  return {
+    employeeId: `0192aaaa-0000-7000-8000-00000000000${EMPLOYEE_ROLES.indexOf(role)}`,
+    loginEmail: `${role.toLowerCase()}@example.com`,
+    role,
+    displayName: role.toLowerCase(),
+    accountStatus: 'ACTIVE',
+    emailVerification: 'VERIFIED',
+    displayStatus: 'Active',
+    isBootstrapAdmin: false,
+  };
+}
+
+@Module({
+  imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true })],
+  controllers: [
+    BackofficeHelpdeskFaqsController,
+    HelpdeskIntegrationFaqsController,
+  ],
+  providers: [
+    {
+      provide: HELPDESK_FAQ_SERVICE,
+      useFactory: () =>
+        createFaqService({
+          repository: {
+            // 每个用例重建仓库，这里转发到当前实例
+            list: (f) => repository.list(f),
+            get: (id) => repository.get(id),
+            insert: (q, e, k) => repository.insert(q, e, k),
+            update: (id, v, p, a, e) => repository.update(id, v, p, a, e),
+            revisions: (id) => repository.revisions(id),
+            listPublished: (f) => repository.listPublished(f),
+            searchPublished: (s) => repository.searchPublished(s),
+          },
+        }),
+    },
+    { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_GUARD, useClass: BackofficeAccessGuard },
+  ],
+})
+class FaqsTestModule {}
+
+type Envelope = {
+  success: boolean;
+  data: Record<string, unknown> & { faqs?: { id: string }[] };
+  error: { code: string } | null;
+};
+
+describe('FAQ endpoints', () => {
+  let app: INestApplication<App>;
+  const savedToken = process.env.ADMIN_HELPDESK_TOKEN;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [FaqsTestModule],
+    }).compile();
+    app = moduleRef.createNestApplication({ logger: false });
+    configureApp(app);
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    if (savedToken === undefined) delete process.env.ADMIN_HELPDESK_TOKEN;
+    else process.env.ADMIN_HELPDESK_TOKEN = savedToken;
+  });
+
+  beforeEach(() => {
+    repository = createMemoryFaqRepository([seed]);
+    process.env.ADMIN_HELPDESK_TOKEN = TOKEN;
+    (resolveSession as jest.Mock).mockReset();
+    (resolveSession as jest.Mock).mockImplementation((token?: string) =>
+      Promise.resolve(
+        token && (EMPLOYEE_ROLES as readonly string[]).includes(token)
+          ? employeeFor(token as EmployeeRole)
+          : null,
+      ),
+    );
+  });
+
+  const server = () => app.getHttpServer();
+  const as = (role: EmployeeRole) => `lgbo_session=${role}`;
+  const body = (res: request.Response) => res.body as Envelope;
+  const viewRoles = EMPLOYEE_ROLES.filter(
+    (r) => levelFor(r, 'helpDesk') === 'VIEW',
+  );
+  const fullRoles = EMPLOYEE_ROLES.filter(
+    (r) => levelFor(r, 'helpDesk') === 'FULL',
+  );
+  const create = {
+    category: 'other',
+    popular: false,
+    questionEn: 'Can I pause my plan?',
+    answerEn: 'Yes, from **Subscription**.',
+    questionZh: '可以暂停订阅吗？',
+    answerZh: '可以，在**订阅**里操作。',
+    keywords: ['pause'],
+  };
+
+  describe('employee side (session + helpDesk menu)', () => {
+    it('requires a signed-in employee', async () => {
+      const res = await request(server()).get('/api/helpdesk/faqs').expect(401);
+      expect(body(res).error?.code).toBe('INVALID_EMPLOYEE_ACCOUNT');
+    });
+
+    it.each(viewRoles)(
+      '%s can list, open (preview) and see revisions',
+      async (role) => {
+        const list = await request(server())
+          .get('/api/helpdesk/faqs?popular=true')
+          .set('Cookie', as(role))
+          .expect(200);
+        expect(body(list).data.faqs?.map((f) => f.id)).toEqual([FID]);
+        expect(body(list).data).toMatchObject({
+          total: 1,
+          page: 1,
+          pageSize: 10,
+        });
+        await request(server())
+          .get(`/api/helpdesk/faqs/${FID}`)
+          .set('Cookie', as(role))
+          .expect(200);
+        await request(server())
+          .get(`/api/helpdesk/faqs/${FID}/revisions`)
+          .set('Cookie', as(role))
+          .expect(200);
+      },
+    );
+
+    it.each(viewRoles)('%s cannot add, edit or delete', async (role) => {
+      const writes: [string, string, unknown][] = [
+        ['post', '/api/helpdesk/faqs', create],
+        ['put', `/api/helpdesk/faqs/${FID}`, { ...create, version: 1 }],
+        ['post', `/api/helpdesk/faqs/${FID}/archive`, { version: 1 }],
+      ];
+      for (const [method, path, payload] of writes) {
+        const req =
+          method === 'post'
+            ? request(server()).post(path)
+            : request(server()).put(path);
+        const res = await req
+          .set('Cookie', as(role))
+          .send(payload as object)
+          .expect(403);
+        expect(body(res).error?.code).toBe('NOT_AUTHORISED');
+      }
+      expect(repository.rows.get(FID)?.version).toBe(1);
+      expect(repository.rows.size).toBe(1);
+    });
+
+    it.each(fullRoles)(
+      '%s can add (201, published) and the creator is the signed-in employee',
+      async (role) => {
+        const res = await request(server())
+          .post('/api/helpdesk/faqs')
+          .set('Cookie', as(role))
+          .send({ ...create, createdBy: 'forged' })
+          .expect(201);
+        expect(body(res).data).toMatchObject({
+          status: 'published',
+          version: 1,
+          createdBy: employeeFor(role).employeeId,
+        });
+      },
+    );
+
+    it('creates once per Idempotency-Key header', async () => {
+      const key = '0192dddd-0000-4000-8000-000000000009';
+      const first = await request(server())
+        .post('/api/helpdesk/faqs')
+        .set('Cookie', as('ADMIN'))
+        .set('Idempotency-Key', key)
+        .send(create)
+        .expect(201);
+      const retry = await request(server())
+        .post('/api/helpdesk/faqs')
+        .set('Cookie', as('ADMIN'))
+        .set('Idempotency-Key', key)
+        .send(create)
+        .expect(201);
+      expect(body(retry).data.id).toBe(body(first).data.id);
+      expect(repository.rows.size).toBe(2);
+    });
+
+    it.each(fullRoles)('%s can edit and delete', async (role) => {
+      const cookie = as(role);
+      await request(server())
+        .put(`/api/helpdesk/faqs/${FID}`)
+        .set('Cookie', cookie)
+        .send({ ...create, version: 1 })
+        .expect(200);
+      const archived = await request(server())
+        .post(`/api/helpdesk/faqs/${FID}/archive`)
+        .set('Cookie', cookie)
+        .send({ version: 2 })
+        .expect(200);
+      expect(body(archived).data).toMatchObject({
+        status: 'archived',
+        version: 3,
+      });
+      await request(server())
+        .get(`/api/helpdesk/faqs/${FID}`)
+        .set('Cookie', cookie)
+        .expect(404);
+    });
+
+    it('answers a stale version with 409 VERSION_CONFLICT in the envelope', async () => {
+      const res = await request(server())
+        .put(`/api/helpdesk/faqs/${FID}`)
+        .set('Cookie', as('ADMIN'))
+        .send({ ...create, version: 9 })
+        .expect(409);
+      expect(body(res).error?.code).toBe('VERSION_CONFLICT');
+    });
+
+    it('answers bad input with 400 INVALID_INPUT', async () => {
+      const res = await request(server())
+        .post('/api/helpdesk/faqs')
+        .set('Cookie', as('ADMIN'))
+        .send({ ...create, category: 'technical_support' })
+        .expect(400);
+      expect(body(res).error?.code).toBe('INVALID_INPUT');
+    });
+
+    it('answers a repeated list query parameter with 400 INVALID_INPUT, not 500', async () => {
+      for (const query of ['q=a&q=b', 'popular=true&popular=false']) {
+        const res = await request(server())
+          .get(`/api/helpdesk/faqs?${query}`)
+          .set('Cookie', as('ADMIN'))
+          .expect(400);
+        expect(body(res).error?.code).toBe('INVALID_INPUT');
+      }
+    });
+  });
+
+  describe('Portal side: GET /api/integration/helpdesk/faqs', () => {
+    const path = '/api/integration/helpdesk/faqs?locale=zh-CN&popular=true';
+
+    function expectProblem(
+      res: request.Response,
+      status: number,
+      code: string,
+    ) {
+      expect(res.headers['content-type']).toMatch(
+        /^application\/problem\+json/,
+      );
+      const body = res.body as Record<string, unknown>;
+      expect(Object.keys(body).sort()).toEqual([
+        'code',
+        'detail',
+        'status',
+        'title',
+        'type',
+      ]);
+      expect(body).toMatchObject({
+        type: `https://www.ilovelearningguide.com/problems/${code}`,
+        status,
+        code,
+      });
+      expect(typeof body.title).toBe('string');
+      expect(typeof body.detail).toBe('string');
+    }
+
+    it('returns published FAQs in the locale with an ETag and no employee session', async () => {
+      const res = await request(server())
+        .get(path)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(200);
+      expect(resolveSession).not.toHaveBeenCalled();
+      expect(res.headers.etag).toMatch(/^"/);
+      expect(res.headers['cache-control']).toBe('no-cache');
+      expect(res.body).toEqual({
+        faqs: [
+          {
+            id: FID,
+            category: 'account_technical',
+            popular: true,
+            question: seed.questionZh,
+            answer: seed.answerZh,
+            updatedAt: seed.updatedAt,
+          },
+        ],
+        etag: res.headers.etag,
+      });
+    });
+
+    it('answers 304 with no body for a matching If-None-Match', async () => {
+      const first = await request(server())
+        .get(path)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(200);
+      const res = await request(server())
+        .get(path)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .set('If-None-Match', first.headers.etag)
+        .expect(304);
+      expect(res.text).toBe('');
+      expect(res.headers.etag).toBe(first.headers.etag);
+    });
+
+    it('returns one FAQ by id, and 404 problem+json for an unknown or deleted one', async () => {
+      const one = await request(server())
+        .get(`/api/integration/helpdesk/faqs/${FID}?locale=en-GB`)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(200);
+      expect(one.body).toEqual({
+        id: FID,
+        category: 'account_technical',
+        popular: true,
+        question: seed.questionEn,
+        answer: seed.answerEn,
+        updatedAt: seed.updatedAt,
+      });
+      expect(one.headers['cache-control']).toBe('no-cache');
+      const missing = await request(server())
+        .get(
+          '/api/integration/helpdesk/faqs/0192bbbb-0000-7000-8000-0000000000ff?locale=en-GB',
+        )
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(404);
+      expectProblem(missing, 404, 'not_found');
+      const bad = await request(server())
+        .get(`/api/integration/helpdesk/faqs/${FID}?locale=fr`)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(400);
+      expectProblem(bad, 400, 'invalid_request');
+    });
+
+    it('rejects a missing token with 401 problem+json', async () => {
+      const res = await request(server()).get(path).expect(401);
+      expectProblem(res, 401, 'invalid_token');
+      expect(res.headers['www-authenticate']).toBe(
+        'Bearer realm="helpdesk", error="invalid_token"',
+      );
+      const one = await request(server())
+        .get(`/api/integration/helpdesk/faqs/${FID}?locale=en-GB`)
+        .expect(401);
+      expectProblem(one, 401, 'invalid_token');
+    });
+
+    it('rejects a wrong token with 401, and an employee cookie does not help', async () => {
+      const res = await request(server())
+        .get(path)
+        .set('Cookie', as('ADMIN'))
+        .set('Authorization', 'Bearer wrong-token')
+        .expect(401);
+      expectProblem(res, 401, 'invalid_token');
+      const cookieOnly = await request(server())
+        .get(path)
+        .set('Cookie', as('ADMIN'))
+        .expect(401);
+      expectProblem(cookieOnly, 401, 'invalid_token');
+    });
+
+    it('answers 503 integration_disabled when ADMIN_HELPDESK_TOKEN is empty', async () => {
+      process.env.ADMIN_HELPDESK_TOKEN = '  ';
+      const res = await request(server())
+        .get(path)
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(503);
+      expectProblem(res, 503, 'integration_disabled');
+    });
+
+    it('answers bad query parameters with 400 problem+json', async () => {
+      const res = await request(server())
+        .get('/api/integration/helpdesk/faqs?locale=fr')
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(400);
+      expectProblem(res, 400, 'invalid_request');
+      const repeated = await request(server())
+        .get(
+          '/api/integration/helpdesk/faqs?locale=en-GB&locale=zh-CN&popular=true&popular=false',
+        )
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .expect(400);
+      expectProblem(repeated, 400, 'invalid_request');
+    });
+  });
+});

@@ -1,12 +1,6 @@
-import {
-  IsIn,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-} from 'class-validator';
+import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
-/** PUT /api/ai/config 请求体（§4.2.5 / §5.2；2026-10-27 调整：System Prompt 按 mode，Welcome/Model 共享） */
+/** PUT /api/ai/config 请求体（§4.2.5 / §5.2；2026-10-29 新增 MAIN 模式用于主提示词） */
 export class SaveAiConfigDto {
   @IsUUID()
   courseId!: string;
@@ -16,9 +10,9 @@ export class SaveAiConfigDto {
   @IsUUID()
   releaseId?: string;
 
-  /** 当前保存的模式：只写该模式的 System Prompt */
-  @IsIn(['LECTURE', 'SOCRATIC', 'ASSESSMENT'])
-  mode!: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT';
+  /** 当前保存的分段项：MAIN=主提示词（讲授/苏格拉底共享），其余为模式自身 System Prompt */
+  @IsIn(['MAIN', 'LECTURE', 'SOCRATIC', 'ASSESSMENT'])
+  mode!: 'MAIN' | 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT';
 
   @IsString()
   @IsIn(['openrouter'])

@@ -1,4 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+} from '@nestjs/common';
 import { SyncService } from './sync.service';
 import { SyncRequestDto } from './dto/sync-request.dto';
 
