@@ -165,47 +165,60 @@ export class CommerceCoursesService {
   }
 
   async approve(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    if (course.lifecycleStatus !== 'IN_UAT') {
-      throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be in UAT before approval' });
-    }
-    await this.prisma.commerceCourse.update({
-      where: { id },
+    // 条件更新：状态检查与写入是同一条语句，并发或重复点击不会互相覆盖
+    const moved = await this.prisma.commerceCourse.updateMany({
+      where: { id, lifecycleStatus: 'IN_UAT' },
       data: { lifecycleStatus: 'APPROVED', approvedAt: new Date() },
     });
+    if (moved.count === 0) {
+      const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
+      if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+      // 重复提交：已经审批过就按成功返回
+      if (course.lifecycleStatus !== 'APPROVED') {
+        throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be in UAT before approval' });
+      }
+    }
     return this.detail(id);
   }
 
   async goLive(id: string, actorEmployeeId: string | null) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    if (course.lifecycleStatus !== 'APPROVED') {
-      throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be approved before going live' });
-    }
-    const snapshot = await this.buildSnapshotData(id);
-    const last = await this.prisma.courseVersion.findFirst({
-      where: { courseId: id },
-      orderBy: { versionNo: 'desc' },
-      select: { versionNo: true },
-    });
-    const version = await this.prisma.courseVersion.create({
-      data: {
-        courseId: id,
-        versionNo: (last?.versionNo ?? 0) + 1,
-        snapshotData: snapshot as Prisma.InputJsonValue,
-        wentLiveAt: new Date(),
-        createdBy: actorEmployeeId ?? null,
-      },
-    });
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: {
-        lifecycleStatus: 'LIVE',
-        liveStatus: 'ONLINE',
-        liveVersionId: version.id,
-      },
-    });
+    // 一个事务里锁住课程行再判断状态：两次点击（或两个人同时点）只会生成一个版本，
+    // 版本与课程的 liveVersionId 要么一起写成，要么都不写
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ lifecycleStatus: string }>>`
+        SELECT "lifecycleStatus"::text AS "lifecycleStatus"
+        FROM "CommerceCourse" WHERE id = ${id} FOR UPDATE`;
+      if (!locked.length) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+      const status = locked[0].lifecycleStatus;
+      // 重复提交：上一次已经上线，按成功返回
+      if (status === 'LIVE') return;
+      if (status !== 'APPROVED') {
+        throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be approved before going live' });
+      }
+      const snapshot = await this.buildSnapshotData(id);
+      const last = await tx.courseVersion.findFirst({
+        where: { courseId: id },
+        orderBy: { versionNo: 'desc' },
+        select: { versionNo: true },
+      });
+      const version = await tx.courseVersion.create({
+        data: {
+          courseId: id,
+          versionNo: (last?.versionNo ?? 0) + 1,
+          snapshotData: snapshot as Prisma.InputJsonValue,
+          wentLiveAt: new Date(),
+          createdBy: actorEmployeeId ?? null,
+        },
+      });
+      await tx.commerceCourse.update({
+        where: { id },
+        data: {
+          lifecycleStatus: 'LIVE',
+          liveStatus: 'ONLINE',
+          liveVersionId: version.id,
+        },
+      });
+    }, { timeout: 30_000 });
     return this.detail(id);
   }
 
