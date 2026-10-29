@@ -17,6 +17,10 @@ import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
 import { KsModule } from './ks/ks.module';
 import { PrismaKnowledgeClient } from './ks/prisma-knowledge.client';
 import { HELPDESK_QA_SOURCE } from './contracts/helpdesk-qa';
+import { HELPDESK_TRACE_SOURCE } from './contracts/helpdesk-trace';
+import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
+import { createTraceSource } from './ai/helpdesk/trace/trace-query';
+import { PrismaService } from './prisma/prisma.service';
 import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqRepository';
 
 /**
@@ -76,7 +80,19 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
           ]
         : []),
       // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）；HelpDesk 工单与 FAQ 库
-      ...(admin ? [BackofficeModule] : []),
+      // 「查看链路」读 Agent 的事件日志（同库直读，契约见 src/contracts/helpdesk-trace.ts）
+      ...(admin
+        ? [
+            BackofficeModule.register({
+              helpdeskTrace: {
+                provide: HELPDESK_TRACE_SOURCE,
+                useFactory: (prisma: PrismaService) =>
+                  createTraceSource(new PrismaAgentEventLog(prisma)),
+                inject: [PrismaService],
+              },
+            }),
+          ]
+        : []),
     ],
     controllers: [AppController, HealthController],
     providers: [

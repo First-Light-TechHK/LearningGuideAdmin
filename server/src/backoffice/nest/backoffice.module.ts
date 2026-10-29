@@ -1,8 +1,10 @@
 import {
+  DynamicModule,
   Logger,
   Module,
   OnApplicationShutdown,
   OnModuleInit,
+  Provider,
 } from '@nestjs/common';
 
 import { closePool } from '../lib/db';
@@ -14,6 +16,7 @@ import {
 } from '../modules/user-authentication/services/bootstrap';
 import { BackofficeAuthController } from './auth.controller';
 import { BackofficeEmployeesController } from './employees.controller';
+import { BackofficeHelpdeskAgentRunsController } from './helpdesk-agent-runs.controller';
 import {
   BackofficeHelpdeskController,
   HELPDESK_SERVICE,
@@ -28,24 +31,39 @@ import {
  * BackOffice Portal（PRD v1.1）：员工登录、员工账号、六角色菜单权限、语言偏好；
  * HelpDesk 工单（设计文档 §4A，经 Portal 集成接口读写）；
  * FAQ 库（Tickets v2 §1–§3，本模块是唯一写入方；Portal 经集成接口读已发布的，Agent 经契约
- * HelpdeskQaSource 读候选）。
+ * HelpdeskQaSource 读候选）；「查看链路」经契约 HelpdeskTraceSource 读 Agent 的事件日志。
  * 全局守卫 BackofficeAccessGuard 在 AppModule 注册。
  */
-@Module({
-  controllers: [
-    BackofficeAuthController,
-    BackofficeEmployeesController,
-    BackofficeHelpdeskController,
-    BackofficeHelpdeskFaqsController,
-    HelpdeskIntegrationFaqsController,
-  ],
-  providers: [
-    { provide: HELPDESK_SERVICE, useFactory: () => createHelpdeskService() },
-    { provide: HELPDESK_FAQ_SERVICE, useFactory: () => createFaqService() },
-  ],
-})
+export type BackofficeModuleOptions = {
+  /** HELPDESK_TRACE_SOURCE 的提供者（AppModule 组装：Agent 的事件日志 → 导出副本）。 */
+  helpdeskTrace: Provider;
+};
+
+@Module({})
 export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(BackofficeModule.name);
+
+  static register(options: BackofficeModuleOptions): DynamicModule {
+    return {
+      module: BackofficeModule,
+      controllers: [
+        BackofficeAuthController,
+        BackofficeEmployeesController,
+        BackofficeHelpdeskController,
+        BackofficeHelpdeskFaqsController,
+        HelpdeskIntegrationFaqsController,
+        BackofficeHelpdeskAgentRunsController,
+      ],
+      providers: [
+        {
+          provide: HELPDESK_SERVICE,
+          useFactory: () => createHelpdeskService(),
+        },
+        { provide: HELPDESK_FAQ_SERVICE, useFactory: () => createFaqService() },
+        options.helpdeskTrace,
+      ],
+    };
+  }
 
   async onModuleInit(): Promise<void> {
     await initialiseSessionSecret();

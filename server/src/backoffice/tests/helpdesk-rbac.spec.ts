@@ -8,6 +8,7 @@ import type { App } from 'supertest/types';
 import { configureApp } from '../../common/app-setup';
 import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
 import { TransformInterceptor } from '../../common/interceptors/transform.interceptor';
+import { HELPDESK_TRACE_SOURCE } from '../../contracts/helpdesk-trace';
 import {
   EMPLOYEE_ROLES,
   type EmployeeRole,
@@ -466,7 +467,14 @@ describe('HelpDesk endpoints: route access and RBAC', () => {
 describe('BackofficeModule wiring', () => {
   it('registers the HelpDesk controller with a real service (no DB needed to compile)', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [BackofficeModule],
+      imports: [
+        BackofficeModule.register({
+          helpdeskTrace: {
+            provide: HELPDESK_TRACE_SOURCE,
+            useValue: { readRun: jest.fn(), traceEvent: jest.fn() },
+          },
+        }),
+      ],
     }).compile();
     expect(moduleRef.get(BackofficeHelpdeskController)).toBeInstanceOf(
       BackofficeHelpdeskController,
@@ -480,7 +488,14 @@ describe('BackofficeModule wiring', () => {
 describe('BackofficeModule wiring (FAQs, Tickets v2 §2 / §3)', () => {
   it('registers the FAQ and Portal FAQ integration controllers', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [BackofficeModule],
+      imports: [
+        BackofficeModule.register({
+          helpdeskTrace: {
+            provide: HELPDESK_TRACE_SOURCE,
+            useValue: { readRun: jest.fn(), traceEvent: jest.fn() },
+          },
+        }),
+      ],
     }).compile();
     expect(moduleRef.get(BackofficeHelpdeskFaqsController)).toBeInstanceOf(
       BackofficeHelpdeskFaqsController,
