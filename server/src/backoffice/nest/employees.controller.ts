@@ -37,12 +37,14 @@ function admin(request: BackofficeRequest) {
 }
 
 /** 按操作者计数：同一办公室出口 IP 下的多位 Admin 互不占额度。 */
-function emailLimit(actorEmployeeId: string): void {
+async function emailLimit(actorEmployeeId: string): Promise<void> {
   const key = `admin-email:${actorEmployeeId}`;
-  if (
-    !consume(key, ADMIN_EMAIL_SEND_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES)
-      .allowed
-  ) {
+  const result = await consume(
+    key,
+    ADMIN_EMAIL_SEND_MAX_PER_WINDOW,
+    RATE_LIMIT_WINDOW_MINUTES,
+  );
+  if (!result.allowed) {
     throw backofficeError(
       'RATE_LIMITED',
       'Too many emails, please try again later',
@@ -79,7 +81,7 @@ export class BackofficeEmployeesController {
   @HttpCode(200)
   async create(@Req() request: BackofficeRequest, @Body() raw: unknown) {
     const actor = admin(request);
-    emailLimit(actor.employeeId);
+    await emailLimit(actor.employeeId);
     const body = asBody(raw);
     const outcome = await createEmployee({
       rawEmail: readString(body, 'email'),
@@ -133,7 +135,7 @@ export class BackofficeEmployeesController {
     @Body() raw: unknown,
   ) {
     const actor = admin(request);
-    emailLimit(actor.employeeId);
+    await emailLimit(actor.employeeId);
     const outcome = await sendAdminPasswordReset({
       employeeId,
       actorEmployeeId: actor.employeeId,
@@ -153,7 +155,7 @@ export class BackofficeEmployeesController {
     @Body() raw: unknown,
   ) {
     const actor = admin(request);
-    emailLimit(actor.employeeId);
+    await emailLimit(actor.employeeId);
     const outcome = await reissueActivation({
       employeeId,
       actorEmployeeId: actor.employeeId,

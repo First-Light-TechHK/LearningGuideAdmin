@@ -85,8 +85,8 @@ export type SessionPayload = {
   sidebarState: 'expanded' | 'collapsed';
 };
 
-function limit(key: string, max: number): void {
-  if (!consume(key, max, RATE_LIMIT_WINDOW_MINUTES).allowed) {
+async function limit(key: string, max: number): Promise<void> {
+  if (!(await consume(key, max, RATE_LIMIT_WINDOW_MINUTES)).allowed) {
     throw backofficeError(
       'RATE_LIMITED',
       'Too many attempts, please try again later',
@@ -105,7 +105,7 @@ export class BackofficeAuthController {
   @Post('auth/email-check')
   @HttpCode(200)
   async emailCheck(@Req() request: Request, @Body() raw: unknown) {
-    limit(`email-check:${clientIp(request)}`, EMAIL_CHECK_MAX_PER_WINDOW);
+    await limit(`email-check:${clientIp(request)}`, EMAIL_CHECK_MAX_PER_WINDOW);
     return checkEmployeeEmail(readString(asBody(raw), 'email'));
   }
 
@@ -123,7 +123,7 @@ export class BackofficeAuthController {
     const ipKey = `sign-in:${ip}`;
     const pairKey = `sign-in-pair:${ip}:${normaliseEmail(readString(body, 'email'))}`;
     for (const key of [ipKey, pairKey]) {
-      if (!peek(key, SIGN_IN_MAX_PER_WINDOW).allowed) {
+      if (!(await peek(key, SIGN_IN_MAX_PER_WINDOW)).allowed) {
         throw backofficeError(
           'RATE_LIMITED',
           'Too many attempts, please try again later',
@@ -141,12 +141,12 @@ export class BackofficeAuthController {
         outcome.code === 'INVALID_CREDENTIALS' ||
         outcome.code === 'INVALID_INPUT'
       ) {
-        consume(ipKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
-        consume(pairKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
+        await consume(ipKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
+        await consume(pairKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
       }
       throw backofficeError(outcome.code, 'Sign-in rejected');
     }
-    clear(pairKey);
+    await clear(pairKey);
 
     // PORT-NAV-006：账号级语言偏好优先，其次本次页面语言
     const stored = await preferencesRepository
@@ -197,7 +197,7 @@ export class BackofficeAuthController {
     @Query('token') token?: string,
     @Query('purpose') purpose?: string,
   ) {
-    limit(`token-status:${clientIp(request)}`, TOKEN_STATUS_MAX_PER_WINDOW);
+    await limit(`token-status:${clientIp(request)}`, TOKEN_STATUS_MAX_PER_WINDOW);
     if (purpose !== 'activation' && purpose !== 'reset')
       throw backofficeError('INVALID_INPUT', 'Unsupported purpose');
     const status = await inspectLinkStatus(
@@ -210,7 +210,7 @@ export class BackofficeAuthController {
   @Post('auth/forgot-password')
   @HttpCode(200)
   async forgotPassword(@Req() request: Request, @Body() raw: unknown) {
-    limit(`forgot-password:${clientIp(request)}`, EMAIL_SEND_MAX_PER_WINDOW);
+    await limit(`forgot-password:${clientIp(request)}`, EMAIL_SEND_MAX_PER_WINDOW);
     const body = asBody(raw);
     limit(
       `forgot-password-email:${normaliseEmail(readString(body, 'email'))}`,
@@ -276,7 +276,7 @@ export class BackofficeAuthController {
   @Post('auth/setup')
   @HttpCode(200)
   async setup(@Req() request: Request, @Body() raw: unknown) {
-    limit(`setup:${clientIp(request)}`, SIGN_IN_MAX_PER_WINDOW);
+    await limit(`setup:${clientIp(request)}`, SIGN_IN_MAX_PER_WINDOW);
     const body = asBody(raw);
     if (!setupKeyAccepted(readString(body, 'serviceKey'))) {
       throw backofficeError('NOT_AUTHORISED', 'Service key required');

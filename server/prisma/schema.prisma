@@ -259,6 +259,16 @@ model EmployeeSession {
   @@map("employee_sessions")
 }
 
+/// BackOffice 限流计数（登录、找回密码、发信），多实例共用；固定窗口
+model BackofficeRateLimit {
+  key      String   @id
+  count    Int
+  resetsAt DateTime @map("resets_at") @db.Timestamptz(6)
+
+  @@index([resetsAt], map: "backoffice_rate_limits_resets_at_idx")
+  @@map("backoffice_rate_limits")
+}
+
 model VerificationToken {
   tokenId    String    @id @default(dbgenerated("gen_random_uuid()")) @map("token_id") @db.Uuid
   employeeId String    @map("employee_id") @db.Uuid
