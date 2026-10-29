@@ -14,6 +14,7 @@ import ActivatePage from './backoffice/pages/ActivatePage'
 import ForgotPasswordPage from './backoffice/pages/ForgotPasswordPage'
 import ResetPasswordPage from './backoffice/pages/ResetPasswordPage'
 import SignInPage from './backoffice/pages/SignInPage'
+import HelpDeskPage from './backoffice/pages/HelpDeskPage'
 import {
   EmployeeAccountSettingsPage,
   MenuGuard,
@@ -151,7 +152,17 @@ function App() {
               <Route path="order" element={<PlaceholderPage menu="order" />} />
               <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
               <Route path="student" element={<PlaceholderPage menu="student" />} />
-              <Route path="help-desk" element={<PlaceholderPage menu="helpDesk" />} />
+              <Route
+                // 一条路由带可选的 :ticketId：切换咨询时页面不重新挂载，左栏列表与滚动位置保持不变
+                path="help-desk/:ticketId?"
+                element={
+                  <MenuGuard menu="helpDesk">
+                    <WorkspaceAccessProvider menu="helpDesk">
+                      <HelpDeskPage />
+                    </WorkspaceAccessProvider>
+                  </MenuGuard>
+                }
+              />
               <Route path="settings" element={<SettingsIndexPage />} />
               <Route path="settings/employee-account" element={<EmployeeAccountSettingsPage />} />
               <Route

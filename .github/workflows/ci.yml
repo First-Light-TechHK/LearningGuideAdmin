@@ -11,6 +11,23 @@ jobs:
   server:
     name: Server build and test
     runs-on: ubuntu-latest
+    # HelpDesk PostgreSQL specs (version CAS, published-only candidates, GIN index plan,
+    # outcome first-wins, 90-day purge) skip without HELPDESK_TEST_DATABASE_URL.
+    # The specs apply only the helpdesk migrations in their own schema: plain PostgreSQL 16.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: helpdesk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: server
@@ -25,6 +42,8 @@ jobs:
       - run: npx prisma generate
       - run: npm run build
       - run: npm test -- --runInBand --passWithNoTests
+        env:
+          HELPDESK_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/helpdesk_test
       - run: npm run test:scripts
 
   client:
@@ -42,3 +61,4 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: npm test

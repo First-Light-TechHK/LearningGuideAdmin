@@ -1,12 +1,18 @@
 import {
   CanActivate,
   ExecutionContext,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { ApiKeyGuard } from '../../common/guards/api-key.guard';
+import {
+  checkHelpdeskIntegrationToken,
+  helpdeskIntegrationToken,
+} from '../../common/guards/helpdesk-integration-auth';
 import { serviceTokenAllows } from '../../common/guards/service-token';
 import { isDeployed } from '../lib/env';
 import { decideEmployeeAccountAccess } from '../modules/rbac/access';
@@ -51,6 +57,28 @@ export class BackofficeAccessGuard implements CanActivate {
       throw new UnauthorizedException({
         code: 'SERVICE_TOKEN_INVALID',
         message: 'Service token required',
+      });
+    }
+
+    if (access.kind === 'helpdeskIntegration') {
+      // 不看员工会话：Portal 只带 Bearer ADMIN_HELPDESK_TOKEN（每次现读）
+      const result = checkHelpdeskIntegrationToken(
+        request.headers.authorization,
+        helpdeskIntegrationToken(),
+      );
+      if (result === 'ok') return true;
+      if (result === 'disabled')
+        throw new HttpException(
+          {
+            code: 'integration_disabled',
+            message: 'Helpdesk integration is not configured',
+          },
+          HttpStatus.SERVICE_UNAVAILABLE,
+        );
+      // 与 Portal 集成接口同一个 401 代码（RFC 6750 §3.1 invalid_token）
+      throw new UnauthorizedException({
+        code: 'invalid_token',
+        message: 'A valid Bearer token is required',
       });
     }
 

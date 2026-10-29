@@ -5,6 +5,142 @@
 
 ---
 
+## 2026-10-29 ｜ Helpdesk 推荐 v2：pi-agent-core 工作流 + 链路追踪 + 评测（Admin server + client，Portal 配合）
+
+- **用户拍板**：owner Oliver Zhang（2026-10-28）：不要自主 agent 循环；每一步用原样的 pi-agent-core 跑，步骤由我们写死的工作流决定；追踪照 DeepSeek Harness 的 SessionEvent。方案 `lg-helpdesk/helpdesk-agent-v2-pi-dsh.md`。
+- **变更清单**（设计文档 §4A.8、§4A.11、§5.4、§5.5、§8）：
+  - server：`ai/helpdesk/workflow/`（`engine.ts` 步骤表、`faq-workflow.ts`、`pi-step-runner.ts`）取代旧的 `complete()` + json_schema 路径（旧代码删除）。每个 agent 步只给一个工具，参数枚举锁定，`terminate: true`。闸门：`beforeToolCall` 白名单、一步最多一次调用、`finishTurn` 结束、到期 abort。`@earendil-works/pi-agent-core` / `pi-ai` 1.4.0 不打补丁，server `engines` 改为 Node ≥ 22.19。
+  - server：迁移 `20261029120000_helpdesk_agent_events`（只追加的事件日志，90 天清学员原文）、`trace/`（事件存储、RunTrace、traceparent、查询），以及 BackOffice 只读接口 `GET /api/helpdesk/agent-runs/:runId`、`…/events/:seq`（helpDesk VIEW，导出副本脱敏）。接口经契约 `HELPDESK_TRACE_SOURCE` 注入，`BackofficeModule.register({ helpdeskTrace })`。
+  - server：`/suggest` 收 `runId` / `parentRunId` 与 `traceparent`，客户端断开即 abort。契约样例升到 v3（三份同一文件）。
+  - client：每个 AI 块的「View trace / 查看链路」只读抽屉（`TraceDrawer.tsx`、`lib/helpdeskTrace.ts`）。
+  - 评测：`server/eval/helpdesk/`（120 条用例、种子 FAQ、`npm run eval:helpdesk`、`eval.spec.ts` 进 `npm test`）。
+  - `setup.sh` / `setup.ps1` / README 改为 Node ≥ 22.19（`scripts/node-version.test.mjs` 锁住）。
+  - Portal（同名分支）：`traceparent` 头、预生成 run id、`parentRunId`（Portal `docs/phase1/helpdesk-tickets.md` §18）。
+- **学员可见行为不变**：模型只选候选 id 或 none，答案为库内原文；任何失败返回 null、不阻塞建单；Portal ↔ Admin 契约向后兼容。
+- **自测证据**：
+  - server：`npm run build` 通过；`npm test`（带 `HELPDESK_TEST_DATABASE_URL`，本地临时 PG 16）53 套件、635 通过 + 1 个仓库原有 skip；`npm run test:scripts` 15/15；改动文件 `npx eslint` 无新增问题。
+  - client：`npm run build` 通过，`npm test` 264/264，`npx oxlint` 0 错误（17 条警告，与基线相同）。
+  - 评测（假模型）：`npm run eval:helpdesk` 内存检索与 `--pg` 各跑通一次，报告写出。没有真实 OpenRouter key，**没有真模型成绩**。
+- **待视觉验收**：链路抽屉与「View trace」按钮在 AI 块上的位置（无画板）。
+- **开放问题**：①需要有 key 的人跑一次真模型评测并看闸门；②内存检索只是近似，与生产一致要用 `--pg`；③部署镜像 `node:22-alpine` 须 ≥ 22.19。
+- **Git**：分支 `claude/project-thread-pn4rf0`，未推送。
+
+---
+
+## 2026-10-28 ｜ HelpDesk v1 完整审查修复（Admin client + server + CI）
+
+- **任务（用户）**：「在fork上跑一遍ci 完整review一遍」「不要引入新的问题 查uiux 后端 打边角用例 看测试锁住功能没有 测试覆盖面」。本条修完整审查里 repo = backoffice 的已核实问题，每条先写失败用例再改。
+- **用户拍板（不改）**：OPEN 咨询显示 Claim / 接单；Mark as reviewed = propose_resolution 一次点击、不加确认框；Student ID = Portal 用户 id；不做埋点；界面跟 Figma，不改样式，布局只在问题需要时改，且 1672 宽必须与现状一致。
+- **变更清单**：
+  - server：列表查询参数重复 / 非文本一律 400（控制器参数改为 `unknown`，全局 ValidationPipe 不再把数组 String() 成 `a,b`）；问题 / 答案 / 关键词与推荐的学员原文拒绝控制字符（400，不再 500 / 白调模型）；推荐 3.5 秒总期限（Portal 等 4 秒），过期答案不记 `qa_id`；`CANDIDATES_SQL` 改为全文分支（走 GIN）UNION 关键词 / 双字分支再打分（5000 行本地实测 63 ms → 10 ms），PG 用例对真实 SQL 做 EXPLAIN；90 天清理用例断言新行保留原文；Portal 客户端锁住不跟随重定向、5 / 10 秒超时，附件代理锁住 `Content-Security-Policy: default-src 'none'`。
+  - client：写操作结果只作用于发出请求的那条咨询（切走后不再把旧咨询换进来、不在新咨询上提示），busy 按咨询区分；回复框 Idempotency-Key 只在正文与模式都没变时沿用；搜索框跟随地址栏、防抖用最新参数；搜索词 / 标签 all 不再被吞；标签输入与 Ctrl+Enter 在输入法组字时不提交；编辑弹窗 409 后取最新版本并保留草稿、404 关闭；保存成功 toast；中栏最小 420px（1672 宽像素级不变）；删除卡片看板遗留文案。组件逻辑抽成 `lib/helpdeskView.ts` / `lib/helpdeskQuestions.ts` 的纯函数，`tests/helpdesk-flows.test.ts` 锁住（未引入 jsdom）。
+  - CI：server job 加 `postgres:16` 服务与 `HELPDESK_TEST_DATABASE_URL`（PG 用例在 CI=true 且没库时直接失败，不再静默跳过）；client job 加 `npm test`；job 名不变；`scripts/ci-workflow.test.mjs` 锁住。
+- **未改**：Mark as reviewed 不加确认（用户拍板）。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送。
+
+---
+
+## 2026-10-28 ｜ HelpDesk v1 审查修复（Admin client + server）：Claim 接单、mark_read 带 sequence、全文索引表达式
+
+- **任务**：协调方转来的审查结论，逐条先核实再修；用户原话见下方各条（「拿 TDD 开发锁住」「现在先不做埋点」）。
+- **核实结论**：①新建（OPEN）咨询上没有任何接单入口，「Mark as reviewed」要等第一次公开回复后才出现——属实（spec §7 列有 Claim，状态表规定 propose_resolution 只在 ASSIGNED / WAITING_USER）；②`helpdesk_questions_search_idx` 用 `'simple'`，候选查询用 `'english'`，索引永远用不上——属实（迁移未进任何远端分支，原地修改）。
+- **变更清单**：
+  - client：`lib/helpdeskView.ts` 新增 `claimInput` / `markReadInput`，`EnquiryControls.claim`（FULL 且 Server `available.claim`）；`EnquiryConversation.tsx` 在 Enquiry 卡片底部、Mark as reviewed 的位置显示「Claim / 接单」（复用 `hdMarkReviewed` 样式，不新增 CSS）；`EnquiriesView.tsx` 接单走 `runAction`（409 stale 重新加载）；打开即已读改为带 `expectedSequence`（Portal 只在 sequence 未变时清未读）；en-GB / zh-CN `helpDesk` 段新增 4 个文案。
+  - server：迁移索引改为 `to_tsvector('english', question || ' ' || answer)`，导出 `CANDIDATES_SQL`；新增 `helpdesk-questions-search-index.spec.ts`（索引表达式与查询表达式一字不差、只用 english）；PG 套件新增 EXPLAIN 用例（关闭顺序扫描后命中该索引）。
+- **TDD 证据**：client 先改 `tests/helpdesk-view.test.ts`，运行失败（`claimInput` 不存在）；server 新 spec 与 PG 用例先跑 3 个失败（`'simple'` ≠ `'english'`、`CANDIDATES_SQL` 未导出）；实现后全绿。
+- **自测证据**：client `npm test` 70/70、`npm run build` 通过、`npx oxlint <改动文件>` 0 错误（2 条 HEAD 已有的 set-state-in-effect 警告）；server `npm run build` 通过，`npm test` 41 套件通过 + 2 个 PG 套件跳过；设 `HELPDESK_TEST_DATABASE_URL`（本地临时 PG 16）后 43/43 套件、441 通过 + 1 个仓库原有 skip；`npx eslint <改动文件>` 0 问题。
+- **待视觉验收**：OPEN 咨询卡片底部显示「Claim / 接单」而 Figma 1324:2 画的是「Mark as reviewed」，待产品 / 视觉确认。
+- **开放问题**：候选查询把全文命中与关键词 / 中文双字命中用 OR 合并，即使表达式一致，规划器仍会扫描该语言下的已发布问题（表很小，结果正确）；若问题库变大，可拆成全文分支 UNION 关键词分支再合并打分。本地联调库 `lg_admin_int` 已跑过旧版本迁移，校验和会变，重建该临时库即可。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+
+---
+
+## 2026-10-28 ｜ HelpDesk v1 两端联调（Portal + Admin server + Admin client）
+
+- **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 拿 TDD 开发锁住」；Figma addendum（QA 知识库数据层 / Agent / Student / Backoffice）。本条是把 Portal 与 BackOffice 在本地真跑起来、互相调用，修联调中发现的问题。
+- **联调环境（只用本地值）**：本地 PostgreSQL 16 + pgvector（`prisma migrate deploy` 全部迁移）；Admin server（`PORTAL_HELPDESK_BASE_URL/TOKEN`、`ADMIN_HELPDESK_TOKEN` 为本地测试值；模型走本地假 OpenRouter 端点，没有真实 key）；Admin client（vite）；Portal dev（DEV + 本地存储，`ADMIN_HELPDESK_BASE_URL/TOKEN` 指向本地 Admin）。脚本在 `lg-helpdesk/integration-harness/`。
+- **端到端（Playwright，Portal 仓库 `tests/e2e/helpdesk-integration.spec.ts`）**：员工建并发布 3 个常见问题（1 个精选）→ 学员只看到精选那个 → 提交匹配问题的咨询 → AI 助手弹窗 →「No, still submit」带截图 → Enquiries 行有未读点 → 打开即清、学员信息 / 订阅「—」、加标签、内部备注、回复 → 学员只看到回复 → 学员再回复，行重新未读 → Mark as reviewed → 学员确认 → BackOffice 显示 Closed；「Yes, this solved my issue」不建单、计数 solved；VIEW 角色无任何写控件且不发写请求；zh-CN 两端（含有订阅的学员）。7/7 通过，连跑两次。
+- **联调发现并修复（先写测试见红再改）**：
+  1. Portal 订阅投影会给 `semiannual`、`cancel_at_period_end`、`grace`，页面没有文案，直接显示原值 → client 两种语言补文案，`grace` 用琥珀色胶囊。
+  2. Server 接受 `expectedSequence: 0`，Portal 只认 ≥1 → Server 自己 400 `INVALID_INPUT`，不再转发。
+  3. Portal 的 400（`validation_failed` 等）被转成 `VALIDATION_FAILED`，页面没有文案 → 统一成 `INVALID_INPUT`；补 `TAG_LIMIT_REACHED` 文案。
+  4. txt / csv 附件经 Admin 代理后丢了 `charset=utf-8` → 转发时保留。
+  5. 两个方向的 401 代码不一致（Admin `unauthorized`，Portal `invalid_token`）→ Admin 改为 `invalid_token`，并带 RFC 6750 `error="invalid_token"`。
+- **契约锁定**：`helpdesk-contract.json`（server、client 各一份，与 Portal 仓库同一份）+ server `helpdesk-contract-fixture.spec.ts` + client `helpdesk-contract.test.ts`，见设计文档 §4A.6。
+- **自测证据**：server `npm run build` 通过；`npm test` 40 套件通过 + 2 个 PG 套件跳过（420 通过）；带 `HELPDESK_TEST_DATABASE_URL` 42/42 套件、438 通过；改动文件 `npx eslint` 0 问题。client `npm test` 67/67；`npm run build` 通过；`npx oxlint` 改动文件 0 问题。
+- **开放问题**：「Mark as reviewed」= propose_resolution 仍是假设；新建（OPEN）的咨询要先回复才能 Mark as reviewed（状态机只允许 ASSIGNED / WAITING_USER），Figma 上新咨询也画了这个按钮，待产品确认。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+
+---
+
+## 2026-10-28 ｜ HelpDesk v1（Figma 补充，Admin 前端）：Enquiries 三栏 + Common Questions
+
+- **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 按照我们原有的 UI UX 风格 … 拿 TDD 开发锁住」；「现在先不做埋点」；Figma node 1324-2「QA知识库数据层 / Agent / Student / Backoffice，页面还会有一些变动的」。本条只做 Admin **client**（server 未改）。
+- **用户拍板**：`lg-helpdesk/tickets-v1-figma-addendum.md` §A / §D（与原方案冲突以它为准）：Help Desk 页头 +「+ Add Question」+ Enquiries / Common Questions 两个 Tab；Enquiries 三栏取代卡片看板；VIEW 只读。
+- **设计同步**：开发文档 §1.1、§4A 头注（待视觉验收范围）、§4A.1 前端文件清单、§4A.4（详情并入三栏）。
+- **变更清单（client）**：
+  - 删除卡片看板与 `HelpDeskTicketPage.tsx`；`App.tsx` 两条 help-desk 路由合并为 `help-desk/:ticketId?`（同一 MenuGuard / WorkspaceAccessProvider）。
+  - `pages/HelpDeskPage.tsx` + `backoffice/helpdesk/`：左栏搜索（300ms 防抖写地址栏）、筛选弹层（状态 / 类型 / 标签）、头像（按学员 id 固定配色）、时间（今天 HH:mm，否则「16 May」）、未读红点、选中蓝条、滚动加载；中栏 Enquiry 卡片、附件 chip、Mark as reviewed、之后的消息（内部备注琥珀虚线）、回复 / 内部备注；右栏学员信息、订阅、标签增删；打开即 `mark_read`（仅 FULL）；409 stale 重新加载并提示一次。
+  - Common Questions：antd 表格（语言 / 类型 / 状态筛选 + 搜索、推荐 / 解决 / 未解决计数、编辑、发布 / 下线 / 归档 / 重新发布、单语言下上移下移整表排序）、新增 / 编辑弹窗（语言、类型、问题、答案、关键词、精选、立即发布；版本冲突刷新列表）。
+  - `lib/helpdeskView.ts`、`lib/helpdeskQuestions.ts`（纯逻辑）、`lib/helpdeskApi.ts`（新接口）、`contracts/helpdesk.ts`（与 server 新形状一致）、`helpdesk.css`（只新增 `hd*` 类）、en-GB / zh-CN `helpDesk` 段（只替换该段，其它行不动）。
+  - 测试设施：`client/tests/support/register.mjs`（Node 自带类型擦除 + 补扩展名 / JSON 导入），`package.json` 新增 `npm test`；无新依赖。
+- **TDD 证据**：先写 4 个测试文件（view / questions / api / messages+wiring），运行确认失败（模块不存在、文案与路由未改，11 个用例里 10 个失败）；实现后 62/62 通过。
+- **自测证据**：`client`: `npm test` 62 通过；`npm run build`（tsc -b + vite build）通过；`npx oxlint <改动文件>` 0 错误、4 条 react 规则警告（同类警告仓库已有）。`server`: `npm run build` 通过，`npm test` 39 套件通过 + 2 个 PG 套件跳过（409 通过）。本地桩 API + vite + Playwright（无头）跑了 13 项行为检查并截图（en-GB / zh-CN、FULL / VIEW），截图与 Figma 对比图在 `lg-helpdesk/tickets-v1-shots/`。
+- **待视觉验收**：筛选弹层、日期分隔文字、状态胶囊、之后的消息与内部备注、回复框、空态、只读提示条、Common Questions 表格与弹窗；图标按同名描边图标重画（Figma 资源下载被代理拦截）。
+- **开放问题**：「Mark as reviewed」= propose_resolution（假设，待产品确认）；Claim 按钮与事件时间线不在 Figma，已移除；头像 / 标签颜色按 id / 文本固定取色，与 Figma 示例的具体颜色不会一一对应。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+- **下一步**：用户视觉验收；与 Portal 联调后用真实数据冒烟。
+
+---
+
+## 2026-10-28 ｜ HelpDesk v1（Figma 补充，Admin 服务端）：常见问题库 + 坐席推荐答案 + Portal 集成接口
+
+- **任务（用户）**：「只要把工单这个流程做好，页面做好，UI 做好 … 拿 TDD 开发锁住，直接去实现」；「可以发 workflow」；「现在先不做埋点」；Figma（node 1324-2）「QA知识库数据层 / Agent / Student / Backoffice，页面还会有一些变动的」。本条只做 Admin **server**；client 由下一个 Agent 实现。
+- **用户拍板**：`lg-helpdesk/tickets-v1-spec.md` + `lg-helpdesk/tickets-v1-figma-addendum.md`（两者冲突以补充文档为准）：常见问题（Common Questions）存在 Admin 库、员工维护；学员提交前由 Agent 引擎从已发布问题里挑一条原样展示；Portal 经 `/api/integration/helpdesk/**`（Bearer `ADMIN_HELPDESK_TOKEN`）读取与上报。
+- **设计同步（先改文档）**：开发文档 §1.1 / §2 / §4A.1 / §4A.3（看板改为 Enquiries 列表）/ §4A.4（学员与订阅卡片）/ §4A.5 / §4A.6，新增 §4A.7（常见问题数据层）、§4A.8（推荐答案）、§4A.9（集成鉴权与豁免），重写 §5.4、新增 §5.5，§8 新增两个环境变量。
+- **变更清单（server）**：
+  - 迁移 `20261028090000_helpdesk_questions`（`helpdesk_questions` + 只追加的 `helpdesk_question_revisions`，CHECK 约束、英文全文 GIN、关键词 GIN、`(locale,status,sort_order)` 索引）与 `20261028090100_helpdesk_suggestions`；`schema.prisma` 同步三个模型。
+  - `backoffice/modules/helpdesk/questions/`：Repository（`UPDATE … WHERE id AND version` 乐观锁，修订行同事务写入；排序 `FOR UPDATE` 全成全败；候选检索 = 全文 + 关键词 + 中文双字片段，同类 ×1.25，前 8）+ Service（状态机 draft ⇄ published → archived、可重新发布，版本冲突先于状态判断，归档后不可编辑；计数取自推荐日志，失败按 0）。
+  - `nest/helpdesk-questions.controller.ts`：员工端 `/api/helpdesk/questions…`（列表 / 详情 / 修订 / 新建 / 修改 / 发布 / 下架 / 归档 / 排序）+ 集成端 `GET /api/integration/helpdesk/questions`（强 ETag、304、`Cache-Control: no-cache`）。
+  - `ai/helpdesk/`：`HelpdeskSuggestService`（限流 10 次/小时共用 `ai_rate_limit_hits`；无候选不调模型；OpenRouter 非流式 `complete()` + json_schema 枚举候选 id；非候选 → null；3 秒超时；任何错误 → null；`query_text` 90 天后惰性清除）、`PrismaHelpdeskSuggestionStore`（结果首写为准）、`HelpdeskSuggestController`（`POST /suggest`、`POST /suggestions/:id/outcome`，`no-store`）。
+  - 引擎拆分：中立契约 `src/contracts/helpdesk-qa.ts`；ai 不 import backoffice、backoffice 不 import ai，只在 `app.module.ts` 组装（`AiModule.register({helpdeskQa})`、`BackofficeModule.register({helpdeskSuggestionStats})`）。
+  - 鉴权：`route-access.ts` 新增 `helpdeskIntegration`（仅 `integration/helpdesk` 前缀豁免员工登录），`BackofficeAccessGuard` 只认 Bearer（`timingSafeEqual`，每次现读，空 → 503，错 → 401）；集成路由一律 RFC 9457 problem+json（`ProblemJsonFilter`；全局过滤器按路径委托，覆盖 JSON 解析错误与 404）。
+  - 工单（§D）：Portal 客户端与 Service 新增 contactEmail / preview / unreadByAgent / tags / student / subscription，动作 add_tag / remove_tag / mark_read；列表改为 status / category / tag / q / cursor / limit 过滤；附件放宽为图片内联、pdf / txt / csv / docx / xlsx 以下载方式返回（≤ 10 MB）；Idempotency-Key 必须是 UUID。
+  - 公共：`common/uuidv7.ts`、`common/problem.ts`、`common/guards/helpdesk-integration-auth.ts`、`common/filters/problem-json.filter.ts`；`server/.env.example` 新增 `ADMIN_HELPDESK_TOKEN`、`HELPDESK_SUGGEST_MODEL`（留空）。
+- **TDD 证据**：先写 13 个 spec（新建 + 修改），运行确认失败：13 个套件红、29 个用例失败（模块不存在 / 新行为缺失）；再实现到全绿。
+- **自测证据**：`npm run build` 通过；`npm test` 39 个套件通过 + 2 个 PG 套件跳过（409 通过、19 跳过）；设 `HELPDESK_TEST_DATABASE_URL` 指向本地临时 PG 16 后 41/41 套件、427 通过（1 个为仓库原有 skip）；`npx eslint <改动文件>` 仅剩 `all-exceptions.filter.ts` 中 HEAD 已存在的 9 条 `no-unsafe-enum-comparison`。端到端冒烟（本地构建 + 临时库 + 假 LLM，本地测试令牌）：FULL 新建 201 / VIEW 403、旧版本 409、无令牌 401 problem+json + `WWW-Authenticate`、ETag 304、推荐返回库内原答案、结果 solved→solved→declined 为 changed true/false/false、计数 {shown:1,solved:1,declined:0}、下架后 ETag 变化、第 11 次推荐返回 null、坏 JSON 400 problem。
+- **待视觉验收**：无 client 改动；常见问题 Tab 与编辑弹窗、回复编辑器、学员端手风琴由 client Agent 按 Figma 实现后用户验收。
+- **开放问题**：①推荐接口在 agent 角色、常见问题接口在 admin 角色，拆分部署时 Portal 只有一个 `ADMIN_HELPDESK_BASE_URL`，需要网关按路径转发；②Portal 需支持 category / tag 列表参数、新增摘要字段、student / subscription、tag 与 mark_read 动作（字段名差异只改 `portalHelpdeskClient.ts`）；③「标记已查看」暂映射 propose_resolution，待确认；④中文检索依赖关键词与双字片段。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+- **下一步**：client Agent 实现常见问题与 Enquiries 页面；与 Portal 联调集成接口；用户配置 `ADMIN_HELPDESK_TOKEN`（与 Portal 同值）后冒烟。
+
+---
+
+## 2026-10-28 ｜ HelpDesk 工单 v1（BackOffice 部分）：工单卡片看板 + 详情 + Portal 集成客户端
+
+- **任务（用户）**：「把工单这个流程做好，页面做好，UI 做好，每个工单就是一个小卡片在 Back Office 上 … 按照我们原有的 UI UX 风格去做设计 … 拿 TDD 开发锁住」；「现在先不做埋点」。v1 不做飞书同步、前端埋点、AI 客服。
+- **用户拍板**：方案 `lg-helpdesk/tickets-v1-spec.md`（2026-10-28 批准）：Portal 是工单唯一写入方；BackOffice 只经 Portal 集成接口（Bearer 服务令牌）读写并注入员工身份；菜单 helpDesk VIEW 只读、FULL 可写。
+- **设计同步（先改文档）**：开发文档新增 §4A（模块 C：HelpDesk 工单）、§5.4（接口）、§8（`PORTAL_HELPDESK_BASE_URL` / `PORTAL_HELPDESK_TOKEN`），§1.1 / §2 注明不建表。
+- **变更清单**：
+  - `server/src/backoffice/modules/helpdesk/portalHelpdeskClient.ts`：唯一 Portal 客户端；环境变量每次请求现读；5 秒 / 附件 10 秒超时；RFC 9457 problem+json → 统一错误码（Portal 401/403/`integration_disabled` → 503 `HELPDESK_NOT_CONNECTED`，不透传成员工会话失效）；字段名 camelCase / snake_case 归一化；附件只放行 png / jpeg / webp 且 ≤ 5 MB。
+  - `helpdeskService.ts`：Tab → Portal 状态过滤、待回复判定（OPEN，或 ASSIGNED 且学员最后发言）、Tab 数量、各状态可用操作、输入校验（正文 1–5000、expectedSequence、工单 id 必须是 UUID、Idempotency-Key 格式）、注入当前员工为 agent（忽略请求体里的 agent）。
+  - `server/src/backoffice/nest/helpdesk.controller.ts` + `backoffice.module.ts`：`/api/helpdesk/tickets…`、`/api/helpdesk/attachments/:id`（图片代理，`Cache-Control: private, no-store`、`nosniff`）。
+  - `route-access.ts`：`/api/helpdesk/**` 归菜单 helpDesk，GET = VIEW，任何写 = CREATE（仅 FULL）。
+  - 前端：`App.tsx` 用看板 / 详情替换 help-desk 占位页；新增 `HelpDeskPage.tsx`、`HelpDeskTicketPage.tsx`、`lib/helpdeskApi.ts`、`lib/helpdeskFormat.ts`、`contracts/helpdesk.ts`、`helpdesk.css`；en-GB / zh-CN `helpDesk` 文案。VIEW 角色不渲染任何操作控件。
+  - `server/.env.example`：两个新变量（留空）。
+- **TDD 证据**：先写 `helpdesk-portal-client.spec.ts`、`helpdesk-service.spec.ts`、`helpdesk-rbac.spec.ts` 与 `route-access.spec.ts` 新用例，运行确认失败（模块不存在 / 路由归 Admin-only）后再实现；变异检查：把 helpdesk 写接口改成 VIEW，RBAC 用例 4 条失败。
+- **自测证据**：`server`: `npm run build` 通过；`npm test` 全部通过；`npx eslint <改动文件>` 0 问题；本地假 Portal（node http）冒烟：鉴权头、Idempotency-Key、409 stale 映射、附件代理、超时 504 均符合预期。`client`: `npm run build`（tsc -b + vite build）通过。
+- **待视觉验收**：无 Figma 画板，界面沿用 backoffice.css 的卡片 / 按钮 / 筛选条 / 状态点 / 提示条，由用户手动验收。
+- **开放问题**：Portal 集成接口由另一线程并行实现，`status=` 多值按逗号分隔、`counts` 按状态计数的约定需联调确认；字段名差异只需改 `portalHelpdeskClient.ts`。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：分支 `claude/project-thread-pn4rf0`，已提交未推送（推送由协调方处理）。
+- **下一步**：与 Portal 集成接口联调；用户手动冒烟（Admin / Operation Admin 可认领、回复、内部备注、请学员确认；其余角色只读）。
+
+---
+
 ## 2026-10-28 ｜ AI Tutor Release 下拉：版本说明展示 + 滑动窗口
 
 - **任务（用户）**：AI Tutor 对话头部的 Release 选择器下拉，要求：① 每个版本项下方展示 `revisionNotes`；② 版本数 > 5 时启用滚动窗口。

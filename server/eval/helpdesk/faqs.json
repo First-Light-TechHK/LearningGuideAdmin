@@ -1,0 +1,243 @@
+{
+  "$comment": [
+    "Seed FAQ library for the Helpdesk suggestion eval (server/eval/helpdesk). Example content written for the eval, not the production FAQ library.",
+    "Ids are fixed so cases.jsonl can name the expected FAQ."
+  ],
+  "faqs": [
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000001",
+      "category": "account_technical",
+      "popular": true,
+      "questionEn": "How do I reset my password?",
+      "answerEn": "1. Check your spam folder for the reset email from Learning Guide.\n2. Make sure you use the email address you signed up with.\n3. Go to the sign-in page and choose **Forgot password?** to send a new link.",
+      "questionZh": "如何重置密码？",
+      "answerZh": "1. 在垃圾邮件文件夹中查找来自 Learning Guide 的重置邮件。\n2. 确认使用的是注册时的邮箱。\n3. 前往登录页，点击**忘记密码？**重新发送链接。",
+      "keywords": [
+        "password",
+        "reset",
+        "forgot",
+        "密码",
+        "重置",
+        "忘记密码"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000002",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I change the email address on my account?",
+      "answerEn": "Open **Account settings**, choose **Email**, enter the new address and confirm it from the email we send you.",
+      "questionZh": "如何更改账号的邮箱？",
+      "answerZh": "打开**账号设置**，选择**邮箱**，输入新邮箱，并在我们发送的邮件中确认。",
+      "keywords": [
+        "email",
+        "change email",
+        "邮箱",
+        "更改邮箱"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000003",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "How do I delete my account?",
+      "answerEn": "Email [support@ilovelearningguide.com](mailto:support@ilovelearningguide.com) from the address on your account. We confirm before deleting, and deletion cannot be undone.",
+      "questionZh": "如何注销账号？",
+      "answerZh": "请用账号绑定的邮箱发送邮件到 [support@ilovelearningguide.com](mailto:support@ilovelearningguide.com)。我们会先与你确认，注销后无法恢复。",
+      "keywords": [
+        "delete account",
+        "close account",
+        "注销",
+        "删除账号"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000004",
+      "category": "account_technical",
+      "popular": false,
+      "questionEn": "The site is not loading or videos will not play. What can I do?",
+      "answerEn": "- Refresh the page and sign in again\n- Try another browser (Chrome, Edge, Safari or Firefox, latest version)\n- Turn off browser extensions that block scripts\n- Check your connection; videos need about 5 Mbps",
+      "questionZh": "网站打不开或视频无法播放怎么办？",
+      "answerZh": "- 刷新页面并重新登录\n- 换一个浏览器（最新版 Chrome、Edge、Safari 或 Firefox）\n- 关闭会拦截脚本的浏览器插件\n- 检查网络，视频大约需要 5 Mbps",
+      "keywords": [
+        "video",
+        "not loading",
+        "buffering",
+        "视频",
+        "打不开",
+        "卡顿",
+        "播放"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000005",
+      "category": "courses_learning",
+      "popular": true,
+      "questionEn": "How can I access my course materials?",
+      "answerEn": "Open **My Learning** and choose your course. Lessons and resources you are enrolled in are listed there.",
+      "questionZh": "如何访问我的课程资料？",
+      "answerZh": "打开**我的学习**并选择课程，已报名的课节和资料都在那里。",
+      "keywords": [
+        "course materials",
+        "lessons",
+        "resources",
+        "课程资料",
+        "课节",
+        "资料"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000006",
+      "category": "courses_learning",
+      "popular": true,
+      "questionEn": "How do I join a live session?",
+      "answerEn": "Open **My Learning**, choose the course and select **Join** on the session. The button appears 10 minutes before it starts.",
+      "questionZh": "如何加入直播课？",
+      "answerZh": "打开**我的学习**，选择课程，点击直播课上的**加入**。按钮在开课前 10 分钟出现。",
+      "keywords": [
+        "live",
+        "live session",
+        "join",
+        "直播",
+        "直播课",
+        "加入"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000007",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "Do I get a certificate when I finish a course?",
+      "answerEn": "Yes. When every lesson is complete, a certificate appears under **My Learning > Certificates** and can be downloaded as a PDF.",
+      "questionZh": "完成课程后有证书吗？",
+      "answerZh": "有。完成全部课节后，证书会出现在**我的学习 > 证书**中，可以下载 PDF。",
+      "keywords": [
+        "certificate",
+        "证书",
+        "结业"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000008",
+      "category": "courses_learning",
+      "popular": false,
+      "questionEn": "Can I download lessons to watch offline?",
+      "answerEn": "Not at the moment. Lessons stream online only; downloaded copies are not available.",
+      "questionZh": "可以下载课程离线观看吗？",
+      "answerZh": "目前不可以。课程只能在线观看，不提供下载。",
+      "keywords": [
+        "download",
+        "offline",
+        "下载",
+        "离线"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000009",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "How do I change my subscription?",
+      "answerEn": "Go to **My Subscription** and choose **Change plan**. An upgrade applies at once; a downgrade applies at the next renewal.",
+      "questionZh": "如何更改我的订阅？",
+      "answerZh": "前往**我的订阅**并选择**更改方案**。升级立即生效，降级在下次续费时生效。",
+      "keywords": [
+        "subscription",
+        "plan",
+        "upgrade",
+        "downgrade",
+        "订阅",
+        "方案",
+        "升级",
+        "降级"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000010",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "Where can I find my invoice?",
+      "answerEn": "- Open **My Subscription**\n- Choose **Records**\n- Select **Download invoice** next to the payment",
+      "questionZh": "在哪里可以找到发票？",
+      "answerZh": "- 打开**我的订阅**\n- 选择**记录**\n- 在对应付款旁点击**下载发票**",
+      "keywords": [
+        "invoice",
+        "receipt",
+        "billing",
+        "发票",
+        "收据",
+        "账单",
+        "orders",
+        "order history",
+        "订单",
+        "我的订单"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000011",
+      "category": "payments_subscriptions",
+      "popular": true,
+      "questionEn": "Why did my payment fail?",
+      "answerEn": "Common causes are an expired card, a bank security check or not enough funds. Check the card details in **My Subscription > Payment method**, or try another card.",
+      "questionZh": "为什么我的付款失败了？",
+      "answerZh": "常见原因是卡片过期、银行安全验证或余额不足。请在**我的订阅 > 支付方式**中检查卡片信息，或换一张卡。",
+      "keywords": [
+        "payment failed",
+        "declined",
+        "card",
+        "付款失败",
+        "扣款失败",
+        "银行卡"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000012",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "How do I cancel my subscription?",
+      "answerEn": "Go to **My Subscription** and choose **Cancel subscription**. You keep access until the end of the period you paid for.",
+      "questionZh": "如何取消订阅？",
+      "answerZh": "前往**我的订阅**并选择**取消订阅**。已付费的周期结束前仍可使用。",
+      "keywords": [
+        "cancel",
+        "cancel subscription",
+        "取消订阅",
+        "退订"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000013",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "Can I get a refund?",
+      "answerEn": "You can ask for a refund within 14 days of your first payment if you have completed fewer than two lessons. Submit an enquiry under **Payments & Subscriptions**.",
+      "questionZh": "可以退款吗？",
+      "answerZh": "首次付款 14 天内、且完成的课节少于两节时可以申请退款。请在**付款与订阅**下提交问题。",
+      "keywords": [
+        "refund",
+        "money back",
+        "退款",
+        "退钱",
+        "refund me",
+        "退回",
+        "退给我",
+        "钱退回"
+      ]
+    },
+    {
+      "id": "0192f0e0-0000-7000-8000-000000000014",
+      "category": "other",
+      "popular": false,
+      "questionEn": "Can I suggest a new feature?",
+      "answerEn": "Yes. Choose **Other Enquiries** on the Contact Support form and tell us your idea.",
+      "questionZh": "可以提出新功能建议吗？",
+      "answerZh": "可以。在联系客服表单中选择**其他问题**，告诉我们你的想法。",
+      "keywords": [
+        "feature",
+        "suggestion",
+        "idea",
+        "建议",
+        "功能"
+      ]
+    }
+  ]
+}

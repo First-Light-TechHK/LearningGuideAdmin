@@ -316,6 +316,131 @@ model BackofficeSetting {
 }
 
 // ==========================================
+// HelpDesk Common Questions（2026-10-28，Figma addendum §A；迁移 20261028090000_helpdesk_questions）
+// v2（2026-10-29）起不再使用：由下面的 helpdesk_faqs 取代。表原样保留、不搬数据，之后单独清理
+// （运维文档 docs/Learning_Guide_BackOffice_Agent_Development_Document.md §4A.7）。
+// ==========================================
+
+model HelpdeskQuestion {
+  id        String   @id @db.Uuid
+  locale    String
+  category  String
+  question  String
+  answer    String
+  keywords  String[] @default([])
+  status    String   @default("draft")
+  featured  Boolean  @default(false)
+  sortOrder Int      @default(0) @map("sort_order")
+  version   Int      @default(1)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedBy String?  @map("updated_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  revisions HelpdeskQuestionRevision[]
+
+  @@index([locale, status, sortOrder], map: "helpdesk_questions_list_idx")
+  @@index([keywords], map: "helpdesk_questions_keywords_idx", type: Gin)
+  @@map("helpdesk_questions")
+}
+
+model HelpdeskQuestionRevision {
+  id         String   @id @db.Uuid
+  questionId String   @map("question_id") @db.Uuid
+  version    Int
+  snapshot   Json
+  action     String
+  employeeId String?  @map("employee_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  question HelpdeskQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([questionId, version], map: "helpdesk_question_revisions_question_version_key")
+  @@map("helpdesk_question_revisions")
+}
+
+// HelpDesk 推荐日志（迁移 20261028090100_helpdesk_suggestions；v2 迁移 20261029090000_helpdesk_faqs
+// 加 faq_id / source、category 可空、outcome 加 helpful / not_helpful）。归 Agent（src/ai/helpdesk）；
+// faqId 指向 helpdesk_faqs，跨域不建外键；qaId 是 v1 的旧列（指向 helpdesk_questions），不再写入。
+model HelpdeskSuggestion {
+  id           String   @id @db.Uuid
+  learnerId    String   @map("learner_id")
+  locale       String
+  category     String?
+  source       String   @default("submit")
+  queryText    String?  @map("query_text")
+  candidateIds String[] @default([]) @map("candidate_ids") @db.Uuid
+  qaId         String?  @map("qa_id") @db.Uuid
+  faqId        String?  @map("faq_id") @db.Uuid
+  model        String?
+  latencyMs    Int      @default(0) @map("latency_ms")
+  outcome      String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([qaId])
+  @@index([faqId])
+  @@index([createdAt])
+  @@map("helpdesk_suggestions")
+}
+
+// HelpDesk Agent 链路追踪（迁移 20261029120000_helpdesk_agent_events；helpdesk-agent-v2-pi-dsh §2）：
+// dsh SessionEvent 日志，归 Agent（src/ai/helpdesk/trace）。只追加：seq 由应用在 run 级锁内分配，
+// 触发器拒绝 DELETE 与除 90 天清学员原文以外的 UPDATE；parentRunId 表达式索引只在迁移里。
+model HelpdeskAgentEvent {
+  runId String   @map("run_id") @db.Uuid
+  seq   Int
+  type  String
+  time  DateTime @db.Timestamptz(6)
+  data  Json     @default("{}")
+
+  @@id([runId, seq])
+  @@index([time])
+  @@map("helpdesk_agent_events")
+}
+
+// HelpDesk FAQ（Tickets v2 Figma addendum §1；迁移 20261029090000_helpdesk_faqs）：一条中英双语记录，
+// 归 BackOffice（唯一写入方，原生 SQL 读写，见 modules/helpdesk/faqs/faqRepository.ts）。
+// 英文全文 GIN 索引（helpdesk_faqs_search_en_idx）是表达式索引，Prisma 表达不了，只在迁移里。
+model HelpdeskFaq {
+  id             String   @id @db.Uuid
+  category       String
+  popular        Boolean  @default(false)
+  questionEn     String   @map("question_en")
+  answerEn       String   @map("answer_en")
+  questionZh     String   @map("question_zh")
+  answerZh       String   @map("answer_zh")
+  keywords       String[] @default([])
+  status         String   @default("published")
+  version        Int      @default(1)
+  idempotencyKey String?  @unique @map("idempotency_key") @db.Uuid
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  revisions HelpdeskFaqRevision[]
+
+  @@index([status, popular(sort: Desc), updatedAt(sort: Desc)], map: "helpdesk_faqs_list_idx")
+  @@index([keywords], map: "helpdesk_faqs_keywords_idx", type: Gin)
+  @@map("helpdesk_faqs")
+}
+
+model HelpdeskFaqRevision {
+  id         String   @id @db.Uuid
+  faqId      String   @map("faq_id") @db.Uuid
+  version    Int
+  snapshot   Json
+  action     String
+  employeeId String?  @map("employee_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  faq HelpdeskFaq @relation(fields: [faqId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([faqId, version], map: "helpdesk_faq_revisions_faq_version_key")
+  @@map("helpdesk_faq_revisions")
+}
+
+// ==========================================
 // Commerce Course（v2，2026-10-26 新增；见 docs/Course_Module_Import_Export_Design.md §14）
 // 商品课程：课程 → 课时 两层（无章节），多语言/展品/学习点/测试/试用/版本/导入导出。
 // ==========================================
