@@ -69,8 +69,9 @@ const fixture = JSON.parse(
     suggestRequest: Obj;
     suggestChatRequest: Obj;
     suggestChipRequest: Obj;
-    suggestResponse: { suggestion: Obj };
-    suggestNoMatchResponse: { suggestion: null };
+    suggestResponse: { suggestion: Obj; alternatives: Obj[] };
+    suggestNoMatchResponse: { suggestion: null; alternatives: Obj[] };
+    suggestAlternativesResponse: { suggestion: null; alternatives: Obj[] };
     traceparentHeader: string;
     outcomeRequest: Obj;
     helpfulOutcomeRequest: Obj;
@@ -468,7 +469,10 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
     await expect(service.publishedOne(id, query)).resolves.toEqual(faq);
   });
 
-  function suggestService(candidate: HelpdeskQaCandidate) {
+  function suggestService(
+    candidate: HelpdeskQaCandidate,
+    popular: HelpdeskQaCandidate[] = [],
+  ) {
     const logged: SuggestionLogEntry[] = [];
     // the model step picks the candidate (the real pi runner is tested in workflow/)
     const complete = jest.fn(() =>
@@ -483,6 +487,8 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
         findCandidates: () => Promise.resolve([candidate]),
         findPublished: (id) =>
           Promise.resolve(id === candidate.id ? candidate : null),
+        findPopular: ({ excludeIds }) =>
+          Promise.resolve(popular.filter((c) => !excludeIds.includes(c.id))),
       },
       runner: { run: complete },
       events,
@@ -563,6 +569,37 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
         faqId: '0192bbbb-0000-7000-8000-000000000001',
       }),
     ).resolves.toEqual(toAdmin.suggestNoMatchResponse);
+  });
+
+  it('answers no match with the contract alternatives (v3 §1, code only)', async () => {
+    const expected = toAdmin.suggestAlternativesResponse;
+    const { service, complete } = suggestService(
+      {
+        id: '0192bbbb-0000-7000-8000-0000000000ff',
+        category: 'other',
+        question: 'q',
+        answer: 'a',
+        score: 1,
+      },
+      expected.alternatives.map((a) => ({
+        id: text(a.faqId),
+        category: 'account_technical',
+        question: text(a.question),
+        answer: 'stored answer',
+        score: 0,
+      })),
+    );
+    // the chip FAQ is no longer published: the popular FAQs instead, never the model
+    const answer = await service.suggest({
+      ...toAdmin.suggestChipRequest,
+      faqId: '0192bbbb-0000-7000-8000-000000000001',
+    });
+    expect(answer).toEqual(expected);
+    expect(shape(answer as unknown as Json)).toEqual(
+      shape(expected as unknown as Json),
+    );
+    expect(complete).not.toHaveBeenCalled();
+    expect(expected.alternatives.length).toBeLessThanOrEqual(3);
   });
 
   it('records the contract outcomes', async () => {

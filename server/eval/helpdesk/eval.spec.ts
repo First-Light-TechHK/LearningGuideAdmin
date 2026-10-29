@@ -350,6 +350,7 @@ function result(
     asked: true,
     validCall: true,
     unpricedCalls: 0,
+    alternativeIds: [],
     ...over,
   };
 }
@@ -417,6 +418,8 @@ describe('report', () => {
       gotFaqId: null,
       latencyMs: 3_500,
       locale: 'zh-CN',
+      // 没答上，但「你可能想问」里有它
+      alternativeIds: [FAQ(9), B],
     }),
   ].map((r) => ({ ...r, costUsd: 0.001, inputTokens: 100, outputTokens: 5 }));
   const real = { kind: 'real', model: 'openai/gpt-4o-mini' } as const;
@@ -444,6 +447,10 @@ describe('report', () => {
       // 7 条该有答案的里期望的 FAQ 都在候选中；模型答对其中 4 条
       retrievalRecall: 1,
       modelRecall: 0.5714,
+      // 该有答案却没答的 2 条（r9 r10）里，r10 的 FAQ 在 alternatives 中
+      alternativesRecall: 0.5,
+      alternativesOffered: 1,
+      unansweredAnswerable: 2,
       noneWithoutModel: 0,
       invalidCalls: 0,
       failedRuns: 1,
@@ -451,6 +458,69 @@ describe('report', () => {
     expect(report.cases).toEqual({ total: 10, run: 10 });
     expect(report.budget).toEqual({ capUsd: 5, spentUsd: 0.01, stopped: null });
     expect(report.model).toEqual({ ...real, note: null });
+  });
+
+  it('reports alternatives recall: answerable cases with no answer whose FAQ (or an acceptable one) was offered (v3 §1)', () => {
+    const rs = [
+      result({
+        id: 'a1',
+        expectedFaqId: A,
+        gotFaqId: null,
+        alternativeIds: [B, A],
+      }),
+      result({
+        id: 'a2',
+        expectedFaqId: A,
+        acceptableFaqIds: [B],
+        gotFaqId: null,
+        alternativeIds: [B],
+      }),
+      result({
+        id: 'a3',
+        expectedFaqId: A,
+        gotFaqId: null,
+        alternativeIds: [],
+      }),
+      result({
+        id: 'a4',
+        expectedFaqId: B,
+        gotFaqId: null,
+        alternativeIds: [A],
+      }),
+      // answered or not answerable: not counted
+      result({ id: 'a5', expectedFaqId: A, gotFaqId: A }),
+      result({ id: 'a6', expectedFaqId: A, gotFaqId: B }),
+      result({
+        id: 'a7',
+        expectedFaqId: null,
+        gotFaqId: null,
+        alternativeIds: [A],
+      }),
+    ];
+    const report = summarize({
+      outcome: { results: rs, spentUsd: 0, stopped: null },
+      totalCases: rs.length,
+      model: real,
+      retrieval: 'postgresql',
+      budgetUsd: 5,
+    });
+    expect(report.metrics.alternativesRecall).toBe(0.5);
+    expect(report.metrics.alternativesOffered).toBe(2);
+    expect(report.metrics.unansweredAnswerable).toBe(4);
+    expect(markdownReport(report)).toContain(
+      '| Alternatives recall (answerable, no answer) | 50.0% (2 of 4) |',
+    );
+    const none = summarize({
+      outcome: { results: rs.slice(4), spentUsd: 0, stopped: null },
+      totalCases: 3,
+      model: real,
+      retrieval: 'postgresql',
+      budgetUsd: 5,
+    });
+    expect(none.metrics.alternativesRecall).toBeNull();
+    expect(markdownReport(none)).toContain(
+      '| Alternatives recall (answerable, no answer) | n/a (0 of 0) |',
+    );
   });
 
   it('breaks results down by persona and by locale', () => {
@@ -839,6 +909,7 @@ describe('retrieval only (--retrieval-only)', () => {
         );
       },
       findPublished: () => Promise.reject(new Error('not used')),
+      findPopular: () => Promise.reject(new Error('not used')),
     };
     const progress: number[] = [];
     const results = await runRetrieval({
@@ -1101,6 +1172,36 @@ const abortedRunner: AgentStepRunner = {
 
 const ENV = { OPENROUTER_API_KEY: 'stub', HELPDESK_SUGGEST_MODEL: 'stub' };
 
+describe('memory retrieval: popular FAQs (v3 §1 alternatives)', () => {
+  it('offers popular FAQs only, the category first, in the locale, without the excluded ones', async () => {
+    const qa = memoryQaSource(faqs);
+    const zh = await qa.findPopular({
+      locale: 'zh-CN',
+      category: 'courses_learning',
+      excludeIds: [FAQ(5)],
+      limit: 3,
+    });
+    expect(zh.map((c) => [c.id, c.question, c.score])).toEqual([
+      [FAQ(6), '如何加入直播课？', 0],
+      [FAQ(1), '如何重置密码？', 0],
+      [FAQ(9), '如何更改我的订阅？', 0],
+    ]);
+    expect(
+      (
+        await qa.findPopular({
+          locale: 'en-GB',
+          category: null,
+          excludeIds: [],
+          limit: 2,
+        })
+      ).map((c) => c.question),
+    ).toEqual([
+      'How do I reset my password?',
+      'How can I access my course materials?',
+    ]);
+  });
+});
+
 describe('running the cases', () => {
   const answerable = cases.filter((c) => c.persona === 'paraphrase');
 
@@ -1295,6 +1396,7 @@ describe('running the cases', () => {
           'answered',
           true,
         ]);
+        expect(r.alternativeIds).toEqual([]);
       } else {
         expect([r.id, r.gotFaqId, r.reason, r.asked]).toEqual([
           r.id,
@@ -1302,6 +1404,11 @@ describe('running the cases', () => {
           'no_candidates',
           false,
         ]);
+        // nothing retrieved: the popular FAQs of the seed library, code only
+        expect(r.alternativeIds.length).toBeGreaterThan(0);
+        expect(r.alternativeIds.length).toBeLessThanOrEqual(3);
+        for (const id of r.alternativeIds)
+          expect(faqs.find((f) => f.id === id)?.popular).toBe(true);
       }
       expect(r.costUsd).toBe(0);
     }
@@ -1588,6 +1695,18 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
         expect(password[0]?.id).toBe(FAQ(1));
         const zh = await qa.findPublished(FAQ(1), 'zh-CN');
         expect(zh?.answer).toBe(faqs[0].answerZh);
+        // the memory source offers the same popular FAQs as the production SQL (same order needs updated_at, so as a set)
+        const search = {
+          locale: 'zh-CN',
+          category: 'payments_subscriptions' as const,
+          excludeIds: [],
+          limit: 3,
+        };
+        const popular = await qa.findPopular(search);
+        expect(popular).toHaveLength(3);
+        expect(popular[0].category).toBe('payments_subscriptions');
+        for (const c of popular)
+          expect(faqs.find((f) => f.id === c.id)?.popular).toBe(true);
       } finally {
         await close();
         const pool = new Pool({ connectionString: url });

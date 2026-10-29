@@ -20,7 +20,7 @@
 
 `/api/health` 每个角色都有。
 
-HelpDesk（2026-10-28，见开发文档 §4A.7–§4A.9）：`admin` 角色挂员工端 `/api/helpdesk/**` 和集成端 `GET /api/integration/helpdesk/faqs`（Tickets v2 取代 `questions`）；`agent` 角色挂 `POST /api/integration/helpdesk/suggest` 与 `POST /api/integration/helpdesk/suggestions/:id/outcome`。两边只通过中立契约 `src/contracts/helpdesk-qa.ts` 交互（`HELPDESK_QA_SOURCE` 给 Agent 取候选 FAQ 与按 id 取单条 FAQ；v2 起 BackOffice 不再显示推荐计数，`HELPDESK_SUGGESTION_STATS` 已删除），在 `app.module.ts` 里组装；Agent 单独部署时候选问题直接读同一个库。Portal 只配一个 `ADMIN_HELPDESK_BASE_URL`，拆开部署时需由网关按路径把 `suggest` / `suggestions` 转到 agent 实例。
+HelpDesk（2026-10-28，见开发文档 §4A.7–§4A.9）：`admin` 角色挂员工端 `/api/helpdesk/**` 和集成端 `GET /api/integration/helpdesk/faqs`（Tickets v2 取代 `questions`）；`agent` 角色挂 `POST /api/integration/helpdesk/suggest` 与 `POST /api/integration/helpdesk/suggestions/:id/outcome`。两边只通过中立契约 `src/contracts/helpdesk-qa.ts` 交互（`HELPDESK_QA_SOURCE` 给 Agent 取候选 FAQ、按 id 取单条 FAQ，以及 v3 起「你可能想问」兜底用的热门 FAQ（`findPopular`）；v2 起 BackOffice 不再显示推荐计数，`HELPDESK_SUGGESTION_STATS` 已删除），在 `app.module.ts` 里组装；Agent 单独部署时候选问题直接读同一个库。Portal 只配一个 `ADMIN_HELPDESK_BASE_URL`，拆开部署时需由网关按路径把 `suggest` / `suggestions` 转到 agent 实例。
 
 ## 3. 环境变量
 

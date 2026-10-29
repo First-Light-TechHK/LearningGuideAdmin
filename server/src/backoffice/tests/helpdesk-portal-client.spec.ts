@@ -747,6 +747,8 @@ describe('Portal HelpDesk client', () => {
           faqQuestion: 'Where can I find my invoice?',
           answer: 'Open **My Subscription**.',
           feedback: 'not_helpful',
+          // v3 §2: no rating sent yet
+          rating: null,
           createdAt: '2026-10-28T00:50:00Z',
         },
         {
@@ -757,6 +759,7 @@ describe('Portal HelpDesk client', () => {
           faqQuestion: null,
           answer: null,
           feedback: null,
+          rating: null,
           createdAt: '2026-10-28T00:59:00Z',
         },
         {
@@ -768,10 +771,41 @@ describe('Portal HelpDesk client', () => {
           faqQuestion: null,
           answer: null,
           feedback: null,
+          rating: null,
           createdAt: 't',
         },
       ]);
       expect(normaliseDetail(rawDetail).aiAssist).toEqual([]);
+    });
+
+    it("keeps the learner's AI rating (1-5) on each aiAssist answer, else null (v3 §2)", () => {
+      const ratings = [4, 1, 5, 0, 6, 3.5, '4', true, null, undefined];
+      const detail = normaliseDetail({
+        ...rawDetail,
+        aiAssist: ratings.map((rating, index) => ({
+          id: `as${index}`,
+          source: 'submit',
+          question: 'Help',
+          faqId: 'f1',
+          faqQuestion: 'Q',
+          answer: 'A',
+          feedback: 'solved',
+          rating,
+          createdAt: '2026-10-29T00:00:00Z',
+        })),
+      });
+      expect(detail.aiAssist.map((item) => item.rating)).toEqual([
+        4,
+        1,
+        5,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+      ]);
     });
 
     it('shortens CloudEvents types and maps event data', () => {
