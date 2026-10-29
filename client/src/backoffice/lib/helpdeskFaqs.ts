@@ -1,5 +1,5 @@
 import { FAQ_CATEGORIES, type FaqBody, type FaqCategory, type HelpdeskFaq } from '../contracts/helpdesk'
-import { LINK_PATTERN, safeHref } from './helpdeskMarkdown'
+import { safeHref, unsafeLinks } from './helpdeskMarkdown'
 
 /**
  * FAQs（Tickets v2 §1 / §3a / §3b，Figma 1379:2 / 1379:299）的纯逻辑：草稿、校验、工具栏插入、
@@ -81,10 +81,7 @@ function textError(value: string, max: number): FaqFieldError | null {
 function answerError(value: string): FaqFieldError | null {
   const basic = textError(value, FAQ_LIMITS.answerMax)
   if (basic) return basic
-  for (const match of value.matchAll(LINK_PATTERN)) {
-    if (!safeHref(match[2])) return 'unsafeLink'
-  }
-  return null
+  return unsafeLinks(value).length ? 'unsafeLink' : null
 }
 
 /** 与 Server faqService.ts 同一套规则；保存前先在本地拦住。 */
@@ -145,8 +142,8 @@ export function applyList(value: string, start: number, end: number, kind: 'orde
 
 /** Link：选中文字变成链接文字（没选中就用地址本身）；地址不是 http(s) / mailto 时返回 null。 */
 export function applyLink(value: string, start: number, end: number, rawUrl: string): TextEdit | null {
-  const url = safeHref(rawUrl)
-  if (!url) return null
+  const url = rawUrl.trim()
+  if (!safeHref(url)) return null
   const label = value.slice(start, end) || url
   const link = `[${label}](${url})`
   const next = `${value.slice(0, start)}${link}${value.slice(end)}`

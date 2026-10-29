@@ -720,7 +720,7 @@
         "tooLong": "太长了（最多 {max} 个字符）",
         "tooMany": "最多 20 个关键词",
         "keywordTooLong": "每个关键词最多 40 个字符",
-        "unsafeLink": "链接需以 https://、http:// 或 mailto: 开头"
+        "unsafeLink": "链接需是完整的 https://、http:// 或 mailto: 地址，且不含空格或引号"
       }
     },
     "preview": {

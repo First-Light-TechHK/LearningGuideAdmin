@@ -279,7 +279,11 @@ describe('FAQ drawer (Figma 1379:299)', () => {
     fillValidDraft()
     fill(/^Answer \(English\)/, 'Click [here](javascript:alert(1))')
     fireEvent.click(within(drawer()).getByRole('button', { name: 'Save FAQ' }))
-    assert.ok(await within(drawer()).findByText('Links must start with https://, http:// or mailto:'))
+    const message = 'Links must be a full https://, http:// or mailto: address, without spaces or quotes'
+    assert.ok(await within(drawer()).findByText(message))
+    // Portal 的渲染器会丢掉带引号的地址，所以保存前同样拦住（预览即学生所见）
+    fill(/^Answer \(English\)/, "See [Murphy's law](https://en.wikipedia.org/wiki/Murphy's_law)")
+    assert.ok(await within(drawer()).findByText(message))
     assert.equal(server.callsTo('POST', LIST).length, 0)
   })
 

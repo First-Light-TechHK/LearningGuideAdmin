@@ -24,6 +24,7 @@ import {
   type FaqRepository,
   type WriteResult,
 } from './faqRepository';
+import { unsafeLinks } from './faqMarkdown';
 
 /**
  * Helpdesk FAQ 业务规则（Tickets v2 §1 / §2 / §3）：
@@ -86,18 +87,17 @@ function text(value: unknown, name: string, max: number): string {
   return normalised;
 }
 
-/** Markdown 链接 [文字](地址)：地址只许 http(s):// 与 mailto:（与渲染器同一规则）。 */
-const LINK = /\[[^\]\n]*\]\(([^)\n]*)\)/g;
-const SAFE_URL = /^(https?:\/\/[^\s]+|mailto:[^\s]+)$/i;
-
+/**
+ * Markdown 链接 [文字](地址)：Portal 渲染器会丢掉的地址（非 http(s) / mailto、无主机、含空白或 " ' < > ` \\）
+ * 一律拒绝保存；规则与解析就是 faqMarkdown.ts（与 Portal 同一份语料锁定）。
+ */
 function answer(value: unknown, name: string): string {
   const normalised = text(value, name, FAQ_LIMITS.answerMax);
-  for (const match of normalised.matchAll(LINK)) {
-    if (!SAFE_URL.test(match[1].trim()))
-      throw invalid(
-        `${name}: links must start with https://, http:// or mailto:`,
-      );
-  }
+  const [unsafe] = unsafeLinks(normalised);
+  if (unsafe !== undefined)
+    throw invalid(
+      `${name}: links must be full https://, http:// or mailto: addresses without spaces, quotes, < > \` or \\ (${unsafe.slice(0, 80)})`,
+    );
   return normalised;
 }
 

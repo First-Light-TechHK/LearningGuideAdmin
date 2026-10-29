@@ -720,7 +720,7 @@
         "tooLong": "Too long (up to {max} characters)",
         "tooMany": "Up to 20 keywords",
         "keywordTooLong": "Each keyword can be up to 40 characters",
-        "unsafeLink": "Links must start with https://, http:// or mailto:"
+        "unsafeLink": "Links must be a full https://, http:// or mailto: address, without spaces or quotes"
       }
     },
     "preview": {

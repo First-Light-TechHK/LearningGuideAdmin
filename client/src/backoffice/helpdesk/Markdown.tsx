@@ -1,29 +1,38 @@
 import { Fragment, type ReactNode } from 'react'
 
-import { parseMarkdown, type Inline } from '../lib/helpdeskMarkdown'
+import { parseMarkdown, type Inline, type Line } from '../lib/helpdeskMarkdown'
 
 /**
  * FAQ 答案的唯一渲染器（Tickets v2 §1）：Preview 与 Enquiries 的 AI 块共用。
  * 只生成 React 元素（不用 dangerouslySetInnerHTML），原始 HTML 显示为文字；
- * 外部链接新标签页打开并带 rel="noopener noreferrer"，mailto 在本页打开邮件客户端。
+ * 外部链接新标签页打开，mailto 在本页打开邮件客户端；都带 rel="noopener noreferrer"。
+ * 输出结构与 Portal components/helpdesk/Markdown.tsx 相同（列表条目的续行包在 span.md-line 里）。
  */
 
 function inline(nodes: Inline[]): ReactNode[] {
   return nodes.map((node, index) => {
     if (node.kind === 'text') return <Fragment key={index}>{node.text}</Fragment>
-    if (node.kind === 'bold') return <strong key={index}>{inline(node.children)}</strong>
-    const external = !node.href.toLowerCase().startsWith('mailto:')
+    if (node.kind === 'strong') return <strong key={index}>{inline(node.children)}</strong>
     return (
-      <a
-        key={index}
-        href={node.href}
-        target={external ? '_blank' : undefined}
-        rel={external ? 'noopener noreferrer' : undefined}
-      >
+      <a key={index} href={node.href} target={node.external ? '_blank' : undefined} rel="noopener noreferrer">
         {inline(node.children)}
       </a>
     )
   })
+}
+
+/** 列表条目：第一行是标题，之后的行保留 <br /> 并包在 .md-line 里（与 Portal 相同）。 */
+function itemLines(lines: Line[]): ReactNode[] {
+  return lines.map((line, index) =>
+    index === 0 ? (
+      <Fragment key={index}>{inline(line)}</Fragment>
+    ) : (
+      <Fragment key={index}>
+        <br />
+        <span className="md-line">{inline(line)}</span>
+      </Fragment>
+    ),
+  )
 }
 
 export function MarkdownView({ text, className }: { text: string; className?: string }) {
@@ -43,7 +52,7 @@ export function MarkdownView({ text, className }: { text: string; className?: st
             </p>
           )
         }
-        const items = block.items.map((item, at) => <li key={at}>{inline(item)}</li>)
+        const items = block.items.map((item, at) => <li key={at}>{itemLines(item)}</li>)
         return block.kind === 'ordered' ? (
           <ol key={index} start={block.start === 1 ? undefined : block.start}>
             {items}
