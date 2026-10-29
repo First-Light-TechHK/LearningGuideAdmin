@@ -1004,7 +1004,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET | /api/helpdesk/faqs?category=&popular=true\|false&q=&page=&pageSize= | helpDesk VIEW | v2 FAQs 列表（不含已删除 = 归档）；`pageSize` 缺省 10、最大 50；返回 `{ faqs, total, page, pageSize }` |
 | GET | /api/helpdesk/faqs/:id · /:id/revisions | helpDesk VIEW | 单条 FAQ（归档或不存在 404 `FAQ_NOT_FOUND`）；修订记录新的在前 |
 | POST | /api/helpdesk/faqs | helpDesk FULL | body `{ category, popular, questionEn, answerEn, questionZh, answerZh, keywords[] }`，可带 `Idempotency-Key`（同 key 不同内容 422 `IDEMPOTENCY_KEY_REUSED`）→ 201 FAQ（保存即发布） |
-| PUT | /api/helpdesk/faqs/:id | helpDesk FULL | 同上 body + `version`；版本不符 409 `VERSION_CONFLICT` |
+| PUT | /api/helpdesk/faqs/:id | helpDesk FULL | 同上 body + `version`；内容与当前一致时原样返回（幂等：丢响应后的重试、没改动的保存不升版本、不写修订）；内容不同且版本不符 409 `VERSION_CONFLICT` |
 | POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等 |
 
 ### 5.5 Helpdesk 集成接口（Portal → Admin，2026-10-28，§4A.9）
