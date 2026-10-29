@@ -264,6 +264,19 @@ describe('Helpdesk suggest: happy path', () => {
     );
   });
 
+  it('tells the model to show the self-service FAQ when the learner asks it to act', async () => {
+    // 用户 2026-10-29：「帮我退款 / 帮我取消」这类代办请求，我们做不了，推荐对应 FAQ 就行
+    const { service, complete } = setup();
+    await service.suggest(input);
+    const [spec] = complete.mock.calls[0];
+    expect(spec.system).toContain(
+      'You cannot act on accounts, payments or orders.',
+    );
+    expect(spec.system).toContain(
+      'pick the candidate that tells the learner how to do it themselves',
+    );
+  });
+
   it('reads the key, model and base URL on every call (hot reload)', async () => {
     const { service, complete, env } = setup();
     await service.suggest(input);

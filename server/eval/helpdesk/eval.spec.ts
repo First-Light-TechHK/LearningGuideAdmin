@@ -90,12 +90,15 @@ describe('eval dataset', () => {
     for (const persona of EVAL_PERSONAS)
       expect(count((c) => c.persona === persona)).toBeGreaterThanOrEqual(4);
     expect(count((c) => c.expectedFaqId === null)).toBeGreaterThanOrEqual(25);
-    // 不可回答、越权的问题都应该是 none
+    // 不可回答的问题都应该是 none
     expect(
       count((c) => c.persona === 'unanswerable' && c.expectedFaqId !== null),
     ).toBe(0);
+    // 用户 2026-10-29：「帮我退款」这类代办请求做不了，推荐讲自助办法的 FAQ
+    expect(cases.find((c) => c.id === 'over-01')?.expectedFaqId).toBe(FAQ(13));
+    expect(cases.find((c) => c.id === 'over-07')?.expectedFaqId).toBe(FAQ(13));
     expect(
-      count((c) => c.persona === 'over_reach' && c.expectedFaqId !== null),
+      count((c) => c.expectedFaqId === null && !!c.acceptableFaqIds?.length),
     ).toBe(0);
   });
 
@@ -299,17 +302,29 @@ describe('qa10k dataset (dev.jsonl, test.jsonl, faqs.json)', () => {
     }
   });
 
-  it('labels bare account and payment demands null (the self-service FAQ may be accepted), and unanswerable cases almost always null', () => {
+  it("expects the self-service FAQ for action demands on the learner's own account, and unanswerable cases almost always null", () => {
+    // 用户 2026-10-29：代办请求（退款、取消、删号、查订单）做不了，就推荐讲自助办法的那条 FAQ
     const unanswerable = all.filter((c) => c.persona === 'unanswerable');
     expect(
       unanswerable.filter((c) => c.expectedFaqId !== null).length /
         unanswerable.length,
     ).toBeLessThan(0.01);
-    for (const id of ['qa-02900', 'qa-01381', 'qa-01379', 'qa-00419'])
-      expect(all.find((c) => c.id === id)?.expectedFaqId).toBeNull();
-    expect(all.find((c) => c.id === 'qa-02900')?.acceptableFaqIds).toEqual([
-      FAQ(12),
-    ]);
+    const expected = (id: string) =>
+      all.find((c) => c.id === id)?.expectedFaqId;
+    expect(expected('qa-02900')).toBe(FAQ(12));
+    expect(expected('qa-05856')).toBe(FAQ(13));
+    expect(expected('qa-03029')).toBe(FAQ(13));
+    expect(expected('qa-03996')).toBe(FAQ(3));
+    // none 只留给没有任何 FAQ 能帮上的情况，「none 或某条 FAQ 都算对」不再存在
+    expect(
+      all.filter((c) => c.expectedFaqId === null && c.acceptableFaqIds?.length),
+    ).toEqual([]);
+    expect(expected('qa-01381')).toBe(FAQ(13));
+    expect(expected('qa-01379')).toBe(FAQ(3));
+    expect(expected('qa-00419')).toBe(FAQ(9));
+    // 没有 FAQ 讲得通的代办（批准被拒的退款、多退钱）仍是 none
+    for (const id of ['qa-00427', 'qa-03779', 'qa-08407'])
+      expect(expected(id)).toBeNull();
   });
 });
 
