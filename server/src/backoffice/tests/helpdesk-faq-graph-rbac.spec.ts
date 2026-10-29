@@ -72,6 +72,14 @@ const releases = {
   rollback: jest.fn(() =>
     Promise.resolve({ release: { version: 3 }, created: false }),
   ),
+  preview: jest.fn(() =>
+    Promise.resolve({
+      source: 'working',
+      locale: 'zh-CN',
+      nodes: [],
+      edges: [],
+    }),
+  ),
 };
 
 function employeeFor(role: EmployeeRole): SessionEmployee {
@@ -114,6 +122,8 @@ const READS = [
   '/api/helpdesk/faq-releases',
   '/api/helpdesk/faq-releases/working',
   '/api/helpdesk/faq-releases/diff?head=working',
+  '/api/helpdesk/faq-releases/preview?locale=zh-CN',
+  '/api/helpdesk/faq-releases/preview?locale=en-GB&version=2',
   '/api/helpdesk/faq-releases/2',
   '/api/helpdesk/faq-releases/2/diff?base=1',
 ];
@@ -194,6 +204,10 @@ describe('FAQ question tree endpoints', () => {
         await request(server()).get(path).set('Cookie', as(role)).expect(200);
       expect(releases.diff).toHaveBeenCalledWith('working', undefined);
       expect(releases.diff).toHaveBeenCalledWith('2', '1');
+      // 对话预览（§5.3）：工作副本或某个版本，不会被当成版本号 'preview'
+      expect(releases.preview).toHaveBeenCalledWith('zh-CN', undefined);
+      expect(releases.preview).toHaveBeenCalledWith('en-GB', '2');
+      expect(releases.get).not.toHaveBeenCalledWith('preview');
     },
   );
 

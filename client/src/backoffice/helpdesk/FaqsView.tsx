@@ -36,11 +36,13 @@ type Props = {
   refreshKey: number
   onEdit: (faq: HelpdeskFaq) => void
   onPreview: (faq: HelpdeskFaq) => void
+  /** v5 问题树（大纲 + 对话预览），所有角色都能看。 */
+  onTree: (faq: HelpdeskFaq) => void
 }
 
 type Loaded = { faqs: HelpdeskFaq[]; total: number }
 
-export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Props) {
+export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview, onTree }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = readFaqFilters(searchParams)
   // 只在筛选真的变了时重新请求（地址栏里别的参数变化不算）
@@ -202,7 +204,12 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
               return (
                 <tr key={faq.id}>
                   <td>
-                    <div className="hdFaqQuestion">{question}</div>
+                    <div className="hdFaqQuestion">
+                      {question}
+                      {/* v5 问题树：选择题 / 非入口的追问在问题旁标出（待视觉验收） */}
+                      {faq.type === 'choice' ? <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.choiceTag')}</span> : null}
+                      {faq.entry === false ? <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.followUpTag')}</span> : null}
+                    </div>
                     <div className="hdFaqSummary">{summaryLine(zh ? faq.answerZh : faq.answerEn)}</div>
                   </td>
                   <td>
@@ -239,6 +246,14 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
                         onClick={() => onPreview(faq)}
                       >
                         {t(locale, 'helpDesk.faqs.preview')}
+                      </button>
+                      <button
+                        type="button"
+                        className="hdFaqPreview"
+                        aria-label={t(locale, 'helpDesk.faqs.treeLabel', { question })}
+                        onClick={() => onTree(faq)}
+                      >
+                        {t(locale, 'helpDesk.faqs.tree')}
                       </button>
                     </div>
                   </td>

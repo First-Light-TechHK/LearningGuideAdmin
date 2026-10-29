@@ -25,6 +25,7 @@ import { errorMessage, faqCategoryLabel } from '../lib/helpdeskFormat'
 import { isImeComposing } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
+import { FaqLinksEditor, FaqNodeFields } from './FaqGraphSection'
 import { useModal } from './useModal'
 
 /**
@@ -69,6 +70,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     keywords: `${uid}-keywords`,
     link: `${uid}-link`,
     confirm: `${uid}-confirm`,
+    graph: `${uid}-graph`,
   }
   const [base, setBase] = useState<HelpdeskFaq | null>(faq)
   const [original, setOriginal] = useState<FaqDraft>(() => (faq ? draftFromFaq(faq) : emptyFaqDraft()))
@@ -445,6 +447,16 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
             />
             {errorFor('keywords')}
           </div>
+
+          {/* v5「追问与选项」（graph design §5.1）：没有 Figma 画板，沿用抽屉的样式，待视觉验收 */}
+          <section className="hdGraphSection" aria-labelledby={ids.graph}>
+            <h3 className="hdGraphTitle" id={ids.graph}>
+              {t(locale, 'helpDesk.graph.title')}
+            </h3>
+            <p className="hdGraphHint">{t(locale, editing ? 'helpDesk.graph.hint' : 'helpDesk.graph.newHint')}</p>
+            <FaqNodeFields locale={locale} draft={draft} onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} />
+            {base ? <FaqLinksEditor key={base.id} locale={locale} faq={base} /> : null}
+          </section>
         </div>
 
         <footer className="hdDrawerFoot">

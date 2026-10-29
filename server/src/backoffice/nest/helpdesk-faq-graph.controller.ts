@@ -147,6 +147,15 @@ export class BackofficeHelpdeskFaqGraphController {
     return run(() => this.releases.working());
   }
 
+  /** 对话预览（§5.3）：?locale=en-GB|zh-CN&version=<版本号>（缺省：工作副本）；Portal 读到的同一个形状。 */
+  @Get('faq-releases/preview')
+  preview(
+    @Query('locale') locale?: unknown,
+    @Query('version') version?: unknown,
+  ) {
+    return run(() => this.releases.preview(locale, version));
+  }
+
   /** ?head=<版本号|working>&base=<版本号>（缺省：工作表 vs 当前发布的）。 */
   @Get('faq-releases/diff')
   diff(@Query('head') head?: unknown, @Query('base') base?: unknown) {

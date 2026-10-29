@@ -5,8 +5,20 @@ import {
   type EnquiryDetail,
   type EnquiryList,
   type FaqBody,
+  type FaqEdgeRow,
+  type FaqEdges,
+  type FaqEdgeView,
+  type FaqGraphPreview,
   type FaqPage,
+  type FaqPhrasing,
+  type FaqRelease,
+  type FaqReleaseDiff,
+  type FaqReleaseList,
+  type FaqTree,
+  type FaqWorkingCopy,
   type HelpdeskFaq,
+  type HelpdeskLocale,
+  type PhrasingLocale,
 } from '../contracts/helpdesk'
 import { faqQuery, type FaqFilters } from './helpdeskFaqs'
 import { enquiryQuery, type EnquiryFilters } from './helpdeskView'
@@ -37,7 +49,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<HelpdeskResu
   }
 }
 
-function sendJson<T>(method: 'POST' | 'PUT', url: string, body: unknown, idempotencyKey?: string) {
+function sendJson<T>(method: 'POST' | 'PUT' | 'DELETE', url: string, body: unknown, idempotencyKey?: string) {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
   return request<T>(url, { method, headers, body: JSON.stringify(body) })
@@ -119,4 +131,86 @@ export function updateFaq(faqId: string, body: FaqBody & { version: number }) {
 /** Delete FAQ = 归档（幂等）。 */
 export function archiveFaq(faqId: string, version: number) {
   return sendJson<HelpdeskFaq>('POST', `${faqPath(faqId)}/archive`, { version })
+}
+
+/* --------------------------- v5 问题树（graph design §5） --------------------------- */
+
+const releasePath = (version: number) => `/api/helpdesk/faq-releases/${encodeURIComponent(String(version))}`
+
+/** 一个节点的子节点（按顺序，解析好的文字）与父节点。 */
+export function getFaqEdges(faqId: string) {
+  return request<FaqEdges>(`${faqPath(faqId)}/edges`)
+}
+
+/** 加一条追问 / 选项（kind 由父节点类型决定；同一对父子再加一次返回已有的）。 */
+export function createFaqEdge(parentId: string, body: { childId: string; labelEn?: string | null; labelZh?: string | null }) {
+  return sendJson<FaqEdgeRow>('POST', `${faqPath(parentId)}/edges`, body)
+}
+
+/** 改覆盖文字：两种语言都给，null = 用子节点的问题。 */
+export function updateFaqEdge(edgeId: string, labels: { labelEn: string | null; labelZh: string | null }) {
+  return sendJson<FaqEdgeRow>('PUT', `/api/helpdesk/faq-edges/${encodeURIComponent(edgeId)}`, labels)
+}
+
+export function deleteFaqEdge(edgeId: string) {
+  return sendJson<{ deleted: boolean }>('DELETE', `/api/helpdesk/faq-edges/${encodeURIComponent(edgeId)}`, {})
+}
+
+/** 重排：完整的子节点 id 列表（列表过期 → 409 FAQ_CHILDREN_CHANGED）。 */
+export function reorderFaqEdges(parentId: string, childIds: string[]) {
+  return sendJson<{ children: FaqEdgeView[] }>('PUT', `${faqPath(parentId)}/edges/order`, { childIds })
+}
+
+export function getFaqTree(faqId: string) {
+  return request<FaqTree>(`${faqPath(faqId)}/tree`)
+}
+
+export function listPhrasings(faqId: string) {
+  return request<{ phrasings: FaqPhrasing[] }>(`${faqPath(faqId)}/phrasings`)
+}
+
+export function addPhrasing(faqId: string, body: { locale: PhrasingLocale; text: string }) {
+  return sendJson<FaqPhrasing>('POST', `${faqPath(faqId)}/phrasings`, body)
+}
+
+export function deletePhrasing(phrasingId: string) {
+  return sendJson<{ deleted: boolean }>('DELETE', `/api/helpdesk/faq-phrasings/${encodeURIComponent(phrasingId)}`, {})
+}
+
+export function listReleases() {
+  return request<FaqReleaseList>('/api/helpdesk/faq-releases')
+}
+
+/** 工作副本的检查与它和当前上线版本的差异（只读）。 */
+export function getWorkingCopy() {
+  return request<FaqWorkingCopy>('/api/helpdesk/faq-releases/working')
+}
+
+/** 一个版本和它的前一个上线版本（或 base）的差异。 */
+export function getReleaseDiff(version: number) {
+  return request<FaqReleaseDiff>(`${releasePath(version)}/diff`)
+}
+
+/** 冻结工作副本成新版本并跑检查与评测门（工作副本没变 → 返回已有的那一版）。 */
+export function createRelease() {
+  return sendJson<FaqRelease>('POST', '/api/helpdesk/faq-releases', {})
+}
+
+export function checkRelease(version: number) {
+  return sendJson<FaqRelease>('POST', `${releasePath(version)}/check`, {})
+}
+
+export function publishRelease(version: number) {
+  return sendJson<FaqRelease>('POST', `${releasePath(version)}/publish`, {})
+}
+
+export function rollbackRelease(version: number) {
+  return sendJson<FaqRelease>('POST', `${releasePath(version)}/rollback`, {})
+}
+
+/** 对话预览：工作副本（缺省）或某个版本，按 Portal 的样子投影成一种语言。 */
+export function getGraphPreview(locale: HelpdeskLocale, version?: number) {
+  const query = new URLSearchParams({ locale })
+  if (version !== undefined) query.set('version', String(version))
+  return request<FaqGraphPreview>(`/api/helpdesk/faq-releases/preview?${query.toString()}`)
 }

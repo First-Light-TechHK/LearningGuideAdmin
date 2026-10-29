@@ -948,6 +948,71 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       expect((await releases.list()).releases).toHaveLength(1);
     });
 
+    it('previews the working copy (or one release) per locale, as Portal reads a release', async () => {
+      wire();
+      const a = await choice();
+      const b = await create({ entry: false });
+      const c = await create({ entry: false });
+      await link(a, b, { labelEn: 'It failed', labelZh: '付款失败' });
+      await link(a, c);
+      const zh = await releases.preview('zh-CN');
+      expect(zh.source).toBe('working');
+      expect(zh.published).toBeNull();
+      expect(zh.locale).toBe('zh-CN');
+      const prompt = zh.nodes.find((n) => n.id === a.id);
+      expect(prompt).toMatchObject({
+        type: 'choice',
+        answer: '你遇到的是哪种情况？',
+        blocks: [],
+      });
+      expect(zh.nodes.find((n) => n.id === b.id)?.blocks).toEqual([
+        { id: 'b1', text: '答案。' },
+        { id: 'b2', text: '- 第一步\n- 第二步' },
+      ]);
+      expect(zh.edges).toEqual([
+        {
+          parentId: a.id,
+          childId: b.id,
+          kind: 'option',
+          position: 0,
+          label: '付款失败',
+        },
+        {
+          parentId: a.id,
+          childId: c.id,
+          kind: 'option',
+          position: 1,
+          label: c.questionZh,
+        },
+      ]);
+      expect(
+        (await releases.preview('en-GB')).edges.map((e) => e.label),
+      ).toEqual(['It failed', c.questionEn]);
+      // 一个版本：它的快照（之后的编辑不影响）
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+      await graphService.updateEdge(
+        staff,
+        (await graphService.edges(a.id)).children[0].edge.id,
+        {
+          labelEn: 'Card declined',
+          labelZh: '卡被拒',
+        },
+      );
+      const v1 = await releases.preview('zh-CN', '1');
+      expect(v1.source).toBe(1);
+      expect(v1.published).toBe(1);
+      expect(v1.edges[0].label).toBe('付款失败');
+      expect((await releases.preview('zh-CN')).edges[0].label).toBe('卡被拒');
+      await rejects(releases.preview('fr-FR'), 400, 'INVALID_INPUT');
+      await rejects(
+        releases.preview('zh-CN', '9'),
+        404,
+        'FAQ_RELEASE_NOT_FOUND',
+      );
+      expect((await releases.list()).releases).toHaveLength(1);
+    });
+
     it('with a card on screen, its children come first, then matching siblings, then the entry search', async () => {
       const { qa } = wire();
       const pay = await choice({

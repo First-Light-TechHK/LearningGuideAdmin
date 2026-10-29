@@ -257,6 +257,10 @@ export type HelpdeskFaq = {
   keywords: string[];
   /** v5 Part A：服务端总会给（迁移 20261030080000）；编辑器多选（待视觉验收）。 */
   signals?: FaqSignal[];
+  /** v5 问题树（迁移 20261030090000；旧服务端没有 → 按 answer / 入口处理）：稳定的 slug。 */
+  key?: string;
+  type?: FaqNodeType;
+  entry?: boolean;
   status: "published" | "archived";
   version: number;
   createdBy: string | null;
@@ -277,4 +281,209 @@ export type FaqBody = {
   keywords: string[];
   /** v5 Part A：不带 = 保留已存的标签（旧的编辑器只改文字不会清掉）。 */
   signals?: FaqSignal[];
+  /** v5 问题树：不带 = 保留（新建缺省 answer、入口）。 */
+  type?: FaqNodeType;
+  entry?: boolean;
+};
+
+/* --------------------------- v5 问题树（graph design §5） --------------------------- */
+
+/** answer = FAQ 卡片；choice = 一句提问 + 2–4 个选项（A/B/C/D）。 */
+export const FAQ_NODE_TYPES = ["answer", "choice"] as const;
+export type FaqNodeType = (typeof FAQ_NODE_TYPES)[number];
+export const FAQ_EDGE_KINDS = ["follow_up", "option"] as const;
+export type FaqEdgeKind = (typeof FAQ_EDGE_KINDS)[number];
+
+/** 与服务端 faqContracts.ts FAQ_LIMITS 一致的图上限。 */
+export const FAQ_GRAPH_LIMITS = {
+  optionLabelMaxZh: 24,
+  optionLabelMaxEn: 40,
+  followUpLabelMax: 200,
+  optionsMin: 2,
+  optionsMax: 4,
+  followUpsMax: 6,
+  followUpsShown: 4,
+  phrasingMax: 200,
+  phrasingsMax: 30,
+  depthMax: 4,
+} as const;
+
+/** 节点摘要（树、父子清单）。 */
+export type FaqNodeSummary = {
+  id: string;
+  key: string;
+  type: FaqNodeType;
+  entry: boolean;
+  category: FaqCategory;
+  questionEn: string;
+  questionZh: string;
+  status: "published" | "archived";
+};
+
+export type FaqEdgeRow = {
+  id: string;
+  parentId: string;
+  childId: string;
+  kind: FaqEdgeKind;
+  position: number;
+  /** null = 用子节点的问题。 */
+  labelEn: string | null;
+  labelZh: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** GET /api/helpdesk/faqs/:id/edges 的一行：边、另一端的节点、解析好的文字。 */
+export type FaqEdgeView = {
+  edge: FaqEdgeRow;
+  node: FaqNodeSummary | null;
+  label: { en: string; zh: string };
+};
+
+export type FaqEdges = { children: FaqEdgeView[]; parents: FaqEdgeView[] };
+
+/** 服务端 faqGraphChecks.ts GRAPH_RULES（新规则没有文案时原样显示）。 */
+export const GRAPH_RULES = [
+  "edge_endpoint",
+  "duplicate_edge",
+  "cycle",
+  "depth",
+  "orphan",
+  "option_parent",
+  "choice_follow_up",
+  "choice_options",
+  "choice_prompt",
+  "follow_ups",
+  "language",
+  "label_length",
+  "answer_blocks",
+] as const;
+
+export type GraphProblem = {
+  rule: string;
+  nodeId: string | null;
+  key: string | null;
+  parentId?: string;
+  childId?: string;
+  detail: string;
+};
+
+export type FaqGraphCheckResult = {
+  passed: boolean;
+  problems: GraphProblem[];
+  counts: { nodes: number; entries: number; choices: number; edges: number; phrasings: number };
+  maxDepth: number;
+};
+
+export type FaqTreeNode = {
+  node: FaqNodeSummary;
+  edge: FaqEdgeRow | null;
+  label: { en: string; zh: string } | null;
+  depth: number;
+  parentCount: number;
+  alsoAppearsIn: { id: string; key: string; questionEn: string; questionZh: string }[];
+  warnings: GraphProblem[];
+  cycle: boolean;
+  truncated: boolean;
+  children: FaqTreeNode[];
+};
+
+export type FaqTree = { root: FaqTreeNode; nodes: number };
+
+export const PHRASING_LOCALES = ["en-GB", "zh-CN", "zh-TW"] as const;
+export type PhrasingLocale = (typeof PHRASING_LOCALES)[number];
+
+export type FaqPhrasing = {
+  id: string;
+  faqId: string;
+  locale: PhrasingLocale;
+  text: string;
+  source: "staff" | "flywheel" | "seed";
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export const FAQ_RELEASE_STATUSES = ["draft", "evaluating", "published", "rejected", "superseded"] as const;
+export type FaqReleaseStatus = (typeof FAQ_RELEASE_STATUSES)[number];
+
+export type FaqReleaseEvalReport = {
+  kind: "retrieval" | "model" | "combined" | "rollback" | "skipped" | string;
+  passed: boolean;
+  summary: string;
+  ranAt: string;
+  metrics: Record<string, number>;
+  misses: { nodeId: string; key: string; locale: string; source: string; text: string; rank: number | null }[];
+  sourceVersion?: number;
+};
+
+export type FaqRelease = {
+  id: string;
+  version: number;
+  status: FaqReleaseStatus;
+  checks: FaqGraphCheckResult | null;
+  evalReport: FaqReleaseEvalReport | null;
+  /** 回滚版本：快照复制自哪个版本。 */
+  sourceVersion: number | null;
+  createdBy: string | null;
+  createdAt: string;
+  publishedBy: string | null;
+  publishedAt: string | null;
+  /** draft，且检查与评测都过了。 */
+  publishable: boolean;
+};
+
+export type FaqReleaseList = { releases: FaqRelease[]; published: number | null };
+
+export type FaqNodeRef = { id: string; key: string; questionEn: string; questionZh: string };
+
+export type FaqSnapshotEdge = {
+  parentId: string;
+  childId: string;
+  kind: FaqEdgeKind;
+  position: number;
+  labelEn: string | null;
+  labelZh: string | null;
+};
+
+export type FaqSnapshotDiff = {
+  nodes: { added: FaqNodeRef[]; removed: FaqNodeRef[]; changed: (FaqNodeRef & { fields: string[] })[] };
+  edges: {
+    added: FaqSnapshotEdge[];
+    removed: FaqSnapshotEdge[];
+    changed: { before: FaqSnapshotEdge; after: FaqSnapshotEdge; fields: string[] }[];
+  };
+  phrasings: { added: number; removed: number };
+  same: boolean;
+};
+
+/** 「发布新版本」：工作副本的检查与它和当前上线版本的差异。 */
+export type FaqWorkingCopy = { checks: FaqGraphCheckResult; diff: FaqSnapshotDiff; published: number | null };
+
+export type FaqReleaseDiff = { base: number | null; head: number | "working"; diff: FaqSnapshotDiff };
+
+/** 对话预览：与 Portal 读 faq-release/current 同一个投影（契约 FaqNode / FaqEdge）。 */
+export type FaqBlock = { id: string; text: string };
+
+export type FaqGraphNode = {
+  id: string;
+  key: string;
+  type: FaqNodeType;
+  entry: boolean;
+  category: FaqCategory;
+  popular: boolean;
+  question: string;
+  answer: string;
+  blocks: FaqBlock[];
+  signals: FaqSignal[];
+};
+
+export type FaqGraphEdge = { parentId: string; childId: string; kind: FaqEdgeKind; position: number; label: string };
+
+export type FaqGraphPreview = {
+  source: "working" | number;
+  published: number | null;
+  locale: HelpdeskLocale;
+  nodes: FaqGraphNode[];
+  edges: FaqGraphEdge[];
 };

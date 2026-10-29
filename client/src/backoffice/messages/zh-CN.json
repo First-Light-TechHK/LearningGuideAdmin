@@ -637,7 +637,21 @@
       "VERSION_CONFLICT": "这条常见问题刚被其他人修改，请刷新后重试。",
       "generic": "出了点问题，请重试。",
       "FAQ_NOT_FOUND": "这条常见问题已不存在。",
-      "IDEMPOTENCY_KEY_REUSED": "这次保存与之前的提交冲突，请重试。"
+      "IDEMPOTENCY_KEY_REUSED": "这次保存与之前的提交冲突，请重试。",
+      "FAQ_EDGE_CYCLE": "这样连接会形成循环：那个问题已经能走回这里。",
+      "FAQ_EDGE_EXISTS": "这两个问题已经连接过了，请直接修改那条连接。",
+      "FAQ_TOO_MANY_CHILDREN": "这张卡片的追问或选项已经到上限了。",
+      "FAQ_ARCHIVED": "已删除的问题不能连接。",
+      "FAQ_CHILDREN_CHANGED": "追问在你打开后被改过了，已载入最新列表，请再试一次。",
+      "FAQ_EDGE_NOT_FOUND": "这条连接已经不存在了。",
+      "FAQ_TOO_MANY_PHRASINGS": "每个问题最多 30 种问法。",
+      "FAQ_HAS_PARENTS": "这个问题还是别的卡片的追问或选项，请先在那里移除。",
+      "FAQ_KEY_TAKEN": "这个标识已经被别的问题用了。",
+      "FAQ_RELEASE_NOT_FOUND": "这个版本不存在。",
+      "FAQ_RELEASE_NOT_READY": "这个版本没有通过检查和评测，不能发布。",
+      "FAQ_RELEASE_LOCKED": "这个版本不能重新检查。",
+      "FAQ_RELEASE_NOT_PUBLISHED": "只能回滚到曾经上线过的版本。",
+      "FAQ_RELEASE_CHECKS_FAILED": "那个版本已经不能通过图检查了。"
     },
     "addFaq": "新增常见问题",
     "actions": {
@@ -778,7 +792,11 @@
       "empty": "还没有常见问题。",
       "emptyFiltered": "没有符合搜索或筛选条件的常见问题。",
       "saved": "常见问题已保存。",
-      "deleted": "常见问题已删除。"
+      "deleted": "常见问题已删除。",
+      "tree": "问题树",
+      "treeLabel": "{question} 的问题树",
+      "choiceTag": "选择题",
+      "followUpTag": "追问"
     },
     "drawer": {
       "addTitle": "新增常见问题",
@@ -824,7 +842,8 @@
         "tooLong": "太长了（最多 {max} 个字符）",
         "tooMany": "最多 20 个关键词",
         "keywordTooLong": "每个关键词最多 40 个字符",
-        "unsafeLink": "链接需是完整的 https://、http:// 或 mailto: 地址，且不含空格或引号"
+        "unsafeLink": "链接需是完整的 https://、http:// 或 mailto: 地址，且不含空格或引号",
+        "choicePrompt": "选择题的提问不能包含数字、链接或邮箱"
       }
     },
     "preview": {
@@ -833,6 +852,230 @@
       "languages": "预览语言",
       "en": "EN",
       "zh": "中文"
+    },
+    "graph": {
+      "title": "追问与选项",
+      "hint": "追问、选项和问法改动后立即存入工作副本；学员要等发布新版本后才看到。",
+      "newHint": "先保存这条常见问题，再添加追问和问法。",
+      "type": "卡片类型",
+      "types": {
+        "answer": "答案卡片",
+        "choice": "选择题（A/B/C/D）"
+      },
+      "typeHint": {
+        "answer": "显示答案，下面最多 4 个追问。",
+        "choice": "答案框里写一句提问，学员从 2–4 个选项里选一个；不要写数字或链接。"
+      },
+      "entry": "入口问题",
+      "entryHint": "可以直接匹配学员的新问题，也可以作为 chip 展示。只在某张卡片之后才有意义的追问请关掉。",
+      "signals": "学员情境",
+      "signalsHint": "处于这些情境的学员会优先看到这张卡片。",
+      "key": "标识：{key}",
+      "children": {
+        "follow_up": "追问（最多 {max} 条，显示前 {shown} 条）",
+        "option": "选项（{min}–{max} 个）"
+      },
+      "empty": {
+        "follow_up": "还没有追问。",
+        "option": "还没有选项。选择题需要 2–4 个。"
+      },
+      "parents": "出现在这些卡片之后",
+      "drag": "拖动排序",
+      "moveUp": "上移 {label}",
+      "moveDown": "下移 {label}",
+      "editLabel": "修改 {label} 的文字",
+      "editLabelShort": "改文字",
+      "remove": "移除 {label}",
+      "removeShort": "移除",
+      "customLabel": "自定义文字",
+      "labelEn": "显示文字（英文）",
+      "labelZh": "显示文字（中文）",
+      "labelHint": "两项都留空则显示问题本身。",
+      "labelErrors": {
+        "both": "两种语言都填，或都留空。",
+        "tooLongEn": "英文文字最多 {max} 个字符",
+        "tooLongZh": "中文文字最多 {max} 个字"
+      },
+      "saveLabel": "保存文字",
+      "cancel": "取消",
+      "addExisting": "添加已有问题",
+      "addNew": "新建追问",
+      "addNewOption": "新建选项",
+      "search": "搜索问题...",
+      "searchEmpty": "没有匹配的问题。",
+      "pick": "添加 {question}",
+      "pickShort": "添加",
+      "linked": "已添加",
+      "newFollowUpHint": "新建的问题不是入口问题：学员只能从这张卡片点进去。",
+      "createAndLink": "新建并添加",
+      "full": "已经有 {max} 个了，不能再加。",
+      "working": "保存中…",
+      "phrasings": "学员的问法",
+      "phrasingsHint": "学员问这个问题的其他说法，只用于匹配问题，不会改答案。",
+      "phrasingLocale": "问法的语言",
+      "phrasingText": "新的问法",
+      "phrasingPlaceholder": "例如：卡被拒了怎么办",
+      "addPhrasing": "添加问法",
+      "phrasingsEmpty": "还没有问法。",
+      "phrasingErrors": {
+        "required": "请输入问法",
+        "tooLong": "最多 {max} 个字"
+      },
+      "removePhrasing": "删除问法 {text}",
+      "phrasingLocales": {
+        "en-GB": "英文",
+        "zh-CN": "简体中文",
+        "zh-TW": "繁体中文"
+      },
+      "phrasingSources": {
+        "staff": "员工",
+        "flywheel": "来自对话",
+        "seed": "初始导入"
+      },
+      "rules": {
+        "edge_endpoint": "有一条连接指向已删除或不存在的问题。",
+        "duplicate_edge": "同两个问题之间连了两次。",
+        "cycle": "连接形成了循环。",
+        "depth": "离入口问题太远（最多 4 层）。",
+        "orphan": "不是入口问题，也没有入口问题能走到这里。",
+        "option_parent": "只有选择题才能有选项。",
+        "choice_follow_up": "选择题不能有追问。",
+        "choice_options": "选择题需要 2–4 个选项。",
+        "choice_prompt": "选择题的提问不能包含数字或链接。",
+        "follow_ups": "追问超过 6 条。",
+        "language": "缺少英文或中文。",
+        "label_length": "chip 或选项的文字太长。",
+        "answer_blocks": "有一种语言的答案是空的。"
+      }
+    },
+    "tree": {
+      "title": "问题树",
+      "subtitle": "工作副本：下次发布后学员会看到的样子。",
+      "tabs": {
+        "outline": "大纲",
+        "chat": "对话预览"
+      },
+      "expand": "展开 {label}",
+      "collapse": "收起 {label}",
+      "expandAll": "全部展开",
+      "collapseAll": "全部收起",
+      "alsoIn": "也出现在 {count} 处",
+      "alsoInOne": "也出现在 1 处",
+      "alsoInList": "也在这些问题下：{questions}",
+      "cycle": "回到了上面的问题，不再展开",
+      "truncated": "层级太深，这里不再展开",
+      "types": {
+        "answer": "答案",
+        "choice": "选择题"
+      },
+      "entry": "入口",
+      "shownAs": "显示为「{label}」",
+      "nodes": "这棵树共 {count} 个问题",
+      "warnings": "{count} 个提醒",
+      "noWarnings": "没有提醒",
+      "outlineLabel": "问题树大纲"
+    },
+    "chatPreview": {
+      "title": "对话预览",
+      "hint": "像学员一样点选项和追问。点击时用固定的开场和结尾；不模拟学员打字提问。",
+      "start": "从这里开始",
+      "restart": "重新开始",
+      "source": "来自：{question}",
+      "followUpsTitle": "你可能还想问：",
+      "hidden": "还有 {count} 条追问不会显示（只显示前 4 条）。",
+      "noOptions": "这道选择题还没有选项。",
+      "missing": "工作副本里没有这个问题（已删除）。",
+      "notEntry": "这不是入口问题：学员只能从其他卡片点进来。",
+      "learner": "学员",
+      "assistant": "AI 客服",
+      "handover": "学员随时可以选择联系人工客服。",
+      "empty": "还没有入口问题。",
+      "transcript": "预览对话"
+    },
+    "releases": {
+      "button": "版本发布",
+      "title": "版本发布",
+      "subtitle": "学员只看到已上线的版本。改动要创建新版本、通过检查和评测、再发布后才会上线。",
+      "live": "当前上线：v{version}",
+      "none": "还没有发布过版本，学员看到的是逐条保存的常见问题。",
+      "working": "相对当前上线版本的改动",
+      "noChanges": "相对当前上线版本没有改动。",
+      "diff": {
+        "nodesAdded": "新增问题（{count}）",
+        "nodesChanged": "修改的问题（{count}）",
+        "nodesRemoved": "移除的问题（{count}）",
+        "edgesAdded": "新增连接（{count}）",
+        "edgesChanged": "修改的连接（{count}）",
+        "edgesRemoved": "移除的连接（{count}）",
+        "phrasings": "问法：新增 {added}，移除 {removed}",
+        "edge": "{parent} → {child}"
+      },
+      "fields": {
+        "key": "标识",
+        "type": "卡片类型",
+        "entry": "入口",
+        "category": "分类",
+        "popular": "热门",
+        "questionEn": "英文问题",
+        "answerEn": "英文答案",
+        "questionZh": "中文问题",
+        "answerZh": "中文答案",
+        "signals": "学员情境",
+        "keywords": "关键词",
+        "kind": "连接类型",
+        "position": "顺序",
+        "labelEn": "英文文字",
+        "labelZh": "中文文字"
+      },
+      "checks": "图检查",
+      "checksPassed": "全部检查通过",
+      "checksFailed": "{count} 个问题需要处理",
+      "counts": "{nodes} 个问题、{entries} 个入口、{choices} 道选择题、{edges} 条连接、{phrasings} 种问法",
+      "create": "发布新版本",
+      "creating": "检查中…",
+      "createHint": "冻结工作副本，然后运行图检查和评测。发布之前不会上线。",
+      "sameAsLatest": "相对 v{version} 没有改动，没有新建版本。",
+      "created": "已创建 v{version}。",
+      "history": "版本历史",
+      "columns": {
+        "version": "版本",
+        "status": "状态",
+        "published": "发布时间",
+        "actions": "操作",
+        "result": "检查与评测"
+      },
+      "status": {
+        "draft": "待发布",
+        "evaluating": "评测中",
+        "published": "已上线",
+        "rejected": "未通过",
+        "superseded": "已被替换"
+      },
+      "passed": "通过",
+      "failed": "未通过",
+      "notRun": "未运行",
+      "recall": "通过，recall@8 {value}%",
+      "recallFailed": "未通过，recall@8 {value}%",
+      "rollbackOf": "复制自 v{version}",
+      "misses": "{count} 个用例没有命中",
+      "publish": "发布 v{version}",
+      "publishShort": "发布",
+      "publishConfirm": "发布 v{version}？学员大约一分钟内就会看到。",
+      "confirmNo": "取消",
+      "publishedNotice": "v{version} 已上线。",
+      "recheck": "重新检查",
+      "rechecked": "已重新检查 v{version}。",
+      "rollback": "回滚到此版本",
+      "rollbackLabel": "回滚到 v{version}",
+      "rollbackConfirm": "回滚到 v{version}？它的内容会作为一个新版本重新上线。",
+      "rollbackYes": "回滚",
+      "rolledBack": "已回滚：v{version} 已上线。",
+      "showChanges": "v{version} 的改动",
+      "hideChanges": "收起改动",
+      "empty": "还没有版本。",
+      "loading": "加载中…",
+      "createdOn": "创建于 {date}",
+      "checksValue": "图检查：{result}"
     }
   }
 }

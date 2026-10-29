@@ -903,6 +903,14 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - **CI 的免费检索闸**（`eval/helpdesk/conversations.spec.ts`）：生产候选 SQL（PostgreSQL）跑种子 FAQ 自己的中英问题 + 种子用例，recall@8 ≥ 95%。为此种子评测库（`eval/helpdesk/faqs.json` 与 `qa10k/faqs.json` 的前 14 条，两份一致）补了 4 条 FAQ 的关键词（忘了密码；月付 / 年付；stop paying / 续费 / 停掉；improvement / recommend / 改进 / 意见）：种子用例 recall@8 93.7% → 98.4%（剩下两条错别字用例）。
 - **测试**：`workflow/guard.spec.ts`（`fixtures/guard-corpus.json` 语料：zh-CN / zh-TW / en / 中英混写、全角数字、每个原因码；上限边界；接地；模板；fixture v6 的例子）、`workflow/pi-step-runner.spec.ts`（v5 参数，真的 pi + faux provider）、`workflow/engine.spec.ts`（extras）、`helpdesk-suggest.v5.spec.ts`（每种 kind、choice、clarify 的各种失败、chip、无 key、限流、期限、日志与脱敏；另有真的 pi + faux 走两步）、`helpdesk-suggestion.store.pg.spec.ts`（新列与约束）、`eval/helpdesk/conversations.spec.ts`。
 
+### 4A.15 BackOffice 的问题树编辑、树视图、对话预览与发布新版本（2026-10-30，`helpdesk-v5-faq-graph-design.md` §5.1–§5.4；没有 Figma 画板，待视觉验收）
+
+- **FAQ 抽屉的「追问与选项」**（`client/src/backoffice/helpdesk/FaqGraphSection.tsx`）：卡片类型 answer / choice（单选；choice 时答案框是一句提问，前端与服务端同样拒绝数字、链接、邮箱）、入口问题开关、学员情境多选（`FAQ_SIGNALS`，中英标签，按优先级排序）——这三项属于草稿，跟「Save FAQ」一起 PUT。编辑已有 FAQ 时另有立即写入工作副本的部分：子节点列表（choice 显示 A/B/C/D；拖动或上移 / 下移按钮排序 → `PUT …/edges/order`；改显示文字，两种语言要么都填要么都空，选项 ≤24 / 40、追问 ≤200 → `PUT /faq-edges/:id`；移除 → `DELETE`）、「添加已有问题」（搜索，自己不出现、已连的标「已添加」）、「新建追问 / 新建选项」（新建一条同分类、非入口的 answer FAQ 再连上，带 Idempotency-Key）、到上限（选项 4、追问 6）时两个按钮禁用；学员的问法（en-GB / zh-CN / zh-TW，≤200 字，至多 30 种；来源 flywheel / seed 标出）。新建 FAQ 时只显示三项草稿字段与「先保存再添加」。错误码都有中英文案（`FAQ_EDGE_CYCLE`、`FAQ_HAS_PARENTS`…）。
+- **问题树**（`FaqTreeDrawer.tsx`，FAQs 表格每行「问题树」，VIEW 也能开）：`GET …/tree` 的缩进大纲，根与第一层展开，逐个展开 / 收起（按钮 `aria-expanded`）与全部展开 / 收起；选项标 A/B/C/D，覆盖文字与问题不同时两者都显示；共享节点标「也出现在 N 处」并列出另外的父问题；图检查的提醒（层级、孤立、缺语言…，按规则本地化）挂在节点下；环与超深分支标出。
+- **对话预览**（`FaqChatPreview.tsx`，问题树抽屉的第二个 Tab）：`GET /api/helpdesk/faq-releases/preview?locale=` 取工作副本的 Portal 投影，`client/src/backoffice/lib/helpdeskGraph.ts` `previewTurn` 按 Portal 点击时的规则渲染：answer = 固定开场「好的，这个问题可以这样处理：」/「Here's how to sort this out:」→ 引用卡片「来自：<问题>」+ 整条答案 → 固定结尾 →「你可能还想问：」至多 4 个追问（多出的条数提示员工）；choice = 提问 + A/B/C/D 按钮；只用边种类对、子节点在的边。EN / 中文切换（学员点过的路径保留），可选起点（入口节点，热门在前），重新开始。不模拟打字提问（那要问模型）。
+- **版本发布**（`FaqReleasesDrawer.tsx`，FAQs Tab 页头「版本发布」）：当前上线版本；工作副本相对它的差异（问题 / 连接的新增、修改（列出字段）、移除，问法增减）与图检查（问题按 key + 规则文案）；「发布新版本」（FULL）→ `POST /faq-releases`，提示「已创建 vN」或「没有改动」；版本历史（状态、发布 / 创建时间、检查与评测 recall@8、没命中的用例数、每个版本的改动）；「发布 vN」与「回滚到此版本」都先确认，「重新检查」不需要；按钮只在服务端会成功时出现（`releaseActions`）。VIEW 只看。
+- **测试**：`client/tests/helpdesk-graph.test.ts`（重排、文字与问法校验、大纲、预览的三段式与模板、≤4 个追问、起点、版本操作、每条规则与状态都有中英文案）、`client/tests/helpdesk-graph-ui.test.tsx`（经 HelpDeskPage 与假的 BackOffice Server：上面每个流程，含拖动、VIEW 只读、Escape）、`helpdesk-faqs.test.ts`（草稿的 type / entry / signals、choice 提问校验）；服务端 `helpdesk-faq-graph.pg.spec.ts`（preview：工作副本与版本、语言、错误）与 `helpdesk-faq-graph-rbac.spec.ts`（preview 是 VIEW 的读接口，不被当成版本号）。
+
 ---
 
 ## 5. API 接口规范
@@ -1075,6 +1083,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | DELETE | /api/helpdesk/faq-phrasings/:id | helpDesk FULL | 幂等 `{ deleted }` |
 | GET | /api/helpdesk/faq-releases · /working · /diff?head=&base= · /:version · /:version/diff?base= | helpDesk VIEW | 历史 `{ releases, published }`（每个带 `checks`、`evalReport`、`publishable`）；工作表的检查与和当前发布版本的差异；差异 `{ base, head, diff: { nodes, edges, phrasings, same } }` |
 | POST | /api/helpdesk/faq-releases · /:version/check · /:version/publish · /:version/rollback | helpDesk FULL | 新建（201；工作表没变 200 返回已有的）、重新检查、发布（只有 publishable 的，否则 409 `FAQ_RELEASE_NOT_READY`；幂等）、回滚（201 新版本并发布；已是它 200；没上线过的 409 `FAQ_RELEASE_NOT_PUBLISHED`） |
+| GET | /api/helpdesk/faq-releases/preview?locale=en-GB\|zh-CN&version= | helpDesk VIEW | §4A.15「对话预览」：工作副本（缺省）或某个版本的快照，按 Portal 读 faq-release/current 的同一个投影 `{ source: 'working'\|<版本号>, published, locale, nodes, edges }`（答案块、解析好的边文字）；locale 不对 400 `INVALID_INPUT`，版本不存在 404 `FAQ_RELEASE_NOT_FOUND`；什么都不写 |
 | GET | /api/helpdesk/agent-runs/:runId | helpDesk VIEW | 2026-10-29，§4A.11：`{ runId, parentRunId, chain, events }`（导出副本，学员原文脱敏），`Cache-Control: no-store`；不存在或 id 不合法 404 `AGENT_RUN_NOT_FOUND`；没有写接口 |
 | GET | /api/helpdesk/agent-runs/:runId/events/:seq | helpDesk VIEW | `{ event, sources, derived }`；`seq` 须为正整数（否则 400 `INVALID_INPUT`），不存在 404 `AGENT_EVENT_NOT_FOUND` |
 

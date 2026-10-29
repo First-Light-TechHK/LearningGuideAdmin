@@ -7,6 +7,8 @@ import type { HelpdeskFaq } from '../contracts/helpdesk'
 import { EnquiriesView } from '../helpdesk/EnquiriesView'
 import { FaqDrawer } from '../helpdesk/FaqDrawer'
 import { FaqPreview } from '../helpdesk/FaqPreview'
+import { FaqReleasesDrawer } from '../helpdesk/FaqReleasesDrawer'
+import { FaqTreeDrawer } from '../helpdesk/FaqTreeDrawer'
 import { FaqsView } from '../helpdesk/FaqsView'
 import { TraceDrawer } from '../helpdesk/TraceDrawer'
 import { afterFaqSave } from '../lib/helpdeskFaqs'
@@ -23,6 +25,8 @@ import { useWorkspaceAccess } from '../lib/workspaceAccess'
  * 抽屉盖在 Tab 下方的内容区上（.hdContent）。抽屉或 Preview 打开时，页头、Tab 和后面的列表都 inert
  *（点不到、Tab 不进去），「+ Add FAQ」与切 Tab 也不会替换掉正在编辑的草稿。写操作只给 helpDesk = FULL；VIEW 能看能预览，
  * 没有任何写控件（服务端同样拒绝）。Enquiries 里 AI 块的「查看链路」抽屉（只读）也在这一层打开。
+ * v5 问题树（graph design §5，待视觉验收）：FAQs Tab 的每一行「问题树」打开大纲 + 对话预览抽屉（只读）；
+ * 页头「版本发布」打开发布新版本 / 版本历史抽屉（所有角色能看，写操作只给 FULL）。
  */
 
 type TabKey = 'enquiries' | 'faqs'
@@ -44,8 +48,10 @@ export default function HelpDeskPage() {
   const [faqsVersion, setFaqsVersion] = useState(0)
   /** 「查看链路」打开的 run（AI 块 id）；只读，VIEW 也能开。 */
   const [tracing, setTracing] = useState<string | null>(null)
+  const [treeOf, setTreeOf] = useState<HelpdeskFaq | null>(null)
+  const [releasesOpen, setReleasesOpen] = useState(false)
   const drawerOpen = Boolean(editing && controls.faqDrawer)
-  const modal = drawerOpen || previewing !== null || tracing !== null
+  const modal = drawerOpen || previewing !== null || tracing !== null || treeOf !== null || releasesOpen
 
   // v1 的 Common Questions 链接（?tab=questions）换成 ?tab=faqs，其它参数保留
   useEffect(() => {
@@ -82,11 +88,18 @@ export default function HelpDeskPage() {
           <h1 className="cardTitle">{t(locale, 'helpDesk.title')}</h1>
           <p className="hdSubtitle">{t(locale, 'helpDesk.subtitle')}</p>
         </div>
-        {controls.addFaq ? (
-          <button type="button" className="hdPrimaryButton" onClick={() => !modal && setEditing({ faq: null })}>
-            + {t(locale, 'helpDesk.addFaq')}
-          </button>
-        ) : null}
+        <div className="hdHeaderActions">
+          {tab === 'faqs' ? (
+            <button type="button" className="hdDrawerButton hdReleasesButton" onClick={() => !modal && setReleasesOpen(true)}>
+              {t(locale, 'helpDesk.releases.button')}
+            </button>
+          ) : null}
+          {controls.addFaq ? (
+            <button type="button" className="hdPrimaryButton" onClick={() => !modal && setEditing({ faq: null })}>
+              + {t(locale, 'helpDesk.addFaq')}
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="hdTabs" role="tablist" aria-label={t(locale, 'helpDesk.title')} inert={modal}>
@@ -126,6 +139,7 @@ export default function HelpDeskPage() {
               refreshKey={faqsVersion}
               onEdit={(faq) => setEditing({ faq })}
               onPreview={setPreviewing}
+              onTree={setTreeOf}
             />
           )}
         </div>
@@ -141,6 +155,19 @@ export default function HelpDeskPage() {
         ) : null}
 
         {tracing ? <TraceDrawer key={tracing} locale={locale} runId={tracing} onClose={() => setTracing(null)} /> : null}
+
+        {treeOf ? <FaqTreeDrawer key={treeOf.id} locale={locale} faq={treeOf} onClose={() => setTreeOf(null)} /> : null}
+
+        {releasesOpen ? (
+          <FaqReleasesDrawer
+            locale={locale}
+            canWrite={canWrite}
+            onClose={() => {
+              setReleasesOpen(false)
+              setFaqsVersion((value) => value + 1)
+            }}
+          />
+        ) : null}
       </div>
 
       {previewing ? <FaqPreview locale={locale} faq={previewing} onClose={() => setPreviewing(null)} /> : null}

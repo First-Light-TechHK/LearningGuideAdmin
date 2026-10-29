@@ -1,3 +1,9 @@
+import {
+  isHelpdeskLocale,
+  type FaqEdge,
+  type FaqNode,
+  type HelpdeskLocale,
+} from '../../../../contracts/helpdesk-qa';
 import { HelpdeskError } from '../portalHelpdeskClient';
 import type { FaqActor } from './faqContracts';
 import { checkFaqGraph, type FaqGraphCheckResult } from './faqGraphChecks';
@@ -10,6 +16,7 @@ import {
 import {
   diffSnapshots,
   freezeSnapshot,
+  publicRelease,
   snapshotHash,
   type FaqReleaseSnapshot,
   type FaqReleaseSource,
@@ -81,6 +88,19 @@ export type FaqReleaseSummary = FaqReleaseRow & { publishable: boolean };
 function summary(release: FaqReleaseRow): FaqReleaseSummary {
   return { ...release, publishable: releaseReady(release) };
 }
+
+/**
+ * 「对话预览」（graph design §5.3）读到的图：与 Portal 读 faq-release/current 同一个投影（publicRelease：
+ * 按语言挑字段、答案块、解析好的边文字），来源是工作副本（缺省）或某一个版本的快照。
+ */
+export type FaqGraphPreview = {
+  source: 'working' | number;
+  /** 当前上线的版本号；还没有任何发布 → null。 */
+  published: number | null;
+  locale: HelpdeskLocale;
+  nodes: FaqNode[];
+  edges: FaqEdge[];
+};
 
 export type CreateReleaseResult = {
   release: FaqReleaseSummary;
@@ -270,6 +290,35 @@ export function createFaqReleaseService(
         checks: checkFaqGraph(snapshot),
         diff: diffSnapshots(published?.snapshot ?? null, snapshot),
         published: published?.version ?? null,
+      };
+    },
+
+    /** 对话预览：工作副本（version 缺省）或某个版本的快照，按 Portal 的样子投影成一种语言（什么都不写）。 */
+    async preview(
+      rawLocale: unknown,
+      rawVersion?: unknown,
+    ): Promise<FaqGraphPreview> {
+      if (!isHelpdeskLocale(rawLocale))
+        throw invalid('locale must be en-GB or zh-CN');
+      const working =
+        rawVersion === undefined ||
+        rawVersion === '' ||
+        rawVersion === 'working';
+      const [release, published] = await Promise.all([
+        working ? null : required(versionNumber(rawVersion)),
+        graph.published(),
+      ]);
+      const snapshot = release ? release.snapshot : await workingSnapshot();
+      const { nodes, edges } = publicRelease(
+        { version: release?.version ?? 1, publishedAt: '', snapshot },
+        rawLocale,
+      );
+      return {
+        source: release ? release.version : 'working',
+        published: published?.version ?? null,
+        locale: rawLocale,
+        nodes,
+        edges,
       };
     },
 

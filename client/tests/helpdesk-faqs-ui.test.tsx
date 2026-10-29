@@ -358,6 +358,10 @@ describe('FAQ drawer (Figma 1379:299)', () => {
       questionZh: '可以退款吗？',
       answerZh: '可以，14 天内。',
       keywords: ['refund', 'money back'],
+      // v5 question trees: the card type, entry and situations are part of the FAQ
+      type: 'answer',
+      entry: true,
+      signals: [],
     })
     await waitFor(() => absent(screen.queryByRole('dialog')))
     await waitFor(() => assert.equal(server.callsTo('GET', LIST).length, before + 1))
@@ -430,6 +434,9 @@ describe('FAQ drawer (Figma 1379:299)', () => {
       questionZh: '问题 f1？',
       answerZh: '答案 f1。',
       keywords: ['password', 'reset'],
+      type: 'answer',
+      entry: true,
+      signals: [],
       version: 4,
     })
   })

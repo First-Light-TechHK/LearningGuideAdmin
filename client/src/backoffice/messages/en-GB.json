@@ -637,7 +637,21 @@
       "VERSION_CONFLICT": "Someone else changed this FAQ. Please reload and try again.",
       "generic": "Something went wrong. Please try again.",
       "FAQ_NOT_FOUND": "This FAQ no longer exists.",
-      "IDEMPOTENCY_KEY_REUSED": "This save clashes with an earlier one. Please try again."
+      "IDEMPOTENCY_KEY_REUSED": "This save clashes with an earlier one. Please try again.",
+      "FAQ_EDGE_CYCLE": "This link would make a loop: that question already leads back here.",
+      "FAQ_EDGE_EXISTS": "These two questions are already linked. Edit that link instead.",
+      "FAQ_TOO_MANY_CHILDREN": "This card already has as many follow-ups or options as it can.",
+      "FAQ_ARCHIVED": "A deleted question cannot be linked.",
+      "FAQ_CHILDREN_CHANGED": "The follow-ups changed since you loaded them. The latest list is loaded; try again.",
+      "FAQ_EDGE_NOT_FOUND": "This link no longer exists.",
+      "FAQ_TOO_MANY_PHRASINGS": "A question can have up to 30 phrasings.",
+      "FAQ_HAS_PARENTS": "This question is still a follow-up or option of another card. Remove it there first.",
+      "FAQ_KEY_TAKEN": "Another question already uses this key.",
+      "FAQ_RELEASE_NOT_FOUND": "This version no longer exists.",
+      "FAQ_RELEASE_NOT_READY": "This version has not passed the checks and the eval, so it cannot be published.",
+      "FAQ_RELEASE_LOCKED": "This version cannot be checked again.",
+      "FAQ_RELEASE_NOT_PUBLISHED": "You can only roll back to a version that was live before.",
+      "FAQ_RELEASE_CHECKS_FAILED": "That version no longer passes the graph checks."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -778,7 +792,11 @@
       "empty": "No FAQs yet.",
       "emptyFiltered": "No FAQs match your search or filters.",
       "saved": "FAQ saved.",
-      "deleted": "FAQ deleted."
+      "deleted": "FAQ deleted.",
+      "tree": "Tree",
+      "treeLabel": "Question tree for {question}",
+      "choiceTag": "Choice",
+      "followUpTag": "Follow-up"
     },
     "drawer": {
       "addTitle": "Add FAQ",
@@ -824,7 +842,8 @@
         "tooLong": "Too long (up to {max} characters)",
         "tooMany": "Up to 20 keywords",
         "keywordTooLong": "Each keyword can be up to 40 characters",
-        "unsafeLink": "Links must be a full https://, http:// or mailto: address, without spaces or quotes"
+        "unsafeLink": "Links must be a full https://, http:// or mailto: address, without spaces or quotes",
+        "choicePrompt": "The question of a choice card cannot contain digits, links or emails"
       }
     },
     "preview": {
@@ -833,6 +852,230 @@
       "languages": "Preview language",
       "en": "EN",
       "zh": "中文"
+    },
+    "graph": {
+      "title": "Follow-ups and options",
+      "hint": "Follow-ups, options and phrasings are saved to the working copy straight away. Learners see them after the next release.",
+      "newHint": "Save this FAQ first, then add follow-ups and phrasings.",
+      "type": "Card type",
+      "types": {
+        "answer": "Answer card",
+        "choice": "Choice question (A/B/C/D)"
+      },
+      "typeHint": {
+        "answer": "Shows the answer, then up to 4 follow-up chips.",
+        "choice": "The answer box holds one short question. Learners pick one of 2–4 options. No digits or links."
+      },
+      "entry": "Entry question",
+      "entryHint": "Can match a new question and be shown as a chip. Turn it off for follow-ups that only make sense after another card.",
+      "signals": "Learner situations",
+      "signalsHint": "Learners in these situations see this card first.",
+      "key": "Key: {key}",
+      "children": {
+        "follow_up": "Follow-ups (up to {max}, the first {shown} are shown)",
+        "option": "Options ({min}–{max})"
+      },
+      "empty": {
+        "follow_up": "No follow-ups yet.",
+        "option": "No options yet. A choice question needs 2–4."
+      },
+      "parents": "Shown after",
+      "drag": "Drag to reorder",
+      "moveUp": "Move {label} up",
+      "moveDown": "Move {label} down",
+      "editLabel": "Edit the text of {label}",
+      "editLabelShort": "Edit text",
+      "remove": "Remove {label}",
+      "removeShort": "Remove",
+      "customLabel": "Custom text",
+      "labelEn": "Text shown (English)",
+      "labelZh": "Text shown (Chinese)",
+      "labelHint": "Leave both empty to show the question itself.",
+      "labelErrors": {
+        "both": "Fill in both languages, or leave both empty.",
+        "tooLongEn": "English text: up to {max} characters",
+        "tooLongZh": "Chinese text: up to {max} characters"
+      },
+      "saveLabel": "Save text",
+      "cancel": "Cancel",
+      "addExisting": "Add existing question",
+      "addNew": "New follow-up",
+      "addNewOption": "New option",
+      "search": "Search questions...",
+      "searchEmpty": "No matching questions.",
+      "pick": "Add {question}",
+      "pickShort": "Add",
+      "linked": "Already added",
+      "newFollowUpHint": "The new question is not an entry question: learners reach it from this card.",
+      "createAndLink": "Create and add",
+      "full": "This card already has {max}.",
+      "working": "Saving…",
+      "phrasings": "How learners ask",
+      "phrasingsHint": "Other ways learners ask this question. Used only to match questions; the answer does not change.",
+      "phrasingLocale": "Language of the phrasing",
+      "phrasingText": "New phrasing",
+      "phrasingPlaceholder": "e.g. my card was declined",
+      "addPhrasing": "Add phrasing",
+      "phrasingsEmpty": "No phrasings yet.",
+      "phrasingErrors": {
+        "required": "Enter a phrasing",
+        "tooLong": "Up to {max} characters"
+      },
+      "removePhrasing": "Remove the phrasing {text}",
+      "phrasingLocales": {
+        "en-GB": "English",
+        "zh-CN": "Simplified Chinese",
+        "zh-TW": "Traditional Chinese"
+      },
+      "phrasingSources": {
+        "staff": "Staff",
+        "flywheel": "From chats",
+        "seed": "Imported"
+      },
+      "rules": {
+        "edge_endpoint": "A link points to a question that is deleted or missing.",
+        "duplicate_edge": "The same two questions are linked twice.",
+        "cycle": "The links make a loop.",
+        "depth": "Too many steps from an entry question (up to 4).",
+        "orphan": "Not an entry question, and no entry question leads here.",
+        "option_parent": "Only a choice question can have options.",
+        "choice_follow_up": "A choice question cannot have follow-ups.",
+        "choice_options": "A choice question needs 2–4 options.",
+        "choice_prompt": "The question of a choice card cannot contain digits or links.",
+        "follow_ups": "More than 6 follow-ups.",
+        "language": "English or Chinese text is missing.",
+        "label_length": "A chip or option text is too long.",
+        "answer_blocks": "The answer is empty in one language."
+      }
+    },
+    "tree": {
+      "title": "Question tree",
+      "subtitle": "Working copy: what learners will see after the next release.",
+      "tabs": {
+        "outline": "Outline",
+        "chat": "Chat preview"
+      },
+      "expand": "Expand {label}",
+      "collapse": "Collapse {label}",
+      "expandAll": "Expand all",
+      "collapseAll": "Collapse all",
+      "alsoIn": "Also appears in {count} places",
+      "alsoInOne": "Also appears in 1 place",
+      "alsoInList": "Also under: {questions}",
+      "cycle": "Leads back to a question above; not expanded",
+      "truncated": "Too deep to show here",
+      "types": {
+        "answer": "Answer",
+        "choice": "Choice"
+      },
+      "entry": "Entry",
+      "shownAs": "Shown as “{label}”",
+      "nodes": "{count} questions in this tree",
+      "warnings": "{count} warnings",
+      "noWarnings": "No warnings",
+      "outlineLabel": "Question tree outline"
+    },
+    "chatPreview": {
+      "title": "Chat preview",
+      "hint": "Click through options and follow-ups as a learner would. Clicks use the fixed opening and closing lines; typed questions are not simulated.",
+      "start": "Start from",
+      "restart": "Start again",
+      "source": "From: {question}",
+      "followUpsTitle": "You might also ask:",
+      "hidden": "{count} more follow-ups are not shown (only the first 4 are).",
+      "noOptions": "This choice question has no options yet.",
+      "missing": "This question is not in the working copy (deleted).",
+      "notEntry": "This is not an entry question: learners only reach it from another card.",
+      "learner": "Learner",
+      "assistant": "AI Support",
+      "handover": "Learners can always choose to contact a person.",
+      "empty": "There are no entry questions yet.",
+      "transcript": "Preview conversation"
+    },
+    "releases": {
+      "button": "Releases",
+      "title": "Releases",
+      "subtitle": "Learners only see the live version. Edits go live after you create a new version, it passes the checks and the eval, and you publish it.",
+      "live": "Live: v{version}",
+      "none": "No version has been published yet, so learners see each FAQ as soon as it is saved.",
+      "working": "Changes since the live version",
+      "noChanges": "No changes since the live version.",
+      "diff": {
+        "nodesAdded": "Questions added ({count})",
+        "nodesChanged": "Questions changed ({count})",
+        "nodesRemoved": "Questions removed ({count})",
+        "edgesAdded": "Links added ({count})",
+        "edgesChanged": "Links changed ({count})",
+        "edgesRemoved": "Links removed ({count})",
+        "phrasings": "Phrasings: {added} added, {removed} removed",
+        "edge": "{parent} → {child}"
+      },
+      "fields": {
+        "key": "key",
+        "type": "card type",
+        "entry": "entry",
+        "category": "category",
+        "popular": "popular",
+        "questionEn": "English question",
+        "answerEn": "English answer",
+        "questionZh": "Chinese question",
+        "answerZh": "Chinese answer",
+        "signals": "situations",
+        "keywords": "keywords",
+        "kind": "link type",
+        "position": "order",
+        "labelEn": "English text",
+        "labelZh": "Chinese text"
+      },
+      "checks": "Graph checks",
+      "checksPassed": "All checks passed",
+      "checksFailed": "{count} problems to fix",
+      "counts": "{nodes} questions, {entries} entries, {choices} choice questions, {edges} links, {phrasings} phrasings",
+      "create": "Create new version",
+      "creating": "Checking…",
+      "createHint": "Freezes the working copy, then runs the graph checks and the eval. Nothing goes live until you publish.",
+      "sameAsLatest": "Nothing changed since v{version}, so no new version was created.",
+      "created": "v{version} created.",
+      "history": "Version history",
+      "columns": {
+        "version": "Version",
+        "status": "Status",
+        "published": "Published",
+        "actions": "Action",
+        "result": "Checks and eval"
+      },
+      "status": {
+        "draft": "Ready",
+        "evaluating": "Evaluating",
+        "published": "Live",
+        "rejected": "Did not pass",
+        "superseded": "Replaced"
+      },
+      "passed": "Passed",
+      "failed": "Failed",
+      "notRun": "Not run",
+      "recall": "Passed, recall@8 {value}%",
+      "recallFailed": "Failed, recall@8 {value}%",
+      "rollbackOf": "Copy of v{version}",
+      "misses": "{count} cases were not matched",
+      "publish": "Publish v{version}",
+      "publishShort": "Publish",
+      "publishConfirm": "Publish v{version}? Learners will start seeing it within about a minute.",
+      "confirmNo": "Cancel",
+      "publishedNotice": "v{version} is live.",
+      "recheck": "Check again",
+      "rechecked": "v{version} checked again.",
+      "rollback": "Roll back to this version",
+      "rollbackLabel": "Roll back to v{version}",
+      "rollbackConfirm": "Roll back to v{version}? Its content is published again as a new version.",
+      "rollbackYes": "Roll back",
+      "rolledBack": "Rolled back: v{version} is live.",
+      "showChanges": "Changes in v{version}",
+      "hideChanges": "Hide changes",
+      "empty": "No versions yet.",
+      "loading": "Loading…",
+      "createdOn": "Created {date}",
+      "checksValue": "Graph checks: {result}"
     }
   }
 }

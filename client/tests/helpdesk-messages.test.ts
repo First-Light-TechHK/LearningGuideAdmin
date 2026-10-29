@@ -154,6 +154,21 @@ describe('HelpDesk messages', () => {
       'VERSION_CONFLICT',
       'FAQ_NOT_FOUND',
       'IDEMPOTENCY_KEY_REUSED',
+      // v5 question trees and releases (graph design §5)
+      'FAQ_EDGE_CYCLE',
+      'FAQ_EDGE_EXISTS',
+      'FAQ_TOO_MANY_CHILDREN',
+      'FAQ_ARCHIVED',
+      'FAQ_CHILDREN_CHANGED',
+      'FAQ_EDGE_NOT_FOUND',
+      'FAQ_TOO_MANY_PHRASINGS',
+      'FAQ_HAS_PARENTS',
+      'FAQ_KEY_TAKEN',
+      'FAQ_RELEASE_NOT_FOUND',
+      'FAQ_RELEASE_NOT_READY',
+      'FAQ_RELEASE_LOCKED',
+      'FAQ_RELEASE_NOT_PUBLISHED',
+      'FAQ_RELEASE_CHECKS_FAILED',
       'generic',
     ]) {
       assert.equal(typeof get(enGB, `helpDesk.errors.${code}`), 'string', code)
