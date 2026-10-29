@@ -145,7 +145,7 @@ describe('EnquiryList rows', () => {
     const a = rowButton('Subject a')
     assert.ok(within(a).getByText(earlier.zh))
     assert.ok(within(a).getByRole('img', { name: '未读' }))
-    assert.ok(screen.getByRole('searchbox', { name: '搜索学员或咨询...' }))
+    assert.ok(screen.getByRole('searchbox', { name: '搜索学员或工单...' }))
   })
 
   test('a flagged row shows the flag icon; others do not (v2 §3d)', () => {
@@ -289,13 +289,13 @@ describe('EnquiryList search and filters', () => {
 
   test('zh-CN filter panel text', () => {
     renderList({ locale: 'zh-CN' })
-    fireEvent.click(screen.getByRole('button', { name: '筛选咨询' }))
+    fireEvent.click(screen.getByRole('button', { name: '筛选工单' }))
     const status = screen.getByLabelText('状态') as HTMLSelectElement
     assert.equal(status.options[0].textContent, '全部')
     assert.equal(status.options[1].textContent, '待回复')
-    assert.ok(screen.getByLabelText('咨询类型'))
+    assert.ok(screen.getByLabelText('工单类型'))
     assert.ok(screen.getByRole('checkbox', { name: '已标记跟进' }))
     assert.ok(screen.getByRole('button', { name: '清除筛选' }))
-    assert.ok(screen.getByText('还没有咨询。'))
+    assert.ok(screen.getByText('还没有工单。'))
   })
 })

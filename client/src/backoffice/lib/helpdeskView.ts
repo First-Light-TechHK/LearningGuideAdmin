@@ -376,9 +376,9 @@ export function writeEnquiryFilters(params: URLSearchParams, patch: Partial<Enqu
  * 搜索框跟着地址栏走（返回、侧栏回到 /help-desk 时清掉旧词）；员工正在输入（防抖未到）
  * 或框里只是同一个词多了空白时，保留框里的原样。
  */
-export function resyncQuery(input: string, urlQ: string, typing: boolean): string {
+export function resyncQuery(input: string, urlQ: string, typing: boolean, max = SEARCH_MAX): string {
   if (typing) return input
-  return input.trim().slice(0, SEARCH_MAX) === urlQ ? input : urlQ
+  return input.trim().slice(0, max) === urlQ ? input : urlQ
 }
 
 /** 输入法正在组字（中文 / 日文选词）时的 Enter 属于输入法，不能当作提交。 */

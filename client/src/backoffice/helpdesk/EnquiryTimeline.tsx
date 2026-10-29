@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import {
   CONFIRM_WINDOW_HOURS,
@@ -66,6 +66,10 @@ type Props = {
   onFlag: (id: string) => void
   /** idempotencyKey：同一份草稿重试沿用同一个，内容变了或发送成功后换新。 */
   onSend: (id: string, body: string, internal: boolean, idempotencyKey: string) => Promise<boolean>
+  /** 回复 / 备注草稿与它们的 Idempotency-Key（按「工单 id:reply|note」），由父组件保存：中栏卸载也不丢。 */
+  drafts: Record<string, string>
+  onDraft: (key: string, value: string) => void
+  composerKeys: { current: Record<string, ComposerKey | null> }
 }
 
 function Attachments({ files, locale }: { files: TicketAttachment[]; locale: Locale }) {
@@ -156,11 +160,12 @@ type ComposerProps = {
   busy: string | null
   onDraft: (value: string) => void
   onSend: (body: string, key: string) => Promise<boolean>
+  /** 这份草稿上次发送用的 key（父组件保存，卸载再打开的重试仍沿用）。 */
+  keyRef: { current: ComposerKey | null }
 }
 
-/** 一张卡片的回复框 / 备注框（无画板，待视觉验收）。草稿在父组件里，收起再展开不丢。 */
-function Composer({ locale, internal, hint, draft, busy, onDraft, onSend }: ComposerProps) {
-  const keyRef = useRef<ComposerKey | null>(null)
+/** 一张卡片的回复框 / 备注框（无画板，待视觉验收）。草稿在 EnquiriesView 里，收起再展开、切换工单都不丢。 */
+function Composer({ locale, internal, hint, draft, busy, onDraft, onSend, keyRef }: ComposerProps) {
   const trimmed = draft.trim()
   const tooLong = trimmed.length > MESSAGE_BODY_MAX
 
@@ -211,8 +216,16 @@ function Composer({ locale, internal, hint, draft, busy, onDraft, onSend }: Comp
 }
 
 export function EnquiryTimeline(props: Props) {
-  const { locale, entries, selectedId, canWrite, notice, busy, panel } = props
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const { locale, entries, selectedId, canWrite, notice, busy, panel, drafts, composerKeys } = props
+  /** 某份草稿的 key 存取（存在父组件的 ref 里）。 */
+  const keyRefFor = (key: string) => ({
+    get current() {
+      return composerKeys.current[key] ?? null
+    },
+    set current(value: ComposerKey | null) {
+      composerKeys.current[key] = value
+    },
+  })
   const selectedRef = useRef<HTMLElement | null>(null)
   const groups = groupByDay(
     entries.map((entry) => ({ ...entry, createdAt: entry.row.createdAt })),
@@ -416,7 +429,8 @@ export function EnquiryTimeline(props: Props) {
                     hint={t(locale, 'helpDesk.actions.emailHint', { email: ticket.contactEmail || ticket.learner.email })}
                     draft={drafts[draftKey('reply')] ?? ''}
                     busy={cardBusy}
-                    onDraft={(value) => setDrafts((current) => ({ ...current, [draftKey('reply')]: value }))}
+                    keyRef={keyRefFor(draftKey('reply'))}
+                    onDraft={(value) => props.onDraft(draftKey('reply'), value)}
                     onSend={(text, key) => props.onSend(row.id, text, false, key)}
                   />
                 ) : null}
@@ -437,7 +451,8 @@ export function EnquiryTimeline(props: Props) {
                         hint={t(locale, 'helpDesk.actions.internalNotesHint')}
                         draft={drafts[draftKey('note')] ?? ''}
                         busy={cardBusy}
-                        onDraft={(value) => setDrafts((current) => ({ ...current, [draftKey('note')]: value }))}
+                        keyRef={keyRefFor(draftKey('note'))}
+                        onDraft={(value) => props.onDraft(draftKey('note'), value)}
                         onSend={(text, key) => props.onSend(row.id, text, true, key)}
                       />
                     ) : null}

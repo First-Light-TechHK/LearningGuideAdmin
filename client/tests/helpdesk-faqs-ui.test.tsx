@@ -7,7 +7,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 
 import type { HelpdeskFaq } from '../src/backoffice/contracts/helpdesk'
 import { absent, faq, installFakeServer, type Call, type FakeServer } from './support/helpdesk-fake'
-import { location, renderHelpDesk } from './support/helpdesk-render'
+import { location, renderHelpDesk, router } from './support/helpdesk-render'
 
 /**
  * Tickets v2 §3a / §3b：FAQs Tab（Figma 1379:2）、新增 / 编辑抽屉（Figma 1379:299）与 Preview，
@@ -232,6 +232,56 @@ describe('FAQs tab (Figma 1379:2)', () => {
     assert.ok(screen.getByRole('button', { name: 'Previous page' }))
     fireEvent.click(screen.getByRole('button', { name: 'Page 1' }))
     await waitFor(() => assert.equal(lastListQuery().page, '1'))
+  })
+
+  test('deleting the only row of the last page lands on the new last page, not on an empty one', async () => {
+    let all = Array.from({ length: 11 }, (_, i) => faq(`f${i}`, { questionEn: `Question ${i}` }))
+    server.on('GET', LIST, (call) => {
+      const page = Number(call.query.get('page') ?? 1)
+      return { data: { faqs: all.slice((page - 1) * 10, page * 10), total: all.length, page, pageSize: 10 } }
+    })
+    server.on('POST', ARCHIVE, () => {
+      all = all.slice(0, 10)
+      return { data: faq('f10', { status: 'archived' }) }
+    })
+    await openFaqs({ query: '&page=2' })
+    assert.ok(await screen.findByText('Showing 11–11 of 11 FAQs'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Question 10' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete FAQ' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    assert.ok(await screen.findByText('Showing 1–10 of 10 FAQs'))
+    assert.match(location.current, /page=1|^(?!.*page=)/)
+    assert.equal(lastListQuery().page, '1')
+    absent(screen.queryByText('No FAQs yet.'))
+    assert.equal(screen.getByRole('button', { name: 'Page 1' }).getAttribute('aria-current'), 'page')
+  })
+
+  test('a stale ?page= beyond the last page loads the last page', async () => {
+    const all = Array.from({ length: 12 }, (_, i) => faq(`f${i}`, { questionEn: `Question ${i}` }))
+    server.on('GET', LIST, (call) => {
+      const page = Number(call.query.get('page') ?? 1)
+      return { data: { faqs: all.slice((page - 1) * 10, page * 10), total: all.length, page, pageSize: 10 } }
+    })
+    await openFaqs({ query: '&page=99' })
+    assert.ok(await screen.findByText('Showing 11–12 of 12 FAQs'))
+    assert.match(location.current, /page=2/)
+    assert.equal(screen.getByRole('button', { name: 'Page 2' }).getAttribute('aria-current'), 'page')
+  })
+
+  test('the search box follows the address bar on Back and Forward', async () => {
+    serveFaqs(faq('f1'))
+    await openFaqs()
+    const box = screen.getByRole('searchbox') as HTMLInputElement
+    fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), { target: { value: 'other' } })
+    await waitFor(() => assert.match(location.current, /category=other/))
+    fireEvent.change(box, { target: { value: 'invoice' } })
+    await waitFor(() => assert.match(location.current, /q=invoice/))
+    router.navigate?.(-1)
+    await waitFor(() => assert.doesNotMatch(location.current, /category=other|q=invoice/))
+    await waitFor(() => assert.equal(box.value, '', 'Back to before the search empties the box'))
+    router.navigate?.(1)
+    await waitFor(() => assert.match(location.current, /q=invoice/))
+    await waitFor(() => assert.equal(box.value, 'invoice', 'Forward brings the words back'))
   })
 
   test('a list error is shown', async () => {
@@ -575,5 +625,132 @@ describe('FAQ Preview', () => {
     const dialog = await screen.findByRole('dialog')
     fireEvent.keyDown(dialog, { key: 'Escape' })
     await waitFor(() => absent(screen.queryByRole('dialog')))
+  })
+})
+
+describe('the drawer, preview and confirmations are modal', () => {
+  function tab(options: { shiftKey?: boolean } = {}) {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab', ...options })
+  }
+
+  test('while the drawer is open the header, tabs and list behind it are inert; Add FAQ and the tabs cannot replace an edit', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Being edited' }))
+    await openFaqs()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Being edited' }))
+    await screen.findByRole('dialog', { name: 'Edit FAQ' })
+    fill(/^Answer \(Chinese\)/, '写到一半')
+    const add = screen.getByRole('button', { name: '+ Add FAQ' })
+    assert.ok(add.closest('[inert]'), 'the header button is inert')
+    assert.ok(screen.getByRole('tablist').closest('[inert]'), 'the tabs are inert')
+    assert.ok(screen.getByRole('table').closest('[inert]'), 'the list behind is inert')
+    assert.ok(drawer().closest('[inert]') === null, 'the drawer itself is not')
+    fireEvent.click(add)
+    assert.ok(screen.getByRole('dialog', { name: 'Edit FAQ' }), 'still the Edit drawer')
+    assert.equal(field(/^Answer \(Chinese\)/).value, '写到一半', 'the draft is kept')
+    fireEvent.click(screen.getByRole('tab', { name: 'Enquiries' }))
+    assert.match(location.current, /tab=faqs/)
+    assert.ok(screen.getByRole('dialog', { name: 'Edit FAQ' }))
+    fireEvent.click(within(drawer()).getByRole('button', { name: 'Close' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }))
+    await waitFor(() => absent(screen.queryByRole('dialog')))
+    assert.ok(screen.getByRole('tablist').closest('[inert]') === null, 'live again once the drawer is closed')
+  })
+
+  test('Tab and Shift+Tab stay inside the drawer, and inside a confirmation while it is open', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Trap me' }))
+    await openFaqs()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Trap me' }))
+    await screen.findByRole('dialog')
+    const close = within(drawer()).getByRole('button', { name: 'Close' })
+    const save = within(drawer()).getByRole('button', { name: 'Save FAQ' })
+    save.focus()
+    tab()
+    assert.ok(document.activeElement === close, 'Tab from Save wraps to the first control')
+    tab({ shiftKey: true })
+    assert.ok(document.activeElement === save, 'Shift+Tab from the first control wraps to Save')
+    save.blur()
+    tab()
+    assert.ok(document.activeElement === close, 'focus outside comes back in')
+    fireEvent.click(within(drawer()).getByRole('button', { name: 'Delete FAQ' }))
+    const confirm = await screen.findByRole('alertdialog')
+    const [keep, remove] = within(confirm).getAllByRole('button')
+    await waitFor(() => assert.ok(document.activeElement === keep, 'focus on ' + keep.textContent))
+    // jsdom 不做 Tab 的默认移动：只验证两端的回绕
+    tab({ shiftKey: true })
+    assert.ok(document.activeElement === remove, 'Shift+Tab from Keep wraps to Delete, not to the drawer')
+    tab()
+    assert.ok(document.activeElement === keep, 'Tab from Delete wraps to Keep: the confirmation keeps focus to itself')
+  })
+
+  test('Escape works wherever focus is (even on the page body), but not while an input method is composing', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Escape me' }))
+    await openFaqs()
+    fireEvent.click(screen.getByRole('button', { name: '+ Add FAQ' }))
+    await screen.findByRole('dialog')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => absent(screen.queryByRole('dialog')), 'an untouched drawer closes on Escape from the body')
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add FAQ' }))
+    await screen.findByRole('dialog')
+    fill(/^Question \(Chinese\)/, 'mi')
+    fireEvent.keyDown(field(/^Question \(Chinese\)/), { key: 'Escape', isComposing: true })
+    fireEvent.keyDown(field(/^Question \(Chinese\)/), { key: 'Escape', keyCode: 229 })
+    absent(screen.queryByRole('alertdialog'), 'Escape that cancels a pinyin candidate is not a close')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    assert.ok(await screen.findByRole('alertdialog', { name: 'Discard unsaved changes?' }))
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => absent(screen.queryByRole('alertdialog'), 'Escape closes the confirmation first'))
+    assert.ok(screen.getByRole('dialog'))
+
+    const answer = field(/^Answer \(English\)/) as HTMLTextAreaElement
+    fill(/^Answer \(English\)/, 'Open settings')
+    answer.setSelectionRange(5, 13)
+    const toolbar = within(drawer()).getAllByRole('toolbar', { name: 'Formatting' })[0]
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Link' }))
+    const address = within(drawer()).getByRole('textbox', { name: 'Link address' })
+    fireEvent.change(address, { target: { value: 'https://a.test/s' } })
+    fireEvent.keyDown(address, { key: 'Enter', keyCode: 229 })
+    assert.equal(answer.value, 'Open settings', 'Enter that confirms an IME candidate does not insert the link')
+    fireEvent.keyDown(address, { key: 'Escape', isComposing: true })
+    assert.ok(within(drawer()).getByRole('textbox', { name: 'Link address' }), 'nor does a composing Escape cancel it')
+    fireEvent.keyDown(address, { key: 'Enter' })
+    await waitFor(() => assert.equal(answer.value, 'Open [settings](https://a.test/s)'))
+  })
+
+  test('the preview traps focus, makes the page behind it inert and closes on Escape from anywhere', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Preview me' }))
+    await openFaqs()
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview Preview me' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Preview FAQ' })
+    assert.ok(screen.getByRole('tablist').closest('[inert]'), 'the page behind the preview is inert')
+    const close = within(dialog).getByRole('button', { name: 'Close' })
+    assert.ok(document.activeElement === close, 'focus on ' + close.textContent)
+    tab()
+    const english = within(dialog).getByRole('radio', { name: 'EN' })
+    assert.ok(document.activeElement === english, 'Tab from Close (the last control) wraps to the language switch')
+    tab({ shiftKey: true })
+    assert.ok(document.activeElement === close, 'Shift+Tab from the first control wraps to Close')
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => absent(screen.queryByRole('dialog')))
+  })
+
+  test('a save error or a version conflict takes focus, so it is seen even when the body is scrolled to Keywords', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Notice me', version: 2 }))
+    let puts = 0
+    server.on('PUT', ONE, () => {
+      puts += 1
+      return puts === 1 ? { status: 503, error: 'HELPDESK_UNAVAILABLE' } : { status: 409, error: 'VERSION_CONFLICT' }
+    })
+    server.on('GET', ONE, { data: faq('f1', { questionEn: 'Changed elsewhere', version: 3 }) })
+    await openFaqs()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Notice me' }))
+    await screen.findByRole('dialog')
+    fill('Keywords (for search & AI)', 'notice')
+    fireEvent.click(within(drawer()).getByRole('button', { name: 'Save FAQ' }))
+    const alert = await within(drawer()).findByRole('alert')
+    await waitFor(() => assert.ok(document.activeElement === alert, 'focus on ' + alert.textContent))
+    fireEvent.click(within(drawer()).getByRole('button', { name: 'Save FAQ' }))
+    const status = await within(drawer()).findByRole('status')
+    await waitFor(() => assert.ok(document.activeElement === status, 'focus on ' + status.textContent))
   })
 })

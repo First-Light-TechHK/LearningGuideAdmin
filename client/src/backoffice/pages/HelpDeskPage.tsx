@@ -19,7 +19,8 @@ import { useWorkspaceAccess } from '../lib/workspaceAccess'
  * Help Desk（Tickets v2，Figma 1324:2 / 1379:2 / 1379:299）：页头 +「+ Add FAQ」（两个 Tab 都有）+ 两个 Tab。
  * - Enquiries（缺省）：三栏，/help-desk/:ticketId 选中一条工单，中栏是这个学员的时间线
  * - FAQs（?tab=faqs；旧链接 ?tab=questions 也到这里）：FAQ 表格，抽屉新增 / 编辑，Preview
- * 抽屉盖在 Tab 下方的内容区上（.hdContent）。写操作只给 helpDesk = FULL；VIEW 能看能预览，
+ * 抽屉盖在 Tab 下方的内容区上（.hdContent）。抽屉或 Preview 打开时，页头、Tab 和后面的列表都 inert
+ *（点不到、Tab 不进去），「+ Add FAQ」与切 Tab 也不会替换掉正在编辑的草稿。写操作只给 helpDesk = FULL；VIEW 能看能预览，
  * 没有任何写控件（服务端同样拒绝）。
  */
 
@@ -40,6 +41,8 @@ export default function HelpDeskPage() {
   const [editing, setEditing] = useState<Editing>(null)
   const [previewing, setPreviewing] = useState<HelpdeskFaq | null>(null)
   const [faqsVersion, setFaqsVersion] = useState(0)
+  const drawerOpen = Boolean(editing && controls.faqDrawer)
+  const modal = drawerOpen || previewing !== null
 
   // v1 的 Common Questions 链接（?tab=questions）换成 ?tab=faqs，其它参数保留
   useEffect(() => {
@@ -55,7 +58,7 @@ export default function HelpDeskPage() {
   }, [tabParam, ticketId, setSearchParams])
 
   function openTab(next: TabKey) {
-    if (next === tab) return
+    if (next === tab || modal) return
     navigate(next === 'faqs' ? `/${locale}/help-desk?tab=faqs` : `/${locale}/help-desk`)
   }
 
@@ -71,19 +74,19 @@ export default function HelpDeskPage() {
 
   return (
     <section className="card cardGrow hdPage">
-      <header className="hdHeader">
+      <header className="hdHeader" inert={modal}>
         <div className="hdTitleBlock">
           <h1 className="cardTitle">{t(locale, 'helpDesk.title')}</h1>
           <p className="hdSubtitle">{t(locale, 'helpDesk.subtitle')}</p>
         </div>
         {controls.addFaq ? (
-          <button type="button" className="hdPrimaryButton" onClick={() => setEditing({ faq: null })}>
+          <button type="button" className="hdPrimaryButton" onClick={() => !modal && setEditing({ faq: null })}>
             + {t(locale, 'helpDesk.addFaq')}
           </button>
         ) : null}
       </header>
 
-      <div className="hdTabs" role="tablist" aria-label={t(locale, 'helpDesk.title')}>
+      <div className="hdTabs" role="tablist" aria-label={t(locale, 'helpDesk.title')} inert={modal}>
         {(['enquiries', 'faqs'] as const).map((key) => (
           <button
             key={key}
@@ -98,22 +101,28 @@ export default function HelpDeskPage() {
         ))}
       </div>
 
-      {access.readOnly ? <div className="hdReadOnly">{t(locale, 'helpDesk.readOnly')}</div> : null}
+      {access.readOnly ? (
+        <div className="hdReadOnly" inert={modal}>
+          {t(locale, 'helpDesk.readOnly')}
+        </div>
+      ) : null}
 
       <div className="hdContent">
-        {tab === 'enquiries' ? (
-          <EnquiriesView locale={locale} ticketId={ticketId ?? null} canWrite={canWrite} />
-        ) : (
-          <FaqsView
-            locale={locale}
-            canWrite={canWrite}
-            refreshKey={faqsVersion}
-            onEdit={(faq) => setEditing({ faq })}
-            onPreview={setPreviewing}
-          />
-        )}
+        <div className="hdContentBody" inert={modal}>
+          {tab === 'enquiries' ? (
+            <EnquiriesView locale={locale} ticketId={ticketId ?? null} canWrite={canWrite} />
+          ) : (
+            <FaqsView
+              locale={locale}
+              canWrite={canWrite}
+              refreshKey={faqsVersion}
+              onEdit={(faq) => setEditing({ faq })}
+              onPreview={setPreviewing}
+            />
+          )}
+        </div>
 
-        {editing && controls.faqDrawer ? (
+        {editing && drawerOpen ? (
           <FaqDrawer
             key={editing.faq?.id ?? 'new'}
             locale={locale}

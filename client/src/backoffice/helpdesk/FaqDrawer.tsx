@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { FAQ_CATEGORIES, type FaqCategory, type HelpdeskFaq } from '../contracts/helpdesk'
 import { archiveFaq, createFaq, getFaq, newIdempotencyKey, updateFaq } from '../lib/helpdeskApi'
@@ -22,14 +22,17 @@ import {
   type TextEdit,
 } from '../lib/helpdeskFaqs'
 import { errorMessage, faqCategoryLabel } from '../lib/helpdeskFormat'
+import { isImeComposing } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
+import { useModal } from './useModal'
 
 /**
  * 新增 / 编辑 FAQ 抽屉（Tickets v2 §3b，Figma 1379:299）：盖在 Tab 下方的内容区上，右侧 620 宽。
  * 保存即发布（中英文都必填）；新建带 Idempotency-Key（同内容重试沿用），编辑带 version，
  * 版本冲突时载入最新版本、保留草稿。Delete（归档）与「未保存的修改」确认在 Figma 里没有画板，
- * 沿用同一套样式（待视觉验收）。
+ * 沿用同一套样式（待视觉验收）。抽屉是模态层（useModal）：Tab 不出抽屉（确认框打开时不出确认框），
+ * Escape 在哪儿按都算、输入法组字时不算；保存失败或版本冲突的提示会拿到焦点，滚到哪儿都看得见。
  */
 
 type AnswerField = 'answerEn' | 'answerZh'
@@ -85,6 +88,11 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
   const pendingSelection = useRef<{ field: AnswerField; start: number; end: number } | null>(null)
   const firstField = useRef<HTMLSelectElement>(null)
   const confirmFocus = useRef<HTMLButtonElement>(null)
+  const drawerRef = useRef<HTMLElement>(null)
+  const confirmRef = useRef<HTMLDivElement>(null)
+  const alertRef = useRef<HTMLDivElement>(null)
+  const statusRef = useRef<HTMLDivElement>(null)
+  const [noticeShown, setNoticeShown] = useState(0)
 
   const errors = submitted ? validateFaqDraft(draft) : {}
   const editing = base !== null
@@ -99,6 +107,20 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
   useEffect(() => {
     if (confirm) confirmFocus.current?.focus()
   }, [confirm])
+
+  // 保存 / 删除失败、版本冲突：提示在可滚动区域的顶上，把焦点给它（浏览器随之滚到它）
+  useEffect(() => {
+    if (noticeShown) (alertRef.current ?? statusRef.current)?.focus()
+  }, [noticeShown])
+
+  useModal(
+    () => confirmRef.current ?? drawerRef.current,
+    () => {
+      if (confirm) setConfirm(null)
+      else if (linkTarget) setLinkTarget(null)
+      else requestClose()
+    },
+  )
 
   // 工具栏改完文字后恢复选区（受控 textarea 重渲染会把光标挪到最后）
   useLayoutEffect(() => {
@@ -190,8 +212,10 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
       } else {
         setErrorCode(latest.code)
       }
+      setNoticeShown((value) => value + 1)
     } else if (!result.ok) {
       setErrorCode(result.code)
+      setNoticeShown((value) => value + 1)
     }
     setSaving(false)
   }
@@ -213,15 +237,8 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     } else {
       setErrorCode(result.code)
     }
+    setNoticeShown((value) => value + 1)
     setSaving(false)
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    if (confirm) setConfirm(null)
-    else if (linkTarget) setLinkTarget(null)
-    else requestClose()
   }
 
   function errorFor(field: FaqField): ReactNode {
@@ -298,7 +315,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
                   setLinkInvalid(false)
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
+                  if (event.key === 'Enter' && !isImeComposing(event)) {
                     event.preventDefault()
                     insertLink()
                   }
@@ -330,7 +347,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
   return (
     <div className="hdDrawerLayer">
       <div className="hdDrawerBackdrop" aria-hidden="true" onClick={requestClose} />
-      <aside className="hdDrawer" role="dialog" aria-modal="true" aria-labelledby={ids.title} onKeyDown={onKeyDown}>
+      <aside ref={drawerRef} className="hdDrawer" role="dialog" aria-modal="true" aria-labelledby={ids.title}>
         <header className="hdDrawerHead">
           <div className="hdDrawerHeading">
             <h2 className="hdDrawerTitle" id={ids.title}>
@@ -345,12 +362,12 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
 
         <div className="hdDrawerBody">
           {conflict ? (
-            <div className="hdNotice hdDrawerNotice" role="status">
+            <div ref={statusRef} className="hdNotice hdDrawerNotice" role="status" tabIndex={-1}>
               {t(locale, 'helpDesk.drawer.conflict')}
             </div>
           ) : null}
           {errorCode ? (
-            <div className="hdNotice hdDrawerNotice hdDrawerAlert" role="alert">
+            <div ref={alertRef} className="hdNotice hdDrawerNotice hdDrawerAlert" role="alert" tabIndex={-1}>
               {errorMessage(locale, errorCode)}
             </div>
           ) : null}
@@ -452,7 +469,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
 
         {confirm ? (
           <div className="hdConfirmLayer">
-            <div className="hdConfirm" role="alertdialog" aria-modal="true" aria-labelledby={ids.confirm}>
+            <div ref={confirmRef} className="hdConfirm" role="alertdialog" aria-modal="true" aria-labelledby={ids.confirm}>
               <p className="hdConfirmText" id={ids.confirm}>
                 {t(locale, confirm === 'delete' ? 'helpDesk.drawer.deleteConfirm' : 'helpDesk.drawer.discardTitle')}
               </p>

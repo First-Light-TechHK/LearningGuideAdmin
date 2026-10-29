@@ -361,7 +361,7 @@ describe('Claim and Mark as reviewed', () => {
     fireEvent.click(await screen.findByRole('button', { name: '接单' }))
     assert.ok(within(conversation()).getByText('待受理'))
     assert.ok(await screen.findByRole('button', { name: '标记为已处理' }))
-    assert.ok(screen.getByText('已接单，这条咨询已分配给你。'))
+    assert.ok(screen.getByText('已接单，这条工单已分配给你。'))
     assert.ok(within(conversation()).getByText('处理中'))
   })
 })
@@ -1124,5 +1124,64 @@ describe('AI blocks (aiAssist after each card)', () => {
     const block = within(item(await card('Subject a'))).getByRole('region', { name: 'AI Support Assistant' })
     absent(block.querySelector('img'))
     assert.ok(within(block).getByText('<img src=x onerror=alert(1)>'))
+  })
+})
+
+describe('the timeline and drafts survive moving between enquiries', () => {
+  test('a reply and a note draft are kept after opening another learner’s enquiry and coming back', async () => {
+    const slow = deferred<Reply>()
+    serve(detail('a'), detail('b'))
+    let firstB = true
+    server.on('GET', DETAIL, (call) => {
+      const id = ticketIdOf(call)
+      if (id === 'b' && firstB) {
+        firstB = false
+        return slow.promise
+      }
+      return { data: tickets.get(id) as EnquiryDetail }
+    })
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    fireEvent.change(await openReply(), { target: { value: 'Half way' } })
+    fireEvent.click(within(await card('Subject a')).getByRole('button', { name: 'Internal notes' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Internal note' }), { target: { value: 'Note so far' } })
+    fireEvent.click(await listRow('Subject b'))
+    await waitFor(() => assert.ok(within(conversation()).getByText('Loading…')), 'the timeline is replaced while B loads')
+    await act(async () => slow.resolve({ data: tickets.get('b') as EnquiryDetail }))
+    await card('Subject b')
+    fireEvent.click(await listRow('Subject a'))
+    assert.equal((await openReply()).value, 'Half way')
+    fireEvent.click(within(await card('Subject a')).getByRole('button', { name: 'Internal notes' }))
+    assert.equal(((await screen.findByRole('textbox', { name: 'Internal note' })) as HTMLTextAreaElement).value, 'Note so far')
+  })
+
+  test('a timeline that failed to load is asked again when another enquiry is opened', async () => {
+    serve(sameLearner('a', { subject: 'First' }), sameLearner('b', { subject: 'Second' }))
+    let timelineCalls = 0
+    server.on('GET', LIST, (call) => {
+      if (!call.query.has('learnerId')) return { data: { tickets: [...tickets.values()], nextCursor: null, counts: {} } }
+      timelineCalls += 1
+      if (timelineCalls <= 2) return { status: 503, error: 'HELPDESK_UNAVAILABLE' }
+      return { data: { tickets: [...tickets.values()], nextCursor: null, counts: {} } }
+    })
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    await card('First')
+    await waitFor(() => assert.equal(timelineCalls, 1))
+    absent(within(conversation()).queryByRole('article', { name: 'Second' }), 'only the selected card after a failure')
+    fireEvent.click(await listRow('Second'))
+    await card('Second')
+    await waitFor(() => assert.equal(timelineCalls, 2))
+    // First is already loaded, so nothing else would ask again: the failure must not be remembered
+    fireEvent.click(await listRow('First'))
+    assert.ok(await card('Second'), 'the retry brings the other card back')
+    assert.equal(timelineCalls, 3)
+  })
+
+  test('a new enquiry from the same learner appears when the agent opens another of their cards', async () => {
+    serve(sameLearner('a', { subject: 'First', createdAt: '2026-10-26T10:00:00Z' }), sameLearner('b', { subject: 'Second', createdAt: '2026-10-27T10:00:00Z' }))
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    await card('Second')
+    tickets.set('c', sameLearner('c', { subject: 'Third', createdAt: '2026-10-28T10:00:00Z' }))
+    fireEvent.click(await listRow('Second'))
+    assert.ok(await card('Third'))
   })
 })

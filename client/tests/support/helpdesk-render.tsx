@@ -4,7 +4,7 @@
 import { render, screen } from '@testing-library/react'
 import { useEffect } from 'react'
 import { App as AntApp, ConfigProvider } from 'antd'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
 
 import type { EmployeeRole } from '../../src/backoffice/contracts/employee'
 import { WorkspaceAccessProvider } from '../../src/backoffice/lib/workspaceAccess'
@@ -16,11 +16,18 @@ import { employee, type FakeServer } from './helpdesk-fake'
 /** 当前地址（路径 + 查询），随路由变化更新。 */
 export const location = { current: '' }
 
+/** 测试里模拟浏览器的返回 / 前进（history.go）：router.navigate(-1)。 */
+export const router: { navigate: NavigateFunction | null } = { navigate: null }
+
 function LocationProbe() {
   const here = useLocation()
+  const navigate = useNavigate()
   useEffect(() => {
     location.current = `${here.pathname}${here.search}`
   }, [here.pathname, here.search])
+  useEffect(() => {
+    router.navigate = navigate
+  }, [navigate])
   return null
 }
 

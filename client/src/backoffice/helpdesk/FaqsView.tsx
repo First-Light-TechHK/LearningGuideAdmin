@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { FAQ_CATEGORIES, type FaqCategory, type HelpdeskFaq } from '../contracts/helpdesk'
@@ -15,7 +15,7 @@ import {
 } from '../lib/helpdeskFaqs'
 import { errorMessage, faqCategoryLabel } from '../lib/helpdeskFormat'
 import { summaryLine } from '../lib/helpdeskMarkdown'
-import { longDate } from '../lib/helpdeskView'
+import { longDate, resyncQuery } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { HdSearchIcon } from './icons'
@@ -24,6 +24,7 @@ import { HdSearchIcon } from './icons'
  * FAQs Tab（Tickets v2 §3a，Figma 1379:2）：搜索 + 分类 + 热门筛选、表格、分页。
  * 筛选与页码都在地址栏（?tab=faqs&q=&category=&popular=&page=），刷新 / 分享不丢。
  * 写操作（Edit）只给 FULL；Preview 所有能进 Help Desk 的角色都能用。
+ * 地址栏的 q 变了（返回 / 前进）搜索框跟着变；页码超过最后一页（删掉最后一页唯一一行、旧书签）时换到最后一页。
  */
 
 const POPULAR_FILTERS: PopularFilter[] = ['all', 'popular', 'not_popular']
@@ -53,13 +54,23 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
   const loading = settledFor !== requestKey
   const request = useRef(0)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 加载回调里用最新的 update（它读 ref 与 setSearchParams）
+  const clampToPage = useRef<(page: number) => void>(() => undefined)
 
   useEffect(() => {
     const id = ++request.current
     void listFaqs(JSON.parse(filterKey) as FaqFilters).then((result) => {
       if (id !== request.current) return
       if (result.ok) {
-        setLoaded({ faqs: result.data.faqs, total: result.data.total })
+        const { faqs, total } = result.data
+        const lastPage = Math.max(1, Math.ceil(total / FAQ_LIMITS.pageSize))
+        const asked = (JSON.parse(filterKey) as FaqFilters).page
+        if (faqs.length === 0 && asked > lastPage) {
+          // 不显示空的一页：换到最后一页（替换这条历史，返回不会再回到空页）
+          clampToPage.current(lastPage)
+          return
+        }
+        setLoaded({ faqs, total })
         setErrorCode(null)
       } else {
         setErrorCode(result.code)
@@ -67,6 +78,11 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
       setSettledFor(`${filterKey}#${refreshKey}`)
     })
   }, [filterKey, refreshKey])
+
+  // 地址栏的 q 变了（返回 / 前进）：搜索框跟着变，正在输入时不打断
+  useEffect(() => {
+    setSearch((current) => resyncQuery(current, filters.q, searchTimer.current !== null, FAQ_LIMITS.searchMax))
+  }, [filters.q])
 
   useEffect(
     () => () => {
@@ -89,10 +105,17 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
     setSearchParams(next, { replace })
   }
 
+  useLayoutEffect(() => {
+    clampToPage.current = (page) => update({ page }, true)
+  })
+
   function onSearch(value: string) {
     setSearch(value)
     if (searchTimer.current) clearTimeout(searchTimer.current)
-    searchTimer.current = setTimeout(() => update({ q: value.slice(0, FAQ_LIMITS.searchMax) }, true), 300)
+    searchTimer.current = setTimeout(() => {
+      searchTimer.current = null
+      update({ q: value.slice(0, FAQ_LIMITS.searchMax) }, true)
+    }, 300)
   }
 
   const rows = loaded?.faqs ?? []

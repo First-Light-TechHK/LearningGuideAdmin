@@ -30,6 +30,7 @@ import {
   writeEnquiryFilters,
   type Busy,
   type BusyToken,
+  type ComposerKey,
   type EnquiryFilters,
 } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
@@ -77,6 +78,9 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
   const [panel, setPanel] = useState<Panel>(null)
   // 进行中的写操作属于发出它的那条工单（切到别的工单后不再禁用那边的按钮）
   const [busy, setBusy] = useState<Busy>(NO_BUSY)
+  // 回复 / 备注草稿（按「工单 id:reply|note」）放在这里：中栏在切换工单、加载详情时会卸载，草稿不能跟着丢
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const composerKeys = useRef<Record<string, ComposerKey | null>>({})
   const ticket = ticketId ? (details[ticketId] ?? null) : null
   const learnerId = ticket?.learner.id ?? ''
 
@@ -217,15 +221,19 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
     }
   }, [ticketId, canWrite, loadTicket, adopt])
 
-  // 学员时间线（Figma 1324:2 中栏）：选中工单的学员最多 10 条工单。取不到就只显示选中的那张。
+  // 学员时间线（Figma 1324:2 中栏）：选中工单的学员最多 10 条工单。每次打开一条工单都重新取
+  // （学员刚提交的新工单也会出现）；取不到时保留这个学员上次取到的，没有就只显示选中的那张，失败不记住。
   useEffect(() => {
     if (!learnerId) return
     const id = ++timelineRequest.current
     void listTimeline(learnerId).then((result) => {
       if (id !== timelineRequest.current) return
-      setTimeline({ learnerId, rows: result.ok ? result.data.tickets : [] })
+      setTimeline((current) => {
+        if (result.ok) return { learnerId, rows: result.data.tickets }
+        return current?.learnerId === learnerId ? current : { learnerId, rows: [] }
+      })
     })
-  }, [learnerId])
+  }, [learnerId, ticketId])
 
   // 时间线上其它卡片的详情（只读 GET，不调 mark_read）：Figma 1324:2 每张卡片都有正文、附件与 AI 块。
   // 最多 9 条（时间线上限 10），每条只取一次；点开时仍会重新取最新的。
@@ -377,6 +385,9 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
               onMarkReviewed={(id) => void markReviewed(id)}
               onFlag={(id) => void toggleFlag(id)}
               onSend={send}
+              drafts={drafts}
+              onDraft={(key, value) => setDrafts((current) => ({ ...current, [key]: value }))}
+              composerKeys={composerKeys}
             />
           </div>
           <StudentPanel

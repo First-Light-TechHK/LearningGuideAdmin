@@ -96,6 +96,15 @@ describe('HelpDesk messages', () => {
     assert.equal(get(z, 'ai.notHelpful'), '学生反馈：仍提交给客服')
   })
 
+  test('zh-CN calls an enquiry 工单 everywhere, as the tab does (the Other Enquiries type keeps its name)', () => {
+    const mixed = keys(zhCN.helpDesk)
+      .filter((key) => key !== 'category.other')
+      .filter((key) => String(get(zhCN.helpDesk, key)).includes('咨询'))
+    assert.deepEqual(mixed, [])
+    assert.equal(get(zhCN, 'helpDesk.claimHint'), '接手这条工单：分配给你并进入处理中；直接回复也会自动接单。')
+    assert.equal(get(zhCN, 'helpDesk.searchPlaceholder'), '搜索学员或工单...')
+  })
+
   test('the four FAQ categories (v2 §1 labels)', () => {
     assert.deepEqual(get(enGB, 'helpDesk.faqCategory'), {
       account_technical: 'Account & Technical Support',

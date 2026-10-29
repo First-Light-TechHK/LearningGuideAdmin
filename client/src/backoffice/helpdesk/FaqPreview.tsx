@@ -6,10 +6,12 @@ import { faqCategoryLabel } from '../lib/helpdeskFormat'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { MarkdownView } from './Markdown'
+import { useModal } from './useModal'
 
 /**
  * FAQ Preview（Tickets v2 §3a）：按 Help Centre 的样子显示一条 FAQ，可在 EN / 中文 之间切换
  * （缺省跟随界面语言）。答案经同一个安全渲染器（Markdown.tsx）。Figma 没有画板（待视觉验收）。
+ * 模态层（useModal）：Tab 不出 Preview，Escape 在哪儿按都关。
  */
 
 type PreviewLocale = 'en-GB' | 'zh-CN'
@@ -23,19 +25,14 @@ export function FaqPreview({ locale, faq, onClose }: { locale: Locale; faq: Help
   const [language, setLanguage] = useState<PreviewLocale>(locale === 'zh-CN' ? 'zh-CN' : 'en-GB')
   const closeRef = useRef<HTMLButtonElement>(null)
   const radios = useRef<(HTMLButtonElement | null)[]>([])
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useModal(() => dialogRef.current, onClose)
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null
     closeRef.current?.focus()
     return () => opener?.focus?.()
   }, [])
-
-  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (event.key === 'Escape') {
-      event.stopPropagation()
-      onClose()
-    }
-  }
 
   function onRadioKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -51,7 +48,7 @@ export function FaqPreview({ locale, faq, onClose }: { locale: Locale; faq: Help
   return (
     <div className="hdModalLayer">
       <div className="hdModalBackdrop" aria-hidden="true" onClick={onClose} />
-      <div className="hdPreview" role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`} onKeyDown={onKeyDown}>
+      <div ref={dialogRef} className="hdPreview" role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`}>
         <header className="hdPreviewHead">
           <div className="hdDrawerHeading">
             <h2 className="hdDrawerTitle" id={`${uid}-title`}>

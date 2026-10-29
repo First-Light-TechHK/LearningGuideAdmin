@@ -481,11 +481,11 @@
       "enquiries": "工单",
       "faqs": "常见问题"
     },
-    "searchPlaceholder": "搜索学员或咨询...",
-    "filter": "筛选咨询",
+    "searchPlaceholder": "搜索学员或工单...",
+    "filter": "筛选工单",
     "filters": {
       "status": "状态",
-      "category": "咨询类型",
+      "category": "工单类型",
       "tag": "标签",
       "tagPlaceholder": "任意标签",
       "any": "全部",
@@ -494,19 +494,19 @@
       "flagged": "已标记跟进"
     },
     "list": {
-      "empty": "还没有咨询。",
-      "emptyFiltered": "没有符合搜索或筛选条件的咨询。",
+      "empty": "还没有工单。",
+      "emptyFiltered": "没有符合搜索或筛选条件的工单。",
       "loadingMore": "正在加载更多…",
       "unread": "未读",
       "flagged": "已标记跟进"
     },
-    "selectPrompt": "选择一条咨询查看对话。",
+    "selectPrompt": "选择一条工单查看对话。",
     "today": "今天",
     "yesterday": "昨天",
     "claim": "接单",
     "claiming": "正在接单…",
-    "claimHint": "接手这条咨询：分配给你并进入处理中；直接回复也会自动接单。",
-    "claimedNotice": "已接单，这条咨询已分配给你。",
+    "claimHint": "接手这条工单：分配给你并进入处理中；直接回复也会自动接单。",
+    "claimedNotice": "已接单，这条工单已分配给你。",
     "markReviewed": "标记为已处理",
     "markReviewedHint": "请学员确认问题已解决；{hours} 小时内没有回应将自动结束。",
     "reviewedNotice": "已标记为已处理，已请学员确认。",
@@ -540,15 +540,15 @@
       "sending": "发送中…",
       "characters": "{count} / {max}"
     },
-    "stale": "这条咨询已更新，请重新查看。",
-    "notFound": "这条咨询不存在或已不可用。",
+    "stale": "这条工单已更新，请重新查看。",
+    "notFound": "这条工单不存在或已不可用。",
     "student": {
       "title": "学员信息",
       "accountEmail": "账号邮箱",
       "contactEmail": "联系邮箱",
       "joinedAt": "注册日期",
       "id": "学员 ID",
-      "totalEnquiries": "咨询总数",
+      "totalEnquiries": "工单总数",
       "currentCourse": "当前课程"
     },
     "subscription": {
@@ -585,8 +585,8 @@
       "remove": "移除标签 {tag}",
       "empty": "还没有标签。",
       "invalid": "标签为 1–32 个字符。",
-      "duplicate": "这条咨询已有这个标签。",
-      "limit": "每条咨询最多 10 个标签。"
+      "duplicate": "这条工单已有这个标签。",
+      "limit": "每条工单最多 10 个标签。"
     },
     "localeName": {
       "en-GB": "英语（英国）",
@@ -595,11 +595,11 @@
     "errors": {
       "HELPDESK_NOT_CONNECTED": "HelpDesk 尚未接通。",
       "HELPDESK_UNAVAILABLE": "HelpDesk 暂时不可用，请稍后再试。",
-      "TICKET_NOT_FOUND": "这条咨询不存在或已不可用。",
-      "STALE_TICKET": "这条咨询已更新，请重新查看。",
+      "TICKET_NOT_FOUND": "这条工单不存在或已不可用。",
+      "STALE_TICKET": "这条工单已更新，请重新查看。",
       "INVALID_TRANSITION": "当前状态下不能执行这个操作。",
       "IDEMPOTENCY_CONFLICT": "这次提交与之前的请求冲突，请刷新后重试。",
-      "TAG_LIMIT_REACHED": "每个咨询最多 10 个标签。",
+      "TAG_LIMIT_REACHED": "每条工单最多 10 个标签。",
       "INVALID_INPUT": "请检查填写内容后重试。",
       "NOT_AUTHORISED": "你的角色只能查看服务台。",
       "RATE_LIMITED": "请求太频繁，请稍后再试。",
