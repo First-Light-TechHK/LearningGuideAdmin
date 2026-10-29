@@ -29,10 +29,15 @@ import type {
  * 不重试（maxRetries 0），能要求就要求必须调工具（tool_choice required）；不发 pi 的署名头。
  *
  * 事件（dsh 名字，一个订阅者）：请求发出前 request/context + request/header（含 traceparent，
- * 从不含 key 或鉴权头）；message_end → assistant/message（usage、costUsd = pi usage.cost.total、
- * stopReason）；tool_execution_start → tool/call（arguments 为模型给的参数 JSON）；
- * tool_execution_end → tool/result（失败时 error {name, code}）。step/start、step/end 由工作流写
+ * 从不含 key 或鉴权头）；message_end → assistant/message（usage、costUsd = pi usage.cost.total，
+ * 模型不在 pi 的价目里时为 null（未知，不是免费）、stopReason，出错时 error {name, code}）；
+ * tool_execution_start → tool/call（arguments 为模型给的参数 JSON）；tool_execution_end →
+ * tool/result（失败时 error {name, code}）。step/start、step/end 由工作流写
  * （每个 agent 步正好是 pi 的一个 turn，code 步也要有）。
+ *
+ * 模型可能把学员原文塞进被拒的调用或 provider 的报错（审核元数据带原文）：这些只记形状——
+ * 被拒的参数只记长度（rejectedArguments），不像标识符的工具名记 invalid_name，pi 的校验文字与
+ * provider 的报错文字一律不记，只记 code。日志里的学员原文因此只在 LEARNER_TEXT_FIELDS 里。
  */
 // 依次加载：共用 typebox 等依赖，并发 import() 在 Jest 的 ESM 加载器里会撞上链接竞争
 async function importPi() {
@@ -64,7 +69,12 @@ export type StreamSource = {
 export type ModelSource = (
   pi: PiModules,
   target: ModelTarget,
-) => { models: StreamSource; model: Model<Api> };
+) => {
+  models: StreamSource;
+  model: Model<Api>;
+  /** model.cost 是真价格（缺省 true）；false 时费用未知，costUsd 记 null。 */
+  priced?: boolean;
+};
 
 const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 let openRouterModels: ReturnType<PiModules['ai']['createModels']> | undefined;
@@ -94,13 +104,23 @@ export const openRouterSource: ModelSource = (pi, target) => {
           contextWindow: known?.contextWindow ?? 128_000,
           maxTokens: known?.maxTokens ?? 4_096,
         };
-  return { models: openRouterModels, model };
+  return { models: openRouterModels, model, priced: known !== undefined };
 };
 
 const clip = (text: string, max: number) =>
   text.length > max ? `${text.slice(0, max)}…` : text;
 
-function assistantData(message: AssistantMessage): JsonObject {
+const IDENTIFIER = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** provider 报错只留 code：HTTP 状态、finish_reason，其余 provider_error。 */
+function providerErrorCode(message: string): string {
+  const status = /^(\d{3})\b/.exec(message) ?? /\((\d{3})\):/.exec(message);
+  if (status) return `http_${status[1]}`;
+  const finish = /^Provider finish_reason: ([a-z_]+)$/.exec(message);
+  return finish ? finish[1] : 'provider_error';
+}
+
+function assistantData(message: AssistantMessage, priced: boolean): JsonObject {
   const usage = message.usage;
   const text = message.content
     .filter((block) => block.type === 'text')
@@ -114,7 +134,7 @@ function assistantData(message: AssistantMessage): JsonObject {
       cacheReadTokens: usage.cacheRead,
       reasoningTokens: usage.reasoning ?? 0,
     },
-    costUsd: usage.cost.total,
+    costUsd: priced ? usage.cost.total : null,
     stopReason: message.stopReason,
     toolCalls: message.content.filter((block) => block.type === 'toolCall')
       .length,
@@ -125,7 +145,12 @@ function assistantData(message: AssistantMessage): JsonObject {
     // 模型的文字可能复述学员原文：按学员原文对待（90 天清空、导出脱敏）
     ...(text ? { text: clip(text, 500) } : {}),
     ...(message.errorMessage
-      ? { errorMessage: clip(message.errorMessage, 300) }
+      ? {
+          error: {
+            name: 'ProviderError',
+            code: providerErrorCode(message.errorMessage),
+          },
+        }
       : {}),
   };
 }
@@ -153,8 +178,24 @@ export class PiStepRunner implements AgentStepRunner {
     const pi = await this.load();
     const { signal, trace, step } = context;
     if (signal.aborted) return { kind: 'aborted' };
-    const { models, model } = this.source(pi, context.model);
+    const { models, model, priced = true } = this.source(pi, context.model);
     const allowed = [spec.tool.name];
+    const toolName = (name: string) =>
+      IDENTIFIER.test(name) ? name : 'invalid_name';
+    // 原样记参数只限通过枚举的那种：恰好这些键、每个值都在枚举里
+    const valid = (args: unknown) => {
+      if (typeof args !== 'object' || args === null || Array.isArray(args))
+        return false;
+      const entries = Object.entries(args as Record<string, unknown>);
+      const enums = Object.entries(spec.tool.enumArgs);
+      return (
+        entries.length === enums.length &&
+        enums.every(([key, values]) => {
+          const value = (args as Record<string, unknown>)[key];
+          return typeof value === 'string' && values.includes(value);
+        })
+      );
+    };
     let closed = false;
     let picked: Record<string, string> | null = null;
     let lastStop: AssistantMessage['stopReason'] | null = null;
@@ -243,15 +284,21 @@ export class PiStepRunner implements AgentStepRunner {
     agent.subscribe((event) => {
       if (event.type === 'message_end' && event.message.role === 'assistant') {
         lastStop = event.message.stopReason;
-        emit('assistant/message', assistantData(event.message));
+        emit('assistant/message', assistantData(event.message, priced));
       } else if (event.type === 'tool_execution_start') {
+        const raw = JSON.stringify(event.args ?? {});
         emit('tool/call', {
           callId: event.toolCallId,
-          name: event.toolName,
-          arguments: JSON.stringify(event.args ?? {}),
+          name: toolName(event.toolName),
+          ...(allowed.includes(event.toolName) && valid(event.args)
+            ? { arguments: raw }
+            : { rejectedArguments: { length: raw.length } }),
         });
       } else if (event.type === 'tool_execution_end') {
-        const base = { callId: event.toolCallId, name: event.toolName };
+        const base = {
+          callId: event.toolCallId,
+          name: toolName(event.toolName),
+        };
         if (!event.isError) {
           emit('tool/result', {
             ...base,
@@ -259,25 +306,15 @@ export class PiStepRunner implements AgentStepRunner {
           });
           return;
         }
+        // 中止后的事件已被 closed 挡掉，这里不会有 aborted
         const code =
           blocked.get(event.toolCallId) ??
           (!allowed.includes(event.toolName)
             ? 'unknown_tool'
-            : signal.aborted
-              ? 'aborted'
-              : lastStop === 'length'
-                ? 'truncated'
-                : 'invalid_arguments');
-        const content = (event.result as { content?: { text?: string }[] })
-          .content;
-        emit('tool/result', {
-          ...base,
-          error: {
-            name: 'ToolError',
-            code,
-            message: clip(content?.[0]?.text ?? '', 300),
-          },
-        });
+            : lastStop === 'length'
+              ? 'truncated'
+              : 'invalid_arguments');
+        emit('tool/result', { ...base, error: { name: 'ToolError', code } });
       }
     });
 

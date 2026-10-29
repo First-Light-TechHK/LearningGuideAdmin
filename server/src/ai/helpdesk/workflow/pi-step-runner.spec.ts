@@ -224,6 +224,8 @@ describe('PiStepRunner on pi-agent-core', () => {
       expect(of(events, 'tool/call').map((c) => c.name)).toEqual(
         calls.map((c) => c.name),
       );
+      for (const c of of(events, 'tool/call'))
+        if (codes[0] !== 'too_many_calls') expect(c.arguments).toBeUndefined();
       const results = of(events, 'tool/result');
       expect(results.map((r) => (r.error as JsonObject).code)).toEqual(codes);
       for (const r of results) {
@@ -232,6 +234,79 @@ describe('PiStepRunner on pi-agent-core', () => {
       }
     },
   );
+
+  it('never stores model-echoed text from a rejected call (arguments or validation message)', async () => {
+    const echo = 'my email is lena@example.com';
+    const f = await faux();
+    f.handle.setResponses([
+      f.pi.ai.fauxAssistantMessage(
+        [f.pi.ai.fauxToolCall('pick_faq', { faqId: echo }, { id: 'call_x' })],
+        { stopReason: 'toolUse' },
+      ),
+    ]);
+    const { outcome, events } = await runStep(f);
+    expect(outcome).toEqual({ kind: 'no_call' });
+    expect(JSON.stringify(events)).not.toContain('lena@example.com');
+    expect(of(events, 'tool/call')).toEqual([
+      {
+        turn: 1,
+        step: 2,
+        callId: 'call_x',
+        name: 'pick_faq',
+        rejectedArguments: {
+          length: JSON.stringify({ faqId: echo }).length,
+        },
+      },
+    ]);
+    // dsh tool/result error is {name, code} only
+    expect(of(events, 'tool/result')).toEqual([
+      {
+        turn: 1,
+        step: 2,
+        callId: 'call_x',
+        name: 'pick_faq',
+        error: { name: 'ToolError', code: 'invalid_arguments' },
+      },
+    ]);
+  });
+
+  it('records a call cut off by the token limit as truncated', async () => {
+    const f = await faux();
+    f.handle.setResponses([
+      f.pi.ai.fauxAssistantMessage(
+        [f.pi.ai.fauxToolCall('pick_faq', { faqId: IDS[0] }, { id: 'call_t' })],
+        { stopReason: 'length' },
+      ),
+    ]);
+    const { outcome, events } = await runStep(f);
+    expect(outcome).toEqual({ kind: 'no_call' });
+    expect(of(events, 'tool/result')).toEqual([
+      {
+        turn: 1,
+        step: 2,
+        callId: 'call_t',
+        name: 'pick_faq',
+        error: { name: 'ToolError', code: 'truncated' },
+      },
+    ]);
+  });
+
+  it('keeps a model-made tool name only when it looks like an identifier', async () => {
+    const f = await faux();
+    f.handle.setResponses([
+      f.pi.ai.fauxAssistantMessage(
+        [f.pi.ai.fauxToolCall('tell lena@example.com', {}, { id: 'call_n' })],
+        { stopReason: 'toolUse' },
+      ),
+    ]);
+    const { events } = await runStep(f);
+    expect(JSON.stringify(events)).not.toContain('lena@example.com');
+    expect(of(events, 'tool/call')[0]).toMatchObject({ name: 'invalid_name' });
+    expect(of(events, 'tool/result')[0]).toMatchObject({
+      name: 'invalid_name',
+      error: { name: 'ToolError', code: 'unknown_tool' },
+    });
+  });
 
   it('counts a text answer as no call and keeps the text (learner-derived) on the message', async () => {
     const f = await faux();
@@ -260,9 +335,31 @@ describe('PiStepRunner on pi-agent-core', () => {
       kind: 'error',
       message: '429 rate limited upstream',
     });
-    expect(of(events, 'assistant/message')[0]).toMatchObject({
+    const [reply] = of(events, 'assistant/message');
+    expect(reply).toMatchObject({
       stopReason: 'error',
-      errorMessage: '429 rate limited upstream',
+      error: { name: 'ProviderError', code: 'http_429' },
+    });
+    // provider error text can carry the request (moderation metadata): never stored
+    expect(reply.errorMessage).toBeUndefined();
+  });
+
+  it.each([
+    ['Provider finish_reason: content_filter', 'content_filter'],
+    ['OpenRouter error (503): upstream busy', 'http_503'],
+    ['socket hang up', 'provider_error'],
+  ])('maps the provider error %j to the code %s', async (message, code) => {
+    const f = await faux();
+    f.handle.setResponses([
+      f.pi.ai.fauxAssistantMessage([], {
+        stopReason: 'error',
+        errorMessage: message,
+      }),
+    ]);
+    const { events } = await runStep(f);
+    expect(of(events, 'assistant/message')[0].error).toEqual({
+      name: 'ProviderError',
+      code,
     });
   });
 
@@ -431,6 +528,79 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
     );
     expect(outcome.kind).toBe('error');
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps learner text from a provider error body out of the log', async () => {
+    const { outcome, events } = await call(
+      () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'Input flagged',
+              code: 403,
+              metadata: {
+                raw: 'flagged_input: reset my password',
+                flagged_input: 'reset my password',
+              },
+            },
+          }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    expect(outcome.kind).toBe('error');
+    expect(JSON.stringify(events)).not.toContain('reset my password');
+    expect(
+      events.find((e) => e.type === 'assistant/message')?.data.error,
+    ).toEqual({ name: 'ProviderError', code: 'http_403' });
+  });
+
+  it('records the cost as unknown (null) for a model missing from the catalog', async () => {
+    const fetch = jest.fn(() =>
+      Promise.resolve(
+        sse([
+          chunk({
+            role: 'assistant',
+            tool_calls: [
+              {
+                index: 0,
+                id: 'call_u',
+                type: 'function',
+                function: {
+                  name: 'pick_faq',
+                  arguments: JSON.stringify({ faqId: IDS[0] }),
+                },
+              },
+            ],
+          }),
+          {
+            ...chunk({}),
+            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+            usage: { prompt_tokens: 100, completion_tokens: 10, cost: 0.0012 },
+          },
+        ]),
+      ),
+    );
+    const log = createMemoryAgentEventLog();
+    const trace = new RunTrace(RUN, log);
+    await new PiStepRunner({
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    }).run(SPEC, {
+      trace,
+      step: 2,
+      name: 'pick_faq',
+      signal: new AbortController().signal,
+      model: { ...TARGET, model: 'acme/brand-new-model' },
+      traceparent: () => TRACEPARENT,
+    });
+    trace.emit('turn/end', { turn: 1, reason: 'test' });
+    await trace.flush();
+    const reply = (await log.read(RUN)).find(
+      (e) => e.type === 'assistant/message',
+    )?.data;
+    expect(reply).toMatchObject({
+      usage: { inputTokens: 100, outputTokens: 10 },
+      costUsd: null,
+    });
   });
 
   it('uses any OpenRouter model id, also one missing from the catalog', async () => {
