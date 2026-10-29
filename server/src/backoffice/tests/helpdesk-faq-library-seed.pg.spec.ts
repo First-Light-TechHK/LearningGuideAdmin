@@ -6,9 +6,12 @@ import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRep
 import { createFaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
 import {
   parseFaqLibrary,
+  parseSeedArgs,
+  seedExitCode,
   seedFaqLibrary,
   seedIdempotencyKey,
   type SeedDeps,
+  type SeedReport,
 } from '../modules/helpdesk/faqs/faqLibrarySeed';
 import { publicRelease } from '../modules/helpdesk/faqs/faqRelease';
 import { createRetrievalGate } from '../modules/helpdesk/faqs/faqReleaseGate';
@@ -137,6 +140,88 @@ describe('FAQ library file (parse, pure)', () => {
   });
 });
 
+describe('seed command line (eval/helpdesk/seed-faq-library.ts)', () => {
+  it('takes the library path, an optional employee id and --no-release', () => {
+    expect(parseSeedArgs(['lib.json'])).toEqual({
+      ok: true,
+      path: 'lib.json',
+      employeeId: null,
+      release: true,
+    });
+    expect(
+      parseSeedArgs([
+        'lib.json',
+        '--employee-id',
+        '0192aaaa-0000-7000-8000-000000000001',
+        '--no-release',
+      ]),
+    ).toEqual({
+      ok: true,
+      path: 'lib.json',
+      employeeId: '0192aaaa-0000-7000-8000-000000000001',
+      release: false,
+    });
+  });
+
+  it('refuses a missing path, a bad employee id and unknown flags with exit code 2', () => {
+    const missing = parseSeedArgs([]);
+    expect(missing).toMatchObject({ ok: false, exitCode: 2 });
+    expect(Object.keys(missing).sort()).toEqual(['exitCode', 'message', 'ok']);
+    expect((missing as { message: string }).message).toContain(
+      'Usage: seed-faq-library',
+    );
+    expect(parseSeedArgs(['lib.json', '--employee-id', 'nope'])).toEqual({
+      ok: false,
+      exitCode: 2,
+      message: '--employee-id must be a UUID',
+    });
+    expect(parseSeedArgs(['lib.json', '--publish-now'])).toMatchObject({
+      ok: false,
+      exitCode: 2,
+    });
+  });
+
+  it('exits 1 when anything was skipped or failed, or the release was not published', () => {
+    const clean: SeedReport = {
+      nodes: { created: ['a'], updated: [], unchanged: 0, skipped: [] },
+      edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
+      phrasings: { created: 0, existing: 0, failed: [] },
+      release: {
+        version: 1,
+        status: 'published',
+        created: true,
+        published: true,
+      },
+      warnings: [],
+    };
+    expect(seedExitCode(clean)).toBe(0);
+    expect(seedExitCode({ ...clean, release: null })).toBe(0);
+    expect(
+      seedExitCode({
+        ...clean,
+        nodes: { ...clean.nodes, skipped: [{ key: 'a', reason: 'archived' }] },
+      }),
+    ).toBe(1);
+    expect(
+      seedExitCode({
+        ...clean,
+        edges: { ...clean.edges, failed: [{ link: 'a → b', reason: 'x' }] },
+      }),
+    ).toBe(1);
+    expect(
+      seedExitCode({
+        ...clean,
+        release: {
+          version: 2,
+          status: 'rejected',
+          created: true,
+          published: false,
+        },
+      }),
+    ).toBe(1);
+  });
+});
+
 const url = process.env.HELPDESK_TEST_DATABASE_URL;
 if (!url && process.env.CI === 'true')
   throw new Error('HELPDESK_TEST_DATABASE_URL is required when CI=true');
@@ -185,6 +270,13 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
         }
       },
     };
+  });
+
+  beforeEach(async () => {
+    await pool.query(
+      `TRUNCATE helpdesk_faq_release_nodes, helpdesk_faq_releases, helpdesk_faq_edge_revisions,
+                helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions, helpdesk_faqs`,
+    );
   });
 
   afterAll(async () => {
@@ -308,5 +400,106 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       'SELECT count(*)::int AS n FROM helpdesk_faq_releases',
     );
     expect(rows[0].n).toBe(1);
+  });
+  it('matches FAQs already in the table under the migration slug key by their English question, instead of duplicating them', async () => {
+    // rows from before the graph: the migration gave them the slug of the English question as key
+    await pool.query(
+      `INSERT INTO helpdesk_faqs (id, category, question_en, answer_en, question_zh, answer_zh, key)
+       VALUES ('0192f0e0-0000-7000-8000-0000000000b1', 'payments_subscriptions',
+               'What should I do if my payment failed?', 'Old answer.', '付款失败怎么办？', '旧答案。',
+               'what-should-i-do-if-my-payment-failed'),
+              ('0192f0e0-0000-7000-8000-0000000000b2', 'other',
+               '  how do I contact   support? ', 'Old answer.', '如何联系客服？', '旧答案。',
+               'how-do-i-contact-support')`,
+    );
+    const report = await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor: { employeeId: null },
+      release: false,
+    });
+    expect(report.nodes.created).not.toContain('payment-failed');
+    expect(report.nodes.created).not.toContain('contact-support');
+    expect(report.nodes.updated).toEqual(
+      expect.arrayContaining(['payment-failed', 'contact-support']),
+    );
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        'payment-failed: matched the existing FAQ what-should-i-do-if-my-payment-failed by its English question and gave it this key',
+        'contact-support: matched the existing FAQ how-do-i-contact-support by its English question and gave it this key',
+      ]),
+    );
+    const { rows } = await pool.query<{ key: string; id: string }>(
+      'SELECT key, id FROM helpdesk_faqs ORDER BY key',
+    );
+    expect(rows).toHaveLength(7);
+    expect(rows.find((r) => r.key === 'payment-failed')?.id).toBe(
+      '0192f0e0-0000-7000-8000-0000000000b1',
+    );
+    expect(rows.find((r) => r.key === 'contact-support')?.id).toBe(
+      '0192f0e0-0000-7000-8000-0000000000b2',
+    );
+    // and a second run finds them by key
+    const again = await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor: { employeeId: null },
+      release: false,
+    });
+    expect(again.nodes).toMatchObject({ created: [], updated: [] });
+  });
+
+  it('re-seeding a changed library after v1 relabels links, updates answers, adds links and publishes v2', async () => {
+    const actor = { employeeId: null };
+    const first = await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor,
+      release: true,
+    });
+    expect(first.release).toMatchObject({ version: 1, published: true });
+    const changed = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    const byKey = (key: string) => changed.faqs.find((f) => f.key === key)!;
+    const options = byKey('payment-problem').options as Record<
+      string,
+      unknown
+    >[];
+    options[0].labelEn = 'Payment did not go through';
+    options[0].labelZh = '付款没成功';
+    byKey('contact-support').answerEn =
+      'Select **Contact Support** at the bottom of any page, or reply to any of our emails.';
+    byKey('still-not-active').followUps = ['contact-support'];
+    const second = await seedFaqLibrary(deps(), parseFaqLibrary(changed), {
+      actor,
+      release: true,
+    });
+    expect(second.nodes).toMatchObject({
+      created: [],
+      updated: ['contact-support'],
+      skipped: [],
+    });
+    expect(second.edges).toEqual({
+      created: 1,
+      existing: 5,
+      relabelled: 1,
+      failed: [],
+    });
+    expect(second.release).toEqual({
+      version: 2,
+      status: 'published',
+      created: true,
+      published: true,
+    });
+    const release = await deps().source.current();
+    const en = publicRelease(release!, 'en-GB');
+    const ids = new Map(en.nodes.map((n) => [n.key, n.id]));
+    expect(
+      en.edges
+        .filter((e) => e.parentId === ids.get('payment-problem'))
+        .map((e) => e.label),
+    ).toEqual(['Payment did not go through', 'Paid but not active']);
+    expect(
+      en.edges.filter(
+        (e) =>
+          e.parentId === ids.get('still-not-active') &&
+          e.childId === ids.get('contact-support'),
+      ),
+    ).toHaveLength(1);
   });
 });

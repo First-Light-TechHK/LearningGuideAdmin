@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseArgs } from 'node:util';
 
 import {
   isFaqCategory,
@@ -7,6 +8,7 @@ import {
   type FaqNodeType,
   type FaqSignal,
 } from '../../../../contracts/helpdesk-qa';
+import { isUuid } from '../../../../common/uuidv7';
 import { HelpdeskError } from '../portalHelpdeskClient';
 import {
   FAQ_KEY_PATTERN,
@@ -38,6 +40,12 @@ import { toSimplified } from './faqSearchText';
  * - 问题链：parentKey（字符串或数组：这条是谁的追问 / 选项），或 followUps / options（数组：
  *   子节点的 key，或 { key, labelEn, labelZh } 引用，或整条子 FAQ 内联）。边的类型由父节点类型决定。
  * 不删除库里没有的东西（只加不减）；已归档的同 key 行跳过并报告。
+ *
+ * 找已有的行：先按 key，再按 source "existing:<id>"，最后按英文问题（去首尾空白、合并空白、不分大小写）
+ * 在已发布的行里找 —— 问题树之前就有的 FAQ 由迁移回填了「英文问题的 slug」当 key，库文件（v2）用自己的 key，
+ * 不按问题找就会把同一条 FAQ 再建一遍。按问题找到的行改成库里的 key（报告里写一条 warning）；
+ * 那一行的 key 若正是库里另一条的 key，或同一个问题对上了多行，就不按问题认（避免认错）。
+ * 边只加与改文字，不删除、不重排（库里去掉的边要在 BackOffice 里删）。
  */
 
 type Raw = Record<string, unknown>;
@@ -290,7 +298,7 @@ export type SeedReport = {
 
 export type SeedDeps = {
   faqs: FaqService;
-  repository: Pick<FaqRepository, 'getByKey' | 'get'>;
+  repository: Pick<FaqRepository, 'getByKey' | 'get' | 'list'>;
   graph: FaqGraphService;
   releases?: FaqReleaseService;
 };
@@ -301,6 +309,27 @@ function reason(error: unknown): string {
     : error instanceof Error
       ? error.message
       : String(error);
+}
+
+/** 比较英文问题用：去首尾空白、合并空白、小写。 */
+function questionKey(question: string): string {
+  return question.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** 已发布的行按英文问题分组（导入前一次读完，导入中途的改动不影响分页）。 */
+async function publishedByQuestion(
+  repository: Pick<FaqRepository, 'list'>,
+): Promise<Map<string, HelpdeskFaq[]>> {
+  const out = new Map<string, HelpdeskFaq[]>();
+  const pageSize = 200;
+  for (let offset = 0; ; offset += pageSize) {
+    const { faqs } = await repository.list({ offset, limit: pageSize });
+    for (const faq of faqs) {
+      const key = questionKey(faq.questionEn);
+      out.set(key, [...(out.get(key) ?? []), faq]);
+    }
+    if (faqs.length < pageSize) return out;
+  }
 }
 
 export async function seedFaqLibrary(
@@ -316,6 +345,9 @@ export async function seedFaqLibrary(
     warnings: [...library.warnings],
   };
   const ids = new Map<string, string>();
+  const byQuestion = await publishedByQuestion(deps.repository);
+  const libraryKeys = new Set(library.nodes.map((node) => node.key));
+  const claimed = new Set<string>();
 
   for (const node of library.nodes) {
     let current: HelpdeskFaq | null = await deps.repository.getByKey(node.key);
@@ -323,6 +355,17 @@ export async function seedFaqLibrary(
       const old = await deps.repository.get(node.existingId);
       if (old) current = old;
     }
+    if (!current) {
+      const same = byQuestion.get(questionKey(node.questionEn)) ?? [];
+      const found = same.length === 1 ? same[0] : null;
+      if (found && !libraryKeys.has(found.key) && !claimed.has(found.id)) {
+        current = found;
+        report.warnings.push(
+          `${node.key}: matched the existing FAQ ${found.key} by its English question and gave it this key`,
+        );
+      }
+    }
+    if (current) claimed.add(current.id);
     if (current && current.status !== 'published') {
       report.nodes.skipped.push({ key: node.key, reason: 'archived' });
       continue;
@@ -434,4 +477,56 @@ export async function seedFaqLibrary(
     };
   }
   return report;
+}
+
+export type SeedArgs =
+  | { ok: true; path: string; employeeId: string | null; release: boolean }
+  | { ok: false; exitCode: 2; message: string };
+
+const SEED_USAGE =
+  'Usage: seed-faq-library <library.json> [--employee-id <uuid>] [--no-release]';
+
+/** 命令行参数（eval/helpdesk/seed-faq-library.ts）：库文件路径、可选的员工 id、--no-release。 */
+export function parseSeedArgs(args: readonly string[]): SeedArgs {
+  let parsed: ReturnType<typeof parseSeedOptions>;
+  try {
+    parsed = parseSeedOptions(args);
+  } catch (error) {
+    return {
+      ok: false,
+      exitCode: 2,
+      message: `${error instanceof Error ? error.message : String(error)}\n${SEED_USAGE}`,
+    };
+  }
+  const { values, positionals } = parsed;
+  const path = positionals[0];
+  if (!path || positionals.length > 1)
+    return { ok: false, exitCode: 2, message: SEED_USAGE };
+  const employeeId = values['employee-id'] ?? null;
+  if (employeeId !== null && !isUuid(employeeId))
+    return { ok: false, exitCode: 2, message: '--employee-id must be a UUID' };
+  return { ok: true, path, employeeId, release: !values['no-release'] };
+}
+
+function parseSeedOptions(args: readonly string[]) {
+  return parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    strict: true,
+    options: {
+      'employee-id': { type: 'string' },
+      'no-release': { type: 'boolean', default: false },
+    },
+  });
+}
+
+/** 退出码：有跳过 / 失败的，或建了版本却没发布 → 1；否则 0。 */
+export function seedExitCode(report: SeedReport): 0 | 1 {
+  const failed =
+    report.nodes.skipped.length +
+    report.edges.failed.length +
+    report.phrasings.failed.length;
+  return failed > 0 || (report.release !== null && !report.release.published)
+    ? 1
+    : 0;
 }

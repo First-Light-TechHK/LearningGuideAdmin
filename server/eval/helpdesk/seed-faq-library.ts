@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { parseArgs } from 'node:util';
 
 import { closePool } from '../../src/backoffice/lib/db';
 import { createPgFaqGraphRepository } from '../../src/backoffice/modules/helpdesk/faqs/faqGraphRepository';
 import { createFaqGraphService } from '../../src/backoffice/modules/helpdesk/faqs/faqGraphService';
 import {
   parseFaqLibrary,
+  parseSeedArgs,
+  seedExitCode,
   seedFaqLibrary,
 } from '../../src/backoffice/modules/helpdesk/faqs/faqLibrarySeed';
 import {
@@ -14,7 +15,6 @@ import {
 } from '../../src/backoffice/modules/helpdesk/faqs/faqReleaseService';
 import { createPgFaqRepository } from '../../src/backoffice/modules/helpdesk/faqs/faqRepository';
 import { createFaqService } from '../../src/backoffice/modules/helpdesk/faqs/faqService';
-import { isUuid } from '../../src/common/uuidv7';
 
 /**
  * 从 FAQ 库文件导入问题树并建发布版本 v1（helpdesk-v5-faq-graph-design §8.2）：
@@ -26,27 +26,13 @@ import { isUuid } from '../../src/common/uuidv7';
  * 输出一份 JSON 报告（建了 / 改了 / 跳过的 key、边、问法、版本）。
  */
 async function main(): Promise<void> {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      'employee-id': { type: 'string' },
-      'no-release': { type: 'boolean', default: false },
-    },
-  });
-  const path = positionals[0];
-  if (!path) {
-    console.error(
-      'Usage: seed-faq-library <library.json> [--employee-id <uuid>] [--no-release]',
-    );
-    process.exitCode = 2;
+  const args = parseSeedArgs(process.argv.slice(2));
+  if (!args.ok) {
+    console.error(args.message);
+    process.exitCode = args.exitCode;
     return;
   }
-  const employeeId = values['employee-id'] ?? null;
-  if (employeeId !== null && !isUuid(employeeId)) {
-    console.error('--employee-id must be a UUID');
-    process.exitCode = 2;
-    return;
-  }
+  const { path, employeeId } = args;
   const library = parseFaqLibrary(JSON.parse(readFileSync(path, 'utf8')));
   const repository = createPgFaqRepository();
   const graph = createPgFaqGraphRepository();
@@ -64,15 +50,10 @@ async function main(): Promise<void> {
         releases: createFaqReleaseService({ graph }),
       },
       library,
-      { actor: { employeeId }, release: !values['no-release'] },
+      { actor: { employeeId }, release: args.release },
     );
     console.log(JSON.stringify(report, null, 2));
-    const failed =
-      report.nodes.skipped.length +
-      report.edges.failed.length +
-      report.phrasings.failed.length;
-    if (failed > 0 || (report.release !== null && !report.release.published))
-      process.exitCode = 1;
+    process.exitCode = seedExitCode(report);
   } finally {
     await closePool();
   }

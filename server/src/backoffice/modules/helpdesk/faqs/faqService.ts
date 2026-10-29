@@ -255,7 +255,24 @@ async function keyTaken<T>(work: () => Promise<T>): Promise<T> {
 function written<T>(result: WriteResult<T>): T {
   if (result.kind === 'not_found') throw notFound();
   if (result.kind === 'conflict') throw conflict(result.currentVersion);
+  if (result.kind === 'has_parents') throw hasParents([]);
   return result.value;
+}
+
+/** 409 FAQ_HAS_PARENTS：消息里列出在用它的父节点（graph design §2.3「拒绝，并列出父节点」）。 */
+function hasParents(
+  parents: Pick<HelpdeskFaq, 'key' | 'questionEn'>[],
+): HelpdeskError {
+  return new HelpdeskError(
+    409,
+    'FAQ_HAS_PARENTS',
+    parents.length === 0
+      ? 'This question is still a follow-up or option of another question. Remove it there first.'
+      : `This question is still a follow-up or option of: ${parents
+          .map((parent) => `"${parent.questionEn}" (${parent.key})`)
+          .join(', ')
+          .slice(0, 800)}. Remove it there first.`,
+  );
 }
 
 function publicShape(faq: HelpdeskFaq, locale: HelpdeskLocale): PublicFaq {
@@ -511,24 +528,18 @@ export function createFaqService(options: FaqServiceOptions = {}) {
       if (current.status === 'archived') return current;
       if (current.version !== expected) throw conflict(current.version);
       const parents = await liveParents(id);
-      if (parents.length > 0)
-        throw new HelpdeskError(
-          409,
-          'FAQ_HAS_PARENTS',
-          `This question is still a follow-up or option of: ${parents
-            .map((parent) => `"${parent.questionEn}" (${parent.key})`)
-            .join(', ')
-            .slice(0, 800)}. Remove it there first.`,
-        );
-      return written(
-        await repository.update(
-          id,
-          expected,
-          { status: 'archived' },
-          'archive',
-          employee.employeeId,
-        ),
+      if (parents.length > 0) throw hasParents(parents);
+      // 仓库在同一事务里锁住这一行后再查一次（同时有人把它挂到别的问题下）：那时再列出父节点
+      const result = await repository.update(
+        id,
+        expected,
+        { status: 'archived' },
+        'archive',
+        employee.employeeId,
       );
+      if (result.kind === 'has_parents')
+        throw hasParents(await liveParents(id));
+      return written(result);
     },
 
     async published(

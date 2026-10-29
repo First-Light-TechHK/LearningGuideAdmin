@@ -11,6 +11,7 @@ import {
   createPgFaqGraphRepository,
   type FaqGraphRepository,
   type FaqReleaseRow,
+  type PublishReadiness,
   type FaqReleaseWithSnapshot,
 } from './faqGraphRepository';
 import {
@@ -73,20 +74,57 @@ function evalPassed(report: unknown): boolean {
   );
 }
 
-/** 能不能发布：draft，且图检查与评测门都过了。 */
-export function releaseReady(release: FaqReleaseRow): boolean {
-  return (
-    release.status === 'draft' &&
-    release.checks?.passed === true &&
-    evalPassed(release.evalReport)
-  );
+function baselineOf(report: unknown): number | null | undefined {
+  if (typeof report !== 'object' || report === null) return undefined;
+  if (!('baselineVersion' in report)) return undefined;
+  const value = (report as { baselineVersion?: unknown }).baselineVersion;
+  return typeof value === 'number' ? value : null;
+}
+
+/**
+ * 能不能发布（publishedVersion = 现在上线的版本号，没有 → null）：
+ * - not_ready：不是 draft，或图检查 / 评测门没过；
+ * - stale：比上线的版本旧（发布它会悄悄丢掉更新的内容），或评测时对比的不是现在上线的那一版
+ *   （recall 退步没跟它比过，要重新检查）。回滚版本不看后者（它不跑评测，立即发布）。
+ */
+export function releaseReadiness(
+  release: FaqReleaseRow,
+  publishedVersion: number | null,
+): PublishReadiness {
+  if (
+    release.status !== 'draft' ||
+    release.checks?.passed !== true ||
+    !evalPassed(release.evalReport)
+  )
+    return 'not_ready';
+  if (publishedVersion !== null && release.version < publishedVersion)
+    return 'stale';
+  const baseline = baselineOf(release.evalReport);
+  if (
+    release.sourceVersion === null &&
+    baseline !== undefined &&
+    baseline !== publishedVersion
+  )
+    return 'stale';
+  return 'ok';
+}
+
+/** 能不能发布（列表里的 publishable）。 */
+export function releaseReady(
+  release: FaqReleaseRow,
+  publishedVersion: number | null,
+): boolean {
+  return releaseReadiness(release, publishedVersion) === 'ok';
 }
 
 /** 列表 / 详情里的一个版本（不含快照；counts 来自检查结果）。 */
 export type FaqReleaseSummary = FaqReleaseRow & { publishable: boolean };
 
-function summary(release: FaqReleaseRow): FaqReleaseSummary {
-  return { ...release, publishable: releaseReady(release) };
+function summary(
+  release: FaqReleaseRow,
+  publishedVersion: number | null,
+): FaqReleaseSummary {
+  return { ...release, publishable: releaseReady(release, publishedVersion) };
 }
 
 /**
@@ -207,16 +245,20 @@ export function createFaqReleaseService(
     );
     if (!started) return release;
     const previous = await publishedRelease();
+    const baseline =
+      previous && previous.version !== release.version ? previous : null;
     let report: FaqReleaseEvalReport;
     try {
-      report = await gate.evaluate({
-        version: release.version,
-        snapshot: release.snapshot,
-        previous:
-          previous && previous.version !== release.version
-            ? { version: previous.version, evalReport: previous.evalReport }
+      report = {
+        ...(await gate.evaluate({
+          version: release.version,
+          snapshot: release.snapshot,
+          previous: baseline
+            ? { version: baseline.version, evalReport: baseline.evalReport }
             : null,
-      });
+        })),
+        baselineVersion: baseline?.version ?? null,
+      };
     } catch (error) {
       report = {
         kind: 'skipped',
@@ -241,8 +283,20 @@ export function createFaqReleaseService(
     actor: FaqActor,
     version: number,
   ): Promise<FaqReleaseSummary> {
-    const result = await graph.publish(version, releaseReady, actor.employeeId);
+    const result = await graph.publish(
+      version,
+      releaseReadiness,
+      actor.employeeId,
+    );
     if (result.kind === 'not_found') throw notFound();
+    if (result.kind === 'stale')
+      throw new HelpdeskError(
+        409,
+        'FAQ_RELEASE_STALE',
+        result.published !== null && result.release.version < result.published
+          ? `v${result.release.version} is older than the live v${result.published}; create a new release or roll back instead`
+          : `v${result.release.version} was evaluated against another live release; re-check it before publishing`,
+      );
     if (result.kind === 'not_ready')
       throw new HelpdeskError(
         409,
@@ -251,7 +305,12 @@ export function createFaqReleaseService(
           ? 'This release has not passed the graph checks and the eval'
           : `Only a release that passed the checks and the eval can be published (this one is ${result.release.status})`,
       );
-    return summary(result.release);
+    // published / already：这一版就是上线的
+    return summary(result.release, result.release.version);
+  }
+
+  async function liveVersion(): Promise<number | null> {
+    return (await graph.published())?.version ?? null;
   }
 
   return {
@@ -260,11 +319,12 @@ export function createFaqReleaseService(
       published: number | null;
     }> {
       const releases = await graph.releases();
+      const published =
+        releases.find((release) => release.status === 'published')?.version ??
+        null;
       return {
-        releases: releases.map(summary),
-        published:
-          releases.find((release) => release.status === 'published')?.version ??
-          null,
+        releases: releases.map((release) => summary(release, published)),
+        published,
       };
     },
 
@@ -273,7 +333,7 @@ export function createFaqReleaseService(
         versionNumber(rawVersion),
       );
       void _snapshot;
-      return summary(release);
+      return summary(release, await liveVersion());
     },
 
     /** 「发布新版本」页面：工作表的检查与它和当前发布版本的差异（什么都不写）。 */
@@ -369,9 +429,16 @@ export function createFaqReleaseService(
         employeeId: actor.employeeId,
         dedupe: true,
       });
-      if (!created) return { release: summary(inserted), created: false };
+      if (!created)
+        return {
+          release: summary(inserted, await liveVersion()),
+          created: false,
+        };
       const evaluated = await evaluate({ ...inserted, snapshot }, checks);
-      return { release: summary(evaluated), created: true };
+      return {
+        release: summary(evaluated, await liveVersion()),
+        created: true,
+      };
     },
 
     /** 对 draft / rejected / evaluating 的版本重跑检查与评测门（快照不变）。 */
@@ -389,7 +456,11 @@ export function createFaqReleaseService(
           'FAQ_RELEASE_LOCKED',
           'A rollback release is not re-evaluated',
         );
-      return summary(await evaluate(release, checkFaqGraph(release.snapshot)));
+      const evaluated = await evaluate(
+        release,
+        checkFaqGraph(release.snapshot),
+      );
+      return summary(evaluated, await liveVersion());
     },
 
     publish(actor: FaqActor, rawVersion: unknown): Promise<FaqReleaseSummary> {
@@ -414,7 +485,7 @@ export function createFaqReleaseService(
         (current.version === target.version ||
           current.sourceVersion === target.version)
       )
-        return { release: summary(current), created: false };
+        return { release: summary(current, current.version), created: false };
       const checks = checkFaqGraph(target.snapshot);
       if (!checks.passed)
         throw new HelpdeskError(

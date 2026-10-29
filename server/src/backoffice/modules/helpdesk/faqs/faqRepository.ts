@@ -117,7 +117,9 @@ export type FaqPatch = Partial<
 export type WriteResult<T> =
   | { kind: 'ok'; value: T }
   | { kind: 'not_found' }
-  | { kind: 'conflict'; currentVersion: number };
+  | { kind: 'conflict'; currentVersion: number }
+  /** 归档时还有已发布的父节点在用它（在同一事务里、锁住这一行之后查的）。 */
+  | { kind: 'has_parents' };
 
 export type FaqRepository = {
   list: (filter: FaqFilter) => Promise<{ faqs: HelpdeskFaq[]; total: number }>;
@@ -519,6 +521,21 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
 
     update(id, expectedVersion, patch, action, employeeId) {
       return db.withTransaction(async (client) => {
+        if (patch.status === 'archived') {
+          // 先锁住这一行（建边的事务对它 FOR SHARE，要等它提交），再用新的快照查父节点：
+          // 归档与同时建的边不会都成功（不会留下已归档、却还挂在已发布父节点下的子节点）
+          await client.query(
+            'SELECT id FROM helpdesk_faqs WHERE id = $1 FOR UPDATE',
+            [id],
+          );
+          const parents = await client.query(
+            `SELECT 1 FROM helpdesk_faq_edges e
+               JOIN helpdesk_faqs p ON p.id = e.parent_id AND p.status = 'published'
+              WHERE e.child_id = $1 LIMIT 1`,
+            [id],
+          );
+          if (parents.rows.length > 0) return { kind: 'has_parents' as const };
+        }
         const params: unknown[] = [id, expectedVersion, employeeId];
         const sets = [
           'version = version + 1',

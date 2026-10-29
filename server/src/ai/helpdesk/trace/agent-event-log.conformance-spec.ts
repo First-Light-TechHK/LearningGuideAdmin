@@ -168,7 +168,11 @@ export function describeAgentEventLog(
         {
           type: 'turn/end',
           time: new Date('2026-01-01T00:00:02Z'),
-          data: { turn: 1, reason: 'no_match' },
+          data: {
+            turn: 1,
+            reason: 'answered',
+            output: { opening: 'echo of the learner' },
+          },
         },
       ]);
       await log.append(fresh, [
@@ -181,7 +185,7 @@ export function describeAgentEventLog(
       const cleared = await log.purgeLearnerText(
         new Date('2026-08-01T00:00:00Z'),
       );
-      expect(cleared).toBe(2);
+      expect(cleared).toBe(3);
       const events = await log.read(old);
       expect(events.map((e) => e.seq)).toEqual([1, 2, 3]);
       expect(events[0].data).toEqual({ turn: 1, source: 'chat' });
@@ -190,7 +194,8 @@ export function describeAgentEventLog(
         step: 2,
         usage: { inputTokens: 1 },
       });
-      expect(events[2].data).toEqual({ turn: 1, reason: 'no_match' });
+      // v5：turn/end.output（给学员看的短句）同样 90 天后清掉；PostgreSQL 的只追加触发器也得放行
+      expect(events[2].data).toEqual({ turn: 1, reason: 'answered' });
       expect((await log.read(fresh))[0].data).toEqual(start);
       await expect(
         log.purgeLearnerText(new Date('2026-08-01T00:00:00Z')),

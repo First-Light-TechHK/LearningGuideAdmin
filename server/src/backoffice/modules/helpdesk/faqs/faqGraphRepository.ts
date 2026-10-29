@@ -194,7 +194,12 @@ export type PublishResult =
   | { kind: 'published'; release: FaqReleaseRow; previous: number | null }
   | { kind: 'already'; release: FaqReleaseRow }
   | { kind: 'not_found' }
-  | { kind: 'not_ready'; release: FaqReleaseRow };
+  | { kind: 'not_ready'; release: FaqReleaseRow }
+  /** 版本比上线的旧，或评测时对比的不是现在上线的那一版。 */
+  | { kind: 'stale'; release: FaqReleaseRow; published: number | null };
+
+/** 能否发布（服务层判断，仓库在发布锁里带着当前上线的版本号调用）。 */
+export type PublishReadiness = 'ok' | 'not_ready' | 'stale';
 
 const RELEASE_COLUMNS = `id, version, status, snapshot_hash, checks, eval_report, source_version,
   created_by, created_at, published_by, published_at`;
@@ -706,11 +711,15 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
 
     /**
      * 发布（原子）：同一事务里旧的 published → superseded、这一版 → published。已经是 published
-     * → already（幂等）；不是 draft，或检查 / 评测没过 → not_ready（ready 由服务层判断后传入）。
+     * → already（幂等）；不是 draft，或检查 / 评测没过 → not_ready；比上线的旧、或评测对比的不是
+     * 现在上线的那一版 → stale（ready 由服务层判断，在锁里带着当前上线的版本号调用，并发发布也一致）。
      */
     publish(
       version: number,
-      ready: (release: FaqReleaseRow) => boolean,
+      ready: (
+        release: FaqReleaseRow,
+        publishedVersion: number | null,
+      ) => PublishReadiness,
       employeeId: string | null,
     ): Promise<PublishResult> {
       return db.withTransaction(async (client) => {
@@ -722,8 +731,15 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
         if (target.rows.length === 0) return { kind: 'not_found' };
         const release = toRelease(target.rows[0]);
         if (release.status === 'published') return { kind: 'already', release };
-        if (release.status !== 'draft' || !ready(release))
-          return { kind: 'not_ready', release };
+        const live = await client.query(
+          `SELECT version FROM helpdesk_faq_releases WHERE status = 'published'`,
+        );
+        const published =
+          live.rows.length > 0 ? Number(live.rows[0].version) : null;
+        const readiness =
+          release.status === 'draft' ? ready(release, published) : 'not_ready';
+        if (readiness === 'not_ready') return { kind: 'not_ready', release };
+        if (readiness === 'stale') return { kind: 'stale', release, published };
         const old = await client.query(
           `UPDATE helpdesk_faq_releases SET status = 'superseded'
             WHERE status = 'published' RETURNING version`,

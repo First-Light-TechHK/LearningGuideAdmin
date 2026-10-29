@@ -911,6 +911,17 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - **版本发布**（`FaqReleasesDrawer.tsx`，FAQs Tab 页头「版本发布」）：当前上线版本；工作副本相对它的差异（问题 / 连接的新增、修改（列出字段）、移除，问法增减）与图检查（问题按 key + 规则文案）；「发布新版本」（FULL）→ `POST /faq-releases`，提示「已创建 vN」或「没有改动」；版本历史（状态、发布 / 创建时间、检查与评测 recall@8、没命中的用例数、每个版本的改动）；「发布 vN」与「回滚到此版本」都先确认，「重新检查」不需要；按钮只在服务端会成功时出现（`releaseActions`）。VIEW 只看。
 - **测试**：`client/tests/helpdesk-graph.test.ts`（重排、文字与问法校验、大纲、预览的三段式与模板、≤4 个追问、起点、版本操作、每条规则与状态都有中英文案）、`client/tests/helpdesk-graph-ui.test.tsx`（经 HelpDeskPage 与假的 BackOffice Server：上面每个流程，含拖动、VIEW 只读、Escape）、`helpdesk-faqs.test.ts`（草稿的 type / entry / signals、choice 提问校验）；服务端 `helpdesk-faq-graph.pg.spec.ts`（preview：工作副本与版本、语言、错误）与 `helpdesk-faq-graph-rbac.spec.ts`（preview 是 VIEW 的读接口，不被当成版本号）。
 
+### 4A.16 v5 终检修复（2026-10-30；推送等 FKO 扩写与剩下的真实测试都做完再一起推 V4，2026-10-29 用户）
+
+- **事件日志清空**（新迁移 `20261030110000_helpdesk_agent_events_purge_turn_end`，只替换触发器函数）：90 天清空学员原文时，`turn/end` 只准去掉 `output` 一个字段（`NEW.data = OLD.data - 'output'`），改别的字段仍被只追加触发器拒绝。
+- **守卫加严**（`workflow/guard.ts`，语料 `fixtures/guard-corpus.json` 多约 46 条）：比较前再去掉 `\p{Cf}` 隐形字符（零宽、方向控制；短句与解释里出现即 `markup`）、去重音（NFKD 去 `\p{Mn}`）、弯引号变直、汉字之间的空白去掉；用文字写的数量（中英数词 + 时间或钱的单位：「十四天」「两个工作日」「fourteen days」「a few minutes」）短句里算 `digit`，解释里必须在答案里出现；承诺类（一定、马上、已为你、I will make sure、definitely、right away…）并入挡词；拉丁词按整词加常见后缀匹配（free 不再挡 freeze）；任何「点 + ≥2 个字母」的主机名都算链接；解释里的邮箱与链接按整串比对答案（去掉协议、www. 与末尾斜杠），「搜索 / 检索」与承诺词只有答案本身写了才放行。已知限制：序数词（第二步）不挡。
+- **发布门**（`faqReleaseGate.ts` / `faqReleaseService.ts` / `faqGraphRepository.ts`）：回滚版本的 recall 跟着 `sourceReport` 找原报告（至多 10 层）；没有入口 answer 的版本不通过；报告多 `baselineVersion`（评测时对比的上线版本）。发布在 `RELEASE_LOCK` 里读当前上线版本：版本号比上线的旧，或 `baselineVersion` 与上线的不同（回滚除外）→ 409 `FAQ_RELEASE_STALE`（先「重新检查」）。两个版本同时发布：一个成功，另一个 409。
+- **归档与连接的竞态**（`faqRepository.ts`）：归档先 `FOR UPDATE` 锁住这条，再查已发布的父节点，有就 409 `FAQ_HAS_PARENTS`；BackOffice 的删除提示列出这些父节点的问题（`FaqDrawer.tsx`，待视觉验收）。
+- **候选**（`faqQaSource.ts` `CANDIDATE_NEAR`）：屏幕上那张卡片的子节点最多 4 个没打分的进候选，检索结果至少留 4 个位置。
+- **种子**（`faqLibrarySeed.ts`）：key 认领不到时按英文问题（去空白、小写）认领唯一、没被别的 key 用的旧行，并在报告里写一条警告；命令行参数严格解析（`parseSeedArgs`，不认识的参数退出码 2），报告有失败退出码 1（`seedExitCode`）。已知限制：种子不删除、不重排已有的连接。
+- **BackOffice 可访问性**（待视觉验收）：问题树改成嵌套的 `<ul>`（每层有 `aria-label`，选项字母读作「选项 A：」）；问题树编辑每个操作后焦点落到合理的位置，并在 `aria-live="polite"` 里播报（已添加、已新建、已移除、已保存文字、已移动、问法增删）；版本发布的确认取消后焦点回到打开它的按钮。
+
+
 ---
 
 ## 5. API 接口规范
@@ -1073,7 +1084,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET | /api/helpdesk/faqs/:id · /:id/revisions | helpDesk VIEW | 单条 FAQ（归档或不存在 404 `FAQ_NOT_FOUND`）；修订记录新的在前 |
 | POST | /api/helpdesk/faqs | helpDesk FULL | body `{ category, popular, questionEn, answerEn, questionZh, answerZh, keywords[] }`，可带 `Idempotency-Key`（同 key 不同内容 422 `IDEMPOTENCY_KEY_REUSED`）→ 201 FAQ（保存即发布） |
 | PUT | /api/helpdesk/faqs/:id | helpDesk FULL | 同上 body + `version`；内容与当前一致时原样返回（幂等：丢响应后的重试、没改动的保存不升版本、不写修订）；内容不同且版本不符 409 `VERSION_CONFLICT` |
-| POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等；还有已发布的父节点在用 → 409 `FAQ_HAS_PARENTS`（v5 §4A.13） |
+| POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等；还有已发布的父节点在用 → 409 `FAQ_HAS_PARENTS`（v5 §4A.13；与新建连接同时发生时也一样，§4A.16） |
 | POST / PUT | /api/helpdesk/faqs · /:id（v5 节点字段） | helpDesk FULL | §4A.13：body 可多带 `key`（小写字母数字 . _ -，≤80；撞了 409 `FAQ_KEY_TAKEN`；新建不带 = 英文问题的 slug）、`type` answer\|choice、`entry`；不带就保留原值 |
 | GET | /api/helpdesk/faqs/:id/edges · /:id/edge-revisions · /:id/tree | helpDesk VIEW | §4A.13：`{ children: [{ edge, node, label }], parents }`；边的修订（新的在前）；从该节点展开的树 `{ root: { node, edge, label, depth, parentCount, alsoAppearsIn, warnings, cycle, truncated, children }, nodes }` |
 | POST | /api/helpdesk/faqs/:id/edges | helpDesk FULL | body `{ childId, kind?, labelEn?, labelZh?, position? }` → 201 新建 / 200 已有同样的边；409 `FAQ_EDGE_EXISTS` / `FAQ_EDGE_CYCLE` / `FAQ_TOO_MANY_CHILDREN` / `FAQ_ARCHIVED` |
@@ -1082,7 +1093,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET · POST | /api/helpdesk/faqs/:id/phrasings | helpDesk VIEW / FULL | `{ phrasings }`；POST body `{ locale: en-GB\|zh-CN\|zh-TW, text ≤200, source?: staff\|flywheel }` → 201 / 200 已有；每条至多 30 种 |
 | DELETE | /api/helpdesk/faq-phrasings/:id | helpDesk FULL | 幂等 `{ deleted }` |
 | GET | /api/helpdesk/faq-releases · /working · /diff?head=&base= · /:version · /:version/diff?base= | helpDesk VIEW | 历史 `{ releases, published }`（每个带 `checks`、`evalReport`、`publishable`）；工作表的检查与和当前发布版本的差异；差异 `{ base, head, diff: { nodes, edges, phrasings, same } }` |
-| POST | /api/helpdesk/faq-releases · /:version/check · /:version/publish · /:version/rollback | helpDesk FULL | 新建（201；工作表没变 200 返回已有的）、重新检查、发布（只有 publishable 的，否则 409 `FAQ_RELEASE_NOT_READY`；幂等）、回滚（201 新版本并发布；已是它 200；没上线过的 409 `FAQ_RELEASE_NOT_PUBLISHED`） |
+| POST | /api/helpdesk/faq-releases · /:version/check · /:version/publish · /:version/rollback | helpDesk FULL | 新建（201；工作表没变 200 返回已有的）、重新检查、发布（只有 publishable 的，否则 409 `FAQ_RELEASE_NOT_READY`；评测之后上线版本变了 409 `FAQ_RELEASE_STALE`，§4A.16；幂等）、回滚（201 新版本并发布；已是它 200；没上线过的 409 `FAQ_RELEASE_NOT_PUBLISHED`） |
 | GET | /api/helpdesk/faq-releases/preview?locale=en-GB\|zh-CN&version= | helpDesk VIEW | §4A.15「对话预览」：工作副本（缺省）或某个版本的快照，按 Portal 读 faq-release/current 的同一个投影 `{ source: 'working'\|<版本号>, published, locale, nodes, edges }`（答案块、解析好的边文字）；locale 不对 400 `INVALID_INPUT`，版本不存在 404 `FAQ_RELEASE_NOT_FOUND`；什么都不写 |
 | GET | /api/helpdesk/agent-runs/:runId | helpDesk VIEW | 2026-10-29，§4A.11：`{ runId, parentRunId, chain, events }`（导出副本，学员原文脱敏），`Cache-Control: no-store`；不存在或 id 不合法 404 `AGENT_RUN_NOT_FOUND`；没有写接口 |
 | GET | /api/helpdesk/agent-runs/:runId/events/:seq | helpDesk VIEW | `{ event, sources, derived }`；`seq` 须为正整数（否则 400 `INVALID_INPUT`），不存在 404 `AGENT_EVENT_NOT_FOUND` |

@@ -153,6 +153,65 @@ describe('FAQ release eval gate', () => {
     expect(report.summary).toContain('dropped from 100.0% (v2) to 98.0%');
   });
 
+  it('after a rollback compares with the report of the release that was rolled back to', async () => {
+    const many: FaqReleaseSnapshot = {
+      nodes: Array.from({ length: 50 }, (_, i) => node(`n${i}`)),
+      edges: [],
+      phrasings: [],
+    };
+    let misses = 0;
+    const repository = fakeRepository((text) => {
+      if (text.startsWith('问题') && misses < 2) {
+        misses += 1;
+        return [];
+      }
+      return [text.replace(/^question |^问题 /, '')];
+    });
+    // the live release is a rollback: its own report has no metrics, its source's report has recall@8 100%
+    const report = await createRetrievalGate(repository, fixed).evaluate({
+      version: 4,
+      snapshot: many,
+      previous: {
+        version: 3,
+        evalReport: {
+          kind: 'rollback',
+          passed: true,
+          metrics: {},
+          sourceVersion: 1,
+          sourceReport: {
+            kind: 'combined',
+            passed: true,
+            metrics: {},
+            parts: [
+              { kind: 'retrieval', passed: true, metrics: { recallAt8: 1 } },
+            ],
+          },
+        },
+      },
+    });
+    expect(report.metrics).toMatchObject({
+      recallAt8: 0.98,
+      previousRecallAt8: 1,
+    });
+    expect(report.passed).toBe(false);
+    expect(report.summary).toContain('dropped from 100.0% (v3) to 98.0%');
+  });
+
+  it('fails a release with no entry answers (an empty release would leave Portal with no chips and no answers)', async () => {
+    const empty: FaqReleaseSnapshot = {
+      nodes: [node('c', false), node('d', true, 'choice')],
+      edges: [],
+      phrasings: [],
+    };
+    const report = await createRetrievalGate(
+      fakeRepository(() => []),
+      fixed,
+    ).evaluate({ version: 5, snapshot: empty, previous: null });
+    expect(report.passed).toBe(false);
+    expect(report.metrics.cases).toBe(0);
+    expect(report.summary).toContain('no entry answers');
+  });
+
   it('runs the model eval only behind the switch; switched on without a model eval it fails', async () => {
     const retrieval: FaqReleaseGate = createRetrievalGate(
       fakeRepository(() => ['a', 'b']),

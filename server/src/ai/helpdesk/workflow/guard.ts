@@ -24,7 +24,13 @@ import {
  * **加粗** 只在接地后允许，展示前去掉星号（给学员的是纯文本）；承诺类禁用词只在答案里也有时允许
  * （解释退款 FAQ 免不了说「退款」），「没找到」类与 AI 套话一律不许；其余同短句（可分行写步骤）。
  *
- * 比较前统一：NFKC（全角数字 / 字母 → 半角）、小写、繁体 → 简体（OpenCC），所以 zh-TW 与 zh-CN 同一套词表。
+ * 比较前统一：NFKC（全角数字 / 字母 → 半角）、小写、繁体 → 简体（OpenCC），所以 zh-TW 与 zh-CN 同一套词表；
+ * 去掉隐形字符（零宽、软连字符、方向控制）与附加符号、汉字之间的空白、弯引号 → 直引号，
+ * 免得「免\u200b费」「re\u0301fund」「免 费」绕过词表。原文里有隐形字符（emoji 的 ZWJ 连接除外）本身就算 markup。
+ *
+ * 数字不只是阿拉伯数字：用文字写的时长 / 金额（「三天」「一两个工作日」「几分钟」「two working days」
+ * 「half an hour」「a few minutes」）同样算 digit；解释里它们必须原样出现在答案里。序数（第一步、first）不算。
+ * 承诺 / 已办理类说法（「一定」「马上」「已为你」「I've」「I will make sure」「definitely」）同禁用词。
  */
 
 type Convert = (text: string) => string;
@@ -70,7 +76,27 @@ export function learnerOf(text: string, locale: string): Learner {
 
 /** 比较用的统一写法（从不改给学员看的文字）。 */
 export function normalizeForGuard(text: string): string {
-  return simplify(text.normalize('NFKC').toLowerCase());
+  const plain = text
+    .normalize('NFKC')
+    .replace(INVISIBLE, '')
+    .normalize('NFKD')
+    .replace(/\p{Mn}/gu, '')
+    .normalize('NFC')
+    .replace(/[\u2018\u2019\u02bc\u2032]/g, "'")
+    .replace(/(\p{Script=Han})\s+(?=\p{Script=Han})/gu, '$1')
+    .toLowerCase();
+  return simplify(plain);
+}
+
+/** 隐形的格式字符（Unicode Cf：零宽空格 / 连接符、软连字符、方向控制……）。 */
+const INVISIBLE = /\p{Cf}/gu;
+/** emoji 序列里的 ZWJ（👨‍👩‍👧）不算藏字符。 */
+const EMOJI_ZWJ =
+  /(\p{Extended_Pictographic}\uFE0F?)\u200D(?=\p{Extended_Pictographic})/gu;
+
+/** 原文里藏了隐形字符（emoji 的 ZWJ 除外）。 */
+export function hasHiddenCharacters(text: string): boolean {
+  return new RegExp(INVISIBLE.source, 'u').test(text.replace(EMOJI_ZWJ, '$1'));
 }
 
 /** 字数：按 code point 数（一个汉字、一个字母、一个表情都算一个）。 */
@@ -109,6 +135,54 @@ export const BLOCKED_PHRASES: readonly string[] = [
   'pricing',
 ];
 
+/**
+ * 承诺 / 「已经帮你办了」类说法（模型不能替系统承诺或声称做过什么）：同 BLOCKED_PHRASES 处理
+ * （短句一律不许；解释里只在答案本身也这么写时允许）。
+ */
+export const PROMISE_PHRASES: readonly string[] = [
+  '一定',
+  '肯定会',
+  '马上',
+  '立刻',
+  '立即',
+  '已为你',
+  '已为您',
+  '已经为你',
+  '已经为您',
+  '已帮你',
+  '已帮您',
+  '已经帮你',
+  '已经帮您',
+  '已经替你',
+  '我已经',
+  '我已',
+  '我会确保',
+  '帮你取消',
+  '帮您取消',
+  '帮你开通',
+  '帮您开通',
+  '帮你解决',
+  '帮您解决',
+  'i have',
+  "i've",
+  "i'll make sure",
+  'i will make sure',
+  "we'll make sure",
+  'we will make sure',
+  'definitely',
+  'right away',
+  'straight away',
+  'immediately',
+  'for sure',
+  'rest assured',
+  'i can confirm',
+];
+
+const CLAIM_PHRASES: readonly string[] = [
+  ...BLOCKED_PHRASES,
+  ...PROMISE_PHRASES,
+];
+
 /** 「没找到 / 搜过了」类（Part B：从不说找过或没找到）：任何字段都不许。 */
 export const NOT_FOUND_PHRASES: readonly string[] = [
   '找不到',
@@ -119,9 +193,9 @@ export const NOT_FOUND_PHRASES: readonly string[] = [
   '查不到',
   '没查到',
   '没有查到',
-  '搜索',
   '搜了',
-  '检索',
+  '我搜',
+  '我查了',
   "couldn't find",
   'could not find',
   "can't find",
@@ -135,6 +209,12 @@ export const NOT_FOUND_PHRASES: readonly string[] = [
   'i searched',
   'i looked it up',
 ];
+
+/**
+ * 界面上的词（「搜索框」「检索」）：短句里同 NOT_FOUND_PHRASES 一律不许；解释里只在答案本身也写了时允许
+ * （答案教学员用搜索框，解释免不了说「搜索」）。
+ */
+export const UI_SEARCH_WORDS: readonly string[] = ['搜索', '检索'];
 
 /** AI 套话（Part D §3）：任何字段都不许。 */
 export const AI_FILLER: readonly string[] = [
@@ -175,12 +255,16 @@ const LATIN_WORD = /^[a-z]/;
 
 /** 含禁用词却无害的固定说法（「feel free to ask」不是在说免费）。 */
 const HARMLESS = [/feel free/g, /free to (?:ask|come|reach)/g];
+/** 拉丁词按整词匹配，允许常见词尾（refund → refunds / refunded；free 不拦 freeze / freely；price 不拦 priceless）。 */
+const LATIN_SUFFIX = '(?:s|es|d|ed|ing|e|ion|ions)?';
 
 function containsPhrase(text: string, phrase: string): boolean {
   const normalized = HARMLESS.reduce((t, re) => t.replace(re, ' '), text);
   if (!LATIN_WORD.test(phrase)) return normalized.includes(phrase);
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z])${escaped}`).test(normalized);
+  return new RegExp(`(^|[^a-z])${escaped}${LATIN_SUFFIX}(?![a-z])`).test(
+    normalized,
+  );
 }
 
 function firstPhrase(
@@ -191,8 +275,29 @@ function firstPhrase(
 }
 
 const EMAIL = /[^\s@<>()[\]（）]+@[^\s@<>()[\]（）]+\.[a-z]{2,}/giu;
+/** 链接：带协议或 www.，或任何「点 + 两个以上字母」结尾的主机名（不靠后缀白名单：.xyz、.online 也算）。 */
 const URL =
-  /(?:https?:\/\/|www\.)[^\s<>()[\]（）]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|cn|net|org|io|co|uk|app|ai|edu|gov|me|info|hk|tw|dev)\b(?:\/[^\s<>()[\]（）]*)?/giu;
+  /(?:https?:\/\/|www\.)[^\s<>()[\]（）]+|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b(?:\/[^\s<>()[\]（）]*)?/giu;
+/**
+ * 用文字写的数量（时长、金额）：中文数字（含「两」「半」「几」）+ 时间 / 钱的单位，前面不是「第」；
+ * 英文数词（zero…ninety、hundred、dozen、half、a few、a couple of、several）+ 单位。序数不算。
+ */
+const ZH_NUMBER =
+  /(?<!第)[零〇一二两三四五六七八九十百千万半几]+(?:\s*(?:到|至|或|-|–|~)\s*[零〇一二两三四五六七八九十百千万半几]+)?\s*(?:多|来)?\s*个?\s*(?:半\s*)?(?:工作日|天|日|周|星期|礼拜|月|年|分钟|小时|钟头|钟|秒|刻钟|元|块钱|英镑|镑|美元|欧元|港币|毛钱)/gu;
+const EN_NUMBER_WORD =
+  '(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozen|half an?|half|a few|few|a couple of|couple of|several)';
+const EN_NUMBER = new RegExp(
+  `\\b${EN_NUMBER_WORD}(?:[\\s-]+(?:to|or|and|-)?[\\s-]*${EN_NUMBER_WORD})*[\\s-]+(?:more\\s+)?(?:(?:working|business|calendar)\\s+)?(?:seconds?|minutes?|mins?|hours?|hrs?|days?|weeks?|fortnights?|months?|years?|pounds?|quid|dollars?|euros?|pence|cents?)\\b`,
+  'gu',
+);
+
+/** 用文字写的数量（normalizeForGuard 之后的文本里找）。 */
+export function numberWords(normalized: string): string[] {
+  return [
+    ...[...normalized.matchAll(ZH_NUMBER)].map((m) => m[0]),
+    ...[...normalized.matchAll(EN_NUMBER)].map((m) => m[0]),
+  ];
+}
 const DIGIT = /\p{N}/u;
 const DIGIT_RUN = /\d+/g;
 const CURRENCY =
@@ -227,15 +332,18 @@ export function guardShortText(
 ): GuardCheck {
   if (typeof raw !== 'string' || raw.trim() === '') return fail('missing');
   const text = raw.trim();
-  if (SHORT_MARKUP.test(text)) return fail('markup');
+  if (SHORT_MARKUP.test(text) || hasHiddenCharacters(text))
+    return fail('markup');
   const normalized = normalizeForGuard(text);
   if (new RegExp(EMAIL.source, 'iu').test(normalized)) return fail('email');
   if (new RegExp(URL.source, 'iu').test(normalized)) return fail('link');
-  if (DIGIT.test(normalized)) return fail('digit');
+  if (DIGIT.test(normalized) || numberWords(normalized).length > 0)
+    return fail('digit');
   if (textLength(text) > limitOf(field, learner)) return fail('too_long');
   if (
-    firstPhrase(normalized, BLOCKED_PHRASES) ||
-    firstPhrase(normalized, NOT_FOUND_PHRASES)
+    firstPhrase(normalized, CLAIM_PHRASES) ||
+    firstPhrase(normalized, NOT_FOUND_PHRASES) ||
+    firstPhrase(normalized, UI_SEARCH_WORDS)
   )
     return fail('blocked_phrase');
   if (firstPhrase(normalized, AI_FILLER)) return fail('ai_filler');
@@ -244,6 +352,12 @@ export function guardShortText(
 }
 
 const clean = (token: string) => token.replace(TRAILING, '');
+/** 链接比较用：去掉协议、www. 与末尾斜杠。 */
+const linkKey = (link: string) =>
+  clean(link)
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/+$/, '');
 
 /** 解释里没出现在答案里的第一个数字串 / 链接 / 邮箱 / 金额 / 界面文字（都没有 → null）。 */
 export function ungroundedToken(
@@ -258,18 +372,30 @@ export function ungroundedToken(
     const text = normalizeForGuard(label[1]).trim();
     if (!source.includes(text)) return label[1];
   }
-  const emails = [...said.matchAll(EMAIL)].map((m) => clean(m[0]));
-  for (const email of emails) if (!source.includes(email)) return email;
+  // 邮箱、链接按整个记号比（不是子串：learningguide.co 不因答案里有 learningguide.com 而算接地）
+  const emailsOf = (text: string) =>
+    [...text.matchAll(EMAIL)].map((m) => clean(m[0]).replace(/^mailto:/, ''));
+  const sourceEmails = new Set(emailsOf(source));
+  const emails = emailsOf(said);
+  for (const email of emails) if (!sourceEmails.has(email)) return email;
+  const sourceLinks = new Set<string>();
+  for (const url of source.matchAll(URL)) {
+    const key = linkKey(url[0]);
+    sourceLinks.add(key);
+    sourceLinks.add(key.split('/')[0]); // 只说主机名也算（答案里有这个网站）
+  }
   let rest = said;
   for (const email of emails) rest = rest.split(email).join(' ');
   for (const url of rest.matchAll(URL)) {
     const link = clean(url[0]);
-    if (!source.includes(link)) return link;
+    if (!sourceLinks.has(linkKey(link))) return link;
   }
   for (const amount of said.matchAll(CURRENCY))
     if (!sourceCompact.includes(compact(clean(amount[0])))) return amount[0];
   const runs = new Set(source.match(DIGIT_RUN) ?? []);
   for (const run of said.match(DIGIT_RUN) ?? []) if (!runs.has(run)) return run;
+  for (const words of numberWords(said))
+    if (!sourceCompact.includes(compact(words))) return words;
   // 其它数字（罗马数字、上标、带圈数字……）答案里没法逐个比：一律算没接地
   if (DIGIT.test(said.replace(/\d/g, ''))) return 'digit';
   return null;
@@ -284,14 +410,18 @@ export function guardExplanation(
   if (typeof raw !== 'string' || raw.trim() === '') return fail('missing');
   const text = raw.trim();
   const plain = text.replace(BOLD, '$1');
-  if (EXPLANATION_MARKUP.test(plain) || HTML_TAG.test(text))
+  if (
+    EXPLANATION_MARKUP.test(plain) ||
+    HTML_TAG.test(text) ||
+    hasHiddenCharacters(text)
+  )
     return fail('markup');
   if (ungroundedToken(text, answer) !== null) return fail('ungrounded');
   if (textLength(plain) > limitOf('explanation', learner))
     return fail('too_long');
   const normalized = normalizeForGuard(plain);
   const source = normalizeForGuard(answer);
-  const promise = BLOCKED_PHRASES.find(
+  const promise = [...CLAIM_PHRASES, ...UI_SEARCH_WORDS].find(
     (phrase) =>
       containsPhrase(normalized, phrase) && !containsPhrase(source, phrase),
   );

@@ -52,6 +52,15 @@ type View = {
   nodes: Map<string, FaqSnapshotNode>;
 };
 
+/**
+ * 屏幕上有卡片时的候选配额：没有检索命中的子节点至多取前 4 个（Portal 至多显示 4 个追问 / 选项），
+ * 普通检索至少留 4 个位置（学员换了话题时，新问题的答案还在候选里）。
+ */
+export const CANDIDATE_NEAR = {
+  unscoredChildrenMax: 4,
+  searchReserved: 4,
+} as const;
+
 function blocksOf(
   faq: Pick<HelpdeskFaq, 'id' | 'type'>,
   answer: string,
@@ -158,18 +167,16 @@ export function createHelpdeskQaSource(
         searched.map((faq) => [faq.id, faq]),
       );
 
-      const out: HelpdeskQaCandidate[] = [];
-      const taken = new Set<string>();
-      const push = (
-        faq: HelpdeskFaq | null,
-        score: number,
-        relation: HelpdeskQaCandidate['relation'],
-      ) => {
-        if (!faq || taken.has(faq.id) || out.length >= limit) return;
-        taken.add(faq.id);
-        out.push(candidate(faq, score, locale, v, relation));
-      };
-
+      // 先排好「附近」（子节点、兄弟节点）与普通检索两队，再合并：
+      // - 子节点：有检索命中的按分数在前（不管第几个）；没命中的只取学员看得到的前 4 个（Portal 至多 4 个
+      //   追问 chip / 选项），免得 6 个零分的追问挤掉换了话题的新问题；
+      // - 兄弟节点：只要有命中的；
+      // - 普通检索至少留 4 个位置（不够 4 个时附近的补满）。
+      const nearList: {
+        faq: HelpdeskFaq;
+        score: number;
+        relation: 'child' | 'sibling';
+      }[] = [];
       if (children.length > 0) {
         const rows = await Promise.all(
           children.map(
@@ -186,23 +193,61 @@ export function createHelpdeskQaSource(
             index,
             score: faq ? (scored.get(faq.id)?.score ?? 0) : 0,
           }))
+          .filter(
+            ({ faq, index }) =>
+              faq !== null &&
+              (scored.has(faq.id) ||
+                index < CANDIDATE_NEAR.unscoredChildrenMax),
+          )
           .sort((a, b) => b.score - a.score || a.index - b.index)
-          .forEach(({ faq, score }) => push(faq, score, 'child'));
+          .forEach(({ faq, score }) =>
+            nearList.push({
+              faq: faq as HelpdeskFaq,
+              score,
+              relation: 'child',
+            }),
+          );
       }
       for (const id of siblingIds) {
         const hit = scored.get(id);
-        if (hit) push(hit, hit.score, 'sibling');
+        if (hit)
+          nearList.push({ faq: hit, score: hit.score, relation: 'sibling' });
       }
       const entryOnly = search.entryOnly ?? true;
       const types = search.types ?? ['answer'];
-      for (const faq of searched) {
-        if (
-          near.size > 0 &&
-          ((entryOnly && !faq.entry) || !types.includes(faq.type))
-        )
-          continue;
-        push(faq, faq.score, 'search');
-      }
+      const nearIds = new Set(nearList.map((item) => item.faq.id));
+      const searchList = searched.filter(
+        (faq) =>
+          !nearIds.has(faq.id) &&
+          !(
+            near.size > 0 &&
+            ((entryOnly && !faq.entry) || !types.includes(faq.type))
+          ),
+      );
+
+      const out: HelpdeskQaCandidate[] = [];
+      const taken = new Set<string>();
+      const push = (
+        faq: HelpdeskFaq,
+        score: number,
+        relation: HelpdeskQaCandidate['relation'],
+      ) => {
+        if (taken.has(faq.id) || out.length >= limit) return;
+        taken.add(faq.id);
+        out.push(candidate(faq, score, locale, v, relation));
+      };
+      const reserved = Math.min(
+        CANDIDATE_NEAR.searchReserved,
+        searchList.length,
+      );
+      const nearRoom = Math.max(0, limit - reserved);
+      nearList
+        .slice(0, nearRoom)
+        .forEach((item) => push(item.faq, item.score, item.relation));
+      for (const faq of searchList) push(faq, faq.score, 'search');
+      nearList
+        .slice(nearRoom)
+        .forEach((item) => push(item.faq, item.score, item.relation));
       return out;
     },
 

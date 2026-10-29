@@ -559,6 +559,43 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       expect(archived.status).toBe('archived');
       await rejects(link(parent, archived), 409, 'FAQ_ARCHIVED');
     });
+
+    it('an archive racing a new link to the same node cannot leave an archived child with a live parent', async () => {
+      wire();
+      const parent = await create({ questionEn: 'Why was my card declined?' });
+      const child = await create();
+      // a link being created in another transaction, as createEdge does: the child row is held FOR SHARE
+      const other = await pool.connect();
+      try {
+        await other.query('BEGIN');
+        await other.query(
+          'SELECT id FROM helpdesk_faqs WHERE id = ANY ($1::uuid[]) FOR SHARE',
+          [[parent.id, child.id]],
+        );
+        await other.query(
+          `INSERT INTO helpdesk_faq_edges (id, parent_id, child_id, kind, position, created_by)
+           VALUES (gen_random_uuid(), $1, $2, 'follow_up', 0, NULL)`,
+          [parent.id, child.id],
+        );
+        // the archive checks for parents before the link commits, then has to wait for the row
+        const archiving = faqs
+          .archive(staff, child.id, { version: child.version })
+          .then(
+            () => null,
+            (error: unknown) => error,
+          );
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await other.query('COMMIT');
+        const refused = await archiving;
+        expect(refused).toMatchObject({ status: 409, code: 'FAQ_HAS_PARENTS' });
+        expect((refused as { message: string }).message).toContain(
+          'Why was my card declined?',
+        );
+      } finally {
+        other.release();
+      }
+      expect((await repo.get(child.id))?.status).toBe('published');
+    });
   });
 
   describe('phrasings (§2.1)', () => {
@@ -841,15 +878,26 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
         keywords: ['x'],
       });
       const three = (await releases.create(staff)).release.version;
-      await Promise.all([
+      const outcomes = await Promise.allSettled([
         releases.publish(staff, two),
         releases.publish(staff, three),
       ]);
+      // whichever takes the lock first wins; the other is refused as stale (v2 is older than v3, and
+      // v3 was evaluated against v1, not the v2 that went live), never silently made live after it
+      expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+      const loser = outcomes.find((o) => o.status === 'rejected');
+      expect(loser?.reason).toMatchObject({
+        status: 409,
+        code: 'FAQ_RELEASE_STALE',
+      });
       const { rows } = await pool.query<{ version: number; status: string }>(
         'SELECT version, status FROM helpdesk_faq_releases ORDER BY version',
       );
       expect(rows.filter((r) => r.status === 'published')).toHaveLength(1);
-      expect(rows.filter((r) => r.status === 'superseded')).toHaveLength(2);
+      expect(rows.filter((r) => r.status === 'superseded')).toEqual([
+        { version: 1, status: 'superseded' },
+      ]);
+      expect(rows.filter((r) => r.status === 'draft')).toHaveLength(1);
       // the database itself refuses a second published row and any change to a snapshot
       await expect(
         pool.query(`UPDATE helpdesk_faq_releases SET status = 'published', published_at = now()
@@ -863,6 +911,50 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       await expect(
         pool.query('DELETE FROM helpdesk_faq_releases'),
       ).rejects.toThrow(/never deleted/);
+    });
+
+    it('refuses a stale draft: one older than the live release, or evaluated against another live release', async () => {
+      wire();
+      const node = await create();
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+      await faqs.update(staff, node.id, { ...node, popular: true });
+      const two = (await releases.create(staff)).release.version;
+      const latest = await repo.get(node.id);
+      await faqs.update(staff, node.id, {
+        ...latest!,
+        popular: false,
+        keywords: ['x'],
+      });
+      const three = (await releases.create(staff)).release.version;
+      const latest3 = await repo.get(node.id);
+      await faqs.update(staff, node.id, { ...latest3!, keywords: ['y'] });
+      const four = (await releases.create(staff)).release.version;
+      // v2, v3 and v4 were all evaluated against v1
+      await releases.publish(staff, three);
+      await rejects(releases.publish(staff, two), 409, 'FAQ_RELEASE_STALE');
+      const listed = await releases.list();
+      const byVersion = new Map(listed.releases.map((r) => [r.version, r]));
+      expect(byVersion.get(two)).toMatchObject({
+        status: 'draft',
+        publishable: false,
+      });
+      // v4 is newer, but its recall was compared with v1, not with the v3 now live: re-check first
+      expect(byVersion.get(four)).toMatchObject({
+        status: 'draft',
+        publishable: false,
+      });
+      expect(await releases.get(four)).toMatchObject({ publishable: false });
+      await rejects(releases.publish(staff, four), 409, 'FAQ_RELEASE_STALE');
+      const rechecked = await releases.check(four);
+      expect(rechecked).toMatchObject({ status: 'draft', publishable: true });
+      expect(rechecked.evalReport).toMatchObject({ baselineVersion: three });
+      expect(await releases.publish(staff, four)).toMatchObject({
+        status: 'published',
+      });
+      // an older draft is never publishable again, and a re-check does not change that
+      expect(await releases.check(two)).toMatchObject({ publishable: false });
+      await rejects(releases.publish(staff, two), 409, 'FAQ_RELEASE_STALE');
     });
 
     it('rolls back by publishing an older snapshot as a new version, once', async () => {
@@ -1097,6 +1189,58 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
         types: ['answer', 'choice'],
       });
       expect(withChoices.map((c) => c.id)).toContain(pay.id);
+    });
+
+    it('with a card on screen, children without a hit take at most the 4 shown slots and the search keeps 4', async () => {
+      const { qa } = wire();
+      const parent = await create({ questionEn: 'How do I use my account?' });
+      const children: HelpdeskFaq[] = [];
+      for (let i = 1; i <= 5; i++)
+        children.push(
+          await create({ entry: false, questionEn: `Side topic ${i}?` }),
+        );
+      // the 6th follow-up (not shown in Portal: at most 4 chips) does match the new question
+      children.push(
+        await create({
+          entry: false,
+          questionEn: 'Where do I find my certificate?',
+        }),
+      );
+      for (const child of children) await link(parent, child);
+      const entries: HelpdeskFaq[] = [];
+      for (const what of ['download', 'print', 'share', 'rename', 'verify'])
+        entries.push(
+          await create({ questionEn: `How do I ${what} my certificate?` }),
+        );
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+
+      const found = await qa.findCandidates({
+        locale: 'en-GB',
+        category: null,
+        text: 'certificate',
+        limit: 8,
+        nodeId: parent.id,
+      });
+      expect(found).toHaveLength(8);
+      // the child that matches comes first, then the first 3 follow-ups the learner sees, then 4 search hits
+      expect(found.slice(0, 4).map((c) => [c.id, c.relation])).toEqual([
+        [children[5].id, 'child'],
+        [children[0].id, 'child'],
+        [children[1].id, 'child'],
+        [children[2].id, 'child'],
+      ]);
+      expect(found.slice(4).map((c) => c.relation)).toEqual([
+        'search',
+        'search',
+        'search',
+        'search',
+      ]);
+      expect(
+        found.slice(4).every((c) => entries.some((e) => e.id === c.id)),
+      ).toBe(true);
+      // a follow-up the learner cannot see and that does not match is never a candidate
+      expect(found.map((c) => c.id)).not.toContain(children[4].id);
     });
 
     it('the real retrieval gate searches the snapshot with each entry question and phrasing', async () => {

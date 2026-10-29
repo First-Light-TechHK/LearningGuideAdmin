@@ -33,6 +33,11 @@ export type FaqReleaseEvalReport = {
   /** 没过的用例（至多 50 条）。 */
   misses: FaqReleaseEvalMiss[];
   parts?: FaqReleaseEvalReport[];
+  /**
+   * 评测时对比的上线版本（服务层写入；当时没有上线的 → null）。现在上线的不是它 → 要重新检查才能发布。
+   * 早于这个字段的报告没有它（不比较）。
+   */
+  baselineVersion?: number | null;
   /** 回滚：快照复制自哪个版本（那一版当时的报告在 sourceReport）。 */
   sourceVersion?: number;
   sourceReport?: unknown;
@@ -98,22 +103,36 @@ export function releaseEvalCases(
   return cases;
 }
 
-function previousRecall(
-  previous: FaqReleaseGateInput['previous'],
-): number | null {
-  const report = previous?.evalReport as
-    | { kind?: string; metrics?: Record<string, number>; parts?: unknown[] }
-    | null
-    | undefined;
-  if (!report) return null;
-  const all = [report, ...((report.parts ?? []) as (typeof report)[])];
+type StoredReport = {
+  kind?: string;
+  metrics?: Record<string, number>;
+  parts?: unknown[];
+  sourceReport?: unknown;
+};
+
+/**
+ * 上一版的 recall@8：检索报告（或组合报告里的检索部分）；回滚上线的版本自己没有指标，
+ * 跟着 sourceReport 找回滚来源当时的报告（回滚可以套回滚，最多跟 10 层）。
+ */
+function recallOf(raw: unknown, depth = 0): number | null {
+  const report = raw as StoredReport | null | undefined;
+  if (!report || typeof report !== 'object' || depth > 10) return null;
+  const all = [report, ...((report.parts ?? []) as StoredReport[])];
   for (const part of all)
     if (
       part?.kind === 'retrieval' &&
       typeof part.metrics?.recallAt8 === 'number'
     )
       return part.metrics.recallAt8;
+  if (report.kind === 'rollback')
+    return recallOf(report.sourceReport, depth + 1);
   return null;
+}
+
+function previousRecall(
+  previous: FaqReleaseGateInput['previous'],
+): number | null {
+  return recallOf(previous?.evalReport);
 }
 
 /** 免费的检索评测门：用生产的候选 SQL 检索那一版快照（release = version）。 */
@@ -151,6 +170,8 @@ export function createRetrievalGate(
       const recallAt1 = total === 0 ? 1 : hits1 / total;
       const before = previousRecall(previous);
       const reasons: string[] = [];
+      // 一个入口答案都没有（误把 FAQ 全归档了）：Portal 会没有 chip、没有答案，不能发布
+      if (total === 0) reasons.push('the release has no entry answers');
       if (recallAt8 < RETRIEVAL_GATE.recallAt8Min)
         reasons.push(
           `recall@8 ${(recallAt8 * 100).toFixed(1)}% < ${RETRIEVAL_GATE.recallAt8Min * 100}%`,

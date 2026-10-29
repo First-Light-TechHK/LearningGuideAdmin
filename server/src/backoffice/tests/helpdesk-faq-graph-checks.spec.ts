@@ -194,6 +194,56 @@ describe('FAQ graph checks (§2.3, pure)', () => {
     expect(rules(five)).toEqual(['choice_options']);
   });
 
+  it('choice_options boundaries: exactly 4 options passes, no options fails', () => {
+    const { snapshot, choice } = goodGraph();
+    const extra = [1, 2].map((i) => node(`extra-${i}`));
+    const four = {
+      ...snapshot,
+      nodes: [...snapshot.nodes, ...extra],
+      edges: [
+        ...snapshot.edges,
+        ...extra.map((child, i) =>
+          edge(choice, child, {
+            position: i + 2,
+            labelEn: `Extra ${i}`,
+            labelZh: `额外${i}`,
+          }),
+        ),
+      ],
+    };
+    expect(rules(four)).toEqual([]);
+    const none = {
+      ...snapshot,
+      edges: snapshot.edges.filter((e) => e.parentId !== choice.id),
+    };
+    expect(rules(none)).toContain('choice_options');
+  });
+
+  it('cycle: an edge from a node to itself is a cycle', () => {
+    const { snapshot, retry } = goodGraph();
+    snapshot.edges.push(edge(retry, retry, { position: 1 }));
+    expect(rules(snapshot)).toContain('cycle');
+  });
+
+  it('depth: a shared node uses its shortest path from an entry', () => {
+    const root = node('root', { entry: true });
+    const chain = [root];
+    for (let i = 1; i <= 5; i++) chain.push(node(`level-${i}`));
+    const edges = chain.slice(1).map((child, i) => edge(chain[i], child));
+    const shared = node('shared');
+    // reachable at depth 6 through the chain, and at depth 2 through a short branch
+    edges.push(edge(chain[5], shared));
+    edges.push(edge(chain[1], shared, { position: 1 }));
+    const result = checkFaqGraph({
+      nodes: [...chain, shared],
+      edges,
+      phrasings: [],
+    });
+    expect(result.problems.map((p) => [p.rule, p.key])).toEqual([
+      ['depth', 'level-5'],
+    ]);
+  });
+
   it('choice_follow_up and option_parent: options only from a choice, follow-ups only from an answer', () => {
     const { snapshot, choice, failed, retry, deep } = goodGraph();
     snapshot.edges.push({
