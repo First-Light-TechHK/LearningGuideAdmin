@@ -6,6 +6,14 @@ import { ConfigService } from '@nestjs/config';
 export interface CommerceCourseConfig {
   mediaRoot: string;
   packageStagingRoot: string;
+  // 对象存储（生产用 S3 私有桶；未配置时回退到本地文件系统）
+  awsRegion?: string;
+  mediaBucket?: string;
+  mediaPrefix?: string;
+  stagingBucket?: string;
+  stagingPrefix?: string;
+  s3Endpoint?: string;
+  s3ForcePathStyle?: boolean;
   maxImageBytes: number;
   maxVideoBytes: number;
   maxAudioBytes: number;
@@ -36,6 +44,16 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
     packageStagingRoot:
       config.get<string>('COURSE_PACKAGE_ROOT')?.trim() ||
       'storage/course-package',
+    awsRegion: config.get<string>('AWS_REGION')?.trim() || 'ap-southeast-1',
+    mediaBucket: config.get<string>('COURSE_MEDIA_BUCKET')?.trim() || undefined,
+    mediaPrefix: config.get<string>('COURSE_MEDIA_PREFIX')?.trim() || '',
+    stagingBucket:
+      config.get<string>('COURSE_PACKAGE_BUCKET')?.trim() ||
+      config.get<string>('COURSE_MEDIA_BUCKET')?.trim() ||
+      undefined,
+    stagingPrefix: config.get<string>('COURSE_PACKAGE_PREFIX')?.trim() || 'staging/',
+    s3Endpoint: config.get<string>('S3_ENDPOINT')?.trim() || undefined,
+    s3ForcePathStyle: (config.get<string>('S3_FORCE_PATH_STYLE') ?? '').toLowerCase() === 'true',
     maxImageBytes: num('MEDIA_MAX_IMAGE_BYTES', 20 * MB),
     maxVideoBytes: num('MEDIA_MAX_VIDEO_BYTES', 500 * MB),
     maxAudioBytes: num('MEDIA_MAX_AUDIO_BYTES', 100 * MB),
