@@ -686,6 +686,13 @@
         "error": "Error",
         "aborted": "Aborted",
         "no_key": "No API key"
+      },
+      "feedbackValues": {
+        "helpful": "Yes, this solved my issue",
+        "solved": "Yes, this solved my issue",
+        "not_helpful": "No, I still submit to support team",
+        "declined": "No, I still submit to support team",
+        "edited": "Edited the enquiry"
       }
     },
     "faqCategory": {

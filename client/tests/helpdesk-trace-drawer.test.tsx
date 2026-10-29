@@ -213,6 +213,7 @@ describe('View trace on AI blocks', () => {
     const summary = await waitFor(() => within(drawer).getByRole('group', { name: '概要' }))
     assert.equal(within(summary).getByText('结束原因', { selector: 'dt' }).nextElementSibling?.textContent, '已答复')
     assert.equal(within(summary).getByText('Token', { selector: 'dt' }).nextElementSibling?.textContent, '输入 512 / 输出 9')
+    assert.equal(within(summary).getByText('学生反馈', { selector: 'dt' }).nextElementSibling?.textContent, '已解决')
     assert.ok(within(drawer).getByRole('button', { name: '关闭' }))
   })
 

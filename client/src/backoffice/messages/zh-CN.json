@@ -686,6 +686,13 @@
         "error": "出错",
         "aborted": "已中止",
         "no_key": "未配置 API key"
+      },
+      "feedbackValues": {
+        "helpful": "已解决",
+        "solved": "已解决",
+        "not_helpful": "仍提交给客服",
+        "declined": "仍提交给客服",
+        "edited": "修改了问题"
       }
     },
     "faqCategory": {

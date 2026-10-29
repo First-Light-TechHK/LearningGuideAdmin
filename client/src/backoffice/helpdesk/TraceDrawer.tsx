@@ -24,6 +24,11 @@ function reasonLabel(locale: Locale, reason: string): string {
   const label = t(locale, key)
   return label === key ? reason : label
 }
+function feedbackLabel(locale: Locale, outcome: string): string {
+  const key = `helpDesk.trace.feedbackValues.${outcome}`
+  const label = t(locale, key)
+  return label === key ? outcome : label
+}
 const cost = (locale: Locale, usd: number | null) => (usd === null ? t(locale, 'helpDesk.trace.unknown') : `$${usd.toFixed(6)}`)
 
 /** 距第一条事件：毫秒、秒、分钟、小时、天（反馈可能隔天才来）。 */
@@ -54,6 +59,8 @@ function detailValue(locale: Locale, detail: TraceDetail): string {
       return detail.faqId
     case 'endReason':
       return reasonLabel(locale, detail.value)
+    case 'feedback':
+      return feedbackLabel(locale, detail.value)
     default:
       return detail.value
   }
@@ -112,7 +119,7 @@ export function TraceDrawer({ locale, runId, onClose }: Props) {
         ['candidates', summary.candidates.length > 0 ? summary.candidates.join(', ') : none],
         ['traceId', summary.traceId ?? none],
         ['conversation', t(locale, 'helpDesk.trace.conversationValue', { count: summary.chainLength })],
-        ['feedback', summary.feedback ?? none],
+        ['feedback', summary.feedback ? feedbackLabel(locale, summary.feedback) : none],
       ]
     : []
 
