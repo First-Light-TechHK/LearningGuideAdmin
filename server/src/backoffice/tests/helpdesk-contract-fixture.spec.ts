@@ -21,6 +21,9 @@ import {
   AGENT_ACTIONS,
   ATTACHMENT_CONTENT_TYPES,
   ATTACHMENT_INLINE_TYPES,
+  ORDER_KINDS,
+  ORDER_STATUSES,
+  PAYMENT_MODES,
   TICKET_STATUSES,
 } from '../modules/helpdesk/contracts';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
@@ -130,6 +133,9 @@ describe('Helpdesk contract fixture: enums', () => {
     expect([...ALL_OUTCOMES]).toEqual(fixture.enums.assistFeedback);
     expect([...SUGGESTION_SOURCES]).toEqual(fixture.enums.assistSource);
     expect([...FAQ_CATEGORIES]).toEqual(fixture.enums.faqCategory);
+    expect([...ORDER_STATUSES]).toEqual(fixture.enums.orderStatus);
+    expect([...ORDER_KINDS]).toEqual(fixture.enums.orderKind);
+    expect([...PAYMENT_MODES]).toEqual(fixture.enums.paymentMode);
   });
 });
 
@@ -197,6 +203,30 @@ describe('Helpdesk contract fixture: Admin reads Portal', () => {
         (item) => item.rating,
       ),
     ).toEqual(raw);
+  });
+
+  it('v5: the order projection comes through exactly as Portal sends it, and list rows carry orderId', async () => {
+    const raw = toPortal.detailResponse;
+    const detail = normaliseDetail(raw);
+    expect(detail.orderId).toBe(raw.orderId);
+    expect(detail.order).toEqual(raw.order);
+    expect(Object.keys(detail.order ?? {}).sort()).toEqual(
+      Object.keys(raw.order as Obj).sort(),
+    );
+    const service = createHelpdeskService({
+      listTickets: jest.fn().mockResolvedValue({
+        tickets: toPortal.listResponse.tickets.map((t) => normaliseSummary(t)),
+        nextCursor: null,
+        counts: {},
+      }),
+      getTicket: jest.fn().mockResolvedValue(detail),
+    } as never);
+    const list = await service.list({});
+    expect(list.tickets.map((t) => t.orderId)).toEqual(
+      toPortal.listResponse.tickets.map((t) => t.orderId),
+    );
+    const served = await service.detail(text(raw.id));
+    expect(served.order).toEqual(raw.order);
   });
 
   it('reads the flag on list rows', async () => {

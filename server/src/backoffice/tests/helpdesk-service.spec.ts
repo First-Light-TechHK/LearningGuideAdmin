@@ -59,6 +59,7 @@ function summary(overrides: Partial<TicketSummary> = {}): TicketSummary {
     closeReason: null,
     rating: null,
     flagged: false,
+    orderId: null,
     ...overrides,
   };
 }
@@ -68,6 +69,7 @@ function detail(overrides: Partial<TicketDetail> = {}): TicketDetail {
     ...summary(),
     student: null,
     subscription: null,
+    order: null,
     messages: [],
     events: [],
     aiAssist: [],

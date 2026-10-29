@@ -1377,6 +1377,39 @@
   color: var(--hd-ink);
 }
 
+/* v4 Part A 右栏「订单」块：沿用订阅块 .hdPlanRow；订单号与「复制」同一格（无画板，待视觉验收） */
+.hdOrderNumberCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.hdOrderNumber {
+  font-size: 11px;
+  line-height: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* 空的时候不占位，但留在无障碍树里，复制结果才会被读屏播报 */
+.hdOrderCopyNotice:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* v4 Part A 左栏行内的小「订单」标签：沿用 .hdPill-neutral，缩到行高 13（无画板，待视觉验收） */
+.hdRowOrder {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 13px;
+}
+
 /* 左栏行内的小旗子（v2，无画板，待视觉验收） */
 .hdRowFlag {
   flex: 0 0 auto;

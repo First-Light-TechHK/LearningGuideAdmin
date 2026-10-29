@@ -7,6 +7,9 @@ import {
   FAQ_CATEGORIES,
   HELPDESK_CATEGORIES,
   HELPDESK_LOCALES,
+  ORDER_KINDS,
+  ORDER_STATUSES,
+  PAYMENT_MODES,
   TICKET_STATUSES,
   TIMELINE_LIMIT,
 } from '../src/backoffice/contracts/helpdesk'
@@ -15,6 +18,9 @@ import {
   categoryLabel,
   errorMessage,
   faqCategoryLabel,
+  formatOrderAmount,
+  orderStatusLabel,
+  paymentModeLabel,
   statusLabel,
   subscriptionStatusLabel,
 } from '../src/backoffice/lib/helpdeskFormat'
@@ -25,7 +31,11 @@ import { assistFeedbackTone, ratingValue, subscriptionTone } from '../src/backof
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const fixture = JSON.parse(read('./fixtures/helpdesk-contract.json')) as {
   enums: Record<string, string[]> & { agentProblemCode: Record<string, string[]> }
-  adminToPortal: { timelineRequest: string; detailResponse: Record<string, unknown> }
+  adminToPortal: {
+    timelineRequest: string
+    detailResponse: Record<string, unknown>
+    listResponse: { tickets: Array<Record<string, unknown>> }
+  }
 }
 const LOCALES = ['en-GB', 'zh-CN'] as const
 
@@ -107,5 +117,31 @@ describe('HelpDesk client against the Portal contract', () => {
     const items = fixture.adminToPortal.detailResponse.aiAssist as Array<{ rating: unknown }>
     assert.deepEqual(items.map((item) => item.rating), [4, null])
     assert.deepEqual(items.map((item) => ratingValue(item.rating)), [4, null])
+  })
+
+  test('v5: order statuses and payment modes match Portal and every one has a label in both languages', () => {
+    assert.deepEqual([...ORDER_STATUSES], fixture.enums.orderStatus)
+    assert.deepEqual([...ORDER_KINDS], fixture.enums.orderKind)
+    assert.deepEqual([...PAYMENT_MODES], fixture.enums.paymentMode)
+    for (const locale of LOCALES) {
+      for (const status of fixture.enums.orderStatus) {
+        const label = orderStatusLabel(locale, status)
+        assert.notEqual(label, status, `${locale} order status ${status} has no label`)
+        assert.doesNotMatch(label, /_/, `${locale} ${status}`)
+      }
+      for (const mode of fixture.enums.paymentMode) {
+        assert.notEqual(paymentModeLabel(locale, mode), mode, `${locale} payment mode ${mode} has no label`)
+      }
+    }
+  })
+
+  test('v5: the captured order is the 8-field projection; its amount is minor units in a lower-case currency', () => {
+    const order = fixture.adminToPortal.detailResponse.order as Record<string, unknown>
+    assert.deepEqual(Object.keys(order).sort(), ['amount', 'createdAt', 'currency', 'id', 'kind', 'paymentMode', 'planName', 'status'])
+    assert.equal(fixture.adminToPortal.detailResponse.orderId, order.id)
+    assert.equal(order.amount, 3900)
+    assert.equal(order.currency, 'usd')
+    for (const locale of LOCALES) assert.match(formatOrderAmount(locale, order.amount as number, order.currency as string), /39\.00/)
+    assert.ok(fixture.adminToPortal.listResponse.tickets.some((ticket) => typeof ticket.orderId === 'string'))
   })
 })

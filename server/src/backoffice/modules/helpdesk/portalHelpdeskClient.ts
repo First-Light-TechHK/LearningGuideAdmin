@@ -18,7 +18,10 @@ import {
   type TicketDetail,
   type TicketEvent,
   type ListStatusFilter,
+  ORDER_ID_PATTERN,
+  ORDER_PLAN_NAME_MAX,
   type TicketMessage,
+  type TicketOrder,
   type TicketStatus,
   type TicketStudent,
   type TicketSubscription,
@@ -252,6 +255,72 @@ export function normaliseSummary(raw: unknown): TicketSummary {
     flagged:
       r.flagged === true ||
       strOrNull(pick(r, 'flaggedAt', 'flagged_at')) !== null,
+    orderId: orderId(pick(r, 'orderId', 'order_id')),
+  };
+}
+
+// ------------------------------------------------------------ v4 Part A 订单
+
+/** 订单号：与 Portal 同一格式（字母、数字、_、-，最长 64），否则 null。 */
+function orderId(value: unknown): string | null {
+  return typeof value === 'string' && ORDER_ID_PATTERN.test(value)
+    ? value
+    : null;
+}
+
+/** 状态 / 类型 / 支付方式：小写标识符；Portal 以后新增的值原样保留。 */
+const ORDER_TOKEN = /^[a-z][a-z0-9_]{0,31}$/;
+const CURRENCY = /^[A-Za-z]{3}$/;
+
+function orderToken(value: unknown): string | null {
+  return typeof value === 'string' && ORDER_TOKEN.test(value) ? value : null;
+}
+
+function orderAmount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function orderText(value: unknown, max: number): string | null {
+  if (typeof value !== 'string') return null;
+  const clean = value.replace(CONTROL_CHARS, '').trim();
+  return clean === '' ? null : clean.slice(0, max);
+}
+
+function isoTime(value: unknown): string | null {
+  return typeof value === 'string' &&
+    value.length <= 40 &&
+    /^\d{4}-\d{2}-\d{2}T/.test(value) &&
+    Number.isFinite(Date.parse(value))
+    ? value
+    : null;
+}
+
+/**
+ * Portal 的订单投影：只取 8 个字段（多给的一律丢弃），格式不对的字段为 null；
+ * 没有合格订单号的整体视为没有订单。
+ */
+export function normaliseOrder(raw: unknown): TicketOrder | null {
+  if (!isRecord(raw)) return null;
+  const id = orderId(raw.id);
+  if (id === null) return null;
+  const currency = pick(raw, 'currency');
+  return {
+    id,
+    status: orderToken(raw.status),
+    amount: orderAmount(raw.amount),
+    currency:
+      typeof currency === 'string' && CURRENCY.test(currency)
+        ? currency.toLowerCase()
+        : null,
+    planName: orderText(
+      pick(raw, 'planName', 'plan_name'),
+      ORDER_PLAN_NAME_MAX,
+    ),
+    kind: orderToken(raw.kind),
+    createdAt: isoTime(pick(raw, 'createdAt', 'created_at')),
+    paymentMode: orderToken(pick(raw, 'paymentMode', 'payment_mode')),
   };
 }
 
@@ -379,10 +448,13 @@ function normaliseSubscription(raw: unknown): TicketSubscription | null {
 export function normaliseDetail(raw: unknown): TicketDetail {
   const r = isRecord(raw) ? raw : {};
   const summary = normaliseSummary(r);
+  const order = normaliseOrder(r.order);
   return {
     ...summary,
+    orderId: summary.orderId ?? order?.id ?? null,
     student: normaliseStudent(r.student, summary),
     subscription: normaliseSubscription(r.subscription),
+    order,
     messages: Array.isArray(r.messages)
       ? r.messages.filter(isRecord).map(normaliseMessage)
       : [],

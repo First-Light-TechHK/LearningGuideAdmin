@@ -1,14 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
-import type { EnquiryDetail } from '../contracts/helpdesk'
-import { billingCycleLabel, subscriptionStatusLabel } from '../lib/helpdeskFormat'
-import { isImeComposing, longDate, subscriptionTone, tagAddError, tagColor, normalizeTag } from '../lib/helpdeskView'
+import type { EnquiryDetail, TicketOrder } from '../contracts/helpdesk'
+import {
+  billingCycleLabel,
+  formatOrderAmount,
+  orderStatusLabel,
+  paymentModeLabel,
+  subscriptionStatusLabel,
+} from '../lib/helpdeskFormat'
+import {
+  isImeComposing,
+  longDate,
+  orderTone,
+  subscriptionTone,
+  tagAddError,
+  tagColor,
+  normalizeTag,
+} from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
-import { HdCalendarIcon, HdCloseIcon } from './icons'
+import { HdCalendarIcon, HdCloseIcon, HdReceiptIcon } from './icons'
 
 /**
- * 右栏 387px（Figma 1324:2 RightSidebar）：学员信息、当前订阅、标签。
+ * 右栏 387px（Figma 1324:2 RightSidebar）：学员信息、当前订阅、（v4）订单、标签。
  * 只读投影来自 Portal；标签增删只给 FULL（editTags）。
  */
 
@@ -86,6 +100,108 @@ function TagEditor({
   )
 }
 
+/**
+ * v4 Part A「订单 / Order」块（helpdesk-v4-order-and-chat-end.md）：紧跟订阅块，沿用订阅块的行样式。
+ * 无 Figma 画板，待视觉验收。只有工单关联了订单才出现；Portal 这次没读到订单（order 为 null）时
+ * 仍显示订单号与复制，其余为 —。
+ * 不链到订单页：BackOffice 的 Order Management 还是占位页，Portal 的订单页也不能按地址打开某个订单，
+ * 所以只给订单号 + 复制。
+ */
+function OrderBlock({ locale, orderId, order }: { locale: Locale; orderId: string; order: TicketOrder | null }) {
+  const [copy, setCopy] = useState<'idle' | 'copied' | 'fallback'>('idle')
+  const numberRef = useRef<HTMLSpanElement | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const titleId = useId()
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+
+  async function copyNumber() {
+    if (timer.current) clearTimeout(timer.current)
+    try {
+      await navigator.clipboard.writeText(orderId)
+      setCopy('copied')
+      timer.current = setTimeout(() => setCopy('idle'), 2000)
+    } catch {
+      // 浏览器拒绝剪贴板时退化为选中订单号，员工自己按 Ctrl/Cmd+C（与员工账号页的复制链接一致）
+      const node = numberRef.current
+      const selection = window.getSelection()
+      if (node && selection) {
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        selection.removeAllRanges()
+        selection.addRange(range)
+      }
+      setCopy('fallback')
+    }
+  }
+
+  const status = order?.status ?? null
+  return (
+    <section className="hdSideSection" aria-labelledby={titleId}>
+      <h3 className="hdSectionTitle hdSectionTitleIcon" id={titleId}>
+        <HdReceiptIcon />
+        {t(locale, 'helpDesk.order.title')}
+      </h3>
+      <dl className="hdPlan">
+        <div className="hdPlanRow">
+          <dt>{t(locale, 'helpDesk.order.number')}</dt>
+          <dd className="hdOrderNumberCell">
+            <span className="hdOrderNumber" ref={numberRef}>
+              {orderId}
+            </span>
+            <button
+              type="button"
+              className="hdLinkButton"
+              aria-label={t(locale, 'helpDesk.order.copyLabel', { id: orderId })}
+              onClick={() => void copyNumber()}
+            >
+              {t(locale, copy === 'copied' ? 'helpDesk.order.copied' : 'helpDesk.order.copy')}
+            </button>
+          </dd>
+        </div>
+        <div className="hdPlanRow">
+          <dt>{t(locale, 'helpDesk.order.status')}</dt>
+          <dd>
+            {status ? (
+              <span className={`hdPill hdPill-${orderTone(status)}`}>{orderStatusLabel(locale, status)}</span>
+            ) : (
+              '—'
+            )}
+          </dd>
+        </div>
+        <div className="hdPlanRow">
+          <dt>{t(locale, 'helpDesk.order.amount')}</dt>
+          <dd>{formatOrderAmount(locale, order?.amount, order?.currency)}</dd>
+        </div>
+        <div className="hdPlanRow">
+          <dt>{t(locale, 'helpDesk.order.plan')}</dt>
+          <dd>{order?.planName || '—'}</dd>
+        </div>
+        <div className="hdPlanRow">
+          <dt>{t(locale, 'helpDesk.order.date')}</dt>
+          <dd>{longDate(order?.createdAt, locale)}</dd>
+        </div>
+        <div className="hdPlanRow">
+          <dt>{t(locale, 'helpDesk.order.paymentMode')}</dt>
+          <dd>{order?.paymentMode ? paymentModeLabel(locale, order.paymentMode) : '—'}</dd>
+        </div>
+      </dl>
+      {order === null ? <p className="hdMuted">{t(locale, 'helpDesk.order.unavailable')}</p> : null}
+      <p className="hdNotice hdOrderCopyNotice" role="status">
+        {copy === 'copied'
+          ? t(locale, 'helpDesk.order.copiedNotice')
+          : copy === 'fallback'
+            ? t(locale, 'helpDesk.order.copyFallback')
+            : ''}
+      </p>
+    </section>
+  )
+}
+
 export function StudentPanel({ locale, ticket, editTags, busy, onAddTag, onRemoveTag }: Props) {
   const [adding, setAdding] = useState(false)
   const student = ticket.student
@@ -151,6 +267,8 @@ export function StudentPanel({ locale, ticket, editTags, busy, onAddTag, onRemov
           </div>
         </dl>
       </section>
+
+      {ticket.orderId ? <OrderBlock locale={locale} orderId={ticket.orderId} order={ticket.order ?? null} /> : null}
 
       <section className="hdSideSection hdTagsSection">
         <div className="hdTagsHead">

@@ -500,7 +500,9 @@
       "emptyFiltered": "没有符合搜索或筛选条件的工单。",
       "loadingMore": "正在加载更多…",
       "unread": "未读",
-      "flagged": "已标记跟进"
+      "flagged": "已标记跟进",
+      "order": "订单",
+      "orderLabel": "关联订单 {id}"
     },
     "selectPrompt": "选择一条工单查看对话。",
     "today": "今天",
@@ -579,6 +581,33 @@
       "expired": "已过期",
       "cancel_at_period_end": "到期后取消",
       "grace": "付款宽限期"
+    },
+    "order": {
+      "title": "订单",
+      "number": "订单号",
+      "status": "状态",
+      "amount": "金额",
+      "plan": "方案",
+      "date": "下单日期",
+      "paymentMode": "支付方式",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyLabel": "复制订单号 {id}",
+      "copiedNotice": "订单号已复制。",
+      "copyFallback": "已选中订单号，请按 Ctrl+C（Mac 上为 ⌘C）复制。",
+      "unavailable": "暂时读不到这个订单的详情。"
+    },
+    "orderStatus": {
+      "paid": "已支付",
+      "pending": "待支付",
+      "failed": "支付失败",
+      "canceled": "已取消",
+      "cancelled": "已取消",
+      "refunded": "已退款"
+    },
+    "paymentMode": {
+      "demo": "演示支付",
+      "stripe": "Stripe 在线支付"
     },
     "tags": {
       "title": "标签",

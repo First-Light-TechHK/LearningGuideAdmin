@@ -496,6 +496,14 @@ export function activeFilterCount(filters: EnquiryFilters): number {
 }
 
 /** 订阅状态胶囊：Active 绿色（Figma），付款异常（含 Portal 的 grace 宽限期）琥珀色，其它中性。 */
+/** v4 Part A 订单状态的标签色：已支付绿；待支付 / 支付失败琥珀（付款有问题）；已取消 / 已退款 / 未知灰。 */
+export function orderTone(status: string): 'success' | 'warning' | 'neutral' {
+  const value = status.trim().toLowerCase()
+  if (value === 'paid') return 'success'
+  if (value === 'pending' || value === 'failed') return 'warning'
+  return 'neutral'
+}
+
 export function subscriptionTone(status: string): 'success' | 'warning' | 'neutral' {
   const value = status.trim().toLowerCase()
   if (value === 'active' || value === 'trialing') return 'success'

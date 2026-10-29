@@ -500,7 +500,9 @@
       "emptyFiltered": "No enquiries match your search or filters.",
       "loadingMore": "Loading more…",
       "unread": "Unread",
-      "flagged": "Flagged for follow-up"
+      "flagged": "Flagged for follow-up",
+      "order": "Order",
+      "orderLabel": "Linked order {id}"
     },
     "selectPrompt": "Select an enquiry to see the conversation.",
     "today": "Today",
@@ -579,6 +581,33 @@
       "expired": "Expired",
       "cancel_at_period_end": "Cancels at period end",
       "grace": "Payment grace period"
+    },
+    "order": {
+      "title": "Order",
+      "number": "Order number",
+      "status": "Status",
+      "amount": "Amount",
+      "plan": "Plan",
+      "date": "Order date",
+      "paymentMode": "Payment mode",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyLabel": "Copy order number {id}",
+      "copiedNotice": "Order number copied.",
+      "copyFallback": "Press Ctrl+C (⌘C on Mac) to copy the selected order number.",
+      "unavailable": "Order details are not available right now."
+    },
+    "orderStatus": {
+      "paid": "Paid",
+      "pending": "Pending",
+      "failed": "Payment failed",
+      "canceled": "Cancelled",
+      "cancelled": "Cancelled",
+      "refunded": "Refunded"
+    },
+    "paymentMode": {
+      "demo": "Demo",
+      "stripe": "Stripe"
     },
     "tags": {
       "title": "Tags",

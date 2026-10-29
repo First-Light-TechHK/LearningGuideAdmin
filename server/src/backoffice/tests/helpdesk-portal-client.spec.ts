@@ -636,6 +636,8 @@ describe('Portal HelpDesk client', () => {
         closeReason: null,
         rating: null,
         flagged: false,
+        // v4 Part A: a ticket without an order
+        orderId: null,
       });
     });
 
@@ -914,5 +916,189 @@ describe('Portal HelpDesk client', () => {
       expect(detail.messages).toHaveLength(1);
       expect(detail.events).toEqual([]);
     });
+  });
+});
+
+describe('v4 Part A: the enquiry order (Portal projection, well-formed fields only)', () => {
+  const rawOrder = {
+    id: 'order_1761640741859_9f3a2c1d',
+    status: 'paid',
+    amount: 3900,
+    currency: 'usd',
+    planName: 'Epicureanism · PC · 6 months',
+    kind: 'purchase',
+    createdAt: '2026-10-28T08:39:01.859Z',
+    paymentMode: 'stripe',
+  };
+
+  it('reads orderId on list rows; a missing, empty or malformed id is null', () => {
+    expect(
+      normaliseSummary({ ...rawSummary, orderId: rawOrder.id }).orderId,
+    ).toBe(rawOrder.id);
+    expect(
+      normaliseSummary({ ...rawSummary, order_id: 'order_1_ab' }).orderId,
+    ).toBe('order_1_ab');
+    for (const bad of [
+      undefined,
+      null,
+      '',
+      '   ',
+      42,
+      true,
+      { id: 'x' },
+      'order 1',
+      'order/../1',
+      '<script>',
+      'o'.repeat(65),
+    ]) {
+      expect(normaliseSummary({ ...rawSummary, orderId: bad }).orderId).toBe(
+        null,
+      );
+    }
+    expect(
+      normaliseSummary({ ...rawSummary, orderId: 'o'.repeat(64) }).orderId,
+    ).toBe('o'.repeat(64));
+  });
+
+  it('keeps exactly the listed projection fields and drops anything else Portal might add', () => {
+    const detail = normaliseDetail({
+      ...rawDetail,
+      orderId: rawOrder.id,
+      order: {
+        ...rawOrder,
+        cardLast4: '4242',
+        stripePaymentIntentId: 'pi_secret',
+        stripeCheckoutSessionId: 'cs_secret',
+        billingAddress: { line1: '1 High St' },
+        userEmail: 'learner@example.com',
+      },
+    });
+    expect(detail.orderId).toBe(rawOrder.id);
+    expect(detail.order).toEqual(rawOrder);
+    expect(Object.keys(detail.order ?? {}).sort()).toEqual([
+      'amount',
+      'createdAt',
+      'currency',
+      'id',
+      'kind',
+      'paymentMode',
+      'planName',
+      'status',
+    ]);
+  });
+
+  it('a ticket without an order has order null (old Portal: no field at all)', () => {
+    expect(normaliseDetail(rawDetail).order).toBeNull();
+    expect(normaliseDetail(rawDetail).orderId).toBeNull();
+    expect(normaliseDetail({ ...rawDetail, order: null }).order).toBeNull();
+    expect(
+      normaliseDetail({ ...rawDetail, order: 'order_1' }).order,
+    ).toBeNull();
+    expect(
+      normaliseDetail({ ...rawDetail, order: [rawOrder] }).order,
+    ).toBeNull();
+  });
+
+  it('an order without a well-formed id is dropped as a whole', () => {
+    for (const id of [undefined, '', 7, 'a b', 'x'.repeat(65)]) {
+      expect(
+        normaliseDetail({ ...rawDetail, order: { ...rawOrder, id } }).order,
+      ).toBeNull();
+    }
+  });
+
+  it('each malformed field becomes null; the rest of the order stays', () => {
+    const detail = normaliseDetail({
+      ...rawDetail,
+      orderId: rawOrder.id,
+      order: {
+        id: rawOrder.id,
+        status: 'PAID <b>',
+        amount: 39.5,
+        currency: 'us dollars',
+        planName: '   ',
+        kind: 42,
+        createdAt: 'yesterday',
+        paymentMode: { mode: 'stripe' },
+      },
+    });
+    expect(detail.order).toEqual({
+      id: rawOrder.id,
+      status: null,
+      amount: null,
+      currency: null,
+      planName: null,
+      kind: null,
+      createdAt: null,
+      paymentMode: null,
+    });
+    for (const amount of [-1, Number.NaN, Infinity, '3900', 2 ** 60, null]) {
+      expect(
+        normaliseDetail({ ...rawDetail, order: { ...rawOrder, amount } }).order
+          ?.amount,
+      ).toBeNull();
+    }
+    expect(
+      normaliseDetail({ ...rawDetail, order: { ...rawOrder, amount: 0 } }).order
+        ?.amount,
+    ).toBe(0);
+  });
+
+  it('normalises the currency to lower case and accepts snake_case names', () => {
+    const detail = normaliseDetail({
+      ...rawDetail,
+      order: {
+        id: rawOrder.id,
+        status: 'refunded',
+        amount: 12900,
+        currency: 'GBP',
+        plan_name: 'Stoicism · Mobile · 12 months',
+        kind: 'upgrade',
+        created_at: '2026-10-28T08:39:01Z',
+        payment_mode: 'demo',
+      },
+    });
+    expect(detail.order).toEqual({
+      id: rawOrder.id,
+      status: 'refunded',
+      amount: 12900,
+      currency: 'gbp',
+      planName: 'Stoicism · Mobile · 12 months',
+      kind: 'upgrade',
+      createdAt: '2026-10-28T08:39:01Z',
+      paymentMode: 'demo',
+    });
+  });
+
+  it('a status, kind or payment mode Portal adds later is kept as its raw token (the UI shows it as is)', () => {
+    const order = normaliseDetail({
+      ...rawDetail,
+      order: {
+        ...rawOrder,
+        status: 'partially_refunded',
+        kind: 'gift',
+        paymentMode: 'paypal',
+      },
+    }).order;
+    expect(order).toMatchObject({
+      status: 'partially_refunded',
+      kind: 'gift',
+      paymentMode: 'paypal',
+    });
+  });
+
+  it('caps the plan name and strips control characters', () => {
+    const order = normaliseDetail({
+      ...rawDetail,
+      order: { ...rawOrder, planName: `Plan\u0000\u0007 ${'x'.repeat(400)}` },
+    }).order;
+    expect(order?.planName?.startsWith('Plan x')).toBe(true);
+    expect(order?.planName).toHaveLength(200);
+  });
+
+  it('the detail orderId falls back to the order id when Portal leaves it out', () => {
+    expect(normaliseDetail({ ...rawDetail, order: rawOrder }).orderId).toBe(
+      rawOrder.id,
+    );
   });
 });

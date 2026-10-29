@@ -73,6 +73,8 @@ export type EnquiryRow = {
   rating?: number | null;
   /** v2：员工标了「Flag follow-up」。 */
   flagged: boolean;
+  /** v4 Part A：学员从付款记录发起咨询时关联的订单号；没有订单为 null（旧服务端没有这个字段）。 */
+  orderId?: string | null;
   /** 每一行都带可用操作：学员时间线上的每张卡片都有操作栏。 */
   available: AvailableActions;
 };
@@ -165,9 +167,33 @@ export type AgentRun = {
   events: AgentRunEvent[];
 };
 
+/**
+ * v4 Part A：工单关联订单的只读投影（Portal 用代码从学员自己的订单记录构建，Admin Server 只保留这 8 个字段，
+ * 格式不对的字段为 null）。AI 助手从不接触订单。
+ */
+export const ORDER_STATUSES = ["paid", "pending", "failed", "canceled", "refunded"] as const;
+export const ORDER_KINDS = ["purchase", "trial_activation", "upgrade"] as const;
+export const PAYMENT_MODES = ["demo", "stripe"] as const;
+
+export type TicketOrder = {
+  id: string;
+  /** ORDER_STATUSES 之一；Portal 以后新增的值原样显示。 */
+  status: string | null;
+  /** 整数，最小货币单位（3900 = 39.00）。 */
+  amount: number | null;
+  /** ISO 4217，小写（"usd"）。 */
+  currency: string | null;
+  planName: string | null;
+  kind: string | null;
+  createdAt: string | null;
+  paymentMode: string | null;
+};
+
 export type EnquiryDetail = EnquiryRow & {
   student: TicketStudent | null;
   subscription: TicketSubscription | null;
+  /** v4 Part A：没有订单为 null；有 orderId 却为 null = Portal 这次没读到订单（旧服务端没有这个字段）。 */
+  order?: TicketOrder | null;
   messages: TicketMessage[];
   events: TicketEvent[];
   aiAssist: TicketAiAssist[];

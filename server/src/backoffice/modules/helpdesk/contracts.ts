@@ -107,6 +107,8 @@ export type TicketSummary = {
   rating: number | null;
   /** v2 §4a：员工标了「Flag follow-up」。 */
   flagged: boolean;
+  /** v4 Part A：学员从付款记录发起咨询时关联的订单号；没有订单（或旧的 Portal）为 null。 */
+  orderId: string | null;
 };
 
 export type TicketAttachment = {
@@ -191,9 +193,43 @@ export type TicketAiAssist = {
   createdAt: string;
 };
 
+/**
+ * v4 Part A（helpdesk-v4-order-and-chat-end.md）：工单关联订单的只读投影。Portal 用代码从学员
+ * 自己的订单记录构建（AI 助手从不接触订单）；这里只保留这 8 个字段，格式不对的字段为 null，
+ * Portal 多给的任何字段（卡号、Stripe 标识、地址……）一律丢弃。
+ */
+export const ORDER_STATUSES = [
+  'paid',
+  'pending',
+  'failed',
+  'canceled',
+  'refunded',
+] as const;
+export const ORDER_KINDS = ['purchase', 'trial_activation', 'upgrade'] as const;
+export const PAYMENT_MODES = ['demo', 'stripe'] as const;
+/** 与 Portal 一致：字母、数字、_、-，最长 64。 */
+export const ORDER_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const ORDER_PLAN_NAME_MAX = 200;
+
+export type TicketOrder = {
+  id: string;
+  /** ORDER_STATUSES 之一；Portal 以后新增的状态原样保留（界面显示原值）。 */
+  status: string | null;
+  /** 整数，最小货币单位（3900 = 39.00）。 */
+  amount: number | null;
+  /** ISO 4217 三位字母，小写（"usd"）。 */
+  currency: string | null;
+  planName: string | null;
+  kind: string | null;
+  createdAt: string | null;
+  paymentMode: string | null;
+};
+
 export type TicketDetail = TicketSummary & {
   student: TicketStudent | null;
   subscription: TicketSubscription | null;
+  /** v4 Part A：没有订单时为 null。 */
+  order: TicketOrder | null;
   messages: TicketMessage[];
   events: TicketEvent[];
   aiAssist: TicketAiAssist[];
