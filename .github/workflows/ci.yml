@@ -46,6 +46,49 @@ jobs:
           HELPDESK_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/helpdesk_test
       - run: npm run test:scripts
 
+  helpdesk-eval:
+    name: HelpDesk eval gate
+    runs-on: ubuntu-latest
+    # v5 Part G5: free (no model, no key). Retrieval-only eval over eval/helpdesk/faq-library.json
+    # plus the accepted regression cases (recall@8 >= 95%), the guard corpus (answers and gap
+    # labels) and the PII scrubber corpus shared with Portal (pinned by hash). CI=true makes the
+    # PostgreSQL spec fail instead of skipping when the database is missing.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: helpdesk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: >-
+          npm test -- --runInBand
+          src/backoffice/tests/helpdesk-eval-gate.pg.spec.ts
+          src/ai/helpdesk/workflow/guard.spec.ts
+          src/ai/helpdesk/flywheel/gap-labeller.spec.ts
+          src/backoffice/tests/helpdesk-pii-corpus.spec.ts
+        env:
+          CI: "true"
+          HELPDESK_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/helpdesk_test
+
   client:
     name: Client build
     runs-on: ubuntu-latest
