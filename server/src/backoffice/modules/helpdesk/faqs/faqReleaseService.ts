@@ -4,6 +4,7 @@ import {
   type FaqNode,
   type HelpdeskLocale,
 } from '../../../../contracts/helpdesk-qa';
+import { createPgCandidateRepository } from '../flywheel/candidateRepository';
 import { HelpdeskError } from '../portalHelpdeskClient';
 import type { FaqActor } from './faqContracts';
 import { checkFaqGraph, type FaqGraphCheckResult } from './faqGraphChecks';
@@ -195,7 +196,10 @@ export function createFaqReleaseService(
   const gate =
     options.gate ??
     createFaqReleaseGate({
-      retrieval: createRetrievalGate(createPgFaqRepository(), now),
+      // 检索评测带上员工从数据飞轮接受过的回归用例（v5 Part G5）
+      retrieval: createRetrievalGate(createPgFaqRepository(), now, {
+        regressionCases: () => createPgCandidateRepository().evalCases(),
+      }),
       now,
     });
 

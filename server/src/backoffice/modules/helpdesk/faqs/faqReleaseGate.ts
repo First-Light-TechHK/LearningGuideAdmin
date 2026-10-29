@@ -17,7 +17,15 @@ export type FaqReleaseEvalCase = {
   key: string;
   /** 检索用的语言（zh-TW 的问法按 zh-CN 检索，与学员的繁体原文一样）。 */
   locale: 'en-GB' | 'zh-CN';
-  source: 'question' | 'phrasing';
+  /** regression：员工从数据飞轮接受的一组学员原话（脱敏过），标着选定的节点（v5 Part G5）。 */
+  source: 'question' | 'phrasing' | 'regression';
+  text: string;
+};
+
+/** 回归用例（helpdesk_faq_eval_cases）：节点、语言与脱敏过的学员原话。 */
+export type FaqRegressionCase = {
+  faqId: string;
+  locale: 'en-GB' | 'zh-CN' | 'zh-TW';
   text: string;
 };
 
@@ -135,14 +143,56 @@ function previousRecall(
   return recallOf(previous?.evalReport);
 }
 
-/** 免费的检索评测门：用生产的候选 SQL 检索那一版快照（release = version）。 */
+/**
+ * 回归用例 → 检索用例：只算这一版里检索得到的节点（入口 answer）；别的（节点归档了、不是入口）跳过，
+ * 计在 regressionSkipped 里（不算错：那条路径由问题树检查管）。
+ */
+export function regressionEvalCases(
+  snapshot: FaqReleaseSnapshot,
+  regression: readonly FaqRegressionCase[],
+): { cases: FaqReleaseEvalCase[]; skipped: number } {
+  const keys = new Map(
+    snapshot.nodes
+      .filter((node) => node.entry && node.type === 'answer')
+      .map((node) => [node.id, node.key]),
+  );
+  const cases: FaqReleaseEvalCase[] = [];
+  let skipped = 0;
+  for (const item of regression) {
+    const key = keys.get(item.faqId);
+    if (!key) {
+      skipped += 1;
+      continue;
+    }
+    cases.push({
+      nodeId: item.faqId,
+      key,
+      locale: item.locale === 'en-GB' ? 'en-GB' : 'zh-CN',
+      source: 'regression',
+      text: item.text,
+    });
+  }
+  return { cases, skipped };
+}
+
+/**
+ * 免费的检索评测门：用生产的候选 SQL 检索那一版快照（release = version）。regressionCases 给了时，
+ * 员工从数据飞轮接受过的学员原话也一起评测（v5 Part G5）。
+ */
 export function createRetrievalGate(
   repository: Pick<FaqRepository, 'searchPublished'>,
   now: () => Date = () => new Date(),
+  options: { regressionCases?: () => Promise<FaqRegressionCase[]> } = {},
 ): FaqReleaseGate {
   return {
     async evaluate({ version, snapshot, previous }) {
-      const cases = releaseEvalCases(snapshot);
+      const regression = options.regressionCases
+        ? regressionEvalCases(snapshot, await options.regressionCases())
+        : null;
+      const cases = [
+        ...releaseEvalCases(snapshot),
+        ...(regression?.cases ?? []),
+      ];
       const ranks: (number | null)[] = new Array<number | null>(cases.length);
       let next = 0;
       const worker = async () => {
@@ -197,6 +247,12 @@ export function createRetrievalGate(
           recallAt1: Number(recallAt1.toFixed(4)),
           recallAt8: Number(recallAt8.toFixed(4)),
           ...(before === null ? {} : { previousRecallAt8: before }),
+          ...(regression
+            ? {
+                regressionCases: regression.cases.length,
+                regressionSkipped: regression.skipped,
+              }
+            : {}),
         },
         misses,
       };

@@ -19,6 +19,13 @@ import { KsModule } from './ks/ks.module';
 import { PrismaKnowledgeClient } from './ks/prisma-knowledge.client';
 import { HELPDESK_QA_SOURCE } from './contracts/helpdesk-qa';
 import { HELPDESK_TRACE_SOURCE } from './contracts/helpdesk-trace';
+import {
+  HELPDESK_GAP_LABELLER,
+  noGapLabeller,
+} from './contracts/helpdesk-flywheel';
+import { createModelGapLabeller } from './ai/helpdesk/flywheel/gap-labeller';
+import { suggestModel } from './ai/helpdesk/helpdesk-suggest.service';
+import { PiStepRunner } from './ai/helpdesk/workflow/pi-step-runner';
 import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
 import { createTraceSource } from './ai/helpdesk/trace/trace-query';
 import { PrismaService } from './prisma/prisma.service';
@@ -86,6 +93,18 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
       ...(admin
         ? [
             BackofficeModule.register({
+              // 缺口挖掘给一组未解决的问题起话题、提一个学员口吻的问题（只做这个，从不写答案）：
+              // Agent 的一次小模型调用（pi 工作流 + 守卫；没有 OPENROUTER_API_KEY 或测试里 = 不问模型）
+              gapLabeller: {
+                provide: HELPDESK_GAP_LABELLER,
+                useFactory: () =>
+                  process.env.NODE_ENV === 'test'
+                    ? noGapLabeller
+                    : createModelGapLabeller({
+                        runner: new PiStepRunner(),
+                        model: suggestModel,
+                      }),
+              },
               helpdeskTrace: {
                 provide: HELPDESK_TRACE_SOURCE,
                 useFactory: (prisma: PrismaService) =>

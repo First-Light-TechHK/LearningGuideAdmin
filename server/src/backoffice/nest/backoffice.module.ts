@@ -1,11 +1,20 @@
 import {
   DynamicModule,
+  Inject,
+  Injectable,
   Logger,
   Module,
+  OnApplicationBootstrap,
   OnApplicationShutdown,
   OnModuleInit,
   Provider,
 } from '@nestjs/common';
+
+import {
+  HELPDESK_GAP_LABELLER,
+  noGapLabeller,
+  type GapLabeller,
+} from '../../contracts/helpdesk-flywheel';
 
 import { closePool } from '../lib/db';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
@@ -17,6 +26,24 @@ import {
 } from '../modules/helpdesk/faqs/faqReleaseService';
 import { createFaqService } from '../modules/helpdesk/faqs/faqService';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
+import { createPgCandidateRepository } from '../modules/helpdesk/flywheel/candidateRepository';
+import { createFaqCandidateService } from '../modules/helpdesk/flywheel/faqCandidateService';
+import {
+  createJobRunner,
+  createPgJobLock,
+  createPgJobRunRepository,
+  startFlywheelScheduler,
+  type JobRunner,
+} from '../modules/helpdesk/flywheel/flywheelJobs';
+import { createFlywheelMetrics } from '../modules/helpdesk/flywheel/flywheelMetrics';
+import { createFlywheelRunsService } from '../modules/helpdesk/flywheel/flywheelRunsService';
+import {
+  createFlywheelService,
+  workingNodeTexts,
+} from '../modules/helpdesk/flywheel/flywheelService';
+import { createPgInsightRepository } from '../modules/helpdesk/flywheel/insightRepository';
+import { createPortalHelpdeskClient } from '../modules/helpdesk/portalHelpdeskClient';
+import { tryRecordAuditEvent } from '../repositories/auditRepository';
 import {
   bootstrapAdminFromEnv,
   initialiseSessionSecret,
@@ -30,6 +57,12 @@ import {
   HELPDESK_FAQ_RELEASE_SERVICE,
 } from './helpdesk-faq-graph.controller';
 import { HelpdeskIntegrationFaqReleaseController } from './helpdesk-faq-release.controller';
+import {
+  BackofficeHelpdeskFlywheelController,
+  HELPDESK_FAQ_CANDIDATE_SERVICE,
+  HELPDESK_FLYWHEEL_METRICS,
+  HELPDESK_FLYWHEEL_RUNS_SERVICE,
+} from './helpdesk-flywheel.controller';
 import {
   BackofficeHelpdeskController,
   HELPDESK_SERVICE,
@@ -50,7 +83,41 @@ import {
 export type BackofficeModuleOptions = {
   /** HELPDESK_TRACE_SOURCE 的提供者（AppModule 组装：Agent 的事件日志 → 导出副本）。 */
   helpdeskTrace: Provider;
+  /**
+   * HELPDESK_GAP_LABELLER 的提供者（AppModule 组装：Agent 的一次小模型调用；没有 key / 测试 = 不问模型）。
+   * 不给 = 不问模型（代码写的标签）。
+   */
+  gapLabeller?: Provider;
 };
+
+const HELPDESK_FLYWHEEL_RUNNER = Symbol('HELPDESK_FLYWHEEL_RUNNER');
+
+/**
+ * 夜间缺口挖掘的进程内调度（v5 Part G3）：应用启动完成后才开始（第一次检查在 2–3 分钟后，定时器
+ * unref，不阻塞启动也不拖住退出）；几个实例同时跑时由 advisory lock 与当天的运行行保证只跑一次。
+ */
+@Injectable()
+export class HelpdeskFlywheelScheduler
+  implements OnApplicationBootstrap, OnApplicationShutdown
+{
+  private scheduler: { stop(): void } | null = null;
+
+  constructor(
+    @Inject(HELPDESK_FLYWHEEL_RUNNER) private readonly runner: JobRunner,
+  ) {}
+
+  onApplicationBootstrap(): void {
+    // 测试里不起调度（调度本身由 helpdesk-flywheel-jobs.spec.ts 用假定时器测）
+    if (process.env.NODE_ENV === 'test') return;
+    this.scheduler = startFlywheelScheduler({
+      tick: () => this.runner.runScheduled('gap_mining'),
+    });
+  }
+
+  onApplicationShutdown(): void {
+    this.scheduler?.stop();
+  }
+}
 
 @Module({})
 export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
@@ -71,6 +138,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         HelpdeskIntegrationFaqsController,
         HelpdeskIntegrationFaqReleaseController,
         BackofficeHelpdeskAgentRunsController,
+        BackofficeHelpdeskFlywheelController,
       ],
       providers: [
         {
@@ -97,6 +165,62 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         // 已发布快照：还没有任何发布版本时 current() 为 null（Portal 收到 404 no_release，照旧读逐条发布的 FAQ）
         { provide: HELPDESK_FAQ_RELEASE_SOURCE, useValue: releaseSource },
         options.helpdeskTrace,
+        options.gapLabeller ?? {
+          provide: HELPDESK_GAP_LABELLER,
+          useValue: noGapLabeller,
+        },
+        // v5 Part G：数据飞轮（事实表 ← Portal insights；候选；运行行；指标）
+        {
+          provide: HELPDESK_FLYWHEEL_RUNNER,
+          useFactory: (labeller: GapLabeller) => {
+            const flywheel = createFlywheelService({
+              portal: createPortalHelpdeskClient(),
+              insights: createPgInsightRepository(),
+              candidates: createPgCandidateRepository(),
+              nodes: () => workingNodeTexts(graph),
+              labeller,
+            });
+            return createJobRunner({
+              runs: createPgJobRunRepository(),
+              lock: createPgJobLock(),
+              work: { gap_mining: () => flywheel.nightly() },
+            });
+          },
+          inject: [HELPDESK_GAP_LABELLER],
+        },
+        {
+          provide: HELPDESK_FAQ_CANDIDATE_SERVICE,
+          useFactory: (labeller: GapLabeller) =>
+            createFaqCandidateService({
+              candidates: createPgCandidateRepository(),
+              graph,
+              graphService: createFaqGraphService({ graph }),
+              portal: createPortalHelpdeskClient(),
+              nodes: () => workingNodeTexts(graph),
+              labeller,
+            }),
+          inject: [HELPDESK_GAP_LABELLER],
+        },
+        {
+          provide: HELPDESK_FLYWHEEL_RUNS_SERVICE,
+          useFactory: (runner: JobRunner) =>
+            createFlywheelRunsService({
+              runs: createPgJobRunRepository(),
+              runner,
+              portal: createPortalHelpdeskClient(),
+              audit: tryRecordAuditEvent,
+            }),
+          inject: [HELPDESK_FLYWHEEL_RUNNER],
+        },
+        {
+          provide: HELPDESK_FLYWHEEL_METRICS,
+          useFactory: () =>
+            createFlywheelMetrics({
+              insights: createPgInsightRepository(),
+              graph,
+            }),
+        },
+        HelpdeskFlywheelScheduler,
       ],
     };
   }

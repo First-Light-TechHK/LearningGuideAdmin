@@ -105,6 +105,38 @@ describe('FAQ release eval gate', () => {
     expect(RETRIEVAL_GATE.recallAt8Min).toBe(0.95);
   });
 
+  it('adds the regression cases staff accepted from the flywheel, labelled with their node; cases for nodes not retrievable in this release are counted as skipped', async () => {
+    const repository = fakeRepository((text) =>
+      text === '甲怎么办' ? ['b', 'a'] : text === 'lost' ? [] : ['a', 'b'],
+    );
+    const report = await createRetrievalGate(repository, fixed, {
+      regressionCases: () =>
+        Promise.resolve([
+          { faqId: 'a', locale: 'zh-TW', text: '甲怎么办' },
+          { faqId: 'b', locale: 'en-GB', text: 'lost' },
+          // 不是入口（检索不到）/ 这一版没有的节点：跳过，不算错
+          { faqId: 'c', locale: 'en-GB', text: 'x' },
+          { faqId: 'gone', locale: 'zh-CN', text: 'y' },
+        ]),
+    }).evaluate({ version: 3, snapshot, previous: null });
+    expect(report.metrics).toMatchObject({
+      cases: 7,
+      regressionCases: 2,
+      regressionSkipped: 2,
+    });
+    expect(report.misses).toEqual([
+      expect.objectContaining({
+        nodeId: 'b',
+        key: 'k-b',
+        source: 'regression',
+        text: 'lost',
+      }),
+    ]);
+    expect(repository.searches.find((s) => s.text === '甲怎么办')?.locale).toBe(
+      'zh-CN',
+    );
+  });
+
   it('fails below 95% recall@8, listing the misses', async () => {
     const report = await createRetrievalGate(
       fakeRepository((text) => (text === '问题 b' ? [] : ['a', 'b'])),
