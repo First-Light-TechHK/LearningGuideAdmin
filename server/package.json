@@ -24,7 +24,8 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed:demo": "ts-node prisma/seed-demo.ts",
-    "prompts:sync": "ts-node src/ai/sync-prompts.ts"
+    "prompts:sync": "ts-node src/ai/sync-prompts.ts",
+    "eval:helpdesk": "ts-node eval/helpdesk/run.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -87,6 +88,10 @@
       "ts"
     ],
     "rootDir": "src",
+    "roots": [
+      "<rootDir>",
+      "<rootDir>/../eval"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"

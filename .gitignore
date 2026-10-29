@@ -39,3 +39,6 @@ test_files/
 
 # 设计走查用的临时页面快照
 docs/design/figma/preview/
+
+# Helpdesk 推荐评测报告（npm run eval:helpdesk 的缺省输出）
+helpdesk-eval-report.*
