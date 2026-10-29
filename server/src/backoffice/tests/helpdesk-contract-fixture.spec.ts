@@ -488,6 +488,9 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
   function storedFaq(): HelpdeskFaq {
     return {
       id: text(faq.id),
+      key: 'reset-password',
+      type: 'answer',
+      entry: true,
       category: faq.category as never,
       popular: faq.popular === true,
       questionEn: text(faq.question),

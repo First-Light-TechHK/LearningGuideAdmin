@@ -63,6 +63,18 @@ export type HelpdeskQaCandidate = {
   answer: string;
   /** 检索得分，越大越相关（只用于排序与日志）。 */
   score: number;
+  /**
+   * v5 问题树（helpdesk-v5-faq-graph-design §4，增量；旧的调用方不读）：节点类型、是否入口、
+   * 该语言的答案块（answer 节点；发布版本里是冻结时切好的，之前按同一规则现切）、
+   * 哪些 choice 节点把它当选项（「几个候选都是同一个 choice 节点的选项」时显示那个 choice 节点），
+   * 以及它为什么在候选里：child = 屏幕上那张卡片的子节点，sibling = 那张卡片父节点的其它子节点，
+   * search = 检索命中。
+   */
+  type?: FaqNodeType;
+  entry?: boolean;
+  blocks?: FaqBlock[];
+  optionOf?: string[];
+  relation?: 'child' | 'sibling' | 'search';
 };
 
 export type HelpdeskQaSearch = {
@@ -71,6 +83,16 @@ export type HelpdeskQaSearch = {
   category: FaqCategory | null;
   text: string;
   limit: number;
+  /**
+   * v5 问题树（增量，都可不给）：
+   * - nodeId：屏幕上的卡片（context.nodeId）。给了 → 先是它的子节点（全部，按得分、再按顺序），
+   *   再是它父节点的其它子节点里命中的，最后才是普通检索；
+   * - entryOnly：普通检索只要入口节点（缺省 true；子节点 / 兄弟节点不受它限制）；
+   * - types：普通检索要哪些节点类型（缺省 ['answer']：旧的 Portal 不会渲染 choice 节点）。
+   */
+  nodeId?: string;
+  entryOnly?: boolean;
+  types?: FaqNodeType[];
 };
 
 /** 热门已发布 FAQ（v3 §1「你可能想问」：检索不到候选时的兜底）。 */
@@ -99,6 +121,11 @@ export interface HelpdeskQaSource {
    * 不含 excludeIds。只用代码，不问模型。
    */
   findPopular(search: HelpdeskQaPopularSearch): Promise<HelpdeskQaCandidate[]>;
+  /**
+   * v5：运行时读的是哪个发布版本（assist log 的 release_version）；第一版发布之前 null。
+   * 可选：旧的实现与单测的假来源不必提供。
+   */
+  releaseVersion?(): Promise<number | null>;
 }
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ import { HELPDESK_TRACE_SOURCE } from './contracts/helpdesk-trace';
 import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
 import { createTraceSource } from './ai/helpdesk/trace/trace-query';
 import { PrismaService } from './prisma/prisma.service';
-import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqRepository';
+import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqQaSource';
 
 /**
  * Agent 读 KS 的方式：同进程起了 ks 角色、或没配 KS_BASE_URL 时直接读库；
@@ -72,7 +72,8 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
               adminApi: admin,
               learnerApi: agent,
               knowledge: knowledgeProvider(roles),
-              // Helpdesk 推荐的候选：读 BackOffice 的已发布 FAQ（同库直读，契约见 src/contracts）
+              // Helpdesk 推荐的候选：读 BackOffice 的已发布 FAQ（同库直读，契约见 src/contracts）；
+              // 有发布版本后只读那一版快照（faqQaSource.ts）
               helpdeskQa: {
                 provide: HELPDESK_QA_SOURCE,
                 useFactory: () => createPgHelpdeskQaSource(),

@@ -1,20 +1,23 @@
 import { createHash } from 'node:crypto';
 
-import type { SessionEmployee } from '../../../contracts/employee';
 import {
+  FAQ_NODE_TYPES,
   FAQ_SIGNALS,
   isFaqCategory,
   isFaqSignal,
   isHelpdeskLocale,
   type FaqCategory,
+  type FaqNodeType,
   type FaqSignal,
   type HelpdeskLocale,
 } from '../../../../contracts/helpdesk-qa';
 import { isUuid, uuidv7 } from '../../../../common/uuidv7';
 import { HelpdeskError } from '../portalHelpdeskClient';
 import {
+  FAQ_KEY_PATTERN,
   FAQ_LIMITS,
   localised,
+  type FaqActor,
   type FaqPage,
   type FaqRevision,
   type HelpdeskFaq,
@@ -29,6 +32,7 @@ import {
 } from './faqRepository';
 import { unsafeLinks } from './faqMarkdown';
 import { ifNoneMatchHits } from './faqRelease';
+import { choicePromptProblem } from './faqGraphChecks';
 
 /**
  * Helpdesk FAQ 业务规则（Tickets v2 §1 / §2 / §3）：
@@ -138,6 +142,31 @@ function signals(value: unknown): FaqSignal[] | undefined {
   return FAQ_SIGNALS.filter((signal) => value.includes(signal));
 }
 
+/** v5 问题树的 key：不给 → undefined（新建按英文问题取 slug，编辑保留原值）；给了就小写、校验格式。 */
+function key(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw invalid('key must be text');
+  const normalised = value.trim().toLowerCase();
+  if (!FAQ_KEY_PATTERN.test(normalised))
+    throw invalid(
+      `key must be 1-${FAQ_LIMITS.keyMax} lowercase letters, digits, ".", "_" or "-", starting with a letter or digit`,
+    );
+  return normalised;
+}
+
+function nodeType(value: unknown): FaqNodeType | undefined {
+  if (value === undefined) return undefined;
+  if (!(FAQ_NODE_TYPES as readonly unknown[]).includes(value))
+    throw invalid('type must be answer or choice');
+  return value as FaqNodeType;
+}
+
+function entry(value: unknown): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') throw invalid('entry must be true or false');
+  return value;
+}
+
 type Editable = Required<
   Pick<
     FaqPatch,
@@ -149,7 +178,13 @@ type Editable = Required<
     | 'answerZh'
     | 'keywords'
   >
-> & { signals: FaqSignal[] | undefined };
+> & {
+  signals: FaqSignal[] | undefined;
+  /** v5 问题树的节点字段：没给（旧的 BackOffice）→ undefined，新建用缺省、编辑保留原值。 */
+  key: string | undefined;
+  type: FaqNodeType | undefined;
+  entry: boolean | undefined;
+};
 
 function editable(body: Record<string, unknown>): Editable {
   if (!isFaqCategory(body.category)) throw invalid('Unknown category');
@@ -157,6 +192,9 @@ function editable(body: Record<string, unknown>): Editable {
   if (typeof popular !== 'boolean')
     throw invalid('popular must be true or false');
   return {
+    key: key(body.key),
+    type: nodeType(body.type),
+    entry: entry(body.entry),
     category: body.category,
     popular,
     questionEn: text(body.questionEn, 'questionEn', FAQ_LIMITS.questionMax),
@@ -172,6 +210,9 @@ function editable(body: Record<string, unknown>): Editable {
 function sameFields(a: Editable, b: HelpdeskFaq): boolean {
   return (
     (a.signals ?? b.signals).join('\n') === b.signals.join('\n') &&
+    (a.key ?? b.key) === b.key &&
+    (a.type ?? b.type) === b.type &&
+    (a.entry ?? b.entry) === b.entry &&
     a.category === b.category &&
     a.popular === b.popular &&
     a.questionEn === b.questionEn &&
@@ -180,6 +221,35 @@ function sameFields(a: Editable, b: HelpdeskFaq): boolean {
     a.answerZh === b.answerZh &&
     a.keywords.join('\n') === b.keywords.join('\n')
   );
+}
+
+/** choice 节点的「答案」是那句提问：不陈述事实，不许数字、链接、邮箱（graph design §1 / §2.3）。 */
+function checkChoicePrompt(type: FaqNodeType, fields: Editable): void {
+  if (type !== 'choice') return;
+  for (const [name, prompt] of [
+    ['answerEn', fields.answerEn],
+    ['answerZh', fields.answerZh],
+  ] as const)
+    if (choicePromptProblem(prompt))
+      throw invalid(
+        `${name}: the prompt of a choice question must not contain digits, links or emails`,
+      );
+}
+
+/** key 唯一（helpdesk_faqs_key_key）：撞了 → 409，不是 500。 */
+async function keyTaken<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    const pg = error as { code?: unknown; constraint?: unknown };
+    if (pg?.code === '23505' && pg.constraint === 'helpdesk_faqs_key_key')
+      throw new HelpdeskError(
+        409,
+        'FAQ_KEY_TAKEN',
+        'Another question already uses this key',
+      );
+    throw error;
+  }
 }
 
 function written<T>(result: WriteResult<T>): T {
@@ -277,8 +347,25 @@ export type PublishedResult = {
 
 export type FaqService = ReturnType<typeof createFaqService>;
 
-export function createFaqService(options: { repository?: FaqRepository } = {}) {
+/** 归档前检查用：还在用这个节点的已发布父节点（v5 问题树；实现是 faqGraphRepository.liveParents）。 */
+export type FaqParentsLookup = (
+  id: string,
+) => Promise<Pick<HelpdeskFaq, 'id' | 'key' | 'questionEn' | 'questionZh'>[]>;
+
+export type FaqServiceOptions = {
+  repository?: FaqRepository;
+  /** 当前发布的版本号（没有 → null）：有了以后 Portal 读的 FAQ 列表 / 单条只来自那一版快照。 */
+  releaseVersion?: () => Promise<number | null>;
+  /** 还在用某节点的父节点；不给 = 没有边（单测）。 */
+  liveParents?: FaqParentsLookup;
+};
+
+export function createFaqService(options: FaqServiceOptions = {}) {
   const repository = options.repository ?? createPgFaqRepository();
+  const releaseVersion =
+    options.releaseVersion ?? (() => Promise.resolve(null));
+  const liveParents: FaqParentsLookup =
+    options.liveParents ?? (() => Promise.resolve([]));
 
   /** 员工看得到的 FAQ：已归档（删除）的等同不存在。 */
   async function live(id: string): Promise<HelpdeskFaq> {
@@ -329,31 +416,38 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
     },
 
     async create(
-      employee: SessionEmployee,
+      employee: FaqActor,
       rawBody: unknown,
       rawKey?: string,
     ): Promise<HelpdeskFaq> {
       const fields = editable(record(rawBody));
+      checkChoicePrompt(fields.type ?? 'answer', fields);
       let key: string | null = null;
       if (rawKey !== undefined && rawKey !== '') {
         if (!isUuid(rawKey)) throw invalid('Idempotency-Key must be a UUID');
         key = rawKey.toLowerCase();
       }
       const now = new Date().toISOString();
-      const { faq, created } = await repository.insert(
-        {
-          id: uuidv7(),
-          ...fields,
-          signals: fields.signals ?? [],
-          status: 'published',
-          version: 1,
-          createdBy: employee.employeeId,
-          updatedBy: employee.employeeId,
-          createdAt: now,
-          updatedAt: now,
-        },
-        employee.employeeId,
-        key,
+      const { faq, created } = await keyTaken(() =>
+        repository.insert(
+          {
+            id: uuidv7(),
+            ...fields,
+            signals: fields.signals ?? [],
+            // 空 key：仓库 / 数据库按英文问题取第一个空闲的 slug
+            key: fields.key ?? '',
+            type: fields.type ?? 'answer',
+            entry: fields.entry ?? true,
+            status: 'published',
+            version: 1,
+            createdBy: employee.employeeId,
+            updatedBy: employee.employeeId,
+            createdAt: now,
+            updatedAt: now,
+          },
+          employee.employeeId,
+          key,
+        ),
       );
       // 同一个 key 换了内容（draft-ietf-httpapi-idempotency-key-header：422）
       if (!created && faq.version === 1 && !sameFields(fields, faq))
@@ -366,7 +460,7 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
     },
 
     async update(
-      employee: SessionEmployee,
+      employee: FaqActor,
       rawId: string,
       rawBody: unknown,
     ): Promise<HelpdeskFaq> {
@@ -375,25 +469,38 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
       const expected = version(body);
       const fields = editable(body);
       const current = await live(id);
+      checkChoicePrompt(fields.type ?? current.type, fields);
       // PUT 是幂等的（RFC 9110 §9.2.2）：内容已经是这样（丢了响应后的重试、什么都没改的保存）
       // 就原样返回，不升版本、不写修订；内容不同而 version 过期才是冲突
       if (sameFields(fields, current)) return current;
       if (current.version !== expected) throw conflict(current.version);
-      const { signals: picked, ...rest } = fields;
+      const patch: FaqPatch = {
+        category: fields.category,
+        popular: fields.popular,
+        questionEn: fields.questionEn,
+        answerEn: fields.answerEn,
+        questionZh: fields.questionZh,
+        answerZh: fields.answerZh,
+        keywords: fields.keywords,
+      };
+      // 没给的（旧的 BackOffice）保留原值
+      if (fields.signals !== undefined) patch.signals = fields.signals;
+      if (fields.key !== undefined) patch.key = fields.key;
+      if (fields.type !== undefined) patch.type = fields.type;
+      if (fields.entry !== undefined) patch.entry = fields.entry;
       return written(
-        await repository.update(
-          id,
-          expected,
-          picked === undefined ? rest : { ...rest, signals: picked },
-          'update',
-          employee.employeeId,
+        await keyTaken(() =>
+          repository.update(id, expected, patch, 'update', employee.employeeId),
         ),
       );
     },
 
-    /** 删除 = 归档；已经归档的再删一次直接成功（幂等，不再写修订）。 */
+    /**
+     * 删除 = 归档；已经归档的再删一次直接成功（幂等，不再写修订）。v5 问题树：还有已发布的父节点
+     * 在用它 → 409 FAQ_HAS_PARENTS，消息里列出这些父节点（graph design §2.3）。
+     */
     async archive(
-      employee: SessionEmployee,
+      employee: FaqActor,
       rawId: string,
       rawBody: unknown,
     ): Promise<HelpdeskFaq> {
@@ -403,6 +510,16 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
       if (!current) throw notFound();
       if (current.status === 'archived') return current;
       if (current.version !== expected) throw conflict(current.version);
+      const parents = await liveParents(id);
+      if (parents.length > 0)
+        throw new HelpdeskError(
+          409,
+          'FAQ_HAS_PARENTS',
+          `This question is still a follow-up or option of: ${parents
+            .map((parent) => `"${parent.questionEn}" (${parent.key})`)
+            .join(', ')
+            .slice(0, 800)}. Remove it there first.`,
+        );
       return written(
         await repository.update(
           id,
@@ -435,6 +552,9 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
         FAQ_LIMITS.publicLimitMax,
       );
       const q = search(input.q);
+      // 第一版发布之后只读那一版快照（single switch）；之前读逐条发布的行
+      const release = await releaseVersion();
+      const scope = release === null ? {} : { release };
       const rows = q
         ? await repository.searchPublished({
             locale: lang,
@@ -443,8 +563,14 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
             limit,
             category,
             popular,
+            ...scope,
           })
-        : await repository.listPublished({ category, popular, limit });
+        : await repository.listPublished({
+            category,
+            popular,
+            limit,
+            ...scope,
+          });
       const faqs = rows.map((faq) => publicShape(faq, lang));
       const etag = publishedEtag(faqs);
       return {
@@ -460,8 +586,11 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
     ): Promise<PublicFaq> {
       const lang = locale(queryText(raw, ['locale']).locale);
       if (!isUuid(rawId)) throw notFound();
-      const found = await repository.get(rawId.toLowerCase());
-      if (!found || found.status !== 'published') throw notFound();
+      const found = await repository.getPublished(rawId.toLowerCase(), {
+        release: await releaseVersion(),
+      });
+      // choice 节点不是文章（只有一句提问），旧的 Portal 不会渲染选项
+      if (!found || found.type === 'choice') throw notFound();
       return publicShape(found, lang);
     },
   };

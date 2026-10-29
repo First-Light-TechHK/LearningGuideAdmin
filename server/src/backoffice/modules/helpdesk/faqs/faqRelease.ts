@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   faqReleaseEtag,
   isHelpdeskLocale,
@@ -11,6 +13,7 @@ import {
 } from '../../../../contracts/helpdesk-qa';
 import { HelpdeskError } from '../portalHelpdeskClient';
 import { splitAnswerBlocks } from './faqBlocks';
+import type { FaqEdgeRow, FaqPhrasing, HelpdeskFaq } from './faqContracts';
 
 /**
  * FAQ 问题树的发布快照（helpdesk-v5-faq-graph-design §2.2、§4「Caching」）：
@@ -37,6 +40,11 @@ export type FaqSnapshotNode = {
   blocksEn: FaqBlock[];
   blocksZh: FaqBlock[];
   signals: FaqSignal[];
+  /** 检索用（不发给 Portal）。 */
+  keywords: string[];
+  /** 冻结时这条 FAQ 的 version 与更新时间（差异与 Help Centre 排序用；不发给 Portal）。 */
+  version: number;
+  updatedAt: string;
 };
 
 /** 快照里的边（双语）；label 为 null = 用子节点的问题。 */
@@ -171,5 +179,218 @@ export async function currentRelease(
     etag,
     notModified: ifNoneMatchHits(ifNoneMatch, etag),
     body: publicRelease(release, rawLocale),
+  };
+}
+
+/**
+ * 把工作表冻结成快照（「发布新版本」）：只要已发布的节点（按 id 排序）；父节点已发布的边都要
+ * （子节点归档 / 不在 → 图检查 edge_endpoint 拦下），同一父节点下按 position、创建时间、id
+ * 重新编号为 0..n-1；问法只要已发布节点的（按 faqId、语言、文字排序）。同样的工作表永远得到
+ * 同样的快照（snapshotHash 相同），所以「没有改动」可以识别出来。
+ */
+export function freezeSnapshot(
+  faqs: readonly HelpdeskFaq[],
+  edges: readonly FaqEdgeRow[],
+  phrasings: readonly Pick<FaqPhrasing, 'faqId' | 'locale' | 'text'>[],
+): FaqReleaseSnapshot {
+  const published = faqs
+    .filter((faq) => faq.status === 'published')
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const ids = new Set(published.map((faq) => faq.id));
+  const byParent = new Map<string, FaqEdgeRow[]>();
+  for (const edge of edges) {
+    if (!ids.has(edge.parentId)) continue;
+    const list = byParent.get(edge.parentId) ?? [];
+    list.push(edge);
+    byParent.set(edge.parentId, list);
+  }
+  const frozenEdges: FaqSnapshotEdge[] = [];
+  for (const parentId of [...byParent.keys()].sort()) {
+    const ordered = byParent
+      .get(parentId)!
+      .sort(
+        (a, b) =>
+          a.position - b.position ||
+          a.createdAt.localeCompare(b.createdAt) ||
+          a.id.localeCompare(b.id),
+      );
+    ordered.forEach((edge, position) =>
+      frozenEdges.push({
+        parentId: edge.parentId,
+        childId: edge.childId,
+        kind: edge.kind,
+        position,
+        labelEn: edge.labelEn,
+        labelZh: edge.labelZh,
+      }),
+    );
+  }
+  return {
+    nodes: published.map((faq) =>
+      freezeNode({
+        id: faq.id,
+        key: faq.key,
+        type: faq.type,
+        entry: faq.entry,
+        category: faq.category,
+        popular: faq.popular,
+        questionEn: faq.questionEn,
+        answerEn: faq.answerEn,
+        questionZh: faq.questionZh,
+        answerZh: faq.answerZh,
+        signals: [...faq.signals],
+        keywords: [...faq.keywords],
+        version: faq.version,
+        updatedAt: faq.updatedAt,
+      }),
+    ),
+    edges: frozenEdges,
+    phrasings: phrasings
+      .filter((phrasing) => ids.has(phrasing.faqId))
+      .map((phrasing) => ({
+        faqId: phrasing.faqId,
+        locale: phrasing.locale,
+        text: phrasing.text,
+      }))
+      .sort(
+        (a, b) =>
+          a.faqId.localeCompare(b.faqId) ||
+          a.locale.localeCompare(b.locale) ||
+          a.text.localeCompare(b.text),
+      ),
+  };
+}
+
+/** 快照的内容指纹（SHA-256 hex）：同样的工作表 → 同样的指纹（「没有改动」、幂等新建）。 */
+export function snapshotHash(snapshot: FaqReleaseSnapshot): string {
+  return createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+}
+
+/** 节点里参与差异比较的字段（块由答案决定、version / updatedAt 只是记账，不算改动）。 */
+const DIFF_FIELDS = [
+  'key',
+  'type',
+  'entry',
+  'category',
+  'popular',
+  'questionEn',
+  'answerEn',
+  'questionZh',
+  'answerZh',
+  'signals',
+  'keywords',
+] as const satisfies readonly (keyof FaqSnapshotNode)[];
+
+export type FaqDiffField = (typeof DIFF_FIELDS)[number];
+
+export type FaqNodeRef = {
+  id: string;
+  key: string;
+  questionEn: string;
+  questionZh: string;
+};
+
+export type FaqSnapshotDiff = {
+  nodes: {
+    added: FaqNodeRef[];
+    removed: FaqNodeRef[];
+    changed: (FaqNodeRef & { fields: FaqDiffField[] })[];
+  };
+  edges: {
+    added: FaqSnapshotEdge[];
+    removed: FaqSnapshotEdge[];
+    changed: {
+      before: FaqSnapshotEdge;
+      after: FaqSnapshotEdge;
+      fields: ('kind' | 'position' | 'labelEn' | 'labelZh')[];
+    }[];
+  };
+  phrasings: { added: number; removed: number };
+  /** 什么都没变。 */
+  same: boolean;
+};
+
+function ref(node: FaqSnapshotNode): FaqNodeRef {
+  return {
+    id: node.id,
+    key: node.key,
+    questionEn: node.questionEn,
+    questionZh: node.questionZh,
+  };
+}
+
+/** 两个快照的差异（base = 旧的，通常是当前发布的；head = 新的）；base 为 null = 全是新增。 */
+export function diffSnapshots(
+  base: FaqReleaseSnapshot | null,
+  head: FaqReleaseSnapshot,
+): FaqSnapshotDiff {
+  const before = new Map((base?.nodes ?? []).map((node) => [node.id, node]));
+  const after = new Map(head.nodes.map((node) => [node.id, node]));
+  const nodes: FaqSnapshotDiff['nodes'] = {
+    added: [],
+    removed: [],
+    changed: [],
+  };
+  for (const node of head.nodes) {
+    const old = before.get(node.id);
+    if (!old) {
+      nodes.added.push(ref(node));
+      continue;
+    }
+    const fields = DIFF_FIELDS.filter(
+      (field) => JSON.stringify(old[field]) !== JSON.stringify(node[field]),
+    );
+    if (fields.length > 0) nodes.changed.push({ ...ref(node), fields });
+  }
+  for (const node of base?.nodes ?? [])
+    if (!after.has(node.id)) nodes.removed.push(ref(node));
+
+  const key = (edge: FaqSnapshotEdge) => `${edge.parentId}>${edge.childId}`;
+  const oldEdges = new Map(
+    (base?.edges ?? []).map((edge) => [key(edge), edge]),
+  );
+  const newEdges = new Map(head.edges.map((edge) => [key(edge), edge]));
+  const edges: FaqSnapshotDiff['edges'] = {
+    added: [],
+    removed: [],
+    changed: [],
+  };
+  for (const edge of head.edges) {
+    const old = oldEdges.get(key(edge));
+    if (!old) {
+      edges.added.push(edge);
+      continue;
+    }
+    const fields = (['kind', 'position', 'labelEn', 'labelZh'] as const).filter(
+      (field) => old[field] !== edge[field],
+    );
+    if (fields.length > 0)
+      edges.changed.push({ before: old, after: edge, fields });
+  }
+  for (const edge of base?.edges ?? [])
+    if (!newEdges.has(key(edge))) edges.removed.push(edge);
+
+  const phrasingKey = (p: FaqSnapshotPhrasing) =>
+    `${p.faqId}\n${p.locale}\n${p.text.toLowerCase()}`;
+  const oldPhrasings = new Set((base?.phrasings ?? []).map(phrasingKey));
+  const newPhrasings = new Set(head.phrasings.map(phrasingKey));
+  const phrasings = {
+    added: [...newPhrasings].filter((k) => !oldPhrasings.has(k)).length,
+    removed: [...oldPhrasings].filter((k) => !newPhrasings.has(k)).length,
+  };
+  return {
+    nodes,
+    edges,
+    phrasings,
+    same:
+      nodes.added.length +
+        nodes.removed.length +
+        nodes.changed.length +
+        edges.added.length +
+        edges.removed.length +
+        edges.changed.length +
+        phrasings.added +
+        phrasings.removed ===
+      0,
   };
 }

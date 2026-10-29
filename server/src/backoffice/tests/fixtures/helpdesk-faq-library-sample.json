@@ -1,0 +1,140 @@
+{
+  "$comment": [
+    "Small FAQ library for the seed tests (faqLibrarySeed.ts). Example content written for the tests, not the production library.",
+    "Covers the v1 shape (no key: the key is the slug of questionEn) and the v2 shape (key, signals, phrasings, parentKey, followUps, a choice node with options, a node shared by two parents)."
+  ],
+  "faqs": [
+    {
+      "category": "account_technical",
+      "popular": true,
+      "questionEn": "How do I reset my password?",
+      "answerEn": "1. Select **Forgot password** on the sign-in page.\n2. Open the email we send and choose a new password.",
+      "questionZh": "如何重置密码？",
+      "answerZh": "1. 在登录页点击**忘记密码**。\n2. 打开我们发送的邮件并设置新密码。",
+      "keywords": [
+        "password",
+        "reset",
+        "密码"
+      ],
+      "source": "existing:0192f0e0-0000-7000-8000-0000000000aa"
+    },
+    {
+      "key": "payment-problem",
+      "type": "choice",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "Having trouble with a payment?",
+      "answerEn": "Which of these is it?",
+      "questionZh": "付款有问题？",
+      "answerZh": "你遇到的是哪种情况？",
+      "keywords": [
+        "payment problem",
+        "付款问题"
+      ],
+      "phrasings": {
+        "zh-CN": [
+          "付款出问题了"
+        ],
+        "en-GB": [
+          "my payment is not working"
+        ]
+      },
+      "options": [
+        {
+          "key": "payment-failed",
+          "labelEn": "The payment failed",
+          "labelZh": "付款失败"
+        },
+        {
+          "key": "paid-not-active",
+          "labelEn": "Paid but not active",
+          "labelZh": "扣款了没开通"
+        }
+      ]
+    },
+    {
+      "key": "payment-failed",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "signals": [
+        "payment_failed",
+        "not_a_signal"
+      ],
+      "questionEn": "What should I do if my payment failed?",
+      "answerEn": "Check your card details and try again.\n\nIf it still fails, try another card.",
+      "questionZh": "付款失败怎么办？",
+      "answerZh": "请检查银行卡信息后重试。\n\n仍然失败的话，换一张卡试试。",
+      "keywords": [
+        "payment failed",
+        "付款失败"
+      ],
+      "phrasings": [
+        "card was declined",
+        "付款失敗怎麼辦",
+        {
+          "locale": "zh-CN",
+          "text": "扣款失败"
+        }
+      ],
+      "followUps": [
+        {
+          "key": "retry-charged-twice",
+          "category": "payments_subscriptions",
+          "questionEn": "Will I be charged twice if I try again?",
+          "answerEn": "No. A failed payment is not taken.",
+          "questionZh": "再付一次会重复扣款吗？",
+          "answerZh": "不会。失败的付款不会扣款。",
+          "keywords": []
+        },
+        "contact-support"
+      ]
+    },
+    {
+      "key": "paid-not-active",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "signals": [
+        "recent_purchase"
+      ],
+      "questionEn": "I paid but my subscription is not active",
+      "answerEn": "Wait a few minutes, then refresh the page.",
+      "questionZh": "付款成功但没有开通",
+      "answerZh": "请稍等几分钟后刷新页面。",
+      "keywords": [
+        "not active",
+        "没开通"
+      ],
+      "followUps": [
+        "contact-support"
+      ]
+    },
+    {
+      "key": "contact-support",
+      "category": "other",
+      "popular": false,
+      "entry": true,
+      "questionEn": "How do I contact support?",
+      "answerEn": "Select **Contact Support** at the bottom of any page.",
+      "questionZh": "如何联系客服？",
+      "answerZh": "在任意页面底部点击**联系客服**。",
+      "keywords": [
+        "contact",
+        "support",
+        "客服"
+      ]
+    },
+    {
+      "key": "still-not-active",
+      "parentKey": "paid-not-active",
+      "category": "payments_subscriptions",
+      "popular": false,
+      "questionEn": "It is still not active after waiting",
+      "answerEn": "Contact support with your order number.",
+      "questionZh": "等了还是没开通",
+      "answerZh": "请带上订单号联系客服。",
+      "keywords": [],
+      "labelEn": "Still not active?",
+      "labelZh": "还是没开通？"
+    }
+  ]
+}

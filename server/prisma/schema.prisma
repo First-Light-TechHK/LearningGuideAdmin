@@ -412,6 +412,14 @@ model HelpdeskFaq {
   keywords       String[] @default([])
   /// v5 Part A：学员情境信号标签（FAQ_SIGNALS；迁移 20261030080000_helpdesk_faq_signals）
   signals        String[] @default([])
+  /// v5 问题树（迁移 20261030090000_helpdesk_faq_graph）：稳定的 slug（不给时触发器按英文问题取）
+  key            String   @unique(map: "helpdesk_faqs_key_key")
+  /// answer | choice
+  nodeType       String   @default("answer") @map("node_type")
+  /// 能否被新问题直接命中
+  entry          Boolean  @default(true)
+  /// 问法的检索文字（helpdesk_faq_phrasings 的触发器维护；phrasing_tsv 是生成列，不在 Prisma 里）
+  phrasingText   String   @default("") @map("phrasing_text")
   status         String   @default("published")
   version        Int      @default(1)
   idempotencyKey String?  @unique @map("idempotency_key") @db.Uuid
@@ -421,6 +429,9 @@ model HelpdeskFaq {
   updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   revisions HelpdeskFaqRevision[]
+  childEdges  HelpdeskFaqEdge[]     @relation("HelpdeskFaqEdgeParent")
+  parentEdges HelpdeskFaqEdge[]     @relation("HelpdeskFaqEdgeChild")
+  phrasings   HelpdeskFaqPhrasing[]
 
   @@index([status, popular(sort: Desc), updatedAt(sort: Desc)], map: "helpdesk_faqs_list_idx")
   @@index([keywords], map: "helpdesk_faqs_keywords_idx", type: Gin)
@@ -440,6 +451,116 @@ model HelpdeskFaqRevision {
 
   @@unique([faqId, version], map: "helpdesk_faq_revisions_faq_version_key")
   @@map("helpdesk_faq_revisions")
+}
+
+/// v5 FAQ 问题树的边（DAG；BackOffice 原生 SQL 读写，见 faqGraphRepository.ts）
+model HelpdeskFaqEdge {
+  id        String   @id @db.Uuid
+  parentId  String   @map("parent_id") @db.Uuid
+  childId   String   @map("child_id") @db.Uuid
+  /// follow_up | option
+  kind      String
+  position  Int      @default(0) @db.SmallInt
+  labelEn   String?  @map("label_en")
+  labelZh   String?  @map("label_zh")
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  parent HelpdeskFaq @relation("HelpdeskFaqEdgeParent", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  child  HelpdeskFaq @relation("HelpdeskFaqEdgeChild", fields: [childId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([parentId, childId], map: "helpdesk_faq_edges_parent_child_key")
+  @@index([parentId, position], map: "helpdesk_faq_edges_parent_position_idx")
+  @@index([childId], map: "helpdesk_faq_edges_child_idx")
+  @@map("helpdesk_faq_edges")
+}
+
+/// 边的修订（只追加）
+model HelpdeskFaqEdgeRevision {
+  id         String   @id @db.Uuid
+  edgeId     String   @map("edge_id") @db.Uuid
+  parentId   String   @map("parent_id") @db.Uuid
+  childId    String   @map("child_id") @db.Uuid
+  /// create | update | delete
+  action     String
+  before     Json?
+  after      Json?
+  employeeId String?  @map("employee_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([edgeId, at], map: "helpdesk_faq_edge_revisions_edge_idx")
+  @@index([parentId, at], map: "helpdesk_faq_edge_revisions_parent_idx")
+  @@map("helpdesk_faq_edge_revisions")
+}
+
+/// 学员的问法（检索用）；唯一 (faq_id, locale, lower(text)) 是表达式索引，只在迁移里
+model HelpdeskFaqPhrasing {
+  id         String   @id @db.Uuid
+  faqId      String   @map("faq_id") @db.Uuid
+  /// en-GB | zh-CN | zh-TW
+  locale     String
+  text       String
+  searchText String   @map("search_text")
+  /// staff | flywheel | seed
+  source     String   @default("staff")
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  faq HelpdeskFaq @relation(fields: [faqId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("helpdesk_faq_phrasings")
+}
+
+/// FAQ 问题树的发布版本（快照写入后不再改；至多一行 published，部分唯一索引只在迁移里）
+model HelpdeskFaqRelease {
+  id            String    @id @db.Uuid
+  version       Int       @unique(map: "helpdesk_faq_releases_version_key")
+  /// draft | evaluating | published | rejected | superseded
+  status        String
+  snapshot      Json
+  snapshotHash  String    @map("snapshot_hash")
+  checks        Json
+  evalReport    Json?     @map("eval_report")
+  sourceVersion Int?      @map("source_version")
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedBy   String?   @map("published_by") @db.Uuid
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+
+  nodes HelpdeskFaqReleaseNode[]
+
+  @@index([snapshotHash], map: "helpdesk_faq_releases_hash_idx")
+  @@map("helpdesk_faq_releases")
+}
+
+/// 发布版本的检索行（从快照派生，只追加；typo_keys / phrasing_tsv 是生成列，不在 Prisma 里）
+model HelpdeskFaqReleaseNode {
+  releaseVersion Int      @map("release_version")
+  id             String   @db.Uuid
+  key            String
+  nodeType       String   @map("node_type")
+  entry          Boolean
+  category       String
+  popular        Boolean
+  questionEn     String   @map("question_en")
+  answerEn       String   @map("answer_en")
+  questionZh     String   @map("question_zh")
+  answerZh       String   @map("answer_zh")
+  keywords       String[]
+  signals        String[]
+  status         String   @default("published")
+  version        Int
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  createdAt      DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @map("updated_at") @db.Timestamptz(6)
+  phrasingText   String   @default("") @map("phrasing_text")
+
+  release HelpdeskFaqRelease @relation(fields: [releaseVersion], references: [version], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([releaseVersion, id])
+  @@map("helpdesk_faq_release_nodes")
 }
 
 // ==========================================

@@ -21,9 +21,9 @@ import {
 } from '../../src/ai/helpdesk/workflow/pi-step-runner';
 import { MemoryRateLimitStore } from '../../src/ai/rate-limit.service';
 import type { HelpdeskFaq } from '../../src/backoffice/modules/helpdesk/faqs/faqContracts';
+import { createPgHelpdeskQaSource } from '../../src/backoffice/modules/helpdesk/faqs/faqQaSource';
 import {
   createPgFaqRepository,
-  createPgHelpdeskQaSource,
   type SqlDb,
 } from '../../src/backoffice/modules/helpdesk/faqs/faqRepository';
 import { uuidv7 } from '../../src/common/uuidv7';
@@ -341,8 +341,12 @@ export async function pgQaSource(
     for (const faq of faqs) {
       await repository.insert(
         {
-          // v5 Part A: the eval library carries no signals yet
+          // v5 Part A: the eval library carries no signals yet; v5 graph: every eval FAQ is an
+          // entry answer, and the database derives its key from the English question
           signals: [],
+          key: '',
+          type: 'answer',
+          entry: true,
           ...faq,
           status: 'published',
           version: 1,
@@ -355,7 +359,7 @@ export async function pgQaSource(
         null,
       );
     }
-    return { qa: createPgHelpdeskQaSource(repository), close };
+    return { qa: createPgHelpdeskQaSource(repository, db), close };
   } catch (error) {
     await close();
     throw error;

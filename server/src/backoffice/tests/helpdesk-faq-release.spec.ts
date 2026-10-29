@@ -78,6 +78,10 @@ function storedRelease(): PublishedFaqRelease {
               ? `答：${node.key}\n\n- 第一步\n- 第二步`
               : '是哪一种？',
           signals: node.signals,
+          // 检索与差异用的字段（不发给 Portal）
+          keywords: [],
+          version: 1,
+          updatedAt: expected.publishedAt,
         }),
       ),
       edges: expected.edges.map((edge: FaqEdge) => ({

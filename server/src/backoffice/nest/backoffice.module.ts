@@ -8,10 +8,13 @@ import {
 } from '@nestjs/common';
 
 import { closePool } from '../lib/db';
+import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
+import { createFaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
+import { HELPDESK_FAQ_RELEASE_SOURCE } from '../modules/helpdesk/faqs/faqRelease';
 import {
-  HELPDESK_FAQ_RELEASE_SOURCE,
-  noFaqReleases,
-} from '../modules/helpdesk/faqs/faqRelease';
+  createFaqReleaseService,
+  createPgFaqReleaseSource,
+} from '../modules/helpdesk/faqs/faqReleaseService';
 import { createFaqService } from '../modules/helpdesk/faqs/faqService';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
 import {
@@ -21,6 +24,11 @@ import {
 import { BackofficeAuthController } from './auth.controller';
 import { BackofficeEmployeesController } from './employees.controller';
 import { BackofficeHelpdeskAgentRunsController } from './helpdesk-agent-runs.controller';
+import {
+  BackofficeHelpdeskFaqGraphController,
+  HELPDESK_FAQ_GRAPH_SERVICE,
+  HELPDESK_FAQ_RELEASE_SERVICE,
+} from './helpdesk-faq-graph.controller';
 import { HelpdeskIntegrationFaqReleaseController } from './helpdesk-faq-release.controller';
 import {
   BackofficeHelpdeskController,
@@ -49,6 +57,9 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(BackofficeModule.name);
 
   static register(options: BackofficeModuleOptions): DynamicModule {
+    // v5 问题树：同一个仓库与发布来源（快照按版本缓存）给 FAQ、问题树、发布与 Portal 的 faq-release/current
+    const graph = createPgFaqGraphRepository();
+    const releaseSource = createPgFaqReleaseSource(graph);
     return {
       module: BackofficeModule,
       controllers: [
@@ -56,6 +67,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         BackofficeEmployeesController,
         BackofficeHelpdeskController,
         BackofficeHelpdeskFaqsController,
+        BackofficeHelpdeskFaqGraphController,
         HelpdeskIntegrationFaqsController,
         HelpdeskIntegrationFaqReleaseController,
         BackofficeHelpdeskAgentRunsController,
@@ -65,9 +77,25 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
           provide: HELPDESK_SERVICE,
           useFactory: () => createHelpdeskService(),
         },
-        { provide: HELPDESK_FAQ_SERVICE, useFactory: () => createFaqService() },
-        // v5 问题树：发布表接上之前没有快照（Portal 照旧读逐条发布的 FAQ）；发布流程换成它的实现
-        { provide: HELPDESK_FAQ_RELEASE_SOURCE, useValue: noFaqReleases },
+        {
+          provide: HELPDESK_FAQ_SERVICE,
+          // 第一版发布之后 Portal 读的 FAQ 只来自那一版快照；归档前查还在用它的父节点
+          useFactory: () =>
+            createFaqService({
+              releaseVersion: () => releaseSource.publishedVersion(),
+              liveParents: (id) => graph.liveParents(id),
+            }),
+        },
+        {
+          provide: HELPDESK_FAQ_GRAPH_SERVICE,
+          useFactory: () => createFaqGraphService({ graph }),
+        },
+        {
+          provide: HELPDESK_FAQ_RELEASE_SERVICE,
+          useFactory: () => createFaqReleaseService({ graph }),
+        },
+        // 已发布快照：还没有任何发布版本时 current() 为 null（Portal 收到 404 no_release，照旧读逐条发布的 FAQ）
+        { provide: HELPDESK_FAQ_RELEASE_SOURCE, useValue: releaseSource },
         options.helpdeskTrace,
       ],
     };

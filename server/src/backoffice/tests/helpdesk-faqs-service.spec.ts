@@ -22,6 +22,9 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
   counter += 1;
   return {
     id: `0192bbbb-0000-7000-8000-${String(counter).padStart(12, '0')}`,
+    key: `faq-${counter}`,
+    type: 'answer',
+    entry: true,
     category: 'account_technical',
     popular: false,
     questionEn: 'How do I reset my password?',
@@ -619,5 +622,130 @@ describe('FAQs: situation signals (v5 Part A)', () => {
         await rejection(service.create(employee, { ...validInput, signals })),
       ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
     }
+  });
+});
+
+describe('FAQs: v5 question-tree node fields (graph design §2.1)', () => {
+  it('creates with a key derived from the English question, as an answer entry, unless given', async () => {
+    const { service } = setup();
+    const derived = await service.create(employee, validInput);
+    expect(derived).toMatchObject({
+      key: 'cannot-log-in',
+      type: 'answer',
+      entry: true,
+    });
+    const given = await service.create(employee, {
+      ...validInput,
+      key: ' Login.Help ',
+      type: 'choice',
+      entry: false,
+      answerEn: 'Which one is it?',
+      answerZh: '是哪一种？',
+    });
+    expect(given).toMatchObject({
+      key: 'login.help',
+      type: 'choice',
+      entry: false,
+    });
+    expect(
+      await rejection(
+        service.create(employee, { ...validInput, key: 'login.help' }),
+      ),
+    ).toMatchObject({ status: 409, code: 'FAQ_KEY_TAKEN' });
+    for (const bad of [
+      { key: 'no spaces' },
+      { type: 'quiz' },
+      { entry: 'yes' },
+    ])
+      expect(
+        await rejection(service.create(employee, { ...validInput, ...bad })),
+      ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+
+  it('keeps the node fields when an old BackOffice saves without them; a change to them alone bumps the version', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, {
+      ...validInput,
+      key: 'k1',
+      entry: false,
+    });
+    const same = await service.update(employee, created.id, {
+      ...validInput,
+      version: 1,
+    });
+    expect(same).toMatchObject({ version: 1, key: 'k1', entry: false });
+    const moved = await service.update(employee, created.id, {
+      ...validInput,
+      entry: true,
+      version: 1,
+    });
+    expect(moved).toMatchObject({ version: 2, key: 'k1', entry: true });
+  });
+
+  it('a choice prompt has no digits or links', async () => {
+    const { service } = setup();
+    expect(
+      await rejection(
+        service.create(employee, {
+          ...validInput,
+          type: 'choice',
+          answerEn: 'Is it order 42?',
+          answerZh: '是哪一种？',
+        }),
+      ),
+    ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+
+  it('refuses to archive a node that live parents still use, naming them', async () => {
+    const repository = createMemoryFaqRepository();
+    const parents = jest.fn(() =>
+      Promise.resolve([
+        {
+          id: 'p',
+          key: 'payment-failed',
+          questionEn: 'Payment failed?',
+          questionZh: '付款失败？',
+        },
+      ]),
+    );
+    const service = createFaqService({ repository, liveParents: parents });
+    const created = await service.create(employee, validInput);
+    const error = await rejection(
+      service.archive(employee, created.id, { version: 1 }),
+    );
+    expect(error).toMatchObject({ status: 409, code: 'FAQ_HAS_PARENTS' });
+    expect(error.message).toContain('"Payment failed?" (payment-failed)');
+    expect(repository.rows.get(created.id)?.status).toBe('published');
+    parents.mockImplementation(() => Promise.resolve([]));
+    expect(
+      (await service.archive(employee, created.id, { version: 1 })).status,
+    ).toBe('archived');
+  });
+
+  it('once a release exists, Portal reads that release (single switch); a choice node is not an article', async () => {
+    const repository = createMemoryFaqRepository();
+    let version: number | null = null;
+    const service = createFaqService({
+      repository,
+      releaseVersion: () => Promise.resolve(version),
+    });
+    const prompt = await service.create(employee, {
+      ...validInput,
+      type: 'choice',
+      answerEn: 'Which one is it?',
+      answerZh: '是哪一种？',
+    });
+    await service.published({ locale: 'en-GB', q: 'log' });
+    expect(repository.searches.at(-1)).not.toHaveProperty('release');
+    version = 4;
+    await service.published({ locale: 'en-GB', q: 'log' });
+    expect(repository.searches.at(-1)).toMatchObject({ release: 4 });
+    expect(
+      await rejection(service.publishedOne(prompt.id, { locale: 'en-GB' })),
+    ).toMatchObject({ status: 404 });
+    // the default list and search leave choice nodes out
+    expect((await service.published({ locale: 'en-GB' })).body.faqs).toEqual(
+      [],
+    );
   });
 });

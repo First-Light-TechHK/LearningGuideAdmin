@@ -11,16 +11,51 @@ import type {
   PublishedFilter,
   WriteResult,
 } from '../../modules/helpdesk/faqs/faqRepository';
+import { faqKeySlug } from '../../modules/helpdesk/faqs/faqKeys';
+
+/** 种子行可以不写 v5 问题树的字段（缺省：按英文问题取 key、answer、入口）。 */
+export type MemoryFaqSeed = Omit<HelpdeskFaq, 'key' | 'type' | 'entry'> &
+  Partial<Pick<HelpdeskFaq, 'key' | 'type' | 'entry'>>;
+
+/** 与 PostgreSQL 一样的唯一约束错误（服务层按 constraint 名映射成 409）。 */
+function keyTaken(): Error {
+  return Object.assign(
+    new Error('duplicate key value violates unique constraint'),
+    {
+      code: '23505',
+      constraint: 'helpdesk_faqs_key_key',
+    },
+  );
+}
 
 /**
  * 单测用的内存仓库：语义与 PostgreSQL 实现一致（版本号条件更新、同一次写入追加修订行、
  * 冲突时什么都不改、Idempotency-Key 只建一条）。检索只做简单的包含匹配；真实 SQL 由
  * helpdesk-faqs-repository.pg.spec.ts 覆盖。
  */
-export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
-  const rows = new Map<string, HelpdeskFaq>(
-    seed.map((row) => [row.id, { ...row }]),
-  );
+export function createMemoryFaqRepository(seed: MemoryFaqSeed[] = []) {
+  const rows = new Map<string, HelpdeskFaq>();
+  /** 与迁移的触发器一样：base、base-2、base-3……第一个空闲的。 */
+  const freeKey = (question: string) => {
+    const base = faqKeySlug(question);
+    const taken = new Set([...rows.values()].map((row) => row.key));
+    let candidate = base;
+    for (let n = 2; taken.has(candidate); n++) candidate = `${base}-${n}`;
+    return candidate;
+  };
+  for (const row of seed)
+    rows.set(row.id, {
+      type: 'answer',
+      entry: true,
+      ...row,
+      key: row.key ?? freeKey(row.questionEn),
+    });
+  const nodeMatches = (
+    row: HelpdeskFaq,
+    filter: { entryOnly?: boolean; types?: readonly string[] },
+  ) =>
+    (filter.entryOnly === false || row.entry) &&
+    (filter.types ?? ['answer']).includes(row.type);
   const keys = new Map<string, string>();
   const revisions: FaqRevision[] = [];
   let tick = 0;
@@ -101,8 +136,11 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
         return Promise.resolve({ faq: { ...existing }, created: false });
       }
       const now = stamp();
+      if (faq.key !== '' && [...rows.values()].some((r) => r.key === faq.key))
+        return Promise.reject(keyTaken());
       const row: HelpdeskFaq = {
         ...faq,
+        key: faq.key === '' ? freeKey(faq.questionEn) : faq.key,
         keywords: [...faq.keywords],
         signals: [...faq.signals],
         version: 1,
@@ -131,6 +169,11 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
           kind: 'conflict',
           currentVersion: row.version,
         });
+      if (
+        patch.key !== undefined &&
+        [...rows.values()].some((r) => r.id !== id && r.key === patch.key)
+      )
+        return Promise.reject(keyTaken());
       const updated: HelpdeskFaq = {
         ...row,
         ...patch,
@@ -160,6 +203,7 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
               (!filter.category || row.category === filter.category) &&
               (filter.popular === undefined ||
                 row.popular === filter.popular) &&
+              nodeMatches(row, filter) &&
               !(filter.excludeIds ?? []).includes(row.id),
           )
           .sort(
@@ -186,10 +230,24 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
               (!search.category || row.category === search.category) &&
               (search.popular === undefined ||
                 row.popular === search.popular) &&
+              nodeMatches(row, search) &&
               text(row).includes(needle),
           )
           .slice(0, search.limit)
           .map((row) => ({ ...row, score: 1 })),
+      );
+    },
+
+    getByKey(key: string) {
+      const row = [...rows.values()].find((r) => r.key === key);
+      return Promise.resolve(row ? { ...row } : null);
+    },
+
+    /** 内存仓库没有发布版本：scope 不看，只读工作表里已发布的。 */
+    getPublished(id: string) {
+      const row = rows.get(id);
+      return Promise.resolve(
+        row && row.status === 'published' ? { ...row } : null,
       );
     },
   };

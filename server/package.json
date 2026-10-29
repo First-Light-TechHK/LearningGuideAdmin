@@ -25,7 +25,8 @@
     "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
     "seed:demo": "ts-node prisma/seed-demo.ts",
     "prompts:sync": "ts-node src/ai/sync-prompts.ts",
-    "eval:helpdesk": "ts-node eval/helpdesk/run.ts"
+    "eval:helpdesk": "ts-node eval/helpdesk/run.ts",
+    "seed:helpdesk-faqs": "ts-node eval/helpdesk/seed-faq-library.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

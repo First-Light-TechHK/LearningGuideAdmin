@@ -873,6 +873,20 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - **契约 fixture v6**（server 与 client 两份、Portal 一份，逐字节相同，Portal 固定 sha256）：新枚举、FAQ 例子的 `signals`、发布快照的请求 / 回包 / 头 / 304 / 404、带 context 的请求，以及每种 kind 一个回包（带摘录的 answer、choice、smalltalk、zh-CN 的 smalltalk 模板回退（发布前，releaseVersion null）、clarify、clarify 未覆盖、no_match）。
 - **测试**：`src/contracts/helpdesk-qa.spec.ts`、`backoffice/tests/helpdesk-faq-blocks.spec.ts`、`helpdesk-faq-release.spec.ts`（投影、ETag / 304 / 404 / 400 / 401 / 503）、`helpdesk-faqs-service.spec.ts`（信号）、`helpdesk-faqs-repository.pg.spec.ts`（信号列与约束）、`helpdesk-contract-fixture.spec.ts`（v6）、`ai/helpdesk/helpdesk-suggest.service.spec.ts`（context）、client `tests/helpdesk-contract.test.ts`（v6 标签）。
 
+### 4A.13 FAQ 问题树：存储、发布与运行时开关（2026-10-30，`helpdesk-v5-faq-graph-design.md` §2、§2.2、§2.3、§6、§8.1–8.2）
+
+- **迁移** `20261030090000_helpdesk_faq_graph`（只加不改）：
+  - `helpdesk_faqs` 加 `key`（唯一；旧行按英文问题确定地回填：小写、去撇号、非字母数字换成 `-`、≤60 字，重名按创建先后 `-2`、`-3`；不带 key 的 INSERT 由触发器同样取）、`node_type` answer|choice、`entry`（缺省 true）、`phrasing_text` / `phrasing_tsv`（问法的检索文字，问法表的触发器维护）。不动 `updated_at`，Portal 的 ETag 不变。SQL 函数 `helpdesk_faq_slug` 与 `faqKeys.ts` `faqKeySlug` 同一规则（pg 测试逐条比对）。
+  - 新表 `helpdesk_faq_edges`（DAG：parent → child，follow_up | option，position，label_en/zh 可空 = 子节点的问题；两端 FK ON DELETE RESTRICT；UNIQUE (parent, child)；CHECK parent ≠ child）、`helpdesk_faq_edge_revisions`（只追加：改前 / 改后、谁、何时）、`helpdesk_faq_phrasings`（en-GB / zh-CN / zh-TW，≤200 字，staff | flywheel | seed，UNIQUE (faq_id, locale, lower(text))）、`helpdesk_faq_releases`（version 唯一；状态 draft | evaluating | published | rejected | superseded；snapshot 写入后不再改、行不删除（触发器）；部分唯一索引保证至多一行 published）、`helpdesk_faq_release_nodes`（发布版本的检索行，从快照派生、与快照同一事务写入、只追加；列名与 `helpdesk_faqs` 相同）。
+- **编辑**（`faqGraphService.ts` + `faqGraphRepository.ts`，原生 SQL）：边的 kind 由父节点类型决定；choice 至多 4 个选项（文字 ≤24 中文字 / 40 英文字符）、answer 至多 6 条追问；**成环在同一事务里用递归 CTE 拒绝**，所有边的写入先拿同一把事务级 advisory 锁，两条互相指向的并发边不可能都通过；每次建 / 改 / 删 / 重排都追加修订。节点字段 key / type / entry 走原来的 `PUT /api/helpdesk/faqs/:id`（不带就保留原值，旧的编辑器不受影响）；choice 节点的提问不许数字、链接、邮箱；**归档一个还有已发布父节点的节点 → 409 `FAQ_HAS_PARENTS`**（消息里列出父节点）。
+- **图检查**（`faqGraphChecks.ts` `checkFaqGraph`，纯函数）：边的两端都在快照里（没归档）、不重复、无环（DFS）、离最近入口 ≤4 条边、非入口节点都能从入口走到、option 只从 choice 出 / follow_up 只从 answer 出、choice 2–4 个选项且提问不陈述事实、answer ≤6 条追问、两种语言都在且覆盖文字两种语言要么都给要么都不给、解析后的选项文字 ≤24 / 40、answer 两种语言都切得出块。
+- **发布**（`faqReleaseService.ts`）：「发布新版本」= REPEATABLE READ 读一份工作表 → `freezeSnapshot`（只要已发布节点，块此时切好，同一父节点下 position 重编为 0..n-1）→ 图检查 → 写入版本与检索行 → 检查过了才跑评测门（evaluating）→ 过 = draft（可以发布），不过 = rejected。工作表和最新版本（或当前发布的）一模一样 → 不新建（幂等）。发布 = 同一事务里旧的 → superseded、这一版 → published（已发布再发布 = 原样返回）。回滚 = 把曾经上线过的版本的快照复制成新版本并立刻发布（不再跑评测，报告写明来源；图检查照跑；当前上线的就来自它 → 原样返回）。
+- **评测门**（`faqReleaseGate.ts`）：缺省是免费的检索评测 —— 每个入口 answer 节点的中英问题与每一种问法检索那一版快照（生产同一条候选 SQL），recall@8 ≥ 95% 且比当前发布版本低不超过 1 个点；没过的用例至多 50 条写进报告。真模型评测在开关 `HELPDESK_RELEASE_MODEL_EVAL=on` 后面（由组装时给的 model 门执行；开着却没给 → 不通过）；测试里永远关着。
+- **运行时的唯一开关**（`faqQaSource.ts` `createPgHelpdeskQaSource`；`FaqService.published` / `publishedOne`）：有发布版本 → Agent 的候选、单条、热门与 Portal 的 FAQ 列表 / 单条都只读那一版（检索走 `helpdesk_faq_release_nodes`，节点、块与边来自快照，按发布行 id 缓存在进程里）；还没有 → 照旧读逐条发布的行。员工改了工作表，学员看到的要等下一次发布。`releaseVersion()` 给 assist log。
+- **检索**：候选 SQL 由 `candidatesSql('live' | 'release')` 生成（同一条 SQL，只换表并加版本条件），加了问法一路（英文全文 `phrasing_tsv` + 中文双字，繁体问法也对得上），并支持 `entryOnly`（缺省 true）与节点类型（缺省只要 answer，旧的 Portal 不会渲染 choice）。屏幕上有卡片（`nodeId`）时：先是它的全部子节点（命中的按得分在前），再是它父节点的其它子节点里命中的，最后是普通检索。候选多带 `type`、`entry`、`blocks`、`optionOf`（哪些 choice 节点把它当选项）、`relation`（child / sibling / search）。
+- **种子**（`faqLibrarySeed.ts` + 命令行 `npm run seed:helpdesk-faqs -- <library.json> [--employee-id <uuid>] [--no-release]`，脚本在 `eval/helpdesk/`，不进 nest build）：读 v1 / v2 库文件（key、signals、phrasings、parentKey、followUps、choice 的 options、`source: "existing:<id>"` 按 id 认领旧行）→ 经正常的服务层按 key 幂等写入 → 建版本 v1 并发布。不删除库里没有的东西。2026-10-29 的正式库（99 条）在本地临时库上跑过：v1 发布，检索评测 recall@8 100%（198 例），第二次运行 99 条不变、不新建版本。
+- **测试**：`helpdesk-faq-graph-checks.spec.ts`（每条规则、冻结、差异、slug）、`helpdesk-faq-graph.pg.spec.ts`（回填、SQL = TS slug、边与修订、成环与并发、上限、重排、归档拒绝、问法与检索、树、发布 / 拒绝 / 重新检查 / 原子发布 / 回滚 / 差异 / 运行时开关 / 子节点优先 / 真检索评测 / 缓存）、`helpdesk-faq-release-gate.spec.ts`、`helpdesk-faq-library-seed.pg.spec.ts`（解析 + 两次导入）、`helpdesk-faq-graph-rbac.spec.ts`、`helpdesk-faqs-service.spec.ts`（节点字段、归档拒绝、开关）。
+
 ---
 
 ## 5. API 接口规范
@@ -1035,7 +1049,16 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | GET | /api/helpdesk/faqs/:id · /:id/revisions | helpDesk VIEW | 单条 FAQ（归档或不存在 404 `FAQ_NOT_FOUND`）；修订记录新的在前 |
 | POST | /api/helpdesk/faqs | helpDesk FULL | body `{ category, popular, questionEn, answerEn, questionZh, answerZh, keywords[] }`，可带 `Idempotency-Key`（同 key 不同内容 422 `IDEMPOTENCY_KEY_REUSED`）→ 201 FAQ（保存即发布） |
 | PUT | /api/helpdesk/faqs/:id | helpDesk FULL | 同上 body + `version`；内容与当前一致时原样返回（幂等：丢响应后的重试、没改动的保存不升版本、不写修订）；内容不同且版本不符 409 `VERSION_CONFLICT` |
-| POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等 |
+| POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等；还有已发布的父节点在用 → 409 `FAQ_HAS_PARENTS`（v5 §4A.13） |
+| POST / PUT | /api/helpdesk/faqs · /:id（v5 节点字段） | helpDesk FULL | §4A.13：body 可多带 `key`（小写字母数字 . _ -，≤80；撞了 409 `FAQ_KEY_TAKEN`；新建不带 = 英文问题的 slug）、`type` answer\|choice、`entry`；不带就保留原值 |
+| GET | /api/helpdesk/faqs/:id/edges · /:id/edge-revisions · /:id/tree | helpDesk VIEW | §4A.13：`{ children: [{ edge, node, label }], parents }`；边的修订（新的在前）；从该节点展开的树 `{ root: { node, edge, label, depth, parentCount, alsoAppearsIn, warnings, cycle, truncated, children }, nodes }` |
+| POST | /api/helpdesk/faqs/:id/edges | helpDesk FULL | body `{ childId, kind?, labelEn?, labelZh?, position? }` → 201 新建 / 200 已有同样的边；409 `FAQ_EDGE_EXISTS` / `FAQ_EDGE_CYCLE` / `FAQ_TOO_MANY_CHILDREN` / `FAQ_ARCHIVED` |
+| PUT | /api/helpdesk/faqs/:id/edges/order | helpDesk FULL | body `{ childIds }`（必须正好是现有子节点，否则 409 `FAQ_CHILDREN_CHANGED`） |
+| PUT · DELETE | /api/helpdesk/faq-edges/:edgeId | helpDesk FULL | PUT body `{ labelEn, labelZh }`（null = 用子节点的问题；两种语言要么都给要么都不给）；DELETE 幂等 `{ deleted, edge }` |
+| GET · POST | /api/helpdesk/faqs/:id/phrasings | helpDesk VIEW / FULL | `{ phrasings }`；POST body `{ locale: en-GB\|zh-CN\|zh-TW, text ≤200, source?: staff\|flywheel }` → 201 / 200 已有；每条至多 30 种 |
+| DELETE | /api/helpdesk/faq-phrasings/:id | helpDesk FULL | 幂等 `{ deleted }` |
+| GET | /api/helpdesk/faq-releases · /working · /diff?head=&base= · /:version · /:version/diff?base= | helpDesk VIEW | 历史 `{ releases, published }`（每个带 `checks`、`evalReport`、`publishable`）；工作表的检查与和当前发布版本的差异；差异 `{ base, head, diff: { nodes, edges, phrasings, same } }` |
+| POST | /api/helpdesk/faq-releases · /:version/check · /:version/publish · /:version/rollback | helpDesk FULL | 新建（201；工作表没变 200 返回已有的）、重新检查、发布（只有 publishable 的，否则 409 `FAQ_RELEASE_NOT_READY`；幂等）、回滚（201 新版本并发布；已是它 200；没上线过的 409 `FAQ_RELEASE_NOT_PUBLISHED`） |
 | GET | /api/helpdesk/agent-runs/:runId | helpDesk VIEW | 2026-10-29，§4A.11：`{ runId, parentRunId, chain, events }`（导出副本，学员原文脱敏），`Cache-Control: no-store`；不存在或 id 不合法 404 `AGENT_RUN_NOT_FOUND`；没有写接口 |
 | GET | /api/helpdesk/agent-runs/:runId/events/:seq | helpDesk VIEW | `{ event, sources, derived }`；`seq` 须为正整数（否则 400 `INVALID_INPUT`），不存在 404 `AGENT_EVENT_NOT_FOUND` |
 
@@ -1045,7 +1068,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 |------|------|------|------|
 | GET | /api/integration/helpdesk/faqs?locale=&popular=&category=&q=&limit= · /faqs/:id?locale= | admin | v2：`{ faqs: [{ id, category, popular, question, answer, updatedAt }], etag }`（按 `locale` 取中文或英文；`limit` ≤100），头 `ETag` + `Cache-Control: no-cache`，`If-None-Match` 命中 304；problem code `invalid_request` / `not_found` |
 | POST | /api/integration/helpdesk/suggest | agent | v2 body `{ learnerId, locale, source?: "submit" \| "chat" \| "chip", category?, subject?, message, faqId?, runId?, parentRunId? }`（2026-10-29：`runId` 为 Portal 生成的 UUIDv7，给了就作为 suggestion id；`parentRunId` 串起同一对话，§4A.11） → `{ suggestion: { id, faqId, question, answer } \| null, alternatives: { faqId, question }[] }`；`chip` 必带 `faqId`、不调模型；submit 每学员每小时 10 次，chat + chip 共 30 次。v3（2026-10-29，加字段，旧 Portal 不读）：`alternatives`（你可能想问，0–3 个）只在 `suggestion` 为 null 时可能非空，限流 / 调用方已断开为 `[]`；可选 `shownFaqIds`（≤ 20 个 UUID，这段对话里刚给学员看过的 FAQ）不会出现在 alternatives 里 |
-| GET | /api/integration/helpdesk/faq-release/current?locale=en-GB\|zh-CN | admin | v6（§4A.12）：当前已发布的 FAQ 问题树 `{ version, publishedAt, locale, nodes: [{ id, key, type, entry, category, popular, question, answer, blocks: [{ id, text }], signals }], edges: [{ parentId, childId, kind, position, label }] }`，头 `ETag: "v<version>"` + `Cache-Control: no-cache`；`If-None-Match` 命中 304；还没有发布版本 404 `no_release`；locale 不对 400 `invalid_request`。FAQ 列表与单条另多 `signals`。推荐请求可带 `context: { nodeId?, sessionId?, recentTurns? (≤3，每条 ≤500) }`，带了回包才多 `kind` / `intent` / `confidence` / `nodeId` / `blocks` / `opening` / `closing` / `reply` / `explanation` / `covered` / `guard` / `releaseVersion` |
+| GET | /api/integration/helpdesk/faq-release/current?locale=en-GB\|zh-CN | admin | v6（§4A.12；2026-10-30 起读真实的发布表，§4A.13）：当前已发布的 FAQ 问题树 `{ version, publishedAt, locale, nodes: [{ id, key, type, entry, category, popular, question, answer, blocks: [{ id, text }], signals }], edges: [{ parentId, childId, kind, position, label }] }`，头 `ETag: "v<version>"` + `Cache-Control: no-cache`；`If-None-Match` 命中 304；还没有发布版本 404 `no_release`；locale 不对 400 `invalid_request`。FAQ 列表与单条另多 `signals`。推荐请求可带 `context: { nodeId?, sessionId?, recentTurns? (≤3，每条 ≤500) }`，带了回包才多 `kind` / `intent` / `confidence` / `nodeId` / `blocks` / `opening` / `closing` / `reply` / `explanation` / `covered` / `guard` / `releaseVersion` |
 | POST | /api/integration/helpdesk/suggestions/:id/outcome | agent | body `{ outcome }`：submit 取 `solved` / `declined` / `edited`，chat / chip 取 `helpful` / `not_helpful`（不匹配 400 `invalid_request`）→ `{ id, outcome, changed }`（首个为准） |
 
 鉴权均为 `Authorization: Bearer ADMIN_HELPDESK_TOKEN`，错误为 problem+json。Portal 的每次调用带 W3C `traceparent` 头（可选，不合法时 Admin 重开 trace，§4A.11）。
@@ -1264,6 +1287,8 @@ ADMIN_HELPDESK_TOKEN=
 HELPDESK_SUGGEST_MODEL=
 # 只给评测脚本 npm run eval:helpdesk 用（§4A.11），服务不读：真模型评测的花费上限（美元，缺省 5）
 # HELPDESK_EVAL_BUDGET_USD=5
+# FAQ 问题树发布时也跑真模型评测（§4A.13）：on 才跑，缺省关；开着却没组装 model 评测门 → 版本不通过
+# HELPDESK_RELEASE_MODEL_EVAL=on
 
 # 服务器配置
 PORT=3000
