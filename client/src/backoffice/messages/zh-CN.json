@@ -648,6 +648,7 @@
       "FAQ_HAS_PARENTS": "这个问题还是别的卡片的追问或选项，请先在那里移除。",
       "FAQ_KEY_TAKEN": "这个标识已经被别的问题用了。",
       "FAQ_RELEASE_NOT_FOUND": "这个版本不存在。",
+      "FAQ_RELEASE_STALE": "已有更新的版本上线，或这个版本评测时对比的不是现在上线的版本。请重新检查，或新建一个版本。",
       "FAQ_RELEASE_NOT_READY": "这个版本没有通过检查和评测，不能发布。",
       "FAQ_RELEASE_LOCKED": "这个版本不能重新检查。",
       "FAQ_RELEASE_NOT_PUBLISHED": "只能回滚到曾经上线过的版本。",
@@ -854,6 +855,15 @@
       "zh": "中文"
     },
     "graph": {
+      "announce": {
+        "added": "已添加：{label}",
+        "created": "已新建并添加：{label}",
+        "removed": "已移除：{label}",
+        "labelSaved": "文字已保存。",
+        "moved": "已移动：{label}，现在是第 {position} 个，共 {count} 个",
+        "phrasingAdded": "已添加问法。",
+        "phrasingRemoved": "已移除问法。"
+      },
       "title": "追问与选项",
       "hint": "追问、选项和问法改动后立即存入工作副本；学员要等发布新版本后才看到。",
       "newHint": "先保存这条常见问题，再添加追问和问法。",
@@ -960,6 +970,7 @@
       "expandAll": "全部展开",
       "collapseAll": "全部收起",
       "alsoIn": "也出现在 {count} 处",
+      "optionLetter": "选项 {letter}：",
       "alsoInOne": "也出现在 1 处",
       "alsoInList": "也在这些问题下：{questions}",
       "cycle": "回到了上面的问题，不再展开",

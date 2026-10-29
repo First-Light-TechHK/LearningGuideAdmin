@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { FAQ_CATEGORIES, type FaqCategory, type HelpdeskFaq } from '../contracts/helpdesk'
-import { archiveFaq, createFaq, getFaq, newIdempotencyKey, updateFaq } from '../lib/helpdeskApi'
+import { archiveFaq, createFaq, getFaq, getFaqEdges, newIdempotencyKey, updateFaq } from '../lib/helpdeskApi'
 import {
   FAQ_LIMITS,
   applyBold,
@@ -78,6 +78,9 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  // 删除被拒（FAQ_HAS_PARENTS）：列出还在用它的已发布父问题（graph design §2.3「拒绝，并列出父节点」；
+  // 沿用提示框与 hdTreeWarnings 列表样式，没有 Figma 画板，待视觉验收）
+  const [parentQuestions, setParentQuestions] = useState<string[]>([])
   const [conflict, setConflict] = useState(false)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [linkTarget, setLinkTarget] = useState<LinkTarget>(null)
@@ -226,6 +229,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     if (!base || saving) return
     setSaving(true)
     setErrorCode(null)
+    setParentQuestions([])
     const result = await archiveFaq(base.id, base.version)
     if (result.ok) return onDone('deleted')
     if (result.code === 'FAQ_NOT_FOUND') return onDone('gone')
@@ -238,6 +242,15 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
       }
     } else {
       setErrorCode(result.code)
+      if (result.code === 'FAQ_HAS_PARENTS') {
+        const edges = await getFaqEdges(base.id)
+        if (edges.ok)
+          setParentQuestions(
+            edges.data.parents
+              .filter((view) => view.node?.status === 'published')
+              .map((view) => (locale === 'zh-CN' ? view.node!.questionZh : view.node!.questionEn)),
+          )
+      }
     }
     setNoticeShown((value) => value + 1)
     setSaving(false)
@@ -371,6 +384,13 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
           {errorCode ? (
             <div ref={alertRef} className="hdNotice hdDrawerNotice hdDrawerAlert" role="alert" tabIndex={-1}>
               {errorMessage(locale, errorCode)}
+              {errorCode === 'FAQ_HAS_PARENTS' && parentQuestions.length > 0 ? (
+                <ul className="hdTreeWarnings">
+                  {parentQuestions.map((question, at) => (
+                    <li key={`${at}-${question}`}>{question}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 

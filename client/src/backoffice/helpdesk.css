@@ -2652,13 +2652,21 @@
   border-radius: 6px;
 }
 
-.hdTreeRow {
+.hdTreeRowBody {
   padding-top: 6px;
   padding-bottom: 6px;
   padding-right: 10px;
 }
 
-.hdTreeRow + .hdTreeRow {
+/* v5 问题树：每一层是嵌套的列表（读屏软件听得出层级）；行与行之间的分隔线不变（待视觉验收） */
+.hdTreeBranch {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdTreeRow + .hdTreeRow,
+.hdTreeBranch > .hdTreeRow {
   border-top: 1px solid #eef2f7;
 }
 

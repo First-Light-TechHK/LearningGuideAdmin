@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { FaqTree, GraphProblem, HelpdeskFaq } from '../contracts/helpdesk'
 import { getFaqTree } from '../lib/helpdeskApi'
 import { errorMessage } from '../lib/helpdeskFormat'
-import { allPaths, initialExpanded, outlineRows, type OutlineRow } from '../lib/helpdeskGraph'
+import { allPaths, initialExpanded } from '../lib/helpdeskGraph'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { FaqChatPreview } from './FaqChatPreview'
@@ -94,58 +94,74 @@ export function FaqTreeDrawer({ locale, faq, onClose }: Props) {
 
   const question = zh ? faq.questionZh : faq.questionEn
 
-  function row(entry: OutlineRow) {
-    const { item, path, level, index, hasChildren, expanded: open } = entry
+  /**
+   * 一行 + 它展开的子节点：嵌套的列表（读屏软件按层报「列表，2 项」，听得出谁是谁的选项 / 追问）；
+   * 选项字母既画出来（aria-hidden 的圆标）也读出来（hdSrOnly「选项 A：」）。
+   */
+  function branch(item: FaqTree['root'], path: string, level: number, index: number) {
+    const hasChildren = item.children.length > 0
+    const open = hasChildren && expanded.has(path)
     const nodeQuestion = zh ? item.node.questionZh : item.node.questionEn
     const label = item.label ? (zh ? item.label.zh : item.label.en) : nodeQuestion
     const others = item.alsoAppearsIn.map((parent) => (zh ? parent.questionZh : parent.questionEn))
+    const letter = String.fromCharCode(65 + index)
     return (
-      <li key={path} className="hdTreeRow" style={{ paddingInlineStart: `${level * 20}px` }}>
-        <div className="hdTreeLine">
-          {hasChildren ? (
-            <button
-              type="button"
-              className="hdTreeToggle"
-              aria-expanded={open}
-              aria-label={t(locale, open ? 'helpDesk.tree.collapse' : 'helpDesk.tree.expand', { label })}
-              onClick={() => toggle(path)}
-            >
-              <span aria-hidden="true">{open ? '▾' : '▸'}</span>
-            </button>
-          ) : (
-            <span className="hdTreeToggle hdTreeLeaf" aria-hidden="true" />
-          )}
-          {item.edge?.kind === 'option' ? (
-            <span className="hdGraphLetter" aria-hidden="true">
-              {String.fromCharCode(65 + index)}
-            </span>
-          ) : null}
-          <div className="hdTreeText">
-            <span className="hdGraphChildLabel">{label}</span>
-            {label !== nodeQuestion ? <span className="hdGraphHint">{nodeQuestion}</span> : null}
-          </div>
-          <span className="hdTreeTags">
-            {item.node.type === 'choice' ? <span className="hdGraphTag">{t(locale, 'helpDesk.tree.types.choice')}</span> : null}
-            {item.node.entry ? <span className="hdGraphTag hdGraphTagEntry">{t(locale, 'helpDesk.tree.entry')}</span> : null}
-            {others.length > 0 ? (
-              <span className="hdGraphTag hdGraphTagShared" title={t(locale, 'helpDesk.tree.alsoInList', { questions: others.join(' · ') })}>
-                {others.length === 1 ? t(locale, 'helpDesk.tree.alsoInOne') : t(locale, 'helpDesk.tree.alsoIn', { count: others.length })}
-              </span>
+      <li key={path} className="hdTreeRow">
+        <div className="hdTreeRowBody" style={{ paddingInlineStart: `${level * 20}px` }}>
+          <div className="hdTreeLine">
+            {hasChildren ? (
+              <button
+                type="button"
+                className="hdTreeToggle"
+                aria-expanded={open}
+                aria-label={t(locale, open ? 'helpDesk.tree.collapse' : 'helpDesk.tree.expand', { label })}
+                onClick={() => toggle(path)}
+              >
+                <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+              </button>
+            ) : (
+              <span className="hdTreeToggle hdTreeLeaf" aria-hidden="true" />
+            )}
+            {item.edge?.kind === 'option' ? (
+              <>
+                <span className="hdGraphLetter" aria-hidden="true">
+                  {letter}
+                </span>
+                <span className="hdSrOnly">{t(locale, 'helpDesk.tree.optionLetter', { letter })}</span>
+              </>
             ) : null}
-          </span>
+            <div className="hdTreeText">
+              <span className="hdGraphChildLabel">{label}</span>
+              {label !== nodeQuestion ? <span className="hdGraphHint">{nodeQuestion}</span> : null}
+            </div>
+            <span className="hdTreeTags">
+              {item.node.type === 'choice' ? <span className="hdGraphTag">{t(locale, 'helpDesk.tree.types.choice')}</span> : null}
+              {item.node.entry ? <span className="hdGraphTag hdGraphTagEntry">{t(locale, 'helpDesk.tree.entry')}</span> : null}
+              {others.length > 0 ? (
+                <span className="hdGraphTag hdGraphTagShared" title={t(locale, 'helpDesk.tree.alsoInList', { questions: others.join(' · ') })}>
+                  {others.length === 1 ? t(locale, 'helpDesk.tree.alsoInOne') : t(locale, 'helpDesk.tree.alsoIn', { count: others.length })}
+                </span>
+              ) : null}
+            </span>
+          </div>
+          {others.length > 0 ? (
+            <p className="hdGraphHint hdTreeNote">{t(locale, 'helpDesk.tree.alsoInList', { questions: others.join(' · ') })}</p>
+          ) : null}
+          {item.cycle ? <p className="hdGraphHint hdTreeNote">{t(locale, 'helpDesk.tree.cycle')}</p> : null}
+          {item.truncated ? <p className="hdGraphHint hdTreeNote">{t(locale, 'helpDesk.tree.truncated')}</p> : null}
+          {item.warnings.length > 0 ? (
+            <ul className="hdTreeWarnings">
+              {item.warnings.map((problem, at) => (
+                <li key={`${problem.rule}-${at}`} className="hdFieldError">
+                  {ruleText(locale, problem)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
-        {others.length > 0 ? (
-          <p className="hdGraphHint hdTreeNote">{t(locale, 'helpDesk.tree.alsoInList', { questions: others.join(' · ') })}</p>
-        ) : null}
-        {item.cycle ? <p className="hdGraphHint hdTreeNote">{t(locale, 'helpDesk.tree.cycle')}</p> : null}
-        {item.truncated ? <p className="hdGraphHint hdTreeNote">{t(locale, 'helpDesk.tree.truncated')}</p> : null}
-        {item.warnings.length > 0 ? (
-          <ul className="hdTreeWarnings">
-            {item.warnings.map((problem, at) => (
-              <li key={`${problem.rule}-${at}`} className="hdFieldError">
-                {ruleText(locale, problem)}
-              </li>
-            ))}
+        {open ? (
+          <ul className="hdTreeBranch" aria-label={label}>
+            {item.children.map((child, at) => branch(child, `${path}/${child.node.id}`, level + 1, at))}
           </ul>
         ) : null}
       </li>
@@ -218,7 +234,7 @@ export function FaqTreeDrawer({ locale, faq, onClose }: Props) {
                     </button>
                   </div>
                   <ul className="hdTreeOutline" aria-label={t(locale, 'helpDesk.tree.outlineLabel')}>
-                    {outlineRows(state.tree.root, expanded).map(row)}
+                    {branch(state.tree.root, state.tree.root.node.id, 0, 0)}
                   </ul>
                 </>
               ) : null}

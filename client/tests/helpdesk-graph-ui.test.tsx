@@ -338,6 +338,70 @@ describe('FAQ editor: 追问与选项 (graph design §5.1)', () => {
   })
 })
 
+describe('FAQ editor: focus and announcements after each action', () => {
+  const announced = (dialog: HTMLElement) => dialog.querySelector('.hdGraphAnnounce')?.textContent ?? ''
+
+  test('saving a text, adding, removing and phrasings keep the keyboard user in place and say what happened', async () => {
+    serveGraph({ children: [edgeView('e1', 'c1', {}, 'Contact support')], phrasings: [phrasing('p1', { text: 'card declined' })] })
+    server.on('PUT', /^\/api\/helpdesk\/faq-edges\//, (call) => {
+      const body = call.body as { labelEn: string; labelZh: string }
+      children = [edgeView('e1', 'c1', { labelEn: body.labelEn, labelZh: body.labelZh }, 'Contact support')]
+      return { data: children[0].edge }
+    })
+    server.on('POST', /\/edges$/, (call) => {
+      children = [...children, edgeView('e2', (call.body as { childId: string }).childId, { position: 1 }, 'Refund policy')]
+      return { status: 201, data: children[1].edge }
+    })
+    server.on('DELETE', /^\/api\/helpdesk\/faq-edges\//, () => {
+      children = children.filter((view) => view.edge.id !== 'e2')
+      return { data: { deleted: true } }
+    })
+    server.on('POST', /\/phrasings$/, (call) => {
+      phrasings = [...phrasings, phrasing('p2', call.body as Partial<FaqPhrasing>)]
+      return { status: 201, data: phrasings[1] }
+    })
+    server.on('DELETE', /^\/api\/helpdesk\/faq-phrasings\//, { data: { deleted: true } })
+    const dialog = await openEditor(PARENT_FAQ, [faq('c9', { questionEn: 'Refund policy' })])
+
+    // saving a chip text: focus goes back to that row's Edit button
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Edit the text of Contact support' }))
+    fireEvent.change(within(dialog).getByLabelText('Text shown (English)'), { target: { value: 'Talk to us' } })
+    fireEvent.change(within(dialog).getByLabelText('Text shown (Chinese)'), { target: { value: '联系我们' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save text' }))
+    await waitFor(() => assert.ok(document.activeElement === within(dialog).getByRole('button', { name: 'Edit the text of Talk to us' }), 'focus'))
+    assert.equal(announced(dialog), 'Text saved.')
+
+    // adding an existing question: focus goes back to "Add existing question"
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add existing question' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Add Refund policy' }))
+    await waitFor(() => assert.ok(document.activeElement === within(dialog).getByRole('button', { name: 'Add existing question' }), 'focus'))
+    assert.equal(announced(dialog), 'Added: Refund policy')
+
+    // removing a link: focus goes to the list heading
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Remove Refund policy' }))
+    await waitFor(() => assert.equal(announced(dialog), 'Removed: Refund policy'))
+    assert.equal((document.activeElement as HTMLElement).id.endsWith('-children'), true)
+
+    // phrasings: adding keeps focus in the input, removing moves it to the input
+    const input = within(dialog).getByLabelText('New phrasing')
+    fireEvent.change(input, { target: { value: 'charged but failed' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => assert.equal(announced(dialog), 'Phrasing added.'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove the phrasing card declined' }))
+    await waitFor(() => assert.equal(announced(dialog), 'Phrasing removed.'))
+    assert.ok(document.activeElement === within(dialog).getByLabelText('New phrasing'), 'focus')
+  })
+
+  test('cancelling a chip text form returns focus to its Edit button', async () => {
+    serveGraph({ children: [edgeView('e1', 'c1', {}, 'Contact support')] })
+    const dialog = await openEditor()
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Edit the text of Contact support' }))
+    const form = within(dialog).getByLabelText('Text shown (English)').closest('.hdGraphLabelForm') as HTMLElement
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => assert.ok(document.activeElement === within(dialog).getByRole('button', { name: 'Edit the text of Contact support' }), 'focus'))
+  })
+})
+
 /* ---------------------------------- 树视图 ---------------------------------- */
 
 function treeNode(id: string, children: FaqTreeNode[] = [], patch: Partial<FaqTreeNode> = {}, question = `Q ${id}`): FaqTreeNode {
@@ -415,8 +479,17 @@ describe('tree view (graph design §5.2)', () => {
     const dialog = await openTree()
     assert.equal(server.callsTo('GET', /\/tree$/)[0].path, '/api/helpdesk/faqs/pay/tree')
     const outline = await within(dialog).findByRole('list', { name: 'Question tree outline' })
-    const rows = () => [...outline.querySelectorAll(':scope > li')].map((li) => li.querySelector('.hdGraphChildLabel')?.textContent)
+    // nested lists (a screen reader hears each branch as a list inside its parent's item), rows in document order
+    const rows = () => [...outline.querySelectorAll('li.hdTreeRow')].map((li) => li.querySelector('.hdGraphChildLabel')?.textContent)
     assert.deepEqual(rows(), ['A problem with paying?', 'It failed', 'Contact support', 'I want a refund', 'Contact support'])
+    assert.equal(outline.querySelectorAll(':scope > li').length, 1, 'only the entry at the top level')
+    const failedRow = within(outline).getByText('It failed').closest('li') as HTMLElement
+    const branch = failedRow.parentElement as HTMLElement
+    assert.equal(branch.tagName, 'UL')
+    assert.equal(within(branch.closest('li') as HTMLElement).getAllByText('A problem with paying?').length, 1, 'the option sits inside the choice row')
+    assert.equal(within(branch).getAllByRole('listitem').filter((li) => li.parentElement === branch).length, 2, 'two options')
+    // the option letter is read out, not only drawn
+    assert.match(failedRow.querySelector('.hdTreeLine')?.textContent ?? '', /Option A/)
     assert.ok(within(dialog).getByText('5 questions in this tree'))
     assert.ok(within(dialog).getByText('1 warnings'))
     assert.equal(within(outline).getAllByText('Also appears in 2 places').length, 2)
@@ -619,6 +692,8 @@ describe('publish a new version (graph design §5.4)', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => absent(screen.queryByRole('alertdialog')))
     assert.equal(server.callsTo('POST', /\/publish$/).length, 0)
+    // cancelling returns focus to the button that opened the confirmation
+    assert.ok(document.activeElement === within(dialog).getByRole('button', { name: 'Publish v3' }), 'focus')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Publish v3' }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Publish' }))
     await waitFor(() => assert.equal(server.callsTo('POST', /\/publish$/).length, 1))

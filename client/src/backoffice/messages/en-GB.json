@@ -648,6 +648,7 @@
       "FAQ_HAS_PARENTS": "This question is still a follow-up or option of another card. Remove it there first.",
       "FAQ_KEY_TAKEN": "Another question already uses this key.",
       "FAQ_RELEASE_NOT_FOUND": "This version no longer exists.",
+      "FAQ_RELEASE_STALE": "A newer version is live, or this one was checked against another live version. Check it again, or create a new version.",
       "FAQ_RELEASE_NOT_READY": "This version has not passed the checks and the eval, so it cannot be published.",
       "FAQ_RELEASE_LOCKED": "This version cannot be checked again.",
       "FAQ_RELEASE_NOT_PUBLISHED": "You can only roll back to a version that was live before.",
@@ -854,6 +855,15 @@
       "zh": "中文"
     },
     "graph": {
+      "announce": {
+        "added": "Added: {label}",
+        "created": "Created and added: {label}",
+        "removed": "Removed: {label}",
+        "labelSaved": "Text saved.",
+        "moved": "Moved: {label}, now {position} of {count}",
+        "phrasingAdded": "Phrasing added.",
+        "phrasingRemoved": "Phrasing removed."
+      },
       "title": "Follow-ups and options",
       "hint": "Follow-ups, options and phrasings are saved to the working copy straight away. Learners see them after the next release.",
       "newHint": "Save this FAQ first, then add follow-ups and phrasings.",
@@ -960,6 +970,7 @@
       "expandAll": "Expand all",
       "collapseAll": "Collapse all",
       "alsoIn": "Also appears in {count} places",
+      "optionLetter": "Option {letter}:",
       "alsoInOne": "Also appears in 1 place",
       "alsoInList": "Also under: {questions}",
       "cycle": "Leads back to a question above; not expanded",

@@ -163,6 +163,9 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
   const [phrasingText, setPhrasingText] = useState('')
   const [phrasingError, setPhrasingError] = useState<'required' | 'tooLong' | null>(null)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
+  // 键盘 / 读屏用户：写操作卸掉了有焦点的控件时把焦点放到合适的位置，并用礼貌的 live region 读出结果
+  const [announcement, setAnnouncement] = useState('')
+  const pendingFocus = useRef<string | null>(null)
   const newKey = useRef<FaqKey | null>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const searchRequest = useRef(0)
@@ -201,6 +204,29 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
     [],
   )
 
+  // 每次渲染后：有待放的焦点就放过去（目标在这次渲染里才出现，比如收起表单后的 Edit 按钮）
+  useEffect(() => {
+    const id = pendingFocus.current
+    if (!id) return
+    pendingFocus.current = null
+    document.getElementById(id)?.focus()
+  })
+
+  function settle(focusId: string | null, message: string | null) {
+    if (focusId) pendingFocus.current = focusId
+    if (message !== null) setAnnouncement(message)
+  }
+
+  const keyIds = {
+    addExisting: `${uid}-add-existing`,
+    addNew: `${uid}-add-new`,
+    children: `${uid}-children`,
+    edit: (edgeId: string) => `${uid}-edit-${edgeId}`,
+    up: (edgeId: string) => `${uid}-up-${edgeId}`,
+    down: (edgeId: string) => `${uid}-down-${edgeId}`,
+    phrasing: `${uid}-phrasing-input`,
+  }
+
   /** 一个写操作：同一时间只跑一个；失败显示错误码的文案。 */
   async function act(work: () => Promise<{ ok: true } | { ok: false; code: string }>): Promise<boolean> {
     if (busy) return false
@@ -224,12 +250,23 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
       to,
     )
     if (ids.join() === children.map((view) => view.edge.childId).join()) return
-    await act(async () => {
+    const moved = children[from]
+    const ok = await act(async () => {
       const result = await reorderFaqEdges(faq.id, ids)
       if (result.ok) setChildren(result.data.children)
       else if (result.code === 'FAQ_CHILDREN_CHANGED') await loadEdges()
       return result
     })
+    if (ok && moved) {
+      // ↑ / ↓：焦点留在同一行同方向的按钮上（移到头了那个按钮会禁用，就换另一个）
+      const edgeId = moved.edge.id
+      const goingUp = to < from
+      const blocked = goingUp ? to === 0 : to === ids.length - 1
+      settle(
+        goingUp !== blocked ? keyIds.up(edgeId) : keyIds.down(edgeId),
+        t(locale, 'helpDesk.graph.announce.moved', { label: labelOf(moved), position: to + 1, count: ids.length }),
+      )
+    }
   }
 
   function onDrop(event: DragEvent, to: number) {
@@ -252,14 +289,23 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
       const result = await updateFaqEdge(view.edge.id, labelBody(editing.draft))
       return result.ok ? loadEdges() : result
     })
-    if (ok) setEditing(null)
+    if (ok) {
+      setEditing(null)
+      settle(keyIds.edit(view.edge.id), t(locale, 'helpDesk.graph.announce.labelSaved'))
+    }
+  }
+
+  function cancelLabel(edgeId: string) {
+    setEditing(null)
+    settle(keyIds.edit(edgeId), null)
   }
 
   async function remove(view: FaqEdgeView) {
-    await act(async () => {
+    const ok = await act(async () => {
       const result = await deleteFaqEdge(view.edge.id)
       return result.ok ? loadEdges() : result
     })
+    if (ok) settle(keyIds.children, t(locale, 'helpDesk.graph.announce.removed', { label: labelOf(view) }))
   }
 
   function search(value: string) {
@@ -282,12 +328,15 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
     if (next === 'existing' && results === null) search('')
   }
 
-  async function link(childId: string) {
+  async function link(childId: string, question: string) {
     const ok = await act(async () => {
       const result = await createFaqEdge(faq.id, { childId })
       return result.ok ? loadEdges() : result
     })
-    if (ok) setAdding(null)
+    if (ok) {
+      setAdding(null)
+      settle(keyIds.addExisting, t(locale, 'helpDesk.graph.announce.added', { label: question }))
+    }
   }
 
   /** 新建追问：一条非入口的答案卡片（分类同父节点），再连到这张卡片下面。 */
@@ -321,6 +370,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
     })
     if (ok) {
       setAdding(null)
+      settle(keyIds.addNew, t(locale, 'helpDesk.graph.announce.created', { label: zh ? newDraft.questionZh.trim() : newDraft.questionEn.trim() }))
       setNewDraft(EMPTY_NEW)
       setNewSubmitted(false)
       newKey.current = null
@@ -338,15 +388,19 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
       if (words.ok) setPhrasings(words.data.phrasings)
       return words
     })
-    if (ok) setPhrasingText('')
+    if (ok) {
+      setPhrasingText('')
+      settle(keyIds.phrasing, t(locale, 'helpDesk.graph.announce.phrasingAdded'))
+    }
   }
 
   async function removePhrasing(phrasing: FaqPhrasing) {
-    await act(async () => {
+    const ok = await act(async () => {
       const result = await deletePhrasing(phrasing.id)
       if (result.ok) setPhrasings((current) => current.filter((item) => item.id !== phrasing.id))
       return result
     })
+    if (ok) settle(keyIds.phrasing, t(locale, 'helpDesk.graph.announce.phrasingRemoved'))
   }
 
   const linkedIds = new Set(children.map((view) => view.edge.childId))
@@ -391,6 +445,9 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
 
   return (
     <div className="hdGraphLinks" aria-busy={!loaded || busy}>
+      <p className="hdSrOnly hdGraphAnnounce" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
       {faq.key ? <p className="hdGraphHint hdGraphKey">{t(locale, 'helpDesk.graph.key', { key: faq.key })}</p> : null}
       {loadFailed ? <p className="hdGraphHint hdGraphProblem">{errorMessage(locale, loadFailed)}</p> : null}
       {errorCode ? (
@@ -411,7 +468,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
       ) : null}
 
       <div className="hdField">
-        <span className="hdFieldLabel" id={`${uid}-children`}>
+        <span className="hdFieldLabel" id={keyIds.children} tabIndex={-1}>
           {kind === 'option'
             ? t(locale, 'helpDesk.graph.children.option', { min: FAQ_GRAPH_LIMITS.optionsMin, max })
             : t(locale, 'helpDesk.graph.children.follow_up', { max, shown: FAQ_GRAPH_LIMITS.followUpsShown })}
@@ -453,6 +510,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
                     </div>
                     <div className="hdGraphChildActions">
                       <button
+                        id={keyIds.up(view.edge.id)}
                         type="button"
                         className="hdEditorTool"
                         aria-label={t(locale, 'helpDesk.graph.moveUp', { label })}
@@ -462,6 +520,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
                         ↑
                       </button>
                       <button
+                        id={keyIds.down(view.edge.id)}
                         type="button"
                         className="hdEditorTool"
                         aria-label={t(locale, 'helpDesk.graph.moveDown', { label })}
@@ -471,6 +530,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
                         ↓
                       </button>
                       <button
+                        id={keyIds.edit(view.edge.id)}
                         type="button"
                         className="hdLinkButton"
                         aria-label={t(locale, 'helpDesk.graph.editLabel', { label })}
@@ -521,7 +581,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
                         </p>
                       ) : null}
                       <div className="hdGraphFormActions">
-                        <button type="button" className="hdDrawerButton" onClick={() => setEditing(null)}>
+                        <button type="button" className="hdDrawerButton" onClick={() => cancelLabel(view.edge.id)}>
                           {t(locale, 'helpDesk.graph.cancel')}
                         </button>
                         <button type="button" className="hdDrawerButton hdDrawerPrimary" disabled={busy} onClick={() => void saveLabel()}>
@@ -538,6 +598,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
         {full ? <p className="hdGraphHint">{t(locale, 'helpDesk.graph.full', { max })}</p> : null}
         <div className="hdGraphFormActions hdGraphAddRow">
           <button
+            id={keyIds.addExisting}
             type="button"
             className="hdDrawerButton"
             aria-expanded={adding === 'existing'}
@@ -547,6 +608,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
             {t(locale, 'helpDesk.graph.addExisting')}
           </button>
           <button
+            id={keyIds.addNew}
             type="button"
             className="hdDrawerButton"
             aria-expanded={adding === 'new'}
@@ -586,7 +648,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
                           className="hdLinkButton"
                           aria-label={t(locale, 'helpDesk.graph.pick', { question })}
                           disabled={busy}
-                          onClick={() => void link(item.id)}
+                          onClick={() => void link(item.id, question)}
                         >
                           {t(locale, 'helpDesk.graph.pickShort')}
                         </button>
@@ -607,7 +669,14 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
             {newField('questionZh', 'helpDesk.drawer.questionZh', false)}
             {newField('answerZh', 'helpDesk.drawer.answerZh', true)}
             <div className="hdGraphFormActions">
-              <button type="button" className="hdDrawerButton" onClick={() => setAdding(null)}>
+              <button
+                type="button"
+                className="hdDrawerButton"
+                onClick={() => {
+                  setAdding(null)
+                  settle(keyIds.addNew, null)
+                }}
+              >
                 {t(locale, 'helpDesk.graph.cancel')}
               </button>
               <button type="button" className="hdDrawerButton hdDrawerPrimary" disabled={busy} onClick={() => void createAndLink()}>
@@ -662,6 +731,7 @@ export function FaqLinksEditor({ locale, faq }: { locale: Locale; faq: HelpdeskF
             ))}
           </select>
           <input
+            id={keyIds.phrasing}
             className="hdDrawerInput hdDrawerInputSmall"
             value={phrasingText}
             lang={phrasingLocale}

@@ -62,6 +62,8 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
   const drawerRef = useRef<HTMLElement>(null)
   const confirmRef = useRef<HTMLDivElement>(null)
   const confirmFocus = useRef<HTMLButtonElement>(null)
+  // 打开确认框的按钮：取消（按钮或 Escape）后焦点还给它
+  const confirmOpener = useRef<HTMLElement | null>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const noticeRef = useRef<HTMLDivElement>(null)
 
@@ -78,7 +80,16 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
 
   useEffect(() => {
     if (confirm) confirmFocus.current?.focus()
+    else if (confirmOpener.current) {
+      confirmOpener.current.focus()
+      confirmOpener.current = null
+    }
   }, [confirm])
+
+  function ask(next: NonNullable<Confirm>, opener: HTMLElement) {
+    confirmOpener.current = opener
+    setConfirm(next)
+  }
 
   useEffect(() => {
     if (notice) noticeRef.current?.focus()
@@ -132,6 +143,8 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
   function confirmed() {
     if (!confirm) return
     const { action, version } = confirm
+    // 确认了：焦点交给结果提示（act 之后），不回到按钮
+    confirmOpener.current = null
     setConfirm(null)
     if (action === 'publish')
       void act(
@@ -393,7 +406,7 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
                                       type="button"
                                       className="hdDrawerButton hdDrawerPrimary"
                                       disabled={busy}
-                                      onClick={() => setConfirm({ action: 'publish', version: release.version })}
+                                      onClick={(event) => ask({ action: 'publish', version: release.version }, event.currentTarget)}
                                     >
                                       {t(locale, 'helpDesk.releases.publish', { version: release.version })}
                                     </button>
@@ -419,7 +432,7 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
                                       className="hdDrawerButton"
                                       disabled={busy}
                                       aria-label={t(locale, 'helpDesk.releases.rollbackLabel', { version: release.version })}
-                                      onClick={() => setConfirm({ action: 'rollback', version: release.version })}
+                                      onClick={(event) => ask({ action: 'rollback', version: release.version }, event.currentTarget)}
                                     >
                                       {t(locale, 'helpDesk.releases.rollback')}
                                     </button>

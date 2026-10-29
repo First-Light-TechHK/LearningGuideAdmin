@@ -166,6 +166,7 @@ describe('HelpDesk messages', () => {
       'FAQ_KEY_TAKEN',
       'FAQ_RELEASE_NOT_FOUND',
       'FAQ_RELEASE_NOT_READY',
+      'FAQ_RELEASE_STALE',
       'FAQ_RELEASE_LOCKED',
       'FAQ_RELEASE_NOT_PUBLISHED',
       'FAQ_RELEASE_CHECKS_FAILED',

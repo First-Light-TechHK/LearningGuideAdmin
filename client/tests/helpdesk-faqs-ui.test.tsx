@@ -500,6 +500,32 @@ describe('FAQ drawer (Figma 1379:299)', () => {
     await waitFor(() => absent(screen.queryByRole('dialog')))
   })
 
+  test('a delete refused because other questions still use it names those questions', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Shared answer', version: 6 }))
+    server.on('POST', ARCHIVE, { status: 409, error: 'FAQ_HAS_PARENTS' })
+    const parent = (id: string, questionEn: string, questionZh: string, status: 'published' | 'archived' = 'published') => ({
+      edge: { id: `e-${id}`, parentId: id, childId: 'f1', kind: 'follow_up', position: 0, labelEn: null, labelZh: null, createdAt: '2026-10-30T00:00:00.000Z', updatedAt: '2026-10-30T00:00:00.000Z' },
+      node: { id, key: id, type: 'answer', entry: true, category: 'other', questionEn, questionZh, status },
+      label: { en: 'Shared answer', zh: '共享答案' },
+    })
+    server.on('GET', /\/faqs\/f1\/edges$/, {
+      data: {
+        children: [],
+        parents: [parent('p1', 'Why was my card declined?', '为什么卡被拒？'), parent('p2', 'Old question', '旧问题', 'archived')],
+      },
+    })
+    await openFaqs()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Shared answer' }))
+    await screen.findByRole('dialog')
+    fireEvent.click(within(drawer()).getByRole('button', { name: 'Delete FAQ' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    const alert = await within(drawer()).findByRole('alert')
+    assert.match(alert.textContent ?? '', /still a follow-up or option/)
+    await waitFor(() => assert.match(alert.textContent ?? '', /Why was my card declined\?/))
+    assert.doesNotMatch(alert.textContent ?? '', /Old question/)
+    assert.ok(screen.getByRole('dialog'), 'the drawer stays open')
+  })
+
   test('Keep in the delete confirmation keeps the FAQ; a new FAQ has no Delete', async () => {
     serveFaqs(faq('f1', { questionEn: 'Keep me' }))
     await openFaqs()
