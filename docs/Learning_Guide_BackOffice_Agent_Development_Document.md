@@ -223,7 +223,7 @@ model AiRateLimitHit {
 
 ### 2.1 初始种子数据（Seed Data）
 
-初始化数据库后，必须插入以下默认数据：
+初始化数据库后，必须插入以下默认数据（**例外：PromptTemplate 允许省略，2026-10-26 起运行时按 `src/ai/prompts/` 文件兜底**）：
 
 **PromptTemplate 默认数据（2026-10-23 起改为独立文件源）：**
 
@@ -232,6 +232,7 @@ model AiRateLimitHit {
 - 同步命令：`npm run prompts:sync`（upsert `lecture-default` / `socratic-default`，不触碰课程级覆盖）
 - 落库口径：`PromptTemplate.welcomeMsg` 存 `zh-CN` 供后台展示；学员端 welcome 按 `locale` 读取文件对应语言
 - 欢迎语口径：课程已在进入 AI Tutor 前选定，默认文案不再提示“请选择一个课程”
+- **运行时兜底（2026-10-26）**：应用启动**不写库**；库中缺少某模式默认行时，`GET /api/ai/prompts` 与对话提示词解析直接回退上述文件默认值（`src/ai/prompts/`），因此空库 / 云端未执行 `prompts:sync` 时后台不再出现空白 Prompt。`npm run prompts:sync` 仍保留为“主动把文件内容写入数据库”的手段。
 
 ---
 
@@ -256,6 +257,7 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 > Lesson（文件夹）层删除：原 Lesson 标题变为 Page.title（md 文件标题），原 Lesson 下属各 Page 合并为该 Page 的 contentMd，各原 Page 标题作为 H1 section。
 > 树结构扩展为 Course → Page → Heading（H1-H6）三级，Heading 级作为目录（TOC），点击可定位编辑器。
 > **2026-10-19 层级扩展改拍**：Heading/TOC/标签支持范围由 H1/H2/H3 扩展至 **H1-H6**（BlockNote heading schema 原生支持 6 级，块编辑器右键插入菜单同步放开 H4-H6；sectionTags 迁移与 AI 上下文分段正则由 `#{1,3}` 放宽为 `#{1,6}`）。
+> **2026-10-29 补注**：BlockNote 已整体移除（§3.3.2 改拍），H1-H6 由 Markdown `#{1,6}` 语法直接书写；TOC 解析与 `#{1,6}` 正则不变。
 
 > **Phase 4 排版对齐注记（2026-10-14，按用户设计稿）**：整体为「顶部 Header + 模块导航列 + 课程树列 + 内容区」四段——Header 白底，左侧 logo+产品名、右侧通知铃铛与当前用户（演示身份静态占位）；模块导航列含 **Knowledge / AI Tutor** 两个入口（当前模块高亮）；树列顶部搜索框、底部 Sync 按钮；预设标签配色：Core Knowledge 蓝 / Teaching Guidance 绿 / Misconception 橙 / Assessment 紫。
 
@@ -290,14 +292,18 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 > **2026-10-16 扁平化改拍**：外部源仍为 Course→Lesson→Page 三级，本地为 Course→Page 两级。同步时将外部一个 Lesson 映射为本地一个 Page（contentMd = `# {Lesson.title}` + 各外部 Page 以 `# {Page.title}` 为 H1 拼接）。
 >
 > **2026-10-22 改拍（Portal 对接，仅标题同步）**：外部源从 Mock fixture 切换为 LearningGuidePortal 已发布课程目录（`GET /api/integration/catalogue`，服务间 `X-API-Key`）。本期**只同步课程标题与 lesson（Page）标题，不读写课程正文**；本地已有 `contentMd` 保持不变。课程匹配键 `Course.externalId = Portal course.slug`，页面匹配键 `Page.externalId = Portal lesson.id`（同日新增字段）。
+>
+> **2026-10-26 改拍（课程 ID 内置映射表）**：课程主数据后续归 BackOffice，KS 只需按 **courseID** 建立对应关系，因此**取消运行时向 Portal 拉取课程目录**（删除 `portal-source.service.ts` 与 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`）。同步数据源改由 KS 内置映射表 `server/src/sync/course-registry.ts` 提供：`externalId` 即 courseID，`title` 供建课与标题同步，当前无 lesson 结构化数据（`lessons` 恒为空）。**同步目的与算法完全不变**（仍为课程标题 + 课时标题同步，正文不动）。后续 BackOffice 提供课程接口时，只替换映射表数据源，`SyncService` 无需改动。
+>
+> 选择器口径：`GET /api/sync/external-courses` 返回「映射表课程 ∪ 本地带 `externalId` 的课程」，映射表外的本地课程仍可选中，避免侧栏丢失入口；对映射表外课程执行同步返回 `unchanged: true`（无可同步项）。
 
-**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出 Portal 已发布课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时同步按钮禁用。原「新建课程」入口**彻底移除**——课程身份由 Portal 同步。
+**同步目标选取**：Sidebar 顶部为**课程选择器**（下拉列出映射表课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时同步按钮禁用。原「新建课程」入口**彻底移除**——课程身份由映射表的 courseID 决定。
 
 **按钮**：
 
 | 按钮 | 接口 | 行为 |
 |------|------|------|
-| 从 Portal 同步标题 | POST /api/sync/structure `{ externalId }` | 同步课程标题 + 课时标题（Page.title），不写入/覆盖正文 |
+| 同步课程标题 | POST /api/sync/structure `{ externalId }` | 同步课程标题 + 课时标题（Page.title），不写入/覆盖正文 |
 
 > `POST /api/sync/all` 保留路由但返回 400 `CONTENT_SYNC_DISABLED`；2026-10-22 起正文同步禁用，只允许标题同步。
 
@@ -305,18 +311,19 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 
 | 情形 | 行为 |
 |------|------|
-| 课程在本地不存在 | 新建 Course（title = Portal title，externalId = Portal slug） |
+| 课程在本地不存在 | 新建 Course（title = 映射表 title，externalId = courseID） |
 | 课程已存在 | 仅当标题不同时更新 Course.title |
 | Page 按 `Page.externalId` 命中 | 仅当标题不同时更新 Page.title，正文完全不动 |
 | Page 未命中但标题相同 | 回填 `Page.externalId`，并按需更新标题 |
-| 本地无该 lesson | 新增空 Page（contentMd = ''，sortOrder 按 Portal 顺序） |
-| Portal 删除 lesson | 本期不标记 STALE，避免误伤本地正文；后续内容同步阶段再处理 |
+| 本地无该 lesson | 新增空 Page（contentMd = ''，sortOrder 按映射表顺序） |
+| 映射表无该 lesson | 本期不标记 STALE，避免误伤本地正文；后续内容同步阶段再处理 |
+| 课程不在映射表但本地存在 | 视为本地独有课程：返回 `unchanged: true`，不建课不报错 |
 
 **STALE（灰度失效）节点**：外部内容阶段保留原有语义；本期标题同步不产生新的 STALE 节点。
 
-**响应**：`{ created, updated, staleMarked, unchanged }` 变更摘要。
+**响应**：`{ created, courseCreated, updated, staleMarked, unchanged }` 变更摘要（`created` = 新建 Page 数，`courseCreated` = 新建 Course 数；2026-10-26 新增 `courseCreated`，避免首次导入无 lesson 的课程时误报「无变更」）。
 
-> **外部源实现**：`server/src/sync/portal-source.service.ts`。需要 `PORTAL_API_BASE_URL` 与 `PORTAL_API_TOKEN`；Portal 未配置 Token 时接口返回 503，避免课程目录裸奔。e2e 通过 `overrideProvider(PortalSourceService)` 注入假数据源。
+> **数据源实现**：`server/src/sync/course-registry.ts`（内置 courseID → 标题映射表）+ `server/src/sync/catalogue-source.service.ts`（数据源服务）。**不再需要任何 Portal 目录接口配置**；e2e 通过 `overrideProvider(CatalogueSourceService)` 注入带 lesson 结构的假数据源，继续覆盖标题同步与课时建页算法。
 
 #### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
@@ -338,58 +345,85 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 - 标题区右侧保留保存状态提示（页面级 Tags 已移除，见 §3.3.3）
 - 主体区域为 Markdown 编辑器
 
-#### 3.3.2 Markdown 编辑器要求（2026-10-15 改拍：Notion/Jupyter 式块编辑器，BlockNote 实现）
+#### 3.3.2 Markdown 编辑器要求（2026-10-29 改拍：CodeMirror 6 源码编辑器 + 预览）
 
 > **选型改拍（2026-10-15，用户裁决）**：原 `@uiw/react-md-editor` 全文 Markdown 编辑 + live 预览，不符合「逐块编辑、右键插入、无顶栏工具栏」的诉求。改用 **BlockNote**（`@blocknote/react`）实现 Notion/Jupyter 式块编辑器。
+>
+> **选型改拍（2026-10-29，用户裁决，覆盖 2026-10-15 的 BlockNote 拍板）**：BlockNote 块编辑器在大文档（约 300 block / 35KB）下「选中文字即卡死」，实测关闭全部浮动 UI 后无改善，判定为**结构性成本**（整页单一 ProseMirror contenteditable、无视口虚拟化、文档级选区 + 整篇 blocks↔md 序列化）。改为 **CodeMirror 6 纯 Markdown 源码编辑器 + 预览按钮**：
+>
+> - 编辑器内核：`@codemirror/state|view|commands|language|lang-markdown|search`（原生视口虚拟化，选区/布局成本与文档大小无关；跨块选中、撤销、查找均为免费能力）
+> - `contentMd` 直接就是编辑器内容 → **不再存在 blocks ↔ markdown 的整篇序列化**（原 60~250ms 长任务消失）
+> - 标题栏最右侧新增「预览 / 编辑」切换：预览用与 Portal/AI Tutor 相同的 `remark-math + rehype-katex` 渲染
+> - 保存策略改为：**编辑期间每 5 分钟自动保存 + 离开编辑页/切页/切课程立即保存**（`flushSave` 返回 boolean，失败阻断切换并提示重试）；另有 `pagehide/visibilitychange` 写入 localStorage 的草稿兜底
+> - **已下线**（原第 2/3/4 条的块级交互）：侧边 ⋮ 拖拽手柄、块级右键插入菜单、选中浮动格式工具条、块拖拽重排；Markdown 语法由作者直接书写
+> - §3.3.3 的 section tags 编辑入口随之暂时下线（数据 `Page.sectionTags` 保留不变，待用户裁决后续入口）
 
 **核心不变量（必须守住）**：
 
-- `Page.contentMd` 仍是**唯一存储格式**（§2 表结构不动；发布快照、AI 知识源、外部同步、上传转换全部基于 Markdown 字符串）。块只是**编辑视图**，保存时序列化回 md
-- **KaTeX 公式必须可用**（课程核心内容）——经 `@blocknote/math-block` 官方包接入：`$$…$$` 为数学块、`$…$` 为行内公式，底层用 KaTeX 渲染
-- **无源码模式切换**（2026-10-15 用户裁决移除）：纯块编辑，解析异常时仅提示不降级
+- `Page.contentMd` 是**唯一存储格式**，且现在**直接就是编辑器内容**（无 blocks 中间态，因此不存在「块 ↔ markdown」往返与整篇序列化）
+- **KaTeX 公式**：源码里写 `$…$`（行内）/ `$$…$$`（块级）；预览用 `remark-math + rehype-katex` 渲染（与 Portal、AI Tutor 同一渲染器）
+- **源码模式为唯一模式**（2026-10-29）：编辑器即 Markdown 源码，右侧「预览」按钮切换到只读渲染，不提供块级视图
 
-**交互模型**（2026-10-15 用户拍板细化 + 冒烟修正）：
+**交互模型**（2026-10-29）：
 
-1. **输入=源码、失焦即渲染**：每个块编辑态显示可编辑文本，支持 Markdown 快捷语法（输入 `# ` 回车→H1、`- `→列表、`$$…$$`→数学块、`|a|b|`→表格等，BlockNote 原生 markdown shortcuts）；**失焦 / 切换到另一块 / 手动保存时**自动序列化回 md 并渲染预览态
-2. **无顶栏工具栏**，插入操作两种入口：
-   - **块左侧 ⋮ 柄菜单**（hover 显示）：在上方/下方插入块（段落、H1-H6、表格、图片、数学块、代码块、引用、有序/无序列表）、删除块、复制块、上移下移
-   - **右键菜单**（编辑区任意位置 contextmenu）：在光标所在块下方插入指定类型块，每项带图标（段落/标题/列表/表格/代码/引用/数学/图片）——用原生 `contextmenu` 事件 + AntD Dropdown 实现
-   - ~~斜杠命令 `/`~~：**已移除**（2026-10-15 冒烟反馈：触发白屏，移除）
-3. **选中内容浮窗**（BlockNote 原生 `formattingToolbar`）：选中文本后自动弹出小工具栏，含：粗体 / 斜体 / 下划线 / 删除线 / 行内代码 / 链接 / 标记（高亮）/ 颜色 / 清除格式
-4. **拖拽重排**：启用块左侧 drag handle（`sideMenu`），长按拖拽改变块顺序
-5. 顶部仅保留：页面标题（展示态 + 铅笔就地编辑，见 §3.3.1）、保存状态（页面级 Tags 已移除，tag 仅在 H1-H6 section 下，2026-10-19 扩展）
+1. **源码编辑**：CodeMirror 6（`@codemirror/lang-markdown`）提供 Markdown 语法高亮、行号、查找（`Ctrl+F`）、撤销/重做；跨段落选中就是普通文本选区（成本与文档大小无关）
+2. **Live Preview 装饰层（2026-10-29，M2+M3）**：在纯文本上就地渲染——Heading 放大字号并隐藏 `#`、粗体/斜体/删除线/行内代码加样式并隐藏标记、无序列表隐藏 `- ` 改用项目符号；**Widget 层渲染 `$…$` 行内公式、`$$…$$` 块级公式（KaTeX）、`![](url)` 图片、GFM 表格（HTML `<table>`）**；**光标或选区进入该范围时自动回退显示原始 Markdown**，保证可编辑。性能口径：行级/行内装饰按 `view.visibleRanges` 计算；**块级 Widget 由 StateField 全文档扫描**（CM6 禁止 ViewPlugin 提供 block 装饰），并在语法树异步推进后重建
+3. **常驻格式工具条**：编辑器上方一行，选中时高亮当前格式；提供 H1/H2/H3、段落、粗体（`Ctrl+B`）、斜体（`Ctrl+I`）、删除线、行内代码、行内公式 `$…$`、链接、无序/有序列表、引用。**行内格式（粗体/斜体/删除线/行内代码/行内公式）为 toggle 语义**：选区已被同一对标记包裹时再次点击/按快捷键会剥离标记，否则包裹；空选区时光标夹在一对标记中间则剥离该对标记，否则插入标记对并将光标置于中间（2026-10-27 M5）
+4. **右键插入菜单**：插入表格（GFM 模板）、公式块 `$$…$$`、行内公式、图片 `![](url)`、代码块、引用、分割线
+5. **预览**：标题栏最右侧「预览 / 编辑」按钮；进预览前强制提交当前文本，保证所见内容与草稿一致；预览只读
+6. **顶部仅保留**：页面标题（展示态 + 铅笔就地编辑，§3.3.1）、保存状态、预览开关
+7. **TOC**：左侧目录仍由 `contentMd` 解析 H1-H6 生成（§3.2.1）；点击后编辑器按 Markdown 行号定位并滚动
 
-**数据往返（md ↔ blocks）**：
+**保存与兜底**：
 
-| 方向 | API | 时机 |
-|------|-----|------|
-| 加载 | `tryParseMarkdownToBlocks(contentMd)` → `editor.replaceBlocks` | 选中页面、切换页面、激活版本后 |
-| 保存 | `blocksToMarkdownLossy(blocks)` → `editDraft({ contentMd })` | 块内容变更后 500ms 防抖（store 层） |
+| 时机 | 行为 |
+|------|------|
+| 编辑输入 | 300ms 防抖把编辑器文本提交进 `draft.contentMd`（无序列化成本） |
+| 周期自动保存 | 编辑期间**每 5 分钟**一次（`flushSave`） |
+| 离开编辑页 / 切页 / 切课程 | 立即 `flushSave`；**保存失败则阻断切换**并在标题栏提示「重试」，避免覆盖丢稿 |
+| 浏览器刷新 / 关闭 / 切后台 | `pagehide` + `visibilitychange(hidden)` 把「未保存」草稿写入 `localStorage`（已保存内容不写）；下次打开该页若与服务端不同则询问「恢复 / 丢弃」 |
+| 激活发布版本 | **丢弃草稿并清本地草稿**（服务端已用快照整体替换，禁止旧内容回写） |
 
-> 解析失败（`tryParseMarkdownToBlocks` 返回空或异常）时仅 message 提示，不切换模式（无源码模式）。
+> `flushSave` 语义：返回 `boolean`；以「请求快照」判定是否置 `saved`（请求期间又改了内容则保持 `dirty` 并重启自动保存）；同一时刻只有一个写入在飞（串行化，防乱序 PUT）。
 
-**图片处理（待设计，本轮仅外链）**：
+**图片与表格**：
 
-- 块编辑器图片块本轮**仅支持外链 URL**（右键/上传时 prompt 输入 URL）
-- 本地图片上传需新增 `POST /api/files/image`（存库/磁盘 + 返回 URL），属于**待设计项**，不在本轮实现（与音视频一起随 §12 #4 接入）
-- 表格插入：BlockNote 原生表格块，保存为 GFM 表格 md
+- 图片：Markdown 原生 `![alt](url)`（外链）；粘贴图片自动上传属于**待设计项**（需 `POST /api/files/image`，随 §12 #4 与音视频一起接入）
+- 表格：Markdown GFM 表格语法，**支持就地可视化编辑**（见下方「表格就地编辑」）
 
 **与现有链路的兼容性**：
 
-- 上传建页（§3.2.3）产出的 `contentMd` 直接喂给 `tryParseMarkdownToBlocks`，无需改动转换侧
-- AI 知识源（§4.3.3）读的是 `contentMd` 字符串，与编辑器无关，不受影响
-- 发布快照存 `contentMd`，激活后同样经 `tryParseMarkdownToBlocks` 加载
+- 上传建页（§3.2.3）产出的 `contentMd` 直接作为编辑器内容，无需任何转换
+- AI 知识源（§4.3.3）读 `contentMd`，与编辑器无关
+- 发布快照存 `contentMd`，激活后重新加载同一字符串
 
-**依赖**：`@blocknote/react@0.56.0`、`@blocknote/mantine@0.56.0`（提供默认 UI 组件，含格式化浮窗、侧边拖拽手柄）、`@blocknote/math-block@0.56.0`、`@blocknote/core@0.56.0`；注意：0.56 为无头架构，`BlockNoteViewRaw` 不提供 UI，必须使用 `@blocknote/mantine` 的 `BlockNoteView`（内部注入 `ComponentsContext`）才能启用 formattingToolbar/sideMenu 等默认浮窗；导出名：`BlockNoteView`（来自 `@blocknote/mantine`，非 `BlockNoteViewRaw`）、数学包名 `@blocknote/math-block`（非 `@blocknote/math`）；`@uiw/react-md-editor` / `remark-math` / `rehype-katex` 保留供 AI ChatWindow 渲染使用
+**依赖**：`@codemirror/state`、`@codemirror/view`、`@codemirror/commands`、`@codemirror/language`、`@codemirror/lang-markdown`、`@codemirror/search`；`@uiw/react-md-editor` + `remark-math` + `rehype-katex` + `katex` 供预览与 AI Tutor 渲染使用。
+
+**历史选型（已废弃，2026-10-15 → 2026-10-29）**：曾使用 BlockNote（`@blocknote/react|core|mantine|math-block@0.56`）实现 Notion/Jupyter 式块编辑器（块左侧 ⋮ 菜单、右键插入、选中浮窗、拖拽重排、`tryParseMarkdownToBlocks` + `blocksToMarkdownLossy` 往返、块变更后 500ms 防抖）。废弃原因：大文档（约 300 block / 35KB）下选中文字即卡顿且浏览器无响应；关闭全部浮动 UI 后无改善，判定为结构性成本（整页单一 ProseMirror contenteditable、无视口虚拟化、文档级选区）。相关依赖已从 `package.json` 移除，源码已删除。
+
+**已知限制（2026-10-29）**：
+
+1. **多客户端/多标签冲突无版本比较**：本地草稿恢复只比较 `contentMd` / `title` 与当前服务端内容，不判断「谁更新」。彻底解决需 `PageNode.updatedAt` 或乐观锁（后续排期项）。
+2. **本地草稿 key 无员工维度、无 TTL**：key 为 `kg.draft.<pageId>`，共享工作站上换员工登录同一浏览器时可能看到他人的未保存草稿；localStorage 容量无自动清理策略。
+3. **切 Tab 在飞保存与「激活版本」的极窄竞态**：若切到 Releases Tab 时那次保存请求尚未返回，而激活恰在此后完成，理论上旧内容可能晚于激活落库（需在一次请求延迟内完成「打开历史→选版本→确认」才可能触发）。
+4. **切页重试的最坏等待**：保存未收敛时最多 3 次有界重试（每次 120ms 间隔 + 可能 1 次 PUT/GET），慢网下点树到页面切换可能延迟 1~2 秒，且当前无 loading 指示。
+5. **预览↔编辑切换会重建编辑器实例**：撤销历史在预览往返时清空（与切页丢弃历史同源）；如需保留需改用 Compartment 方案。
+6. **Live Preview 覆盖范围（2026-10-29 M2+M3）**：Heading / 粗体 / 斜体 / 删除线 / 行内代码 / 无序列表 / `$…$` 行内公式 / `$$…$$` 块级公式 / `![](url)` 图片 / GFM 表格。实现分两层：**行级/行内**由 ViewPlugin 按 `view.visibleRanges` 计算；**块级 Widget（块公式、表格、整行图片）由 StateField 提供**（CM6 禁止 ViewPlugin 提供 block 装饰与跨行 replace），因此块级是全文档扫描 + 语法树推进后重建。编辑器语言使用 **GFM**（`markdown({ base: markdownLanguage })`）。
+7. **块级解析的边界**：多行 `$$` 公式闭合最多向后 500 行（超出保留源码）；`$$$$` / `$$ $$` 等畸形写法保留源码；GFM 表格仅渲染「首行以 `|` 开头」的独立表格（无外框管道、引用块内表格保留源码）；**表格单元格在预览态渲染行内 Markdown（`**粗体**` / `*斜体*` / `~~删除线~~` / `` `行内代码` `` / `$行内公式$` / 链接 / 图片）**，编辑态下单元格显示原始 Markdown 文本；块公式内部若含表格/图片，以块公式为准（避免两个 block 装饰重叠）。
+8. **表格 Widget 支持就地编辑（2026-10-27 M4）**：预览态点击表格或右上角「✎ 编辑表格」按钮进入编辑态——所有单元格变为 contentEditable，工具条提供 `＋行` / `＋列` / `－行` / `－列` / `完成`；`Tab`/`Shift+Tab` 在单元格间跳转（末尾 Tab 自动加行），`Enter` 跳到下一行同列，`Esc` 取消。点「完成」或失焦时把整张表序列化回 GFM 并通过 `view.dispatch` 替换原范围写回 `contentMd`。实现上通过 `setEditingTable` StateEffect 锁定该表范围，锁定期间「选区接触 → 回退源码」规则对其失效；`markdownBlockWidgets` 与 `markdownLivePreview` 均改为工厂函数，由 `MarkdownSourceEditor` 注入 `getView`。块级公式与图片 Widget 仍为只读渲染（点进范围回退源码）。
+9. **右键在既有表格行内插入新表格会并表**：GFM 中相邻 `|` 行属于同一张表，当前插入只补单个换行，会把新表并入旧表（内容不丢，可 `Ctrl+Z`）。已知限制，下一轮改为补空行分隔。
+10. **图片外链依赖网络与跨域**：`![](url)` 若 URL 失效或站点禁止外链，Widget 只显示破图图标；`data:` 占位串（如历史数据中的 `data:image/png;base64...`）会显示损坏图片，需要作者自行清理。
 
 #### 3.3.3 Tags 管理（2026-10-16 重构：移除页面级 tags，仅保留 section tags + 全局 Tag 词库方案 B）
 
+> **2026-10-29 状态变更**：随着编辑器改为 CM6 源码模式（§3.3.2 改拍），标题标签浮层（每个 H1-H6 下方 TagManager）**暂时下线**。`Page.sectionTags` 数据结构与保存链路不变（仍随 `contentMd` 一起保存），但当前版本**没有编辑入口**。后续入口方案（预览态打标 / 侧栏打标 / 彻底下线）待用户裁决后补文档。
+
 - **页面级 tags 已移除**：编辑器顶部不再显示页面级 TagManager，`Page.tags` 字段删除。
 - **section tags**（`Page.sectionTags`，Json 映射 `{ "h{n}-slug": ["tag1"] }`）：
-  - 每个 H1-H6 标题下方显示一个轻量 TagManager，用户可为该 section 单独打 tag（2026-10-19：由 H1/H2/H3 扩展至 H1-H6）
+  - ~~每个 H1-H6 标题下方显示一个轻量 TagManager~~（**2026-10-29 起无编辑入口**，见上方状态变更；数据结构与保存链路保留）
   - key = `h{层级}-{slug}`，如 `h1-overview`、`h2-subsection`（层级前缀避免同名冲突）
   - slug = heading 文本小写、空格转 `-`、去特殊字符
-  - 修改时实时更新 `sectionTags`，随 contentMd 一起保存
+  - ~~修改时实时更新 `sectionTags`，随 contentMd 一起保存~~（**2026-10-29 起无编辑入口**；保存链路仍原样回传该字段）
   - 用途：AI 投喂时为对应内容段落标注语义标签（如「核心概念」「易错点」），帮助 AI 精准引用
 - **全局 Tag 词库（方案 B 轻量版）**：
   - 独立 `Tag` 表（name 唯一、color），初始内置 4 个预设 tag（Core Knowledge=蓝、Teaching Guidance=绿、Misconception=橙、Assessment=紫）
@@ -520,7 +554,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 #### 4.2.4 Reset 按钮
 
 - 点击后，清空**当前所选模式**的自定义输入（只重置 Lecture / Socratic 中当前这一个）
-- System Prompt / Welcome Message 恢复为**该模式**的默认 PromptTemplate（PromptTemplate 表 load isDefault=true 的记录）；LLM Model 回退默认模型
+- System Prompt / Welcome Message 恢复为**该模式**的默认 PromptTemplate（PromptTemplate 表 load isDefault=true 的记录；**2026-10-26：库中无该模式默认行时回退 `src/ai/prompts/` 文件默认值**）；LLM Model 回退默认模型
 - 接口带 `mode`：`POST /api/ai/config/:courseId/reset`（body `{ mode }`；§5.2）
 
 #### 4.2.5 Save 按钮
@@ -550,6 +584,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 - 左侧：**知识库 Release 选择器**（2026-10-20 新增）——显示「当前测试所选 Release」的 versionTag（蓝色、可点击），其右侧为**动态徽章**（所选 Release ≠ 上线版本时显示 `Testing`；所选 Release = 上线版本时显示 `Live`，均为浅绿底绿字）；再右侧为 **Set Live** 主色按钮。
   - 点击 versionTag 展开下拉：按发布时间**倒序**列出该 Course 全部 Release，**上线版本行**显示绿色 `Live` 徽章、当前所选项高亮；点某行 = 切换 AI Tutor 测试所用 Release（**持久化到后端 `Course.aiTestReleaseId`**）。
+  - **版本说明展示（2026-10-28 新增）**：每个下拉项为两行布局——第一行 versionTag + Live 徽章；第二行展示 `revisionNotes`（单行截断 + `…`，hover 弹出完整说明 Tooltip）。`revisionNotes` 为空时显示灰色占位「无版本说明 / No version notes」，而非留白导致视觉落差。
+  - **滑动窗口（2026-10-28 新增）**：当 Release 数量 > **5** 时，下拉菜单启用垂直滚动（`max-height: 300px` + `overflow-y: auto`，约容纳 5 个双行项）；≤5 时不设高度限制，自然展开。阈值 5 固定为常量，不上调不调低。
   - **Set Live**：仅把 `Course.currentReleaseId` 指向所选 Release，**不重建/覆盖 Page 草稿**（§3.4.4）；成功后左徽章由 `Testing` 切为 `Live`。
   - 切换 Release 时若 AI 配置有未保存改动：**弹未保存改动提醒**（保存 / 取消；§4.3.6）。
   - **进入 AI Tutor 时刷新（2026-10-23 修复）**：模块切换不会清空 `aiStore`，因此每次进入 AI Tutor 都重新拉取当前课程的 `config` 与 Release 列表；在 Knowledge Pages 新建的 Release 会立即出现在版本下拉中。若配置面板存在未保存改动，只刷新列表与配置元数据，**不覆盖表单内容**。Create Release 仍只生成快照，Live 指针只由 Set Live 变更。
@@ -654,7 +690,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 2. **加载配置**：根据 courseId + 测试所选 Release 获取对应的 CourseAiConfig（2026-10-20 按 Release 维度），解析 LLM 提供商和模型（apiKey 字段经 AES-256-GCM 解密后仅在内存中使用，环境变量 `AI_CONFIG_ENCRYPTION_KEY`，2026-10-14 拍板）
 3. **加载知识库上下文**：读取 **`Course.aiTestReleaseId`（为空回退 `currentReleaseId`）** 指向 Release 的 `snapshotData.pages`，按 H1-H6 section 切分 contentMd，每段拼接对应 `sectionTags`（如有），聚合为带语义标注的课程资料
 4. **组装 Prompt**：
-   - 获取对应模式的 PromptTemplate（优先自定义，其次默认）
+   - 获取对应模式的 PromptTemplate（**2026-10-26 完整优先级：课程自定义 > 课程绑定模板 > 库内默认模板 > `src/ai/prompts/` 文件默认值**）
    - 拼接：`System Prompt` + `[CONTEXT_START]` + 课程资料 + `[CONTEXT_END]` + 用户消息
    - 2026-10-22 起不再追加固定苏格拉底指令：默认 Socratic 模板（MixSocratic v8）已包含完整教学规则，运行时仅按学员 `locale` 追加语言指令。
 5. **代理转发**：经 Provider 适配器（策略模式，首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）调用实际 API（流式）
@@ -719,11 +755,11 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/sync/external-courses | 列出 Portal 已发布课程（含同步状态：未同步/已同步/有更新），供选择器 |
+| GET | /api/sync/external-courses | 列出同步目标课程（映射表课程 ∪ 本地带 externalId 的课程，含同步状态：未同步/已同步/有更新），供选择器 |
 | POST | /api/sync/structure | 同步课程标题 + 课时标题，body `{ externalId }`；正文不动 |
 | POST | /api/sync/all | 正文同步已禁用（2026-10-22）：返回 400 `CONTENT_SYNC_DISABLED` |
 
-> 同步语义详见 §3.2.2。外部源为 Portal `GET /api/integration/catalogue`，需要 `PORTAL_API_BASE_URL` + `PORTAL_API_TOKEN`（服务间 `X-API-Key`）。DEV 下 Portal 的 `localhost` 属于 admin host，middleware 已显式放行 `/api/integration/`；若返回 3xx，KS 会提示检查地址与中间件配置。
+> 同步语义详见 §3.2.2。2026-10-26 起数据源为 KS 内置课程 ID 映射表（`server/src/sync/course-registry.ts`），**不再需要 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`**，也不再运行时访问 Portal 目录接口。
 
 #### 5.1.5 文件上传（2026-10-15 新增；同日按 §3.2.3 弹窗设计改为仅转换不建页）
 
@@ -737,7 +773,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/tags | 列出所有 tag（name、color），供 TagManager AutoComplete 联想 |
+| GET | /api/tags | 列出所有 tag（name、color），供 TagManager AutoComplete 联想（TagManager 入口自 2026-10-29 起暂时下线，接口与词库保留） |
 | POST | /api/tags | 创建 tag：`{ name }`；name 已存在则返回已有记录；新 tag 颜色由后端自动分配（按 name 哈希到预设色板） |
 
 ### 5.2 AI 相关接口
@@ -779,7 +815,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 |------|------|------|
 | POST | /api/ai/chat-stream | 流式 AI 对话（SSE 响应）；后端按该 Course 的**测试所选 Release** 解析知识库快照 |
 | GET | /api/ai/models | 获取可用的 LLM 模型列表（数据源 `AI_AVAILABLE_MODELS` env） |
-| GET | /api/ai/prompts | 获取 PromptTemplate 列表 |
+| GET | /api/ai/prompts | 获取默认 PromptTemplate 列表（仅 `isDefault=true`；**2026-10-26：库中缺失的模式按 `src/ai/prompts/` 文件默认值合成返回**，只读不写库；字段 `id` / `mode` / `systemPrompt` / `welcomeMsg` / `isDefault`） |
 | PUT | /api/ai/config | 保存某（课程 × 测试所选 Release × **模式**）的 AI 配置（body 含 `mode`，只写该模式的三项值 + 共享 llmProvider/llmBaseUrl/apiKey） |
 | GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文；含 `releaseId`/`releaseTag`/`isLive` 用于对话头部展示；含 `online` 用户侧开放状态；System Prompt / Welcome / Model **按模式分组**返回，见上方 `AiConfigView`） |
 | POST | /api/ai/config/:courseId/reset | 重置测试所选 Release 的**当前模式**（body `{ mode }`）配置为默认 |
@@ -873,7 +909,7 @@ client/
 > **Phase 4 实装注记（2026-10-14）**：本轮实装 layout/ 与 knowledge/ 组件、pages/KnowledgeSystem.tsx、api/ 与 stores/knowledgeStore.ts。`ai-tutor/` 组件与 `pages/AITutor.tsx`、`api/ai.ts`、`stores/aiStore.ts`、`hooks/useAI.ts` 属 Phase 6；`hooks/` 其余文件与 `utils/` 未建——zustand store 直接承载状态与动作（标准用法，hooks 薄包装属重复抽象），版本号生成由后端完成（§3.4.3 第 4 步），Markdown 渲染由 @uiw/react-md-editor 承担，前端无对应工具需求。dev 环境 `/api` 经 vite.config.ts 代理至后端 :3000。
 
 > **UI 抽象层与设计 Token（2026-10-16 新增，为 Figma 设计库迁移铺路）**：
-> - `theme/tokens.ts` 是颜色/间距/字号/圆角/字重的**单一事实来源**；`index.css` 的 `:root` CSS 变量与之同步，供 BlockNote / md-editor 等不读取 antd ConfigProvider 的第三方库覆盖。
+> - `theme/tokens.ts` 是颜色/间距/字号/圆角/字重的**单一事实来源**；`index.css` 的 `:root` CSS 变量与之同步，供 CodeMirror / md-editor 等不读取 antd ConfigProvider 的第三方库覆盖。
 > - `components/ui/` 是 UI 组件**唯一替换点**：所有业务组件（layout/knowledge/ai/pages）一律 `import from '../ui'`，禁止直接 `import from 'antd'`。未来无论接入 Figma Code Connect、独立组件库还是仅替换 token，都只需修改 `ui/` 与 `tokens.ts`，业务组件零改动。
 > - `App.tsx` 通过 `ConfigProvider theme` 注入与 antd 默认值一致的 token（colorPrimary/success/warning/error/fontSize），确保零视觉变化；业务组件自身的边框/文字/圆角通过 `tokens.*` 内联样式控制。未来接入 Figma 设计库时可在此扩展注入范围。
 > - 当前 token 值与既有 antd 默认值完全一致，**零视觉变化**。
@@ -887,29 +923,36 @@ client/
 
 ### 6.3 Markdown 编辑器配置
 
-> **Phase 4 实装拍板（2026-10-14 用户裁决）**：原推荐的 `md-editor-v3` 为 Vue 3 库、与 React 不兼容，改用 `@uiw/react-md-editor`，KaTeX 经 `remark-math` + `rehype-katex` 接入（§3.3.2 同步更正）。实装配置：
+> **2026-10-29 改拍（当前实现）**：Knowledge 页面编辑器为 **CodeMirror 6 Markdown 源码编辑器**，不使用 `@uiw/react-md-editor` 的编辑态。预览态复用 `MDEditor.Markdown` + `remark-math` + `rehype-katex`（与 Portal / AI Tutor 同一渲染器）。
 
 ```typescript
-import MDEditor from '@uiw/react-md-editor';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+// 编辑：src/components/knowledge/MarkdownSourceEditor.tsx（CodeMirror 6）
+import { EditorState } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, drawSelection, highlightActiveLine } from '@codemirror/view';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { markdown } from '@codemirror/lang-markdown';
+import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 
-// 注意：@uiw/react-md-editor 的预览基于 @uiw/react-markdown-preview（react-markdown 体系），
-// remark/rehype 插件必须经 previewOptions 传入，而非直接作为 MDEditor 顶层 props。
-<MDEditor
-  value={content}
-  onChange={(value) => handleChange(value ?? '')}
-  preview="live"           // 实时预览
-  style={{ height: '100%' }}
-  previewOptions={{
-    remarkPlugins: [remarkMath],
-    rehypePlugins: [rehypeKatex],  // KaTeX：$…$ 与 $$…$$
-  }}
-/>
+const state = EditorState.create({
+  doc: contentMd,                        // contentMd 直接就是编辑器内容（无中间态）
+  extensions: [
+    lineNumbers(), highlightActiveLine(), drawSelection(), bracketMatching(),
+    history(), markdown(), syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+    EditorView.lineWrapping,
+  ],
+});
+
+// 预览：标题栏「预览 / 编辑」切换后渲染（只读）
+import MDEditor from '@uiw/react-md-editor';
+<MDEditor.Markdown source={contentMd} remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} />
 ```
 
-> 代码高亮由 @uiw/react-md-editor 内置（highlight.js）；表格原生支持；编辑内容 500ms 防抖自动保存经 store 调度（§3.3.2）。
+> 语法高亮由 `@codemirror/lang-markdown`（Lezer 增量解析）提供；视口虚拟化使选区/布局成本与文档大小无关。
+> 保存策略：输入 300ms 防抖提交进 draft；**每 5 分钟自动保存 + 离开编辑页/切页/切课程立即保存**；保存失败阻断切换并提示重试；刷新/关闭有 `localStorage` 草稿兜底（详见 §3.3.2）。
+
+> **历史配置（已废弃，2026-10-14 → 2026-10-29）**：曾用 `@uiw/react-md-editor` 的 `preview="live"` 双栏实时编辑 + `previewOptions` 传 remark/rehype 插件，并以 500ms 防抖保存。该编辑器在大文档下与块编辑器一起被替换，编辑态配置已不再使用（`@uiw/react-md-editor` 仅保留 `.Markdown` 渲染用于预览与 AI Tutor）。
 
 ---
 
@@ -1007,9 +1050,7 @@ AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
 # DEEPSEEK_API_KEY="xxx"
 # ANTHROPIC_API_KEY="xxx"
 
-# Portal 课程目录同步（2026-10-22 新增，仅服务间调用）
-PORTAL_API_BASE_URL="http://localhost:3011"
-PORTAL_API_TOKEN="shared-service-token"
+# 课程同步（2026-10-26 改拍：数据源为 KS 内置课程 ID 映射表，无需配置）
 
 # 服务间鉴权（可选；开启后所有 /api 请求需带 X-API-Key）
 AUTH_ENABLED=false
@@ -1069,6 +1110,8 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍
 > **白名单改拍（2026-10-15，用户裁决）**：原表（含 xls/doc/ppt/epub）按 markitdown-ts 实测支持面调整——旧二进制格式 xls/doc/ppt 与 epub 不支持（上传时明确提示「格式暂不支持」）。
 >
 > **白名单扩充（2026-10-19，用户裁决）**：重新支持旧版二进制 **.doc / .xls**——`.xls` 用 SheetJS（`xlsx`）解析转 Markdown 表格，`.doc` 用 `word-extractor` 提取纯文本；其余格式仍由 markitdown-ts 转换（ppt/epub 仍不支持）。**限制说明：`.doc` 仅提取纯文本，不含标题层级 / 表格 / 图片**。
+>
+> **Import 请求体上限（2026-10-27 修复）**：上传弹窗的 Import 经 `POST /api/courses/:courseId/pages` 以 JSON 提交 `contentMd`（整份转换结果），而 Express body-parser 默认 JSON 上限仅 **100KB**；大文档（如 500 页 PDF）会在进入控制器前被拒（413，对外曾误报 500）。现于 `configureApp` 显式把 JSON 请求体上限放宽至 **25MB**（覆盖 15MB 原文件的 Markdown 膨胀与 JSON 转义开销），并在全局过滤器把 body-parser 的 `entity.too.large` 映射为 **400 VALIDATION_ERROR + 可读提示**；前端 `createPage` / `updatePage` 超时同步放宽至 120s。超过 25MB 的文档仍需拆分后再上传（拆分方案待评估）。
 
 ### 10.2 处理流程
 

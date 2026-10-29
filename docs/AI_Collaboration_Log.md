@@ -5,6 +5,213 @@
 
 ---
 
+## 2026-10-28 ｜ AI Tutor Release 下拉：版本说明展示 + 滑动窗口
+
+- **任务（用户）**：AI Tutor 对话头部的 Release 选择器下拉，要求：① 每个版本项下方展示 `revisionNotes`；② 版本数 > 5 时启用滚动窗口。
+- **用户拍板（AskUserQuestion 三轮）**：revisionNotes **单行截断 + 省略号 + hover tooltip**；超过 5 个才启用滚动（`MAX_VISIBLE_RELEASES=5`，`max-height: 300px; overflow-y: auto`）；revisionNotes 为空时显示灰色占位「无版本说明」。
+- **变更清单（设计文档先行）**：
+  - `docs/Learning_Guide_BackOffice_Agent_Development_Document.md` §4.3.1：追加「版本说明展示」和「滑动窗口」两条 bullet
+  - `client/src/components/ai/ChatWindow.tsx`：
+    - 新增常量 `MAX_VISIBLE_RELEASES = 5`、`MAX_DROPDOWN_HEIGHT = 300`
+    - `ReleaseSelector` 新增单一决策变量 `canScroll = releases.length > MAX_VISIBLE_RELEASES`（经验教训：条件收敛）
+    - Dropdown 菜单项 label 由单行改为两行布局（flex column + minWidth 220px + padding）；第一行 versionTag + Live 徽章；第二行 revisionNotes（`whiteSpace:nowrap` + `overflow:hidden` + `textOverflow:ellipsis` 三件套）；外层包 Tooltip（仅 revisionNotes 非空时 `title` 有值，空时 `title=undefined` Tooltip 安全返回 children）
+    - `menu.style` 条件设置：`canScroll ? { maxHeight: MAX_DROPDOWN_HEIGHT, overflowY: 'auto' } : undefined`（antd MenuProps 透传 style 到 `<ul>` 根元素）
+    - 引入 `Tooltip` 从 `../ui`；Typography import 因未使用已移除
+  - `client/src/backoffice/messages/zh-CN.json` / `en-GB.json`：`aiTutor` 命名空间新增 `noRevisionNotes`（zh「无版本说明」/ en「No version notes」）
+- **类型与后端**：后端 `GET /api/courses/:id/releases` 已返回 `revisionNotes`，`ReleaseSummary.revisionNotes: string` 已存在于前端 API 类型，**无需后端改动**、**无 DB/migration 影响**
+- **自测证据**：client `npx tsc --noEmit` EXIT=0；client `npm run build`（tsc -b + vite build）EXIT=0；`npm run lint`（oxlint）0 errors（14 条 warning 为既有项目问题）
+- **审查结论**：test_agent **通过，0 Blocking**。代码审查覆盖 antd MenuProps.style 有效性（rc-menu MenuProps 继承 `HTMLAttributes<HTMLUListElement>`，style 天然包含）、Tooltip title=undefined 安全（antd tooltip.d.ts title 可选，title 空时直接返回 children）、单行截断 CSS 三件套正确性、canScroll 单一决策变量位置合理、边界（0/5/6 个 Release、空/纯空格 revisionNotes）全部覆盖。两条非阻断观察项：OBS-001 revisionNotes 行显式 color 导致选中态不变主色（设计选择，非 bug）；OBS-002 常量可后续提取到 tokens（锦上添花）。
+- **Git**：未提交（待用户手动冒烟）
+- **下一步**：用户手动冒烟验证（见下方清单）
+
+---
+
+## 2026-10-27 ｜ M5：行内格式按钮 toggle（再次点击取消）
+
+- **任务（用户）**：工具栏粗体/斜体/删除线/行内代码/行内公式按钮只会无限叠加标记（如连续点加粗变成 `****text****`），要求「已处于该格式时再次点击取消」。
+- **用户拍板**：方案为「包裹/剥离」toggle；三个风险点一并处理：R1 `*`/`**` 前缀歧义、R2 跨节点选区、R3 空选区光标在标记中间。
+- **变更清单**：
+  - `client/src/components/knowledge/markdownCommands.ts`：
+    - 新增 `isWrapped(text, before, after)`：首尾匹配 + 剥离后内层不以同标记开头/结尾（防 `*` 半剥离 `**text**`）。
+    - `wrapSelection` 重构为 `toggleWrap`：非空选区已包裹→剥离否则包裹；空选区光标夹在 `before|after` 间且两侧非同标记字符→剥离，否则插入 `before+after` 光标居中。保留 `wrapSelection = toggleWrap` 别名。
+  - `client/src/components/knowledge/MarkdownToolbar.tsx`：5 个按钮改用 `toggleWrap`，tooltip 更新为「再次点击取消」。
+  - `client/src/components/knowledge/MarkdownSourceEditor.tsx`：`Mod-b`/`Mod-i` 快捷键改用 `toggleWrap`。
+- **风险点处理**：
+  - R1 `*`/`**`：`isWrapped` 内层残留检测；空选区剥离前检查两侧相邻字符非同标记，避免 `***|***` 误剥离。
+  - R2 跨节点选区（`**a** and *b*`）：首尾不匹配→走包裹，与主流编辑器一致，保留。
+  - R3 空选区：`**|**` 剥离；其余位置插入标记对光标居中。
+- **自测证据**：`npm run build` / `npm run lint` 通过；test_agent 纯函数验证 `isWrapped` 20/20、空选区剥离 17/17。
+- **审查结论**：test_agent APPROVE（0 Blocking）。
+- **Git**：未提交。
+- **下一步**：用户手动冒烟（选中 text→B→`**text**`→B→text；`**|**` 中间点 B 剥离；View 角色无变化）。
+
+---
+
+## 2026-10-28 ｜ M5-bis：选区「包含」判定 + 行内公式 `$$` 修复
+
+- **Bug（用户）**：`**粗体**` 中只选中「粗体」两个字点加粗，结果变成 `****粗体****` 而非取消加粗。期望：**只要选中加粗范围内的任何内容，点加粗就取消该加粗**；斜体/删除线/行内代码/行内公式同理。
+- **根因**：原 `toggleWrap` 只检查选区文本本身是否首尾被标记包裹，不感知选区是否落在格式节点内部。
+- **方案（用户确认）**：用 CM6 语法树查找「包含选区」的同类格式节点，命中则剥离该节点首尾标记，否则包裹。
+- **变更（`markdownCommands.ts`）**：
+  - `MARKER_NODES`：`**`→StrongEmphasis / `*`→Emphasis / `~~`→Strikethrough / `` ` ``→InlineCode。
+  - `findContainingNode`：`resolveInner(from,1)` 向上走父链，找内容区间 `[node.from+beforeLen, node.to-afterLen]` **包含**选区的最内层节点（非空：`from>=innerFrom && to<=innerTo`；空：光标在 `[innerFrom,innerTo]` 内）。
+  - `findContainingMath`：`$` 无语法节点，按行扫描（规则与 Live Preview 一致），找包含选区的 `$…$` 区间。
+  - `mapPosAfterStrip`：选区位置映射到剥离后的新位置。
+  - `toggleWrap` 重写：先按主选区判定 strip（语法树→行内扫描→兜底 `isWrapped`），命中则单次 dispatch 替换为 innerText；否则 `changeByRange` 包裹。
+- **首轮 review 发现的 2 个 Blocking 及修复**：
+  - **B1**：非空选区误用「重叠」判定，跨节点选区（`**a** xx **b**` 选 `a** xx **b`）被剥第一个节点。→ 改为「包含」判定 `from>=innerFrom && to<=innerTo`，跨节点走包裹。
+  - **B2**：`findInlineMathInLine` 遇 `$$` 只前进 1 格，`$$E=mc^2$$` 被误判为行内公式并剥成 `$E=mc^2$`。→ 开/闭 `$` 处遇 `$$` 均前进 2 格，对齐 Live Preview。
+- **自测证据**：`npm run build` / `npm run lint` 通过；test_agent 真实 CM6 树驱动 11 场景全通过（含 B1/B2 复现场景）。
+- **审查结论**：test_agent APPROVE（0 Blocking，复审通过）。
+- **Git**：未提交。
+- **下一步**：用户手动冒烟（见下方清单）。
+
+---
+
+## 2026-10-27 ｜ M4：表格 Widget 就地可视化编辑 + 单元格行内 Markdown 渲染
+
+- **任务（用户）**：表格只能手写 GFM 管道符太麻烦，要求支持像 Notion 那样点击编辑；并希望单元格内渲染 `**粗体**` / `$公式$` 等行内格式。
+- **用户拍板**：方案 A（就地可编辑 Widget，预览态→编辑态）；单元格内支持行内 Markdown 渲染；暂不做拖选行列数的创建网格。
+- **变更清单**：
+  - `client/src/components/knowledge/markdownWidgets.ts`：
+    - `TableWidget` 由只读改为双态：**预览态**（右上角 hover 显现「✎ 编辑表格」按钮，点击表格任意处也可进入）渲染 `<table>`，单元格通过新增的 `renderInline()` 渲染行内 Markdown（粗体/斜体/删除线/行内代码/行内公式/链接/图片，支持转义与嵌套）；**编辑态**单元格 contentEditable，工具条 `＋行`/`＋列`/`－行`/`－列`/`完成`；`Tab`/`Shift+Tab` 跳格（末尾 Tab 自动加行）、`Enter` 下一行同列、`Esc` 取消；失焦或点「完成」时 `syncCellsToTable()` + `serializeTable()` 写回。
+    - 新增 `parseTable()` / `serializeTable()`（单元格内 `|` 转义为 `\|`）、`renderInline()`、`Align` 类型；`parseDestination` 从 blockWidgets 迁移至此（消除循环依赖）。
+    - `TableWidget.eq()` 纳入 `editing` 标志，确保切换态时重建 DOM；`ignoreEvent()` 返回 `true`，Widget 自管交互。
+  - `client/src/components/knowledge/markdownBlockWidgets.ts`：
+    - 改为工厂 `createMarkdownBlockWidgets(getView)`，注入 view 给 Widget 用于 dispatch；新增 `setEditingTable` StateEffect 锁定正在编辑的表格范围（锁定期间 `decorateActive` 不对其应用「选区接触→回退源码」）。
+    - 文档变化后自动清除编辑锁；`editing` 变化触发重建装饰。
+  - `client/src/components/knowledge/markdownLivePreview.ts`：改为工厂 `createMarkdownLivePreview(getOccupiedLineRanges)`，与块层解耦。
+  - `client/src/components/knowledge/MarkdownSourceEditor.tsx`：接线两个工厂，`getView = () => viewRef.current`。
+  - `client/src/index.css`：`.cm-md-table-edit-btn`、`.cm-md-table-editing`、`.cm-md-table-toolbar`、`.cm-md-table-cell-edit` 等编辑态样式。
+  - `docs/..._Development_Document.md` §3.3.2：更新第 7、8 条（表格单元格行内渲染 + 就地编辑）。
+- **自测证据**：`npm run build` 通过（tsc + vite）、`npm run lint` 0 errors（12 条预存 warning 与本次无关）。
+- **审查结论**：test_agent 首轮提出 4 项 Blocking（B1 链接 XSS / B2 View 角色可编辑 / B3 工具条失焦误提交 / B4 外部文档变更丢单元格输入），均已修复并复审通过。附带修复 N1（align 补齐）、N3（删行删列重置焦点）、N4（Shift+Enter 不插换行）、N6（图片 src 走 safeUrl）、N7（末尾 Tab/Enter 加行后焦点记忆）。
+- **Git**：未提交。
+- **下一步**：test_agent 审查 → 修复 → 用户手动冒烟（点表格进入编辑、Tab 跳格、加行加列、完成写回、单元格内 `**x**`/`$x$` 预览态渲染、Esc 取消）。
+
+---
+
+## 2026-10-27 ｜ AllExceptionsFilter 日志级别分级（4xx 不再误报 ERROR）
+
+- **任务（用户）**：终端连续输出 `ERROR [AllExceptionsFilter] 请求处理异常: Sign in required`，询问是否有问题。
+- **定位结论**：`Sign in required` 是 `INVALID_EMPLOYEE_ACCOUNT` → HTTP 401（未登录），属正常业务场景（会话过期）。但 `AllExceptionsFilter` 对**所有**异常统一用 `logger.error` 打印，导致 4xx 客户端错误被误报为服务器故障，污染日志、掩盖真正的 5xx 错误。连续 3 条是前端并发请求在首个 401 返回前已发出（竞态，非 bug），前端已有 401 拦截跳转登录页。
+- **用户拍板**：直接修复。
+- **变更清单**：
+  - `server/src/common/filters/all-exceptions.filter.ts`：日志按最终 `status` 分级——`status >= 500` 用 `logger.error`（含 stack，服务器故障需告警），`status < 500` 用 `logger.warn`（4xx 客户端错误属正常业务）；日志消息格式改为 `请求处理异常 [status] message`，便于 grep。
+  - `server/src/common/filters/all-exceptions.filter.spec.ts`：新增用例断言 4xx 调用 `warn` 且不调用 `error`；beforeEach 增加 `warn` mock。
+- **自测证据**：server `npm test -- --runInBand` → **29 套件 / 185 用例全部通过**（新增 1 个）；server `npm run build` 成功。
+- **审查结论**：test_agent **APPROVE**（Blocking=0）。Non-blocking：Prettier 折行已修复；枚举比较 lint 与既有代码风格一致，不单独处理。
+- **Git**：未提交。
+- **下一步**：无需手动验证（日志级别调整）。重启 dev server 后未登录访问接口，终端应显示 `WARN` 而非 `ERROR`。
+
+---
+
+## 2026-10-27 ｜ 修复上传 .md 文件后页面白屏（codeBlock/mathBlock 误转 math + 缺失错误边界）
+
+- **任务（用户）**：上传 .md 文件后页面突然白屏。
+- **定位结论**：`PageEditor.tsx` 的 `convertMathParagraphs` 第 2 步用 `Array.isArray(block.content)` 遍历所有带 content 数组的块（含 codeBlock），把代码块中的 `$var`、`$100` 等误转为 `math` 行内内容项。但 codeBlock 的 inlineContent spec 只支持 `text` 类型，BlockNote 渲染时遇到不支持的 `math` 类型抛出异常，整个 React 树崩溃 → 白屏。同时应用全局无 ErrorBoundary，任何渲染异常都会导致白屏。
+- **用户拍板**：直接修复，无需方案讨论。
+- **变更清单**：
+  - `client/src/components/knowledge/PageEditor.tsx`：`convertMathParagraphs` 第 2 步条件增加 `block.type !== 'codeBlock' && block.type !== 'mathBlock'`（mathBlock 的 content 同为 plain，仅支持 text，一并跳过以防御 latex 内含 `$` 的边缘场景）。
+  - `client/src/components/ErrorBoundary.tsx`（新增）：全局错误边界 class 组件，`getDerivedStateFromError` 捕获异常、`componentDidCatch` 控制台记录，fallback UI 用 antd `Result` 展示错误信息 +「重新加载」按钮。
+  - `client/src/App.tsx`：在 `ConfigProvider` + `AntApp` 内部用 `<ErrorBoundary>` 包裹 `<Routes>`（确保 fallback UI 获得主题与 antd 上下文）。
+- **自测证据**：client `npm run build`（tsc + vite build）成功；oxlint 0 errors（9 warnings 为项目原有）。
+- **审查结论**：test_agent **APPROVE**（Blocking=0）。Non-blocking 建议：同步跳过 mathBlock（已采纳）；ErrorBoundary 实际触发需用户手动验证。
+- **Git**：未提交。
+- **下一步**：用户手动冒烟——上传含代码块（含 `$var`/`$100`）的 .md 文件，确认不再白屏、代码块 `$` 保留为文本；上传含 `$...$` 行内公式与 `$$...$$` 块公式的文件，确认公式正常渲染。
+
+---
+
+## 2026-10-27 ｜ 修复大文档导入后 sectionTag「+ 标签」按钮全部堆积左上角
+
+- **任务（用户）**：500 页 PDF 整本导入后，页面编辑器里每个标题旁的「+ 标签」按钮全部堆在左上角（top:0, left:0）且重叠；另有公式/图片乱码（另见下一事项）。
+- **定位结论**：`PageEditor.tsx` 用 `headingKey(level, text)` = `h{n}-{slug}` 同时作 React key 与 `tagItemRefs` key。大文档中标题文本大量重复（多个 "Chapter"、"1.1"），导致 `tagItemRefs.set(key, el)` 被同 key 覆盖——仅最后一个同 key 标签被定位，其余停在默认 `(0,0)`；同时 React 出现重复 key。
+- **用户拍板**：先修 bug（标签定位），公式乱码单独评估方案。
+- **变更清单**（仅 `client/src/components/knowledge/PageEditor.tsx`）：
+  - 新增 `HeadingEntry{ sectionKey, uniqueKey }`：`sectionKey` 仍为 `h{n}-{slug}` 用于 sectionTags 数据存取（不破坏既有数据），`uniqueKey` = `sectionKey` + 出现序号（`#1`, `#2`...）用于 React key 与 ref，保证唯一。
+  - `headingKeys: string[]` → `headingEntries: HeadingEntry[]`；新增 `headingEntriesRef` 供 MutationObserver 回调读取最新条目（避免闭包陈旧）。
+  - `updateTagPositions` 改为按 **DOM 顺序索引**匹配 tag 元素（`headingEls[i] ↔ entries[i]`），不再按 key 查 ref。
+  - `syncHeadings` 用 `occurrence` Map 生成 uniqueKey。
+  - MutationObserver 回调加 rAF 节流（大文档每次按键不再重算数百个 `getBoundingClientRect`）。
+  - JSX：`key`/`ref` 用 `entry.uniqueKey`，sectionTags 读写用 `entry.sectionKey`。
+- **自测证据**：client `npm run build`（tsc + vite build）0 error；oxlint 0 error。
+- **审查结论**：test_agent **APPROVE**（Blocking=0）。Non-blocking：rAF 节流已在本轮补上；工作树含上轮 Import 修复的配套变更（app-setup/filter/knowledge.ts），属同一大文档导入场景。
+- **Git**：未提交。
+- **下一步**：用户手动冒烟——重新导入 500 页 PDF，确认标签按钮分布在各标题右侧而非堆积左上角；编辑时不卡顿。
+
+---
+
+## 2026-10-27 ｜ 修复大文档 Import 误报「服务器内部错误」（body-parser 100KB 上限）
+
+- **任务（用户）**：上传约 500 页 PDF（含文字/公式/图片），解析成功、点 Import 时报「服务错误」。
+- **定位结论**：Import 经 `POST /api/courses/:courseId/pages` 以 JSON 提交整份 `contentMd`；Express body-parser 默认 JSON 上限 **100KB**，大文档在进入控制器前被 413 拒绝；该错误不是 `HttpException`，被 `AllExceptionsFilter` 落到默认分支 → **500「服务器内部错误」**。15MB 限制仅作用于 `/api/files/convert` 的 multipart，不覆盖 Import 的 JSON。
+- **用户拍板**：先按**方案 A（最小改动）**修复并自测；若出现编辑器卡死等状况，再讨论拆分多页（方案 B）。
+- **变更清单**：
+  - `server/src/common/app-setup.ts`：新增 `JSON_BODY_LIMIT='25mb'`；`configureApp` 内在 `app.init()` 前注册自定义 json parser（先于 Nest 默认 100KB parser，body-parser 因 `_body` 已解析会跳过默认 parser）。
+  - `server/src/common/filters/all-exceptions.filter.ts`：新增 `isEntityTooLarge()`（`type==='entity.too.large'` 或 413），映射为 **400 VALIDATION_ERROR +「请求内容过大，请拆分文档后重试」**；multer 的 413 仍走 HttpException 分支保留 15MB 文案。
+  - `client/src/api/knowledge.ts`：`createPage` / `updatePage` 超时放宽至 120s（其余接口仍 15s）。
+  - 测试：新增 `server/src/common/app-setup.spec.ts`（3 用例）、`all-exceptions.filter.spec.ts` 新增超限映射用例。
+  - 设计文档 §10.1 追加 2026-10-27 修复说明（25MB + 413→400 语义 + 前端超时）。
+- **自测证据**：server `npm test -- --runInBand` → **29 套件 / 184 用例全部通过**；server `npm run build`、client `npm run build` 均成功；改动文件已 prettier 格式化。
+- **审查结论**：test_agent **APPROVE**（Blocking=0）。Non-blocking：① `knowledgeStore.refreshDetail` 仍走 15s `getCourse`（慢网大响应可能「建页成功却提示失败」，建议后续放宽或加轻量树接口）；② app-setup 单测仅验证委托调用，未做 adapter 级 limit 生效证明；③ 已补本日志。
+- **Git**：未提交（等用户手动验证后按需推送分支）。
+- **下一步**：用户手动冒烟——500 页 PDF 上传→Import 成功并自动选中新页；观察编辑器/KaTeX 是否卡顿；若卡顿则启动方案 B（按标题/体积拆分多页）。
+
+---
+
+## 2026-10-26 ｜ 默认 Prompt / Welcome 改为运行时文件兜底（方案 B，云端空库不再空白）
+
+- **任务（用户）**：云端 App Runner 空库，生产镜像 `npm ci --omit=dev` 不含 ts-node，无法执行 `npm run prompts:sync`；导致 `GET /api/ai/prompts` 返回空、后台 AI Tutor 的 System Prompt / Welcome 两栏空白、对话 System Prompt 为空串。用户拍板按「方案 B：运行时只读兜底，不写库」修复。
+- **用户拍板**：① 采用方案 B（应用启动不写库、不覆盖库内已有默认模板）；② 保留 `npm run prompts:sync` 作为主动落库手段；③ 先改设计文档再改实现（项目规则）。
+- **变更清单**：
+  - `server/src/ai/ai-config.service.ts`：新增 `PromptTemplateView`；`listPrompts()` 库内 `isDefault` 行优先，对缺失模式及空串字段按 `src/ai/prompts/` 文件默认值补齐（合成行沿用 `lecture-default` / `socratic-default` id），并用 `toPromptMode()` 过滤非法 mode；`resolvePrompts()` 的 System Prompt / Welcome 增加文件兜底（`DEFAULT_PROMPTS` / `defaultWelcome(mode,'zh-CN')`）。读路径无任何 `promptTemplate` 写操作。
+  - `server/src/ai/ai-config.service.spec.ts`：新增 6 条用例（空库合成两条、部分缺行只补缺失模式、空串字段补齐、非法 mode 过滤、空库 resolvePrompts 回退文件、课程绑定模板 id 失效回退文件）。
+  - `server/src/ai/prompt-defaults.ts`：注释说明这些文件同时是运行时兜底。
+  - 设计文档 §2.1（Seed 例外说明）、§4.2.4（Reset 兜底）、§4.4.2 第 4 步（完整优先级链）、§5.2 接口表（`/api/ai/prompts` 合成口径）同步更新。
+- **自测证据**：`npm test -- --runInBand` **28 套件 / 180 用例全部通过**；`npm run build` 0 error；`dist/ai/prompts`（lecture.md / socratic.md / welcome.yaml）存在，生产镜像具备文件兜底能力；未新增依赖、无密钥变更；优先级保持「课程自定义 > 绑定模板 > 库内默认模板 > 文件默认」。
+- **审查结论**：test_agent 通过；Review Agent **APPROVE**（无 Blocking）。Non-blocking 已处理：mode 断言改为 `toPromptMode` 收窄、空串默认行补齐、换行格式；保留项：绑定模板 id 失效补 `findFirst`（外键 `ON DELETE SET NULL`，现网不可达）、e2e 内容断言（需 Postgres 测试库）、合成 id 不可回写（当前无绑定接口）。
+- **Git**：未提交（等用户确认后按需推送分支）。
+- **下一步**：用户手动冒烟——云端空库 `GET /api/ai/prompts` 返回两条非空默认模板；后台配置页 Lecture/Socratic 均有默认 System Prompt / Welcome；测试对话正常；学员端欢迎语不受影响。
+
+---
+
+## 2026-10-26 ｜ 课程同步数据源改为 KS 内置课程 ID 映射表（删除 Portal 目录拉取）
+
+- **任务（用户）**：不再由 KS 运行时向 Portal 获取课程 ID；直接按当前 courseID 映射一份到 KS，KS 通过这份映射执行同步。原因：后期课程主数据归 BackOffice，KS 只需 courseID 即可；同时删除原先 KS 向 Portal 获取课程数据的实现。
+- **用户拍板**：① 映射表只收录 Portal 真实 4 门课 ID（`epicureanism` / `stoicism` / `quintus-horatius-flaccus` / `modeling-life`）；② **同步目的不变**——仍同步课程标题 + lesson 结构化同步，当前无 lesson 数据故为空，不改变同步原有语义，只要课程能一一对应即可。
+- **变更清单**：
+  - 新增 `server/src/sync/course-registry.ts`：内置 courseID → 标题映射表（4 门），后续 BackOffice 接管时替换此数据源
+  - 新增 `server/src/sync/catalogue-source.service.ts`：本地数据源，替代 `PortalSourceService`
+  - 删除 `server/src/sync/portal-source.service.ts` 与 `portal-source.service.spec.ts`
+  - `server/src/sync/sync.service.ts`：DI 改为 `CatalogueSourceService`；`listExternalCourses()` 改为「映射表课程 ∪ 本地带 externalId 的课程」，避免映射表外的本地课程从侧栏消失；映射表外课程执行同步返回 `unchanged: true`（不再 404）
+  - `server/src/sync/sync.module.ts`、`sync.controller.ts`：provider 与注释同步
+  - `server/.env.example`：删除 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`
+  - `server/test/knowledge.e2e-spec.ts`：`overrideProvider(CatalogueSourceService)` 注入带 lesson 的假数据源，继续覆盖标题同步 + 课时建页算法
+  - 新增 `catalogue-source.service.spec.ts`、`sync.service.spec.ts` 单元测试
+  - 前端文案去掉 Portal 口径：`SyncButtons.tsx`（按钮「同步课程标题」）、`Sidebar.tsx`（「同步目标（课程 ID）」）、`knowledgeStore.ts`
+  - 设计文档 §3.2.2 / §5.1.4 / §10 环境变量同步改拍说明
+- **自测证据**：`tsc --noEmit` 0 error；`jest` 28 套件 / 174 用例全部通过（新增 sync 相关 10 用例）；`server`/`client` 构建均成功
+- **审查结论**：待 test_agent 验证
+- **下一步**：用户手动冒烟（侧栏选课 → 同步 → 新课程 `modeling-life` 是否建出）
+
+---
+
+## 2026-10-26 ｜ 密码规则改为 8–128 字符并在激活/重置页展示规则提示
+
+- **任务（用户）**：密码长度调整为 8 到 128 个字符；仅做长度校验，不做大小写、数字、特殊字符等复杂度要求；在激活或重置设置密码的页面给出密码规则提示。
+- **用户拍板**：直接按上述口径实施，完成后直接提交并推送到目标分支（`dev`）。
+- **变更清单**：
+  - `server/src/backoffice/lib/securityPolicy.ts`：`PASSWORD_MIN_LENGTH` 12 → 8（`PASSWORD_MAX_LENGTH` 保持 128）；`isPasswordAcceptable` 仍只校验长度
+  - `client/src/backoffice/messages/en-GB.json` / `zh-CN.json`：新增 `passwordRule.hint` 文案
+  - `client/src/backoffice/pages/ActivatePage.tsx`、`ResetPasswordPage.tsx`：在「新密码」输入框下以 `fieldHint` 展示规则提示
+  - `docs/BackOffice_Portal_Implementation.md` §6.1：密码长度参数同步为 8–128
+- **自测证据**：`server` / `client` 分别 `npx tsc --noEmit` 均 0 error；`jest src/backoffice/tests/password.spec.ts src/backoffice/tests/envelope.spec.ts` 10/10 通过；两份语言包 JSON 解析通过
+- **审查结论**：改动为单常量 + 文案 + 提示渲染；UI 由用户手动验收
+- **Git**：`dev` 已推送提交「feat(backoffice): adjust password rule to 8-128 chars and show rule hint」（本机到 github.com:443 直连超时，改用 GitHub API 写入同一 tree/提交内容）
+- **下一步**：无
+
+---
+
 ## 2026-10-24 ｜ KS Engine / Agent Engine 拆分（可独立部署、独立扩容）
 
 - **任务（运维）**：Admin/Portal API、KS/Agent 引擎、数据层三份设计；两个系统深度联动但发版互不影响，KS 和 Agent 可独立扩容。
@@ -1042,3 +1249,86 @@
   - 登录卡片 358→**424** 宽、内距 36、圆角 16、输入框 42、标题 36px
 - **验证**：tsc 0 error、eslint 0 warning、单测 47/47、`next build` 通过；CDP 实测（1672 视口）逐项比对 header 68 / sidebar 280 / nav 50 / subnav 276 / card 1082×852 / th 50 / td 51 全部一致
 
+
+---
+
+## 2026-10-29 Knowledge 编辑器替换为 CodeMirror 6（Markdown 源码 + 预览）
+
+- **问题**：BlockNote 块编辑器在约 300 block / 35KB 的页面上「选中任意文字即卡顿、浏览器未响应」
+- **排查结论**（有日志与源码证据）
+  - Tiptap `update` 只在 `docChanged` 触发 → 纯选中不进我们的 `onChange`；`MutationObserver` 已于前一轮移除
+  - 长任务 60~250ms 全部来自「整篇 blocks→markdown 序列化」（`toExternalHTML` 还会为每个 image block 建 DOM 并请求 URL）
+  - 手测：关闭 BlockNote 全部浮动 UI（侧边菜单/格式气泡/链接条/表格手柄）+ 标题标签浮层后**完全无改善** → 结构性成本（整页单 contenteditable、无虚拟化、文档级选区）
+- **参考**：Notion（块级独立编辑器 + 视口虚拟化 + 块级事务）、Jupyter（每 cell 独立 CM6 实例 + 模态编辑，JupyterLab 4 升级 CodeMirror 6）
+- **改拍**（用户裁决）：放弃块级 WYSIWYG，改 **CodeMirror 6 纯 Markdown 源码编辑 + 标题栏「预览」按钮**
+  - 新增 `src/components/knowledge/MarkdownSourceEditor.tsx`（CM6：行号/历史/查找/markdown 高亮/readOnly Compartment）
+  - 重写 `src/components/knowledge/PageEditor.tsx`：删除 BlockNote 全套（schema、math 块转换、`tryParseMarkdownToBlocks`、`replaceBlocks`、pasteHandler、标签浮层）；预览复用 `MDEditor.Markdown + remark-math + rehype-katex`
+  - `contentMd` 直接作为编辑器内容 → 整篇序列化链路彻底消失；TOC 改为按 markdown 行号定位
+  - 依赖变更：新增 `@codemirror/{state,view,commands,language,lang-markdown,search}`；移除 `@blocknote/{core,react,mantine,math-block}`
+- **保存策略变更**（用户指定）：编辑期间每 5 分钟自动保存 + 离开编辑页/切页/切课程立即保存；`flushSave` 改为返回 boolean 并在失败时阻断切换；新增 `pagehide/visibilitychange` 写 localStorage 草稿 + 打开页面时询问恢复
+- **审查修复**（test_agent 5 项 Blocking）：跨页撤销污染（编辑器 `key=pageId` 重建）、`saved` 覆盖 `dirty`（改为请求快照比对）、保存失败静默丢稿（阻断 + 重试按钮）、刷新无兜底（本地草稿）、文档与日志未同步（本节 + §3.3.2/§3.3.3）
+- **验证**：`npm run build`、`npm run lint`（0 error）
+- **待用户裁决**：§3.3.3 section tags 编辑入口去向（预览态打标 / 侧栏打标 / 彻底下线）
+- **复审后追加修复（同日）**
+  - B6 本地草稿误恢复：`persistToLocal` 仅在 `dirty/saving/error` 时写；本地草稿的清理统一由 store 负责（保存成功、切页、激活版本、删除页均调用 `clearLocalDraft`）；恢复判定同时比较 `contentMd` 与 `title`，弹窗展示 `savedAt` 时间
+  - B7 激活版本回写旧稿：`afterActivateRelease` 恢复「丢弃草稿 + 清本地草稿」语义（遵从 2026-10-19 既有裁决）；激活前的未保存提醒沿用 PublishPanel 现有 confirm 文案
+  - B5 文档正文重写：§3.3.2「核心不变量 / 交互模型 / 保存与兜底 / 图片与表格 / 兼容性 / 依赖」全部按 CM6 实现重写，BlockNote 内容下沉为「历史选型（已废弃）」；§3.3.3 标注 tags 入口暂时下线
+  - 附带：`selectPage` 在切换前再做一次提交+保存并校验 `saved/idle`，消除等待窗口内的丢稿风险；删除 `saveState==='saving'` 不可达分支；修正「序列化」陈旧注释
+- **终审前修复（同日，第三轮）**
+  - P2-1：`selectPage` 的 page 查找移到「最后一次 flush + 状态校验」之后，避免用旧 contentMd 作为新页基线
+  - P2-2：切页/切课程改为最多 3 次有界重试（每次 120ms 间隔且先执行 `draftFlusher()`），仍不收敛则阻断切换（内容保留在 draft，不丢）
+  - P2-3：`selectExternal` 与 `selectPage` 完全对齐（首 flush + 有界重试 + 末次提交 + 状态门禁 + `clearLocalDraft`）
+  - P2-4：本地草稿恢复弹窗增加门禁，仅内存 draft 为 `idle/saved` 时提示，避免用更旧快照覆盖更新内容
+  - P2-5：`deleteCourse` 删除当前课程时清当前页本地草稿
+  - 文档：§3.3.2 标题改拍；§6.3「Markdown 编辑器配置」整节重写为 CM6 + 预览（旧 `preview="live"`/500ms 配置下沉为历史）；§3.3.3 标注 tags 编辑入口无入口；§3.2.1 / §5.1.6 / §6.2 补 2026-10-29 注记；§3.3.2 末尾新增「已知限制（2026-10-29）」5 条
+  - 验证：`npm run build`、`npm run lint`（0 error / 11 既有 warning）
+- **M1+M2（同日）：Live Preview 装饰层 + 格式工具条 + 右键插入**
+  - 新增 `markdownLivePreview.ts`：CM6 ViewPlugin + Lezer 语法树，仅处理 `view.visibleRanges`；Heading 放大并隐藏 `#`、StrongEmphasis/Emphasis/Strikethrough/InlineCode 加样式并隐藏标记、无序列表隐藏 `- ` 改用 CSS 项目符号、表格行等宽对齐、围栏行弱化；**选区/光标进入范围时回退显示原始 Markdown**；代码块内不做装饰
+  - 新增 `markdownCommands.ts`：`wrapSelection` / `toggleLinePrefix` / `setHeading` / `insertSnippet`（纯文本操作，基于 `changeByRange` 与 `dispatch`）
+  - 新增 `MarkdownToolbar.tsx`：常驻顶部工具条（H1/H2/H3/段落、粗体 Ctrl+B、斜体 Ctrl+I、删除线、行内代码、行内公式、链接、无序/有序列表、引用），`mousedown` 阻止抢焦点以保住选区，`selectionchange` 同步高亮
+  - `MarkdownSourceEditor.tsx`：接入 `markdownLivePreview` 扩展与 Mod-b / Mod-i 快捷键
+  - `PageEditor.tsx`：编辑器包 `Dropdown` 右键插入（表格模板 / `$$…$$` / `$…$` / 图片 / 代码块 / 引用 / 分割线），插入后自动选中占位文本；`index.css` 新增 `.cm-md-*` 装饰样式
+  - 文档：§3.3.2 交互模型补充 Live Preview / 工具条 / 右键菜单；已知限制新增「M3 公式与图片 widget 未做」「表格仅样式对齐」
+  - 验证：`npm run build`、`npm run lint`（0 error）
+- **M1+M2 审查后修复（同日）**
+  - F1 块级插入黏连：`insertSnippet` 增加 `block` 选项（行中前补空行、行尾有内容时后补换行）；表格/公式块/代码块/图片/分割线按块级处理，行内公式与链接不补空行
+  - F2 右键位置：编辑器外层 `onContextMenu` 用 `posAtCoords` 把光标落到点击处，插入位置与右键位置一致
+  - F3 只读角色可被快捷键改写：四个命令统一加 `state.readOnly` 守卫；`MarkdownSourceEditor` 的只读 Compartment 同时设置 `EditorView.editable.of(!readOnly)`；Mod-b/Mod-i 只读时不拦截
+  - F4 删除线不渲染：编辑器语言改为 GFM（`markdown({ base: markdownLanguage })`），`Strikethrough` / `Table` 节点可用，与预览端 `remark-gfm` 对齐
+  - F5 有序列表多出项目符号：新增 `cm-md-oli`（无 ::before），仅无序列表用 `cm-md-li`
+  - F6 关闭列表时空行被写前缀：`toggleLinePrefix` 先判定「移除方向」，移除时跳过空行
+  - F8 装饰细节：隐藏标记改用严格相交判断；代码块区间改半开区间；行内节点按 `from` 去重；`update` 增加语法树身份变化重算；行内公式按钮改为插入 `$x$` 并选中 `x`（避免空选区产生 `$$`）
+  - 验证：`npm run build`、`npm run lint`（0 error / 12 warning）
+- **M1+M2 第二轮审查后修复（同日）**
+  - R1 分割线/块级片段在段落行首：`insertSnippet` 的 `block` 前缀逻辑改为「行中补 `\n\n`；行首且上一行非空补 `\n`」，避免 `---` 把上一段变成 Setext 标题
+  - R2 工具条 `$x$` 有选区时丢内容：有选区 → `wrapSelection('"'"'$'"'"')` 包裹选中文本；空选区 → 插入 `$x$` 并选中 `x`
+  - R3 有序列表左移 6px：删除 `.cm-md-oli` 的 `padding-left: 0`（不再覆盖 CM6 `.cm-line` 基础 padding）
+  - R4 行内标记内部光标不可见：行内隐藏判断恢复为**含端点**相交（`selectionTouches`），行首标记仍用严格相交
+  - R5 已修复（`suffix` 改为基于 `lineAt(range.to)` 行尾，跨行选区不再黏连）；R6 仅部分缓解（紧邻既有 `|` 表格行插入新表格仍会被并入同一 GFM 表，已列入 §3.3.2 已知限制，待下一轮用空行分隔修复）
+  - R7 右键折叠选区：点击落在已有选区内时保留选区，否则才把光标落到点击处
+  - 验证：`npm run build`、`npm run lint`（0 error / 12 warning）
+- **M3（同日）：公式 / 图片 / 表格就地渲染（Widget）**
+  - 新增 `markdownWidgets.ts`：`InlineMathWidget` / `BlockMathWidget`（KaTeX `renderToString` + 结果缓存，失败退回原文）、`ImageWidget`（行内/块级、`loading=lazy`、显示 alt 题注）、`TableWidget`（GFM → `<table>`，含对齐解析）
+  - `markdownLivePreview.ts` 新增 `buildWidgetDecorations`：块级公式按行配对 `$$…$$`、GFM `Table` 节点整体替换、`Image` 节点按「整行只有图片」判定块/行内、行内公式正则扫描（跳过代码块/表格/块级公式占用的行，拒绝 `$ 100 $` 这类货币空格写法）；返回 skipLines 供行级/行内层跳过，避免重复渲染
+  - `index.css` 新增 `.cm-md-math-*` / `.cm-md-image-*` / `.cm-md-table-widget` 样式
+  - 交互：光标/选区接触即回退源码（沿用 `selectionTouches`），Widget 为只读渲染
+  - 文档：§3.3.2 交互模型与已知限制更新（M3 已实现；表格/公式 Widget 只读；外链图片失败/坏占位说明）
+  - 验证：`npm run build`、`npm run lint`（0 error / 12 warning）
+- **M3 审查修复（同日）**
+  - P0：块级 Widget 从 ViewPlugin 迁出，新增 `markdownBlockWidgets.ts`（`StateField` + `EditorView.decorations.from`），修复 CM6「ViewPlugin 不得提供 block 装饰 / 跨行 replace」必然抛错问题；ViewPlugin 仅保留行级/行内单行 replace
+  - P1-1：`StateField.update` 增加 `syntaxTree(startState) !== syntaxTree(state)` 判断，语法树异步推进（初始只解析前 ~3000 字符）后重建块候选，修复长文档尾部表格/图片不渲染
+  - P1-2：行内公式扫描增加 `inCodeRange` 判断，围栏/缩进代码块内 `$x$` 不再渲染
+  - P1-3：`collectBlocks` 按 from 排序做区间去重（块公式优先），消除块公式与嵌套表格/整行图片的 block replace 重叠
+  - P2-1：多行 `$$` 的 latex 起点按 `line.text.indexOf('$$')` 计算，缩进写法不再把定界符带进 latex
+  - P2-2：`$$ $$` / `$$  $$`（内容 trim 为空）保留源码，不再生成空块公式
+  - P2-3：`MAX_BLOCK_MATH_LINES` 由 200 调整为 500（与验收口径一致）
+  - P2-5：`occupied` 只包含「实际成功渲染」的块（无效图片不再占用整行）
+  - P2-7：`mathCache` 改为简易 LRU（超过 500 只淘汰最早一条，不再整表清空）
+  - 文档：§3.3.2 已知限制更新（StateField/ViewPlugin 双层、500 行上限、表格仅首行 `|`、单元格纯文本、畸形写法保留源码）
+  - 验证：`npm run build`、`npm run lint`（0 error / 12 warning）
+- **M3 终审后收尾（同日，非阻塞项）**
+  - N1：§3.3.2 交互模型第 2 条补充性能口径（行级/行内按 visibleRanges；块级 StateField 全文档扫描 + 语法树推进后重建）
+  - N5：多行空公式 `$$\n$$` 与畸形写法一致，保留源码不生成空 Widget
+  - N3：`mathCache` 命中时 `delete + set` 移到队尾，改为真正 LRU（容量 500）
+  - 审查结论：M3 APPROVE（0 Blocking）；剩余非阻塞项（500 页性能实测、HTMLBlock/多行 InlineCode 的 `$$` 排除、KaTeX 错误回退口径、客户端测试基建）已记录待后续
+  - 验证：`npm run build`、`npm run lint`（0 error / 12 warning）

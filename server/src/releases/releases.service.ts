@@ -4,9 +4,50 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { lockCourseRow } from '../prisma/course-lock';
 import { PrismaService } from '../prisma/prisma.service';
+import { IndexingService } from '../knowledge/indexing.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
+
+/** 重复发布判定窗口：窗口内同说明、同快照的第二次提交视为重试（QA 2026-10-27 幂等） */
+const PUBLISH_DEDUPE_WINDOW_MS = 60_000;
+
+/** 键排序后的 JSON：jsonb 读回时键顺序会变，比较快照不能直接 JSON.stringify */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const body = entries.map(
+      ([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`,
+    );
+    return `{${body.join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/**
+ * CourseAiConfig 中随 Release 复制的列（不含 id / releaseId / 时间戳，不含 SystemPrompt）
+ *
+ * 2026-10-29 A：不再复制 lectureSystemPrompt / socraticSystemPrompt / assessmentSystemPrompt / mainSystemPrompt。
+ * 新建 Release 时这四列保持 null，resolvePrompts 自动走模板兜底 → 始终指向当前最新 md 文件。
+ * 原因：旧 Release 可能存着被固化的旧 md 内容，复制过来就漂移了。
+ * mainSystemPrompt 本来就不在此字段集（此前从未复制），保持不变。
+ * 用户如需在新 Release 上自定义提示词，手动 Save 即可；Reset 恢复默认也直接从模板兜底链取最新值。
+ */
+const AI_CONFIG_COPY_FIELDS = {
+  lectureModeId: true,
+  socraticModeId: true,
+  assessmentModeId: true,
+  // lectureSystemPrompt / socraticSystemPrompt / assessmentSystemPrompt / mainSystemPrompt 均不复制（2026-10-29 A）
+  welcomeMsg: true,
+  llmProvider: true,
+  model: true,
+  llmBaseUrl: true,
+  apiKey: true,
+} as const;
 
 /** snapshotData 结构（开发文档 §2 Release 模型；2026-10-16 扁平化：lessons → pages；去 tags） */
 interface SnapshotPage {
@@ -22,7 +63,10 @@ interface SnapshotData {
 /** 发布与版本（开发文档 §5.1.3、§3.4；纯快照发布 + 历史版本可切换/删除） */
 @Injectable()
 export class ReleasesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly indexing: IndexingService,
+  ) {}
 
   /**
    * 发布 Course 快照（**纯快照**，§3.4.3；2026-10-20 改拍）：
@@ -34,7 +78,9 @@ export class ReleasesService {
    * versionTag 格式: "CourseName_YYYYMMDDHHmm"。
    */
   async publish(courseId: string, dto: CreateReleaseDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      // 同一课程的发布串行执行，下面的重复判断才可靠（QA 2026-10-27 幂等）
+      await lockCourseRow(tx, courseId);
       const course = await tx.course.findUnique({
         where: { id: courseId },
         include: {
@@ -55,6 +101,20 @@ export class ReleasesService {
           sectionTags: page.sectionTags,
         })),
       };
+      // 幂等：重复提交（连点、超时重试）在短时间内带来同样的说明和同样的快照时，
+      // 返回刚发布的那个版本，不再生成第二个 Release
+      const latest = await tx.release.findFirst({
+        where: { courseId },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (
+        latest &&
+        latest.revisionNotes === dto.revisionNotes &&
+        Date.now() - latest.createdAt.getTime() < PUBLISH_DEDUPE_WINDOW_MS &&
+        stableJson(latest.snapshotData) === stableJson(snapshotData)
+      ) {
+        return { created: latest, duplicate: true };
+      }
       // 仅写入快照，不更新 currentReleaseId（纯快照，2026-10-20 改拍）
       const created = await tx.release.create({
         data: {
@@ -64,13 +124,42 @@ export class ReleasesService {
           snapshotData,
         },
       });
-      // 置当前编辑版本指针 = 新 Release（2026-10-20 三次改拍，§3.4.3）
+      // AI 配置按 Release 一份：新版本沿用当前 Live（无则测试所选）版本的配置，
+      // 否则把新版本设为 Live 后学员端会回到默认 Prompt / 模型 / 欢迎语（QA 2026-10-27 A3）
+      const sourceReleaseId = course.currentReleaseId ?? course.aiTestReleaseId;
+      if (sourceReleaseId) {
+        const source = await tx.courseAiConfig.findUnique({
+          where: {
+            courseId_releaseId: { courseId, releaseId: sourceReleaseId },
+          },
+          select: AI_CONFIG_COPY_FIELDS,
+        });
+        if (source) {
+          await tx.courseAiConfig.create({
+            data: { ...source, courseId, releaseId: created.id },
+          });
+        }
+      }
+      // 置当前编辑版本指针 = 新 Release（2026-10-20 三次改拍，§3.4.3）；
+      // 课程还没有任何测试 / Live 版本时，首个 Release 同时作为测试所选版本，
+      // 否则 AI Tutor 后台无法保存配置或测试对话（QA 2026-10-27 A6）
       await tx.course.update({
         where: { id: courseId },
-        data: { editingReleaseId: created.id },
+        data: {
+          editingReleaseId: created.id,
+          ...(sourceReleaseId ? {} : { aiTestReleaseId: created.id }),
+        },
       });
-      return created;
+      return { created, duplicate: false };
     });
+    const { created, duplicate } = outcome;
+    if (duplicate) return created;
+
+    // 2026-10-26 新增：异步构建向量索引（RAG），不阻塞发布响应
+    void this.indexing.indexRelease(created.id).catch(() => {
+      /* IndexingService 内部已兜底日志；此处防 unhandled rejection */
+    });
+    return created;
   }
 
   /**
@@ -127,7 +216,8 @@ export class ReleasesService {
    */
   async setLive(courseId: string, dto: ActivateReleaseDto) {
     // §3.4.4 第 3 步：在单事务内校验归属 → 更新上线指针（轻量，不重建/覆盖草稿）
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
+      await lockCourseRow(tx, courseId);
       const course = await tx.course.findUnique({
         where: { id: courseId },
         select: { id: true },
@@ -146,8 +236,24 @@ export class ReleasesService {
         where: { id: courseId },
         data: { currentReleaseId: release.id },
       });
-      return { id: release.id, versionTag: release.versionTag };
+      // 自愈：历史版本可能在索引失败（如 embedding 鉴权过期、事务超时）后
+      // 从未生成 chunks，上线后检索会一直为空。上线时补建一次索引。
+      const chunkCount = await tx.knowledgeChunk.count({
+        where: { releaseId: release.id },
+      });
+      return {
+        id: release.id,
+        versionTag: release.versionTag,
+        missingChunks: chunkCount === 0,
+      };
     });
+
+    if (result.missingChunks) {
+      void this.indexing.indexRelease(result.id).catch(() => {
+        /* IndexingService 内部已记录日志 */
+      });
+    }
+    return { id: result.id, versionTag: result.versionTag };
   }
 
   /** Course 的 Release 历史列表（不含 snapshotData，避免响应过大；标注 Live / 后台测试所选 / 当前编辑版本） */
@@ -193,6 +299,16 @@ export class ReleasesService {
    */
   async remove(releaseId: string) {
     return this.prisma.$transaction(async (tx) => {
+      const found = await tx.release.findUnique({
+        where: { id: releaseId },
+        select: { courseId: true },
+      });
+      if (!found) {
+        throw new NotFoundException('发布版本不存在');
+      }
+      // 先锁 Course 再复查：并发的 Set Live / 切换测试版本要么已提交（下面的保护检查能看到），
+      // 要么等本事务结束后再校验（届时版本已不存在）
+      await lockCourseRow(tx, found.courseId);
       const release = await tx.release.findUnique({
         where: { id: releaseId },
         select: { id: true, courseId: true, versionTag: true },
@@ -212,7 +328,9 @@ export class ReleasesService {
         throw new ConflictException('该版本为上线版本（Live），不可删除');
       }
       if (course?.aiTestReleaseId === release.id) {
-        throw new ConflictException('该版本为 AI Tutor 后台测试所选版本，不可删除');
+        throw new ConflictException(
+          '该版本为 AI Tutor 后台测试所选版本，不可删除',
+        );
       }
       await tx.release.delete({ where: { id: release.id } });
       // 清空当前编辑版本指针（若被删版本即 editing 版本）

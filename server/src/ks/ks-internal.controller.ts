@@ -4,6 +4,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Post,
   Put,
   Query,
 } from '@nestjs/common';
@@ -71,5 +72,14 @@ export class KsInternalController {
   @Get('releases/:id')
   async release(@Param('id') id: string) {
     return found(await this.knowledge.getRelease(id), '发布版本');
+  }
+
+  /** RAG 向量检索（2026-10-26 新增）：Agent 调此接口获取相关知识片段 */
+  @Post('releases/:id/chunks/retrieve')
+  retrieveChunks(
+    @Param('id') id: string,
+    @Body() body: { query: string; topK?: number },
+  ) {
+    return this.knowledge.retrieveChunks(id, body.query, body.topK);
   }
 }

@@ -6,6 +6,7 @@ import { t } from "../lib/i18n/messages";
 import { useLocale } from "../lib/navigation";
 import { useQueryToken } from "../lib/navigation";
 import { boFetch } from "../lib/api";
+import { useLinkStatus } from "../lib/linkStatus";
 
 /** 这些状态说明链接已经不可用，不再显示表单（PORT-ACT-003）。 */
 const TERMINAL_CODES: readonly ErrorCode[] = [
@@ -17,6 +18,7 @@ const TERMINAL_CODES: readonly ErrorCode[] = [
 export default function ActivatePage() {
   const locale = useLocale();
   const { token, ready } = useQueryToken();
+  const link = useLinkStatus(token, ready, "activation");
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -56,7 +58,7 @@ export default function ActivatePage() {
   const signInHref = `/${locale}/sign-in`;
   const signInLabel = t(locale, "activate.goSignIn");
 
-  if (!ready) {
+  if (!ready || link.checking) {
     return (
       <AuthLayout title={t(locale, "activate.title")} subtitle={t(locale, "common.loading")}>
         <p className="modalHint">{t(locale, "common.loading")}</p>
@@ -79,8 +81,9 @@ export default function ActivatePage() {
     );
   }
 
-  if (errorCode && TERMINAL_CODES.includes(errorCode)) {
-    const expired = errorCode === "TOKEN_EXPIRED";
+  const terminal = errorCode && TERMINAL_CODES.includes(errorCode) ? errorCode : link.terminal;
+  if (terminal) {
+    const expired = terminal === "TOKEN_EXPIRED";
     return (
       <AuthLayout
         title={t(locale, expired ? "activate.expiredTitle" : "activate.invalidTitle")}
@@ -132,6 +135,7 @@ export default function ActivatePage() {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
+          <span className="fieldHint">{t(locale, "passwordRule.hint")}</span>
         </div>
 
         <div className="field" style={{ marginBottom: 14 }}>

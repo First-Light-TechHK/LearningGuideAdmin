@@ -17,6 +17,7 @@ export type ErrorCode =
   | 'DUPLICATE_EMAIL'
   | 'PASSWORD_TOO_WEAK'
   | 'PASSWORD_MISMATCH'
+  | 'PASSWORD_SAME_AS_CURRENT'
   | 'INTERNAL_ERROR';
 
 export type Envelope<T> =
@@ -49,5 +50,6 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   DUPLICATE_EMAIL: 409,
   PASSWORD_TOO_WEAK: 400,
   PASSWORD_MISMATCH: 400,
+  PASSWORD_SAME_AS_CURRENT: 400,
   INTERNAL_ERROR: 500,
 };

@@ -6,6 +6,7 @@ import { t } from "../lib/i18n/messages";
 import { useLocale } from "../lib/navigation";
 import { useQueryToken } from "../lib/navigation";
 import { boFetch } from "../lib/api";
+import { useLinkStatus } from "../lib/linkStatus";
 
 const TERMINAL_CODES: readonly ErrorCode[] = [
   "TOKEN_EXPIRED",
@@ -16,6 +17,7 @@ const TERMINAL_CODES: readonly ErrorCode[] = [
 export default function ResetPasswordPage() {
   const locale = useLocale();
   const { token, ready } = useQueryToken();
+  const link = useLinkStatus(token, ready, "reset");
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -58,11 +60,11 @@ export default function ResetPasswordPage() {
   const terminal =
     errorCode !== null && TERMINAL_CODES.includes(errorCode)
       ? errorCode
-      : !ready
+      : !ready || link.checking
         ? "LOADING"
         : token === ""
           ? "INVALID_TOKEN"
-          : null;
+          : link.terminal;
 
   if (terminal === "LOADING") {
     return (
@@ -137,6 +139,7 @@ export default function ResetPasswordPage() {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
+          <span className="fieldHint">{t(locale, "passwordRule.hint")}</span>
         </div>
 
         <div className="field" style={{ marginBottom: 14 }}>

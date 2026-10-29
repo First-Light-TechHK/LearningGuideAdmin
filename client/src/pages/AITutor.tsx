@@ -3,6 +3,7 @@ import { ConfigPanel } from '../components/ai/ConfigPanel'
 import { ChatWindow } from '../components/ai/ChatWindow'
 import { TutorManagerModal } from '../components/ai/TutorManagerModal'
 import { useAiStore } from '../stores/aiStore'
+import { useAiText } from '../components/ai/i18n'
 import { tokens } from '../theme/tokens'
 
 /**
@@ -15,6 +16,7 @@ import { tokens } from '../theme/tokens'
  * 经 `MainLayout` 的 `topBar` 槽位注入。
  */
 export function AITutorTopBar() {
+  const { text } = useAiText()
   return (
     <div
       style={{
@@ -40,7 +42,7 @@ export function AITutorTopBar() {
           color: tokens.color.primaryDark,
         }}
       >
-        AI Tutor
+        {text('title')}
         <span
           aria-hidden
           style={{

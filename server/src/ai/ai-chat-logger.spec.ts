@@ -25,8 +25,8 @@ const entry = {
 
 describe('AiChatLogger（§4.4.2 第 7 步）', () => {
   beforeEach(() => {
-    mockedMkdir.mockReset().mockResolvedValue(undefined as never);
-    mockedAppend.mockReset().mockResolvedValue(undefined as never);
+    mockedMkdir.mockReset().mockResolvedValue(undefined);
+    mockedAppend.mockReset().mockResolvedValue(undefined);
   });
 
   it('按自然日追加一行 JSON，只保留预览与字符数', async () => {

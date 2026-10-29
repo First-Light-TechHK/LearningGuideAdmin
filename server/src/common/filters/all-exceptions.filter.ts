@@ -41,9 +41,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         message = '文件大小超过 15MB 限制';
       } else {
         // 允许业务异常通过 { code, message } 指定错误码（如 CONTENT_SYNC_DISABLED）
-        code = this.extractHttpExceptionCode(exception) ?? this.mapHttpStatusToCode(status);
+        code =
+          this.extractHttpExceptionCode(exception) ??
+          this.mapHttpStatusToCode(status);
         message = this.extractHttpExceptionMessage(exception);
       }
+    } else if (this.isEntityTooLarge(exception)) {
+      // body-parser 在进入控制器前拒绝超大请求体（README §10.1 Import JSON 上限），
+      // 它不是 HttpException；此前会落到 500「服务器内部错误」，现按 §3.2.3 语义
+      // 映射为 400 + 可读提示，引导用户拆分文档。
+      status = HttpStatus.BAD_REQUEST;
+      code = 'VALIDATION_ERROR';
+      message = '请求内容过大，请拆分文档后重试';
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       // Prisma 已知错误码映射为合理业务码（不向外暴露 meta/SQL）
       const mapped = this.mapPrismaError(exception.code);
@@ -56,11 +65,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message = '数据校验失败';
     }
 
-    // 服务器日志记录原始错误（含堆栈），仅落日志、不进响应
-    this.logger.error(
-      `请求处理异常: ${exception instanceof Error ? exception.message : String(exception)}`,
-      exception instanceof Error ? exception.stack : undefined,
-    );
+    // 服务器日志记录原始错误（含堆栈），仅落日志、不进响应。
+    // 按状态码区分级别：5xx 服务器故障用 error（需告警），4xx 客户端错误用 warn
+    // （会话过期 401、越权 403、资源不存在 404 等属正常业务场景，不应误报为故障）。
+    const logMsg = `请求处理异常 [${status}] ${
+      exception instanceof Error ? exception.message : String(exception)
+    }`;
+    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      this.logger.error(
+        logMsg,
+        exception instanceof Error ? exception.stack : undefined,
+      );
+    } else {
+      this.logger.warn(logMsg);
+    }
 
     const body: ApiErrorResponse = {
       success: false,
@@ -68,6 +86,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error: { code, message },
     };
     response.status(status).json(body);
+  }
+
+  /**
+   * body-parser 超限错误识别（2026-10-27 新增）：
+   * Express body-parser 抛出的是带 `type: 'entity.too.large'` + 413 的普通 Error，
+   * 不继承 HttpException，需要单独识别，避免误报 500。
+   */
+  private isEntityTooLarge(exception: unknown): boolean {
+    if (typeof exception !== 'object' || exception === null) return false;
+    const e = exception as {
+      type?: unknown;
+      status?: unknown;
+      statusCode?: unknown;
+    };
+    return (
+      e.type === 'entity.too.large' ||
+      e.status === HttpStatus.PAYLOAD_TOO_LARGE ||
+      e.statusCode === HttpStatus.PAYLOAD_TOO_LARGE
+    );
   }
 
   /** HTTP 状态码 → 业务错误码（§5.3：400→VALIDATION_ERROR、404→NOT_FOUND，其余按语义） */
@@ -94,7 +131,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   /** 从 HttpException 响应体提取业务错误码（仅接受字符串 code） */
-  private extractHttpExceptionCode(exception: HttpException): string | undefined {
+  private extractHttpExceptionCode(
+    exception: HttpException,
+  ): string | undefined {
     const res = exception.getResponse();
     if (res && typeof res === 'object') {
       const code = (res as { code?: unknown }).code;
@@ -123,9 +162,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   /** Prisma 已知错误码 → 状态码 + 业务码 + 安全消息 */
-  private mapPrismaError(
-    prismaCode: string,
-  ): { status: number; code: string; message: string } {
+  private mapPrismaError(prismaCode: string): {
+    status: number;
+    code: string;
+    message: string;
+  } {
     switch (prismaCode) {
       case 'P2002': // 唯一约束冲突
         return {

@@ -6,6 +6,7 @@ import { CloseIcon } from '../icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
+import { useKText } from './i18n'
 
 /**
  * Releases 版本发布面板（§3.4；2026-10-15 激活版本模型；2026-10-19 由 Publish 更名为 Releases）：
@@ -21,6 +22,7 @@ import { tokens } from '../../theme/tokens'
  */
 export function PublishPanel() {
   const { message, modal } = App.useApp()
+  const { text } = useKText()
   /** PRD §3.2/§3.3：发布/切换版本是 PUBLISH、删除版本是 DELETE；View/Edit 不显示 */
   const access = useWorkspaceAccess()
   const courses = useKnowledgeStore((s) => s.courses)
@@ -46,11 +48,12 @@ export function PublishPanel() {
   }, [loadReleases])
 
   const doPublish = async () => {
-    if (!publishCourse || !notes.trim()) return
+    // 发布中再次触发（回车、连点）直接忽略，服务端另有重复提交保护
+    if (!publishCourse || !notes.trim() || publishing) return
     setPublishing(true)
     try {
       await knowledgeApi.publish(publishCourse, notes.trim())
-      message.success('发布成功')
+      message.success(text('publish.success'))
       setPublishCourse(null)
       setNotes('')
       await loadReleases()
@@ -63,16 +66,15 @@ export function PublishPanel() {
 
   const doActivate = (courseId: string, release: ReleaseSummary) => {
     modal.confirm({
-      title: `切换到此版本 ${release.versionTag}？`,
-      content:
-        '将以该版本内容覆盖当前可编辑草稿（含未发布的修改）。此操作不可撤销。',
-      okText: '确认切换',
+      title: text('publish.activateTitle', { version: release.versionTag }),
+      content: text('publish.activateContent'),
+      okText: text('publish.activateConfirm'),
       okButtonProps: { danger: true },
-      cancelText: '取消',
+      cancelText: text('common.cancel'),
       onOk: async () => {
         try {
           await knowledgeApi.activateRelease(courseId, release.id)
-          message.success(`已切换到版本 ${release.versionTag}`)
+          message.success(text('publish.activated', { version: release.versionTag }))
           setHistoryCourse(null)
           await loadReleases()
           await afterActivateRelease(courseId)
@@ -86,15 +88,15 @@ export function PublishPanel() {
   /** 删除版本（§3.4.5，2026-10-20 新增）：Live / 后台测试所选版本无删除入口 */
   const doDelete = (release: ReleaseSummary) => {
     modal.confirm({
-      title: `删除版本 ${release.versionTag}？`,
-      content: '将永久删除该版本快照及其 AI 配置，不可撤销。',
-      okText: '删除',
+      title: text('publish.deleteTitle', { version: release.versionTag }),
+      content: text('publish.deleteContent'),
+      okText: text('tree.delete'),
       okButtonProps: { danger: true },
-      cancelText: '取消',
+      cancelText: text('common.cancel'),
       onOk: async () => {
         try {
           await knowledgeApi.deleteRelease(release.id)
-          message.success(`已删除版本 ${release.versionTag}`)
+          message.success(text('publish.deleted', { version: release.versionTag }))
           await loadReleases()
         } catch (e) {
           message.error((e as Error).message)
@@ -104,25 +106,25 @@ export function PublishPanel() {
   }
 
   const columns: ColumnsType<(typeof courses)[number]> = [
-    { title: 'Course Name', dataIndex: 'title' },
+    { title: text('publish.colCourse'), dataIndex: 'title' },
     {
-      title: 'Revision Notes',
+      title: text('publish.colNotes'),
       key: 'notes',
       render: (_, record) => {
         // 最新发布的快照备注（列表按 createdAt 倒序，取首条；2026-10-20 由「激活版本备注」改）
         const note = latest[record.id]?.[0]?.revisionNotes
         return note || (
-          <Typography.Text type="secondary">No revision notes provided</Typography.Text>
+          <Typography.Text type="secondary">{text('publish.noNotes')}</Typography.Text>
         )
       },
     },
     {
-      title: 'Latest Release',
+      title: text('publish.colLatest'),
       key: 'version',
       render: (_, record) => {
         const current = latest[record.id]?.[0]
         if (!current) {
-          return <Typography.Text type="secondary">未发布</Typography.Text>
+          return <Typography.Text type="secondary">{text('publish.unpublished')}</Typography.Text>
         }
         return (
           <a onClick={() => setHistoryCourse(record.id)}>{current.versionTag}</a>
@@ -130,12 +132,12 @@ export function PublishPanel() {
       },
     },
     {
-      title: 'Action',
+      title: text('publish.colAction'),
       key: 'action',
       render: (_, record) =>
         access.canPublish ? (
           <Button type="primary" size="small" onClick={() => setPublishCourse(record.id)}>
-            Create Release
+            {text('publish.createRelease')}
           </Button>
         ) : (
           <Typography.Text type="secondary">—</Typography.Text>
@@ -150,7 +152,7 @@ export function PublishPanel() {
     <Panel style={{ overflow: 'auto' }}>
       {/* 列表上方标题行（2026-10-19 新增） */}
       <Typography.Title level={4} style={{ marginTop: 0, marginBottom: tokens.spacing.md }}>
-        Knowledge Releases
+        {text('publish.title')}
       </Typography.Title>
       <Table
         rowKey="id"
@@ -163,13 +165,13 @@ export function PublishPanel() {
       {/* 历史版本列表（§3.4.2：标题固定「历史版本」；每版本行 editing（紧贴版本名）/ live / testing + 删除 + 切换到此版本） */}
       <Modal
         open={!!historyCourse}
-        title="历史版本"
+        title={text('publish.historyTitle')}
         footer={null}
         onCancel={() => setHistoryCourse(null)}
         width={640}
       >
         {historyList.length === 0 ? (
-          <Typography.Text type="secondary">暂无发布记录</Typography.Text>
+          <Typography.Text type="secondary">{text('publish.noHistory')}</Typography.Text>
         ) : (
           historyList.map((r) => {
             const protectedVersion = r.isActive || r.isTestSelected
@@ -181,11 +183,11 @@ export function PublishPanel() {
                 <div style={{ flex: 1 }}>
                   <Tag color={r.isActive ? 'green' : 'geekblue'}>{r.versionTag}</Tag>
                   {/* editing 紧贴版本名右侧（2026-10-20 三次改拍）；定序 editing → live → testing */}
-                  {r.isEditing && <Tag color="green">editing</Tag>}
-                  {r.isActive && <Tag color="green">live</Tag>}
-                  {r.isTestSelected && <Tag>testing</Tag>}
+                  {r.isEditing && <Tag color="green">{text('publish.tagEditing')}</Tag>}
+                  {r.isActive && <Tag color="green">{text('publish.tagLive')}</Tag>}
+                  {r.isTestSelected && <Tag>{text('publish.tagTesting')}</Tag>}
                   <Typography.Text type="secondary">
-                    {new Date(r.createdAt).toLocaleString('zh-CN')}
+                    {new Date(r.createdAt).toLocaleString()}
                   </Typography.Text>
                   {/* editing 版本不可再「切换到此版本」（2026-10-20 三次改拍） */}
                   {access.canPublish && historyCourse && !r.isEditing && (
@@ -194,7 +196,7 @@ export function PublishPanel() {
                       style={{ marginLeft: tokens.spacing.sm }}
                       onClick={() => doActivate(historyCourse, r)}
                     >
-                      切换到此版本
+                      {text('publish.switchTo')}
                     </Button>
                   )}
                   <div>
@@ -207,7 +209,7 @@ export function PublishPanel() {
                     type="text"
                     size="small"
                     danger
-                    aria-label={`删除版本 ${r.versionTag}`}
+                    aria-label={text('publish.deleteVersionAria', { version: r.versionTag })}
                     onClick={() => doDelete(r)}
                   >
                     <CloseIcon size={16} />
@@ -222,9 +224,11 @@ export function PublishPanel() {
       {/* 发布 Modal（§3.4.3：Revision Notes 必填） */}
       <Modal
         open={!!publishCourse}
-        title={`发布课程「${courses.find((c) => c.id === publishCourse)?.title ?? ''}」全部页面快照`}
-        okText="发布"
-        cancelText="取消"
+        title={text('publish.publishModalTitle', {
+          title: courses.find((c) => c.id === publishCourse)?.title ?? '',
+        })}
+        okText={text('publish.publish')}
+        cancelText={text('common.cancel')}
         confirmLoading={publishing}
         okButtonProps={{ disabled: !notes.trim() }}
         onOk={doPublish}
@@ -234,11 +238,11 @@ export function PublishPanel() {
         }}
       >
         <Typography.Paragraph type="secondary">
-          Create Release 将发布整个课程下所有页面的快照（非单个页面）。
+          {text('publish.publishHint')}
         </Typography.Paragraph>
         <Input.TextArea
           rows={3}
-          placeholder="Revision Notes（必填）"
+          placeholder={text('publish.notesPlaceholder')}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           maxLength={500}

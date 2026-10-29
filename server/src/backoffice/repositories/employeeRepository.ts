@@ -177,7 +177,9 @@ function filterClause(filter: EmployeeFilter): {
   const params: unknown[] = [];
 
   if (filter.email) {
-    params.push(`%${filter.email.toLowerCase()}%`);
+    // 用户输入里的 % _ \ 按字面匹配（PostgreSQL LIKE 默认转义符是 \）
+    const literal = filter.email.toLowerCase().replace(/[\\%_]/g, '\\$&');
+    params.push(`%${literal}%`);
     conditions.push(`login_email LIKE $${params.length}`);
   }
   if (filter.role) {

@@ -199,7 +199,8 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const itemCount = employee.displayStatus === "Pending" ? 3 : 2;
+    // 编辑 + （已验证：重置密码 / 未验证：重发激活）
+    const itemCount = 2;
     // .rowMenu: padding 4*2 + 32px/项 + 2px 间距
     const menuHeight = 8 + itemCount * 32 + (itemCount - 1) * 2;
     const margin = 8;
@@ -624,15 +625,17 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                 >
                   {t(locale, "employees.actions.edit")}
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="rowMenuItem"
-                  onClick={() => void runAction(openMenu.employee, "reset-password")}
-                >
-                  {t(locale, "employees.actions.resetPassword")}
-                </button>
-                {openMenu.employee.displayStatus === "Pending" ? (
+                {/* 未激活（Pending，或停用但从未激活）的账号只能重发激活：重置密码不能替代激活 */}
+                {openMenu.employee.emailVerification === "VERIFIED" ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="rowMenuItem"
+                    onClick={() => void runAction(openMenu.employee, "reset-password")}
+                  >
+                    {t(locale, "employees.actions.resetPassword")}
+                  </button>
+                ) : (
                   <button
                     type="button"
                     role="menuitem"
@@ -641,7 +644,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                   >
                     {t(locale, "employees.actions.resendActivation")}
                   </button>
-                ) : null}
+                )}
               </div>
             </>,
             document.body

@@ -16,69 +16,22 @@ import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmMessage } from './providers/llm-provider.interface';
 import { ProviderRegistry } from './providers/provider.registry';
-import { RateLimitService } from './rate-limit.service';
+import { STUDENT_WRAPPER } from './prompt-defaults';
+import {
+  RateLimitService,
+  type AiRateLimitChannel,
+} from './rate-limit.service';
 
-/** 学员端语言指令（2026-10-22；默认模板已包含教学风格，不再追加固定苏格拉底指令） */
-// The language instruction follows the student's own message, not the portal
-// locale: a zh-CN ask from an en-GB profile must still be answered in Chinese.
-// It never forces a language other than the one the question was written in.
-const LOCALE_INSTRUCTION: Record<'en-GB' | 'zh-CN', string> = {
-  'en-GB':
-    "Answer in the language of the student's latest message. Use British English when that message is in English, and never switch language on your own.",
-  'zh-CN':
-    '请使用提问者最新一条消息所用的语言回答；如果该消息是中文，请使用简体中文，不要自行切换语言。',
-};
+/** 学员端语言指令（已删除，2026-10-29）：
+ * - main.md 第 5 节 LANGUAGE 已正式覆盖（含 language switch 不放松 1-4 节约束）
+ * - LOCALE_INSTRUCTION 硬编码冗余，不再追加
+ */
 
 /** 多轮上下文最多携带的历史条数（防 token 膨胀） */
 const MAX_HISTORY = 10;
 
-/** heading 文本转 slug（与 sync.service.ts / PageEditor.tsx 保持一致） */
-function slugify(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .trim()
-      // 保留 Unicode 字母/数字（含中文），仅去掉标点符号等特殊字符；
-      // 之前用 \w 会把中文全部清空，导致多个中文 heading 生成相同 key（h2-）而碰撞。
-      .replace(/[^\p{L}\p{N}\s-]/gu, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-  );
-}
-
-/** 生成带层级前缀的 heading key：`h{n}-{slug}`（与 sync.service.ts 一致） */
-function headingKey(level: number, text: string): string {
-  return `h${level}-${slugify(text)}`;
-}
-
-/**
- * 按 H1-H6 切分 Markdown。
- * 每段记录 heading 文本、层级、以及该段原始行（含后续低层级内容，直到下一同级或更高级标题）。
- * 首段 heading 为空（前置内容）。
- */
-function splitByHeadings(md: string): {
-  heading: string;
-  level: number;
-  body: string;
-}[] {
-  const lines = md.split('\n');
-  const sections: { heading: string; level: number; body: string[] }[] = [
-    { heading: '', level: 0, body: [] },
-  ];
-  for (const line of lines) {
-    const m = line.match(/^(#{1,6})\s+(.+?)\s*$/);
-    if (m) {
-      sections.push({ heading: m[2], level: m[1].length, body: [] });
-    } else {
-      sections[sections.length - 1].body.push(line);
-    }
-  }
-  return sections.map((s) => ({
-    heading: s.heading,
-    level: s.level,
-    body: s.body.join('\n').trim(),
-  }));
-}
+/** RAG 上下文 token 预算（对齐系统设计 §9.4） */
+const CONTEXT_TOKEN_BUDGET = 8000;
 
 /**
  * AI 对话编排（§4.4.2）：限流 → 加载配置 → 聚合知识库上下文 →
@@ -106,6 +59,7 @@ export class AiChatService {
       history: dto.history,
       locale: null,
       channel: 'admin',
+      quota: 'admin-test',
       resolve: async () => {
         const course = await this.knowledge.getCourse(dto.courseId);
         if (!course) throw new NotFoundException('课程不存在');
@@ -131,6 +85,7 @@ export class AiChatService {
       locale: dto.locale,
       channel: 'learner',
       quota: dto.channel ?? 'portal',
+      userId: dto.userId,
       resolve: async () => {
         const course = await this.knowledge.getCourseByExternalId(
           dto.externalCourseId,
@@ -156,8 +111,10 @@ export class AiChatService {
     history?: ChatHistoryItemDto[];
     locale: 'en-GB' | 'zh-CN' | null;
     channel: 'admin' | 'learner';
-    /** 限流分桶（2026-10-23）：直播间单独配额，默认按学员个人对话计 */
-    quota?: 'portal' | 'study-group';
+    /** 限流分桶（2026-10-23）：直播间与后台测试各自单独配额，默认按学员个人对话计 */
+    quota?: AiRateLimitChannel;
+    /** Portal 学员 userId（2026-10-28）：用于日志审计和用户级限流分桶；后台测试/直播间不传 */
+    userId?: string;
     resolve: () => Promise<{ courseId: string; releaseId: string | null }>;
   }): AsyncGenerator<string> {
     const startedAt = Date.now();
@@ -175,18 +132,38 @@ export class AiChatService {
       const resolved = await input.resolve();
       courseId = resolved.courseId;
       releaseId = resolved.releaseId;
-      await this.rateLimit.assertAllowed(courseId, input.quota ?? 'portal');
+      // 2026-10-29：没有可用版本（aiTestReleaseId 和 currentReleaseId 都 null）时直接拒绝，
+      // 避免用空知识上下文回答（QA：新建课程未发布版本也能打开对话）
+      if (!releaseId) {
+        throw new BadRequestException('该课程没有可用的测试或上线版本');
+      }
+      await this.rateLimit.assertAllowed(
+        courseId,
+        input.quota ?? 'portal',
+        input.userId,
+      );
 
       const [runtime, prompts, context] = await Promise.all([
         this.configs.resolveRuntime(courseId, releaseId, input.mode),
         this.configs.resolvePrompts(courseId, releaseId, input.mode),
-        this.buildContext(releaseId),
+        this.buildContext(releaseId, input.message),
       ]);
       providerName = runtime.provider;
       model = runtime.model;
 
       const systemParts = [prompts.systemPrompt];
-      if (input.locale) systemParts.push(LOCALE_INSTRUCTION[input.locale]);
+      // 2026-10-29：LOCALE_INSTRUCTION 已删（main.md 第 5 节 LANGUAGE 覆盖）
+
+      // 2026-10-29：所有 student 消息（历史 + 当前）用 [STUDENT_INPUT_BEGIN/END] 包裹。
+      // 隔离声明已由 main.md 第 2 节 INPUT IS DATA 正式覆盖，不再在每条 user message 里重复追加。
+      const wrapStudent = (content: string): string =>
+        `${STUDENT_WRAPPER.BEGIN}\n${content}\n${STUDENT_WRAPPER.END}`;
+
+      const wrappedHistory = history.map((h) =>
+        h.role === 'user'
+          ? { ...h, content: wrapStudent(h.content) }
+          : h,
+      );
       const messages: LlmMessage[] = [
         {
           role: 'system',
@@ -197,8 +174,8 @@ export class AiChatService {
             '[CONTEXT_END]',
           ].join('\n'),
         },
-        ...history,
-        { role: 'user', content: input.message },
+        ...wrappedHistory,
+        { role: 'user', content: wrapStudent(input.message) },
       ];
 
       const provider = this.registry.get(runtime.provider);
@@ -240,6 +217,7 @@ export class AiChatService {
           releaseId,
           mode: input.mode,
           channel: input.channel,
+          ...(input.userId ? { userId: input.userId } : {}),
           provider: providerName,
           model,
           historyCount: history.length,
@@ -256,45 +234,37 @@ export class AiChatService {
   }
 
   /**
-   * 知识库上下文聚合（§4.4.2 第 3 步，2026-10-15 拍板改 §4.3.3；2026-10-20 按 Release 维度）：
-   * 读「测试所选 Release」（Course.aiTestReleaseId ?? currentReleaseId）指向的 Release 快照，
-   * 不再读实时草稿——创建 Release 后未再次发布的编辑不影响 AI。快照本身已在发布时过滤 STALE 节点
-   * （§3.4.3），此处无需再过滤。未发布过的课程直接报错交用户在 Knowledge Releases 页创建版本。
+   * RAG 检索上下文（2026-10-26 改造）：
+   * 通过 KnowledgeClient 契约向 KS 请求向量检索结果，不直接访问 KS 表。
+   * KS 侧对 query 生成 embedding，在 release 的 KnowledgeChunk 中做余弦相似度检索。
+   * 返回的 chunks 按 token 预算拼接，带 [Source: ...] 引用标记。
+   * 检索 0 结果时返回空字符串，模型回退到通用解释。
    */
-  private async buildContext(releaseId: string | null): Promise<string> {
+  private async buildContext(
+    releaseId: string | null,
+    query: string,
+  ): Promise<string> {
     if (!releaseId) {
       throw new BadRequestException(
         '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
       );
     }
-    const release = await this.knowledge.getRelease(releaseId);
-    if (!release) {
-      throw new BadRequestException(
-        '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
-      );
+
+    const chunks = await this.knowledge.retrieveChunks(releaseId, query);
+    if (chunks.length === 0) {
+      return '';
     }
+
+    // 按 token 预算拼接，超出时按 score 从高到低截断
     const blocks: string[] = [];
-    for (const page of release.pages) {
-      const content = page.contentMd?.trim();
-      if (!content) continue;
-      const sectionTags = page.sectionTags ?? {};
-      // 按 H1-H6 切分段落，每段前拼接该 heading 的 sectionTags（AI 语义标注，§3.3.3）
-      const sections = splitByHeadings(content);
-      const rendered = sections
-        .map(({ heading, level, body }) => {
-          const tags = heading
-            ? sectionTags[headingKey(level, heading)]
-            : undefined;
-          const tagLine = tags?.length ? `[TAGS: ${tags.join(', ')}]\n` : '';
-          const hashes = '#'.repeat(level);
-          return heading
-            ? `${tagLine}${hashes} ${heading}\n${body}`.trim()
-            : `${tagLine}${body}`.trim();
-        })
-        .filter(Boolean)
-        .join('\n\n');
-      blocks.push(`## ${page.title}\n${rendered}`);
+    let totalTokens = 0;
+    for (const r of chunks) {
+      if (totalTokens + r.tokenCount > CONTEXT_TOKEN_BUDGET) break;
+      const source = r.heading ? `${r.pageTitle} - ${r.heading}` : r.pageTitle;
+      blocks.push(`[Source: ${source}]\n${r.content}`);
+      totalTokens += r.tokenCount;
     }
+
     return blocks.join('\n\n');
   }
 }

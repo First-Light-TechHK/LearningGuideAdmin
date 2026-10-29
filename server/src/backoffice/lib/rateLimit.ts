@@ -57,3 +57,21 @@ export function consume(
     retryAfterSeconds: Math.ceil((existing.resetsAt - now) / 1000),
   };
 }
+
+/** 只查不计数：窗口内已达上限则返回 false。 */
+export function peek(key: string, limit: number): RateLimitResult {
+  const now = Date.now();
+  const existing = buckets().get(key);
+  if (!existing || existing.resetsAt <= now || existing.count < limit) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  return {
+    allowed: false,
+    retryAfterSeconds: Math.max(1, Math.ceil((existing.resetsAt - now) / 1000)),
+  };
+}
+
+/** 清掉某个 key 的窗口（例如登录成功后清零失败计数）。 */
+export function clear(key: string): void {
+  buckets().delete(key);
+}

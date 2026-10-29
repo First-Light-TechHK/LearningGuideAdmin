@@ -25,3 +25,17 @@ export function parseAppRoles(raw: string | undefined): AppRole[] {
   }
   return ALL_ROLES.filter((role) => items.includes(role));
 }
+
+/**
+ * 学员端 /api/user/** 只靠 AUTH_ENABLED + AUTH_TOKEN 保护（api-key.guard）。
+ * 部署环境（NODE_ENV=production）起了 agent 却没开鉴权时返回提示文案，否则 null。
+ */
+export function learnerApiOpenWarning(
+  env: NodeJS.ProcessEnv,
+  roles: readonly AppRole[],
+): string | null {
+  if (env.NODE_ENV !== 'production') return null;
+  if (!roles.includes('agent')) return null;
+  if (env.AUTH_ENABLED === 'true') return null;
+  return '安全配置缺失：NODE_ENV=production 但 AUTH_ENABLED 不是 true，学员端 /api/user/** 无需 X-API-Key 即可调用（会消耗 LLM 额度）。请设置 AUTH_ENABLED=true 与 AUTH_TOKEN。';
+}

@@ -60,7 +60,7 @@ export class AiController {
     @Param('courseId') courseId: string,
     @Body() dto: ResetAiConfigDto,
   ) {
-    return this.configs.resetConfig(courseId, dto.mode);
+    return this.configs.resetConfig(courseId, dto.mode, dto.releaseId);
   }
 
   /** 设置「测试所选 Release」（§4.3.1/§5.2，2026-10-20 新增，持久化 Course.aiTestReleaseId） */
@@ -74,10 +74,7 @@ export class AiController {
 
   /** 设置 Online 状态（§4.2.6，开关即时生效） */
   @Put('config/:courseId/online')
-  setOnline(
-    @Param('courseId') courseId: string,
-    @Body() dto: SetOnlineDto,
-  ) {
+  setOnline(@Param('courseId') courseId: string, @Body() dto: SetOnlineDto) {
     return this.configs.setOnline(courseId, dto.online);
   }
 

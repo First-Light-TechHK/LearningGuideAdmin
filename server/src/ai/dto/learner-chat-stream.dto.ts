@@ -39,4 +39,10 @@ export class LearnerChatStreamDto {
   @IsOptional()
   @IsIn(['portal', 'study-group'])
   channel?: 'portal' | 'study-group';
+
+  /** Portal 学员 userId（2026-10-28）：用于 KS 侧日志审计 + 用户级限流分桶；后台测试不填 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  userId?: string;
 }

@@ -39,6 +39,16 @@ export interface KnowledgeRelease extends KnowledgeReleaseMeta {
   pages: KnowledgeReleasePage[];
 }
 
+/** RAG 检索结果（2026-10-26 新增） */
+export interface RetrievedChunk {
+  pageTitle: string;
+  heading: string | null;
+  content: string;
+  /** 余弦相似度分数（0-1，越高越相关） */
+  score: number;
+  tokenCount: number;
+}
+
 export interface KnowledgeClient {
   getCourse(courseId: string): Promise<KnowledgeCourse | null>;
   getCourseByExternalId(externalId: string): Promise<KnowledgeCourse | null>;
@@ -46,6 +56,16 @@ export interface KnowledgeClient {
   listCourses(options?: { mappedOnly?: boolean }): Promise<KnowledgeCourse[]>;
   getReleaseMeta(releaseId: string): Promise<KnowledgeReleaseMeta | null>;
   getRelease(releaseId: string): Promise<KnowledgeRelease | null>;
+  /**
+   * RAG 向量检索（2026-10-26 新增）：
+   * 对 query 生成 embedding，在 release 的 KnowledgeChunk 中做余弦相似度检索。
+   * 返回空数组表示无相关结果或未建索引。
+   */
+  retrieveChunks(
+    releaseId: string,
+    query: string,
+    topK?: number,
+  ): Promise<RetrievedChunk[]>;
   /**
    * 以下两项是 Tutor 的设置，暂存在 KS 的 Course 表上；
    * 拆库时迁到 Agent 自己的库（见 docs/Engine_Split_Implementation.md）。

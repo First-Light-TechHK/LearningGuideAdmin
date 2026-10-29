@@ -63,6 +63,25 @@ The merged Admin app (NestJS `server/` + Vite `client/`) reads configuration fro
 - Deployed DEV: App Runner `RuntimeEnvironmentVariables` plus Secrets Manager ARNs, written by
   `scripts/provision-admin-dev.mjs`.
 
+### AI Tutor runtime secrets (DEV)
+
+App Runner source deployments rebuild code but keep the service configuration, so `server/.env` is never read in
+the cloud. The tutor needs two values that the provisioning script cannot invent:
+
+| Repository variable | App Runner key | Where the value lives |
+|---|---|---|
+| `OPENROUTER_API_KEY_SECRET_ARN` | `RuntimeEnvironmentSecrets.OPENROUTER_API_KEY` | Secrets Manager |
+| `AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN` | `RuntimeEnvironmentSecrets.AI_CONFIG_ENCRYPTION_KEY` | Secrets Manager (64 hex chars) |
+| `AI_AVAILABLE_MODELS` (optional) | `RuntimeEnvironmentVariables.AI_AVAILABLE_MODELS` | repository variable |
+
+Without `OPENROUTER_API_KEY` a learner request fails with "未配置可用的 LLM API Key"; without
+`AI_CONFIG_ENCRYPTION_KEY` a course-level key cannot be saved or decrypted. The deploy workflow merges these keys
+with `scripts/configure-admin-dev-env.mjs` before `start-deployment` as soon as either ARN variable exists; if
+only one is set the script fails loudly instead of leaving a half-configured pair. Required IAM: the CI user needs
+`apprunner:UpdateService` on this service, and the instance role needs `secretsmanager:GetSecretValue` on both
+secrets. Future provisioning can pass the ARNs to `provision-admin-dev.mjs`; never pass secret values through the
+repository or GitHub.
+
 `backoffice/.env.local` is a leftover from the retired standalone Next.js prototype (`backoffice/`, port 3200).
 It is gitignored, is not read by the merged app, and can be deleted. It contains only
 `DATABASE_URL`, `SESSION_SECRET`, `APP_ENV`, `NEXT_PUBLIC_APP_URL`, `BOOTSTRAP_ADMIN_*` and an empty

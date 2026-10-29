@@ -5,9 +5,13 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/common/app-setup';
 import { signInAs } from './helpers/employee-session';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { PortalSourceService } from '../src/sync/portal-source.service';
+import { CatalogueSourceService } from '../src/sync/catalogue-source.service';
 
-/** 假 Portal 数据源：只提供课程/课时标题结构（Phase 1 不传内容），避免 e2e 依赖真实 Portal */
+/**
+ * 假同步数据源（2026-10-26）：同步数据源已改为 KS 内置课程 ID 映射表，
+ * e2e 通过覆盖 `CatalogueSourceService` 注入带 lesson 结构的假课程，
+ * 以继续覆盖「标题同步 + 课时建页」算法，同时不依赖任何外部服务。
+ */
 const PORTAL_COURSES = [
   {
     externalId: 'ext-quantum-001',
@@ -27,7 +31,7 @@ const PORTAL_COURSES = [
     ],
   },
 ];
-const fakePortalSource = {
+const fakeCatalogueSource = {
   listCourses: async () => PORTAL_COURSES,
   getCourse: async (externalId: string) =>
     PORTAL_COURSES.find((c) => c.externalId === externalId),
@@ -46,8 +50,8 @@ describe('Knowledge API (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
-      .overrideProvider(PortalSourceService)
-      .useValue(fakePortalSource)
+      .overrideProvider(CatalogueSourceService)
+      .useValue(fakeCatalogueSource)
       .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);
@@ -246,13 +250,14 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('GET /api/courses/:id/releases 历史列表不含 snapshotData；纯快照发布后 isActive/isTestSelected 均为 false、isEditing=true（§3.4.3）', async () => {
+  it('GET /api/courses/:id/releases 历史列表不含 snapshotData；纯快照发布后 isActive=false、isEditing=true，首个 Release 即测试所选（§3.4.3，QA A6）', async () => {
     const res = await api.get(`/api/courses/${courseId}/releases`).expect(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].snapshotData).toBeUndefined();
     // 纯快照：Create Release 不改动 Live 指针（2026-10-20 改拍）
     expect(res.body.data[0].isActive).toBe(false);
-    expect(res.body.data[0].isTestSelected).toBe(false);
+    // 课程此前没有测试 / Live 版本：首个 Release 自动作为 AI Tutor 测试所选版本（QA 2026-10-27 A6）
+    expect(res.body.data[0].isTestSelected).toBe(true);
     // 新建 Release 落在新版本 → editing（2026-10-20 三次改拍）
     expect(res.body.data[0].isEditing).toBe(true);
   });

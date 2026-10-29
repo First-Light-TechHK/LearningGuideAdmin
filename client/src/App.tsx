@@ -15,16 +15,19 @@ import ForgotPasswordPage from './backoffice/pages/ForgotPasswordPage'
 import ResetPasswordPage from './backoffice/pages/ResetPasswordPage'
 import SignInPage from './backoffice/pages/SignInPage'
 import {
-  CoursePage,
   EmployeeAccountSettingsPage,
   MenuGuard,
   PlaceholderPage,
   SettingsEntryPage,
   SettingsIndexPage,
 } from './backoffice/pages/ModulePages'
+import { CourseManagementPage } from './backoffice/pages/CourseManagementPage'
+import { CourseEditorPage } from './backoffice/pages/CourseEditorPage'
+import { CoursePreviewPage } from './backoffice/pages/CoursePreviewPage'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 /**
  * 全局主题（对齐 Figma 设计库 2026-10-16；内容面板统一 2026-10-19）：
@@ -112,7 +115,9 @@ function App() {
     <ConfigProvider locale={useAntdLocale()} theme={themeConfig}>
       {/* App 包裹层：提供 message/modal 上下文（§3.2.2 全量同步警告弹框等） */}
       <AntApp>
-        <Routes>
+        {/* 全局错误边界：捕获渲染异常，避免整个应用白屏 */}
+        <ErrorBoundary>
+          <Routes>
           <Route path="/:locale" element={<LocaleGate />}>
             <Route path="sign-in" element={<SignInPage />} />
             <Route path="activate" element={<ActivatePage />} />
@@ -120,7 +125,9 @@ function App() {
             <Route path="reset-password" element={<ResetPasswordPage />} />
             <Route element={<ShellRoute />}>
               <Route index element={<Navigate to="course" replace />} />
-              <Route path="course" element={<CoursePage />} />
+              <Route path="course" element={<CourseManagementPage />} />
+              <Route path="course/:courseId" element={<CourseEditorPage />} />
+              <Route path="course/:courseId/preview" element={<CoursePreviewPage />} />
               <Route
                 path="knowledge"
                 element={
@@ -158,7 +165,8 @@ function App() {
             </Route>
           </Route>
           <Route path="*" element={<LocaleFallback />} />
-        </Routes>
+          </Routes>
+        </ErrorBoundary>
       </AntApp>
     </ConfigProvider>
   )

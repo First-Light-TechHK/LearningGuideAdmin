@@ -4,6 +4,7 @@ import type { ColumnsType } from '../ui'
 import { useAiStore } from '../../stores/aiStore'
 import type { AiTutorListView } from '../../api/ai'
 import { tokens } from '../../theme/tokens'
+import { useAiText } from './i18n'
 
 /**
  * 「管理所有 online」弹窗（§4.2.6，2026-10-20）：
@@ -18,8 +19,21 @@ export function TutorManagerModal() {
   const tutors = useAiStore((s) => s.tutors)
   const loading = useAiStore((s) => s.tutorsLoading)
   const setTutorOnline = useAiStore((s) => s.setTutorOnline)
+  const { text } = useAiText()
 
   const [keyword, setKeyword] = useState('')
+
+  // 2026-10-28 复盘 A1：开关只改 online，但学员端入口还要求"已同步 Portal"与
+  // "有上线版本"。这两个前提不满足时开关点了也不生效，因此这里显示原因并禁用开关。
+  const STATUS_TEXT: Record<
+    NonNullable<AiTutorListView['blockedReason']> | 'available',
+    { text: string; colour: string }
+  > = {
+    available: { text: text('learnerAvailable'), colour: '#0f9960' },
+    'not-synced': { text: text('learnerNotSynced'), colour: '#c2410c' },
+    'no-live-release': { text: text('learnerNoLiveRelease'), colour: '#c2410c' },
+    'not-online': { text: text('learnerNotOnline'), colour: '#64748b' },
+  }
 
   // 搜索：按名称过滤（不区分大小写）
   const filtered = useMemo(() => {
@@ -29,13 +43,28 @@ export function TutorManagerModal() {
 
   const columns: ColumnsType<AiTutorListView> = [
     {
-      title: 'AI Tutor',
+      title: text('managerColumnTutor'),
       dataIndex: 'title',
       key: 'title',
       sorter: (a, b) => a.title.localeCompare(b.title),
     },
     {
-      title: 'Online',
+      title: text('managerColumnLearner'),
+      dataIndex: 'available',
+      key: 'available',
+      width: 150,
+      sorter: (a, b) => Number(a.available) - Number(b.available),
+      render: (_: boolean, row) => {
+        const status = STATUS_TEXT[row.available ? 'available' : row.blockedReason ?? 'not-online']
+        return (
+          <span style={{ color: status.colour, fontSize: 12 }} title={status.text}>
+            {status.text}
+          </span>
+        )
+      },
+    },
+    {
+      title: text('managerColumnOnline'),
       dataIndex: 'online',
       key: 'online',
       width: 120,
@@ -44,6 +73,8 @@ export function TutorManagerModal() {
         <Switch
           size="small"
           checked={row.online}
+          // 已同步且有上线版本时开关才有意义；否则点了学员端也不会出现入口。
+          disabled={!row.externalId || !row.hasLiveRelease}
           onChange={async (v) => {
             try {
               await setTutorOnline(row.courseId, v)
@@ -58,7 +89,7 @@ export function TutorManagerModal() {
 
   return (
     <Modal
-      title="管理所有 online"
+      title={text('managerTitle')}
       open={open}
       onCancel={close}
       footer={null}
@@ -74,7 +105,7 @@ export function TutorManagerModal() {
       >
         <Input.Search
           allowClear
-          placeholder="搜索 AI Tutor"
+          placeholder={text('managerSearch')}
           style={{ width: 220 }}
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}

@@ -1,4 +1,5 @@
 import type { ErrorCode } from '../contracts/envelope'
+import { notifySessionChanged } from './navigation'
 
 const KNOWN_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
   'INVALID_INPUT',
@@ -15,6 +16,7 @@ const KNOWN_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
   'DUPLICATE_EMAIL',
   'PASSWORD_TOO_WEAK',
   'PASSWORD_MISMATCH',
+  'PASSWORD_SAME_AS_CURRENT',
   'INTERNAL_ERROR',
 ])
 
@@ -27,6 +29,11 @@ export type ApiResult<T> = { success: true; data: T; error: null } | { success: 
 export async function boRequest<T>(url: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
     const response = await fetch(url, { credentials: 'same-origin', ...init })
+    // 401 / 403 可能是会话失效或角色刚被改：让外壳重读 /api/session 刷新菜单。
+    // /api/session 自己就是外壳读取会话的请求，排除掉以免循环。
+    if ((response.status === 401 || response.status === 403) && !url.startsWith('/api/session')) {
+      notifySessionChanged()
+    }
     const body = (await response.json().catch(() => null)) as {
       success?: boolean
       data?: T

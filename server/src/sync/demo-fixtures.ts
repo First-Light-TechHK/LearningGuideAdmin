@@ -191,15 +191,31 @@ export const BASELINE_COURSES: BaselineCourse[] = [
       {
         title: 'Introduction',
         pages: [
-          { title: 'Overview', contentMd: POP_OVERVIEW, tags: ['Core Knowledge'] },
-          { title: 'Q&A Table', contentMd: POP_QA_TABLE, tags: ['Teaching Guidance'] },
+          {
+            title: 'Overview',
+            contentMd: POP_OVERVIEW,
+            tags: ['Core Knowledge'],
+          },
+          {
+            title: 'Q&A Table',
+            contentMd: POP_QA_TABLE,
+            tags: ['Teaching Guidance'],
+          },
         ],
       },
       {
         title: 'Mathematical Models',
         pages: [
-          { title: 'Exponential Model', contentMd: POP_EXPONENTIAL, tags: ['Core Knowledge', 'Assessment'] },
-          { title: 'Logistic Growth', contentMd: POP_LOGISTIC, tags: ['Misconception'] },
+          {
+            title: 'Exponential Model',
+            contentMd: POP_EXPONENTIAL,
+            tags: ['Core Knowledge', 'Assessment'],
+          },
+          {
+            title: 'Logistic Growth',
+            contentMd: POP_LOGISTIC,
+            tags: ['Misconception'],
+          },
         ],
       },
     ],
@@ -212,14 +228,26 @@ export const BASELINE_COURSES: BaselineCourse[] = [
       {
         title: 'Derivatives',
         pages: [
-          { title: 'Definition of the Derivative', contentMd: CALC_DERIV_DEF, tags: ['Core Knowledge'] },
-          { title: 'Differentiation Rules', contentMd: CALC_DERIV_RULES, tags: ['Core Knowledge', 'Teaching Guidance'] },
+          {
+            title: 'Definition of the Derivative',
+            contentMd: CALC_DERIV_DEF,
+            tags: ['Core Knowledge'],
+          },
+          {
+            title: 'Differentiation Rules',
+            contentMd: CALC_DERIV_RULES,
+            tags: ['Core Knowledge', 'Teaching Guidance'],
+          },
         ],
       },
       {
         title: 'Integrals',
         pages: [
-          { title: 'Antiderivatives & the FTC', contentMd: CALC_INTEGRALS, tags: ['Core Knowledge', 'Assessment'] },
+          {
+            title: 'Antiderivatives & the FTC',
+            contentMd: CALC_INTEGRALS,
+            tags: ['Core Knowledge', 'Assessment'],
+          },
         ],
       },
     ],
@@ -232,14 +260,26 @@ export const BASELINE_COURSES: BaselineCourse[] = [
       {
         title: 'Kinematics & Laws',
         pages: [
-          { title: "Newton's Laws", contentMd: MECH_NEWTON, tags: ['Core Knowledge'] },
-          { title: 'Projectile Motion', contentMd: MECH_PROJECTILE, tags: ['Teaching Guidance', 'Misconception'] },
+          {
+            title: "Newton's Laws",
+            contentMd: MECH_NEWTON,
+            tags: ['Core Knowledge'],
+          },
+          {
+            title: 'Projectile Motion',
+            contentMd: MECH_PROJECTILE,
+            tags: ['Teaching Guidance', 'Misconception'],
+          },
         ],
       },
       {
         title: 'Energy',
         pages: [
-          { title: 'Work-Energy Theorem', contentMd: MECH_ENERGY, tags: ['Core Knowledge', 'Assessment'] },
+          {
+            title: 'Work-Energy Theorem',
+            contentMd: MECH_ENERGY,
+            tags: ['Core Knowledge', 'Assessment'],
+          },
         ],
       },
     ],
@@ -252,13 +292,21 @@ export const BASELINE_COURSES: BaselineCourse[] = [
       {
         title: 'Vector Spaces',
         pages: [
-          { title: 'Vectors & Span', contentMd: LINALG_SPAN, tags: ['Core Knowledge'] },
+          {
+            title: 'Vectors & Span',
+            contentMd: LINALG_SPAN,
+            tags: ['Core Knowledge'],
+          },
         ],
       },
       {
         title: 'Matrices',
         pages: [
-          { title: 'Matrix Multiplication', contentMd: LINALG_MATRIX, tags: ['Core Knowledge', 'Teaching Guidance'] },
+          {
+            title: 'Matrix Multiplication',
+            contentMd: LINALG_MATRIX,
+            tags: ['Core Knowledge', 'Teaching Guidance'],
+          },
         ],
       },
     ],
@@ -287,22 +335,42 @@ export const EXTERNAL_COURSES: ExtCourse[] = [
       {
         title: 'Introduction',
         pages: [
-          { title: 'Overview', contentMd: POP_OVERVIEW_UPDATED, tags: ['Core Knowledge'] }, // 改版
-          { title: 'Q&A Table', contentMd: POP_QA_TABLE, tags: ['Teaching Guidance'] }, // 不变
-          { title: 'Notation', contentMd: POP_NOTATION, tags: ['Core Knowledge'] }, // 新增页
+          {
+            title: 'Overview',
+            contentMd: POP_OVERVIEW_UPDATED,
+            tags: ['Core Knowledge'],
+          }, // 改版
+          {
+            title: 'Q&A Table',
+            contentMd: POP_QA_TABLE,
+            tags: ['Teaching Guidance'],
+          }, // 不变
+          {
+            title: 'Notation',
+            contentMd: POP_NOTATION,
+            tags: ['Core Knowledge'],
+          }, // 新增页
         ],
       },
       {
         title: 'Mathematical Models',
         pages: [
-          { title: 'Exponential Model', contentMd: POP_EXPONENTIAL, tags: ['Core Knowledge', 'Assessment'] }, // 不变
+          {
+            title: 'Exponential Model',
+            contentMd: POP_EXPONENTIAL,
+            tags: ['Core Knowledge', 'Assessment'],
+          }, // 不变
           // Logistic Growth 被外部删除 → 本地该页将变 STALE
         ],
       },
       {
         title: 'Extensions', // 新增章
         pages: [
-          { title: 'Advanced Topics', contentMd: POP_ADVANCED, tags: ['Teaching Guidance'] },
+          {
+            title: 'Advanced Topics',
+            contentMd: POP_ADVANCED,
+            tags: ['Teaching Guidance'],
+          },
         ],
       },
     ],
@@ -321,8 +389,16 @@ export const EXTERNAL_COURSES: ExtCourse[] = [
       {
         title: 'Foundations',
         pages: [
-          { title: 'Postulates', contentMd: QUANTUM_POSTULATES, tags: ['Core Knowledge'] },
-          { title: 'Harmonic Oscillator', contentMd: QUANTUNE_HARMONIC, tags: ['Core Knowledge', 'Assessment'] },
+          {
+            title: 'Postulates',
+            contentMd: QUANTUM_POSTULATES,
+            tags: ['Core Knowledge'],
+          },
+          {
+            title: 'Harmonic Oscillator',
+            contentMd: QUANTUNE_HARMONIC,
+            tags: ['Core Knowledge', 'Assessment'],
+          },
         ],
       },
     ],

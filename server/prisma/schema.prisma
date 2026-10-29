@@ -37,6 +37,9 @@ model Course {
   editingReleaseId String?
   // 课程级 Online 开关（2026-10-20 由 CourseAiConfig.online 搬移而来）：该课程 AI Tutor 是否对用户侧开放
   aiTutorOnline    Boolean  @default(false)
+  // 商品课程关联（2026-10-26 新增）：KS 课程 ↔ CommerceCourse，一个商品课程最多对应一个 KS 课程
+  commerceCourseId String?  @unique
+  commerceCourse   CommerceCourse? @relation(fields: [commerceCourseId], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -94,8 +97,31 @@ model Release {
 
   // 反向关联：该 Release 对应的 AI 配置（2026-10-20 按 Release 一份）
   aiConfigs CourseAiConfig[]
+  // 反向关联：该 Release 的知识库向量分块（RAG，2026-10-26 新增）
+  knowledgeChunks KnowledgeChunk[]
 
   @@index([courseId, createdAt])
+}
+
+// ==========================================
+// RAG 知识库向量分块（2026-10-26 新增）
+// 发布 Release 时异步分块 + embedding，对话时按向量相似度检索
+// ==========================================
+model KnowledgeChunk {
+  id          String   @id @default(uuid())
+  releaseId   String
+  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  pageId      String?   // 原 Page ID（追溯用）
+  pageTitle   String    // 页面标题（引用展示用）
+  heading     String?   // 所属 H1-H6 标题（引用展示用）
+  content     String   @db.Text   // 分块纯文本
+  embedding   Unsupported("vector(1536)")  // pgvector 1536 维（text-embedding-3-small）
+  sortOrder   Int       // 页面内顺序
+  tokenCount  Int       // token 估算（上下文预算用）
+  createdAt   DateTime  @default(now())
+
+  @@index([releaseId])
+  @@index([releaseId, sortOrder])
 }
 
 // ==========================================
@@ -105,7 +131,7 @@ model Release {
 // AI 提示词模板库（预设两套模式）
 model PromptTemplate {
   id           String   @id @default(uuid())
-  mode         String // 枚举: "LECTURE" | "SOCRATIC"
+  mode         String // 枚举: "LECTURE" | "SOCRATIC" | "ASSESSMENT"
   systemPrompt String   @db.Text // 系统提示词
   welcomeMsg   String   @db.Text // 欢迎语
   isDefault    Boolean  @default(false)
@@ -113,13 +139,16 @@ model PromptTemplate {
   updatedAt    DateTime @updatedAt
 
   // 反向关联：被哪些课程引用
-  // 注：CourseAiConfig 存在两条指向本模型的关系（Lecture/Socratic），
-  // Prisma 要求多关系必须命名消歧，故拆分为两个反向列表字段（不影响数据库列结构）
-  lectureConfigs  CourseAiConfig[] @relation("LectureTemplate")
-  socraticConfigs CourseAiConfig[] @relation("SocraticTemplate")
+  // 注：CourseAiConfig 存在多条指向本模型的关系（Lecture/Socratic/Assessment），
+  // Prisma 要求多关系必须命名消歧，故拆分为多个反向列表字段（不影响数据库列结构）
+  lectureConfigs    CourseAiConfig[] @relation("LectureTemplate")
+  socraticConfigs   CourseAiConfig[] @relation("SocraticTemplate")
+  assessmentConfigs CourseAiConfig[] @relation("AssessmentTemplate")
 }
 
 // 课程 + 发布版本 专属的 AI 配置（2026-10-20 改拍：由「每课程一份」→「每个 Release 一份」）
+// 2026-10-27 调整：System Prompt 按模式分开（Lecture/Socratic/Assessment），
+//   Welcome Message 与 LLM Model 统一为课程级共享列（不随模式切换）。
 model CourseAiConfig {
   id        String  @id @default(uuid())
   courseId  String
@@ -127,25 +156,32 @@ model CourseAiConfig {
   releaseId String
   release   Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
-  // 引用基础模板（两条关系分别命名以消歧）
-  lectureModeId    String?
-  socraticModeId   String?
-  lectureTemplate  PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
-  socraticTemplate PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
+  // 引用基础模板（三条关系分别命名以消歧）
+  lectureModeId      String?
+  socraticModeId     String?
+  assessmentModeId   String?
+  lectureTemplate    PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
+  socraticTemplate   PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
+  assessmentTemplate PromptTemplate? @relation("AssessmentTemplate", fields: [assessmentModeId], references: [id])
 
-  // 覆盖自定义的提示词（按模式分开，可选；有值即优先于该模式模板）
-  // 2026-10-20 由单一 customSystemPrompt / customWelcomeMsg 拆分而来（存量值迁移时两模式同时回填）
-  lectureSystemPrompt  String? @db.Text
-  socraticSystemPrompt String? @db.Text
-  lectureWelcomeMsg    String? @db.Text
-  socraticWelcomeMsg   String? @db.Text
+  // 主提示词（讲授/苏格拉底共享，置于拼接最前端；Assessment 不参与）
+  // 2026-10-29 新增 mainSystemPrompt，用于承载不可协商的硬约束（身份/域界/拒答/注入防护/优先级）
+  mainSystemPrompt String? @db.Text
 
-  // LLM 配置（llmProvider / llmBaseUrl / apiKey 课程级共享；model 按模式，null 回退 AI_AVAILABLE_MODELS[0]）
-  llmProvider   String // 如: "openrouter"
-  lectureModel  String?
-  socraticModel String?
-  llmBaseUrl    String? // 可选的自定义 Base URL
-  apiKey        String? // 加密存储
+  // 各模式自定义 System Prompt（按模式分开，可选；有值即优先于该模式模板）
+  // 2026-10-27 新增 assessmentSystemPrompt；welcome 与 model 统一为共享列
+  lectureSystemPrompt    String? @db.Text
+  socraticSystemPrompt   String? @db.Text
+  assessmentSystemPrompt String? @db.Text
+
+  // 统一 Welcome Message（不再按模式分开）
+  welcomeMsg String? @db.Text
+
+  // LLM 配置（llmProvider / llmBaseUrl / apiKey / model 均课程级共享；model null 回退 AI_AVAILABLE_MODELS[0]）
+  llmProvider String // 如: "openrouter"
+  model       String?
+  llmBaseUrl  String? // 可选的自定义 Base URL
+  apiKey      String? // 加密存储
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -278,3 +314,422 @@ model BackofficeSetting {
 
   @@map("backoffice_settings")
 }
+
+// ==========================================
+// Commerce Course（v2，2026-10-26 新增；见 docs/Course_Module_Import_Export_Design.md §14）
+// 商品课程：课程 → 课时 两层（无章节），多语言/展品/学习点/测试/试用/版本/导入导出。
+// ==========================================
+
+enum CourseLifecycleStatus {
+  WORKING
+  IN_UAT
+  APPROVED
+  LIVE
+}
+
+enum CourseLiveStatus {
+  ONLINE
+  HIDDEN
+  OFFLINE
+}
+
+enum LearningMode {
+  VIDEO_ONLY
+  TEXT_ONLY
+  VIDEO_AND_TEXT
+}
+
+enum ExhibitType {
+  IMAGE
+  VIDEO
+  MODEL3D
+}
+
+enum ReadingType {
+  BOOK
+  ARTICLE
+  PAPER
+}
+
+enum TrialRowStatus {
+  READY
+  RE_CONFIRM
+  LOCKED
+}
+
+enum LearningPointSource {
+  VIDEO
+  TEXT
+}
+
+enum CourseMediaKind {
+  IMAGE
+  VIDEO
+  PDF
+  AUDIO
+  MODEL3D
+}
+
+enum CatalogueStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum CoursePackageJobKind {
+  IMPORT
+  EXPORT
+}
+
+enum CoursePackageJobStatus {
+  UPLOADING
+  VALIDATING
+  AWAITING_CONFIRM
+  IMPORTING
+  EXPORTING
+  READY
+  FAILED
+  CANCELLED
+}
+
+model CommerceCourse {
+  id                     String                @id @default(uuid())
+  code                   String                @unique
+  slug                   String                @unique
+  categoryId             String?
+  category               CourseCatalogueEntry? @relation("CourseCategory", fields: [categoryId], references: [id])
+  subjectId              String?
+  subject                CourseCatalogueEntry? @relation("CourseSubject", fields: [subjectId], references: [id])
+  learningMode           LearningMode
+  defaultContentLanguage String                @default("en-GB")
+  learningLanguages      Json
+  coverAssetId           String?                @unique
+  cover                  CourseMediaAsset?     @relation("CourseCover", fields: [coverAssetId], references: [id])
+
+  lifecycleStatus        CourseLifecycleStatus @default(WORKING)
+  liveStatus             CourseLiveStatus      @default(HIDDEN)
+  liveVersionId          String?
+  currentUatVersionId    String?
+  approvedAt             DateTime?
+  approvedBy             String?
+  lastUatPublishedAt     DateTime?
+  archivedAt             DateTime?
+
+  // v1 兼容 / 迁移过渡
+  subtitle               String?
+  level                  String?
+  tags                   Json?
+  referencePrice         Int?
+  discount               Int?
+  legacyCategory         String?
+  legacyAuthorIds        Json?
+
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  localizations CourseLocalization[]
+  lessons       Lesson[]
+  versions      CourseVersion[]
+  media         CourseMediaAsset[]            @relation("CourseMedia")
+  trialRows     TrialSetting[]
+  authors       CommerceCourseAuthor[]
+  plans         CoursePlan[]
+  ksCourse      Course?
+
+  @@index([lifecycleStatus, updatedAt])
+  @@index([liveStatus])
+  @@index([categoryId])
+}
+
+model CourseLocalization {
+  id               String         @id @default(uuid())
+  courseId         String
+  course           CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  language         String
+  title            String
+  shortDescription String?
+  overview         String?        @db.Text
+  whatYouLearn     Json?
+  provides         Json?
+
+  @@unique([courseId, language])
+}
+
+model Lesson {
+  id                 String         @id @default(uuid())
+  courseId           String
+  course             CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  code               String
+  sortOrder          Int
+  legacySectionId    String?
+  legacySectionTitle String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  localizations   LessonLocalization[]
+  exhibits        Exhibit[]
+  readings        RecommendedReading[]
+  questions       KnowledgeQuestion[]
+  applicationTest ApplicationTest?
+  learningPoints  LearningPoint[]
+  triggers        ExhibitTrigger[]
+
+  @@unique([courseId, code])
+  @@index([courseId, sortOrder])
+}
+
+model LessonLocalization {
+  id                   String           @id @default(uuid())
+  lessonId             String
+  lesson               Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  language             String
+  title                String
+  description          String?
+  videoAssetId         String?
+  video                CourseMediaAsset? @relation("LessonVideo", fields: [videoAssetId], references: [id])
+  videoDurationSeconds Int?
+  textHtml             String?          @db.Text
+  textLearningPoints   Json?
+  legacyContents       Json?
+
+  @@unique([lessonId, language])
+}
+
+model Exhibit {
+  id               String           @id @default(uuid())
+  lessonId         String
+  lesson           Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  code             String
+  type             ExhibitType
+  mediaAssetId     String?
+  media            CourseMediaAsset? @relation("ExhibitMedia", fields: [mediaAssetId], references: [id])
+  thumbnailAssetId String?
+  thumbnail        CourseMediaAsset? @relation("ExhibitThumbnail", fields: [thumbnailAssetId], references: [id])
+  sourceText       String?
+  localized        Json
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([lessonId, code])
+}
+
+model LearningPoint {
+  id            String              @id @default(uuid())
+  lessonId      String
+  lesson        Lesson              @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  language      String
+  code          String
+  title         String
+  source        LearningPointSource
+  timeSeconds   Int?
+  anchorHeading String?
+  sortOrder     Int
+
+  @@unique([lessonId, language, code])
+}
+
+model ExhibitTrigger {
+  id          String @id @default(uuid())
+  lessonId    String
+  lesson      Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  exhibitId   String
+  language    String
+  timeSeconds Int
+
+  @@unique([lessonId, exhibitId, language])
+}
+
+model RecommendedReading {
+  id             String      @id @default(uuid())
+  lessonId       String
+  lesson         Lesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  language       String
+  type           ReadingType
+  title          String
+  author         String?
+  whyRecommended String?     @db.Text
+  sortOrder      Int
+
+  @@index([lessonId, language, sortOrder])
+}
+
+model KnowledgeQuestion {
+  id              String  @id @default(uuid())
+  lessonId        String
+  lesson          Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  code            String
+  question        String  @db.Text
+  referenceAnswer String? @db.Text
+  sortOrder       Int
+  enabled         Boolean @default(true)
+
+  @@unique([lessonId, code])
+}
+
+model ApplicationTest {
+  id              String  @id @default(uuid())
+  lessonId        String  @unique
+  lesson          Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  scenario        String  @db.Text
+  referenceAnswer String? @db.Text
+  enabled         Boolean @default(true)
+}
+
+model TrialSetting {
+  id                        String         @id @default(uuid())
+  courseId                  String
+  course                    CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessonId                  String
+  videoCutoffSeconds        Int?
+  textCutoffLearningPointId String?
+  status                    TrialRowStatus @default(LOCKED)
+
+  @@unique([courseId, lessonId])
+}
+
+model CourseVersion {
+  id              String         @id @default(uuid())
+  courseId        String
+  course          CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  versionNo       Int
+  snapshotData    Json
+  sourceVersionId String?
+  wentLiveAt      DateTime?
+  createdBy       String?
+  createdAt       DateTime       @default(now())
+
+  @@unique([courseId, versionNo])
+  @@index([courseId, wentLiveAt])
+}
+
+model CourseMediaAsset {
+  id           String          @id @default(uuid())
+  courseId     String
+  course       CommerceCourse  @relation("CourseMedia", fields: [courseId], references: [id], onDelete: Cascade)
+  kind         CourseMediaKind
+  originalName String
+  mimeType     String
+  extension    String
+  size         Int
+  storageKey   String          @unique
+  checksum     String?
+  createdBy    String?
+  createdAt    DateTime        @default(now())
+
+  coverFor         CommerceCourse?    @relation("CourseCover")
+  exhibitMedia     Exhibit[]          @relation("ExhibitMedia")
+  exhibitThumbnail Exhibit[]          @relation("ExhibitThumbnail")
+  lessonVideos     LessonLocalization[] @relation("LessonVideo")
+
+  @@index([courseId, kind])
+}
+
+model CourseCatalogueEntry {
+  id          String                 @id @default(uuid())
+  name        String
+  description String                 @default("")
+  parentId    String?
+  parent      CourseCatalogueEntry?  @relation("CatalogueParent", fields: [parentId], references: [id])
+  children    CourseCatalogueEntry[] @relation("CatalogueParent")
+  status      CatalogueStatus        @default(ACTIVE)
+  sortOrder   Int                    @default(0)
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  coursesAsCategory CommerceCourse[] @relation("CourseCategory")
+  coursesAsSubject  CommerceCourse[] @relation("CourseSubject")
+
+  @@unique([parentId, name])
+  @@index([parentId, sortOrder])
+}
+
+model CoursePlan {
+  id              String          @id
+  courseId        String?
+  course          CommerceCourse? @relation(fields: [courseId], references: [id])
+  name            String
+  scope           String
+  scopeId         String
+  termMonths      Int
+  device          String
+  amountMinor     Int
+  currency        String          @default("usd")
+  stripeLookupKey String?
+  aiPoints        Int             @default(0)
+  trialEligible   Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([scope, scopeId])
+}
+
+model CommerceCourseAuthor {
+  courseId   String
+  course     CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  employeeId String         @db.Uuid
+  createdAt  DateTime       @default(now())
+
+  @@id([courseId, employeeId])
+  @@index([employeeId])
+}
+
+model CourseAuthoringActivity {
+  id              BigInt   @id @default(autoincrement())
+  courseId        String?
+  actorEmployeeId String?  @db.Uuid
+  action          String
+  detail          Json?
+  requestId       String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([courseId, createdAt(sort: Desc)])
+}
+
+model PopularCourseEntry {
+  id        String         @id @default(uuid())
+  courseId  String         @unique
+  sortOrder Int
+  createdAt DateTime       @default(now())
+
+  @@index([sortOrder])
+}
+
+model DiscoveryBanner {
+  id        String   @id @default("singleton")
+  enabled   Boolean  @default(false)
+  courseId  String?
+  localized Json?
+  updatedAt DateTime @updatedAt
+}
+
+model CoursePackageJob {
+  id              String                 @id @default(uuid())
+  kind            CoursePackageJobKind
+  status          CoursePackageJobStatus @default(UPLOADING)
+  courseId        String?
+  actorEmployeeId String?                @db.Uuid
+  idempotencyKey  String?                @unique
+  packageHash     String?
+  sourceFileName  String?
+  bytesTotal      Int?
+  bytesReceived   Int?                   @default(0)
+  stage           String?
+  progress        Int?                   @default(0)
+  manifest        Json?
+  report          Json?
+  conflicts       Json?
+  storageKey      String?
+  error           String?
+  lockedBy        String?
+  lockedAt        DateTime?
+  heartbeatAt     DateTime?
+  attempts        Int                    @default(0)
+  cancelRequested Boolean                @default(false)
+  nextAttemptAt   DateTime?
+  requestId       String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([kind, status, createdAt])
+  @@index([actorEmployeeId, createdAt])
+}
+

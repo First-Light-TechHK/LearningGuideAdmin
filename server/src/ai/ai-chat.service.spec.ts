@@ -3,8 +3,6 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { PrismaKnowledgeClient } from '../ks/prisma-knowledge.client';
-import { PrismaService } from '../prisma/prisma.service';
 import { AiChatLogger, type AiChatLogEntry } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
@@ -12,6 +10,7 @@ import { ChatStreamDto } from './dto/chat-stream.dto';
 import type { LlmStreamOptions } from './providers/llm-provider.interface';
 import { ProviderRegistry } from './providers/provider.registry';
 import { RateLimitService } from './rate-limit.service';
+import type { KnowledgeClient } from '../ks/contract/knowledge-client';
 
 const COURSE_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_RELEASE = 'release-test';
@@ -20,22 +19,23 @@ const LIVE_RELEASE = 'release-live';
 type StreamFn = (opts: LlmStreamOptions) => AsyncGenerator<string>;
 
 function setup(stream: StreamFn) {
-  const prisma = {
-    course: {
-      findUnique: jest.fn().mockResolvedValue({
-        id: COURSE_ID,
-        title: '课程',
-        currentReleaseId: LIVE_RELEASE,
-        aiTestReleaseId: TEST_RELEASE,
-      }),
-      findFirst: jest.fn().mockResolvedValue(null),
-    },
-    release: {
-      findUnique: jest.fn().mockResolvedValue({
-        snapshotData: { pages: [] },
-      }),
-    },
-  } as unknown as PrismaService;
+  const knowledge = {
+    getCourse: jest.fn().mockResolvedValue({
+      id: COURSE_ID,
+      title: '课程',
+      currentReleaseId: LIVE_RELEASE,
+      aiTestReleaseId: TEST_RELEASE,
+      aiTutorOnline: true,
+    }),
+    getCourseByExternalId: jest.fn().mockResolvedValue({
+      id: COURSE_ID,
+      title: '课程',
+      currentReleaseId: LIVE_RELEASE,
+      aiTestReleaseId: null,
+      aiTutorOnline: true,
+    }),
+    retrieveChunks: jest.fn().mockResolvedValue([]),
+  } as unknown as KnowledgeClient;
 
   const configs = {
     resolveRuntime: jest.fn().mockResolvedValue({
@@ -62,16 +62,15 @@ function setup(stream: StreamFn) {
   } as unknown as AiChatLogger;
 
   const service = new AiChatService(
-    new PrismaKnowledgeClient(prisma),
+    knowledge,
     configs,
     registry,
     rateLimit,
     chatLogger,
   );
   const write = chatLogger.write as jest.MockedFunction<AiChatLogger['write']>;
-  const entryOf = (): AiChatLogEntry =>
-    write.mock.calls[0][0] as unknown as AiChatLogEntry;
-  return { service, write, entryOf, prisma, configs, rateLimit };
+  const entryOf = (): AiChatLogEntry => write.mock.calls[0][0];
+  return { service, write, entryOf, knowledge, configs, rateLimit };
 }
 
 function dto(history: ChatStreamDto['history'] = []): ChatStreamDto {
@@ -156,10 +155,10 @@ describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
   });
 
   it('课程不存在：日志记 error，releaseId 为空', async () => {
-    const { service, write, entryOf, prisma } = setup(async function* () {
+    const { service, write, entryOf, knowledge } = setup(async function* () {
       yield '';
     });
-    (prisma.course.findUnique as jest.Mock).mockResolvedValueOnce(null);
+    (knowledge.getCourse as jest.Mock).mockResolvedValueOnce(null);
     await expect(collect(service.streamChat(dto()))).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -181,10 +180,10 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
   });
 
   it('Online 关闭时拒绝，并记录 learner 错误日志', async () => {
-    const { service, write, entryOf, prisma } = setup(async function* () {
+    const { service, write, entryOf, knowledge } = setup(async function* () {
       yield '';
     });
-    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+    (knowledge.getCourseByExternalId as jest.Mock).mockResolvedValue({
       id: COURSE_ID,
       currentReleaseId: LIVE_RELEASE,
       aiTutorOnline: false,
@@ -200,10 +199,10 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
   });
 
   it('无上线 Release 时拒绝', async () => {
-    const { service, prisma } = setup(async function* () {
+    const { service, knowledge } = setup(async function* () {
       yield '';
     });
-    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+    (knowledge.getCourseByExternalId as jest.Mock).mockResolvedValue({
       id: COURSE_ID,
       currentReleaseId: null,
       aiTutorOnline: true,
@@ -216,13 +215,13 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
 
   it('只读 currentReleaseId（忽略 aiTestReleaseId）并注入英文语言指令', async () => {
     let systemPrompt = '';
-    const { service, prisma, configs } = setup(
-      async function* (opts: LlmStreamOptions) {
-        systemPrompt = opts.messages[0]?.content ?? '';
-        yield 'ok';
-      },
-    );
-    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+    const { service, knowledge, configs } = setup(async function* (
+      opts: LlmStreamOptions,
+    ) {
+      systemPrompt = opts.messages[0]?.content ?? '';
+      yield 'ok';
+    });
+    (knowledge.getCourseByExternalId as jest.Mock).mockResolvedValue({
       id: COURSE_ID,
       currentReleaseId: LIVE_RELEASE,
       aiTestReleaseId: TEST_RELEASE,
@@ -232,8 +231,8 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     await expect(
       collect(service.streamLearnerChat(learnerDto())),
     ).resolves.toBe('ok');
-    expect(prisma.course.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { externalId: 'epicureanism' } }),
+    expect(knowledge.getCourseByExternalId).toHaveBeenCalledWith(
+      'epicureanism',
     );
     expect(configs.resolveRuntime).toHaveBeenCalledWith(
       COURSE_ID,
@@ -245,14 +244,14 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
       LIVE_RELEASE,
       'LECTURE',
     );
-    expect(systemPrompt).toContain("Answer in the language of the student's latest message.");
+    // LOCALE_INSTRUCTION 已删（main.md 第 5 节 LANGUAGE 覆盖），不再单独断言
   });
 
   it('直播间流量走独立限流槽位（study-group），默认按 portal', async () => {
-    const { service, prisma, rateLimit } = setup(async function* () {
+    const { service, knowledge, rateLimit } = setup(async function* () {
       yield 'ok';
     });
-    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+    (knowledge.getCourseByExternalId as jest.Mock).mockResolvedValue({
       id: COURSE_ID,
       currentReleaseId: LIVE_RELEASE,
       aiTutorOnline: true,
@@ -262,6 +261,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       COURSE_ID,
       'portal',
+      undefined,
     );
 
     await collect(
@@ -270,6 +270,19 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
       COURSE_ID,
       'study-group',
+      undefined,
+    );
+  });
+
+  it('后台测试对话走独立的 admin-test 限流槽位，不占学员额度（QA A2）', async () => {
+    const { service, rateLimit } = setup(async function* () {
+      yield 'ok';
+    });
+    await collect(service.streamChat(dto()));
+    expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
+      expect.any(String),
+      'admin-test',
+      undefined,
     );
   });
 });

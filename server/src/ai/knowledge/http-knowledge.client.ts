@@ -5,6 +5,7 @@ import {
   type KnowledgeCourse,
   type KnowledgeRelease,
   type KnowledgeReleaseMeta,
+  type RetrievedChunk,
 } from '../../ks/contract/knowledge-client';
 
 /** 读接口超时：KS 慢了不能拖住 Tutor（docs/Engine_Split_Implementation.md 规则 5） */
@@ -80,6 +81,18 @@ export class HttpKnowledgeClient implements KnowledgeClient {
     });
   }
 
+  retrieveChunks(
+    releaseId: string,
+    query: string,
+    topK?: number,
+  ): Promise<RetrievedChunk[]> {
+    return this.request<RetrievedChunk[]>(
+      'POST',
+      `/releases/${encodeURIComponent(releaseId)}/chunks/retrieve`,
+      { query, topK },
+    ).then((r) => r ?? []);
+  }
+
   private async write<T>(path: string, body: unknown): Promise<T> {
     const result = await this.request<T>('PUT', path, body);
     if (result === null) throw new NotFoundException('课程不存在');
@@ -87,7 +100,7 @@ export class HttpKnowledgeClient implements KnowledgeClient {
   }
 
   private async request<T>(
-    method: 'GET' | 'PUT',
+    method: 'GET' | 'PUT' | 'POST',
     path: string,
     body?: unknown,
   ): Promise<T | null> {

@@ -120,9 +120,9 @@ describe('TagsService', () => {
   describe('update', () => {
     it('tag 不存在应抛 NotFoundException 且不调用 update', async () => {
       mockPrisma.tag.findUnique.mockResolvedValue(null);
-      await expect(
-        service.update('Missing', { color: 'red' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.update('Missing', { color: 'red' })).rejects.toThrow(
+        NotFoundException,
+      );
       expect(mockPrisma.tag.update).not.toHaveBeenCalled();
     });
 

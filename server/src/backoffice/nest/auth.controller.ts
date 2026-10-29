@@ -15,12 +15,13 @@ import type { Request, Response } from 'express';
 import { normaliseEmail, type SessionEmployee } from '../contracts/employee';
 import { isDeployed } from '../lib/env';
 import { DEFAULT_LOCALE, isLocale, type Locale } from '../lib/i18n/config';
-import { consume } from '../lib/rateLimit';
+import { clear, consume, peek } from '../lib/rateLimit';
 import {
   EMAIL_CHECK_MAX_PER_WINDOW,
   EMAIL_SEND_MAX_PER_WINDOW,
   RATE_LIMIT_WINDOW_MINUTES,
   SIGN_IN_MAX_PER_WINDOW,
+  TOKEN_STATUS_MAX_PER_WINDOW,
 } from '../lib/securityPolicy';
 import {
   canAccessEmployeeAccount,
@@ -37,6 +38,7 @@ import {
 import {
   activateWithToken,
   changeOwnPassword,
+  inspectLinkStatus,
   requestPasswordReset,
   resetWithToken,
 } from '../modules/user-authentication/services/passwordFlows';
@@ -115,20 +117,36 @@ export class BackofficeAuthController {
     @Body() raw: unknown,
   ) {
     const ip = clientIp(request);
-    limit(`sign-in:${ip}`, SIGN_IN_MAX_PER_WINDOW);
     const body = asBody(raw);
-    // 按账号再限一次：换 IP 也不能对同一邮箱无限试密码
-    limit(
-      `sign-in-email:${normaliseEmail(readString(body, 'email'))}`,
-      SIGN_IN_MAX_PER_WINDOW,
-    );
+    // 只数失败：按 IP 一个窗口，按 IP+邮箱 再一个窗口。不单按邮箱计数，
+    // 否则别人换着 IP 输错 10 次就能把某位员工锁在门外。
+    const ipKey = `sign-in:${ip}`;
+    const pairKey = `sign-in-pair:${ip}:${normaliseEmail(readString(body, 'email'))}`;
+    for (const key of [ipKey, pairKey]) {
+      if (!peek(key, SIGN_IN_MAX_PER_WINDOW).allowed) {
+        throw backofficeError(
+          'RATE_LIMITED',
+          'Too many attempts, please try again later',
+        );
+      }
+    }
     const outcome = await signIn({
       rawEmail: readString(body, 'email'),
       password: readString(body, 'password'),
       ipAddress: ip,
       userAgent: userAgent(request),
     });
-    if (!outcome.ok) throw backofficeError(outcome.code, 'Sign-in rejected');
+    if (!outcome.ok) {
+      if (
+        outcome.code === 'INVALID_CREDENTIALS' ||
+        outcome.code === 'INVALID_INPUT'
+      ) {
+        consume(ipKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
+        consume(pairKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
+      }
+      throw backofficeError(outcome.code, 'Sign-in rejected');
+    }
+    clear(pairKey);
 
     // PORT-NAV-006：账号级语言偏好优先，其次本次页面语言
     const stored = await preferencesRepository
@@ -170,6 +188,23 @@ export class BackofficeAuthController {
     });
     if (!outcome.ok) throw backofficeError(outcome.code, 'Activation rejected');
     return { activated: true };
+  }
+
+  /** PORT-ACT-003：页面打开时先判断链接是否可用，过期/已用不显示表单。 */
+  @Get('auth/token-status')
+  async tokenStatus(
+    @Req() request: Request,
+    @Query('token') token?: string,
+    @Query('purpose') purpose?: string,
+  ) {
+    limit(`token-status:${clientIp(request)}`, TOKEN_STATUS_MAX_PER_WINDOW);
+    if (purpose !== 'activation' && purpose !== 'reset')
+      throw backofficeError('INVALID_INPUT', 'Unsupported purpose');
+    const status = await inspectLinkStatus(
+      typeof token === 'string' ? token : '',
+      purpose === 'activation' ? 'ACTIVATION' : 'PASSWORD_RESET',
+    );
+    return { status };
   }
 
   @Post('auth/forgot-password')

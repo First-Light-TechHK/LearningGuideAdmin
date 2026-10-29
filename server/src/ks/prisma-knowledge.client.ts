@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { lockCourseRow } from '../prisma/course-lock';
+import { EmbeddingService } from '../ai/embedding/embedding.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   KnowledgeClient,
@@ -6,7 +8,12 @@ import type {
   KnowledgeRelease,
   KnowledgeReleaseMeta,
   KnowledgeReleasePage,
+  RetrievedChunk,
 } from './contract/knowledge-client';
+
+/** RAG 检索参数（对齐系统设计 §9.4） */
+const RETRIEVAL_TOP_K = 6;
+const RETRIEVAL_SCORE_THRESHOLD = 0.35;
 
 const COURSE_FIELDS = {
   id: true,
@@ -23,7 +30,10 @@ const COURSE_FIELDS = {
  */
 @Injectable()
 export class PrismaKnowledgeClient implements KnowledgeClient {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embedding: EmbeddingService,
+  ) {}
 
   getCourse(courseId: string): Promise<KnowledgeCourse | null> {
     return this.prisma.course.findUnique({
@@ -78,14 +88,25 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
     };
   }
 
+  /** 与删除 Release 共用 Course 行锁，锁内复查版本仍属于该课程（QA 2026-10-27 A7） */
   setTestRelease(
     courseId: string,
     releaseId: string,
   ): Promise<KnowledgeCourse> {
-    return this.prisma.course.update({
-      where: { id: courseId },
-      data: { aiTestReleaseId: releaseId },
-      select: COURSE_FIELDS,
+    return this.prisma.$transaction(async (tx) => {
+      await lockCourseRow(tx, courseId);
+      const release = await tx.release.findUnique({
+        where: { id: releaseId },
+        select: { courseId: true },
+      });
+      if (!release || release.courseId !== courseId) {
+        throw new NotFoundException('发布版本不存在或不属于该课程');
+      }
+      return tx.course.update({
+        where: { id: courseId },
+        data: { aiTestReleaseId: releaseId },
+        select: COURSE_FIELDS,
+      });
     });
   }
 
@@ -95,5 +116,53 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
       data: { aiTutorOnline: online },
       select: COURSE_FIELDS,
     });
+  }
+
+  /**
+   * RAG 向量检索：对 query 生成 embedding，在 release 的 KnowledgeChunk 中
+   * 做余弦相似度检索（topK=6，阈值=0.35）。KS 侧持有向量数据，Agent 只拿结果。
+   */
+  async retrieveChunks(
+    releaseId: string,
+    query: string,
+    topK: number = RETRIEVAL_TOP_K,
+  ): Promise<RetrievedChunk[]> {
+    if (!query?.trim()) return [];
+
+    const queryVec = await this.embedding.embedQuery(query);
+    const vecStr = `[${queryVec.join(',')}]`;
+
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{
+        pageTitle: string;
+        heading: string | null;
+        content: string;
+        score: number;
+        tokenCount: number;
+      }>
+    >(
+      `
+      SELECT "pageTitle", "heading", "content",
+             1 - (embedding <=> $1::vector(1536)) AS score,
+             "tokenCount"
+      FROM "KnowledgeChunk"
+      WHERE "releaseId" = $2
+      ORDER BY embedding <=> $1::vector(1536)
+      LIMIT $3
+    `,
+      vecStr,
+      releaseId,
+      topK,
+    );
+
+    return rows
+      .filter((r) => r.score >= RETRIEVAL_SCORE_THRESHOLD)
+      .map((r) => ({
+        pageTitle: r.pageTitle,
+        heading: r.heading,
+        content: r.content,
+        score: r.score,
+        tokenCount: r.tokenCount,
+      }));
   }
 }

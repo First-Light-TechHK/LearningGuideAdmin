@@ -4,6 +4,7 @@ import {
   chatStream,
   type AiConfigView,
   type AiMode,
+  type AiSegmentKey,
   type AiTutorListView,
   type PromptTemplate,
 } from '../api/ai'
@@ -25,9 +26,12 @@ interface AiForm {
 interface AiState {
   courses: Course[]
   selectedCourseId: string | null
+  /** 对话注入模式（仅 Lecture / Socratic；切换不重置会话，2026-10-27） */
   mode: AiMode
+  /** 配置面板当前编辑的分段项（MAIN / Lecture / Socratic / Assessment），与对话 mode 解耦 */
+  editMode: AiSegmentKey
   models: string[]
-  templates: { LECTURE?: PromptTemplate; SOCRATIC?: PromptTemplate }
+  templates: { LECTURE?: PromptTemplate; SOCRATIC?: PromptTemplate; ASSESSMENT?: PromptTemplate }
   config: AiConfigView | null
   form: AiForm
   /** 初始表单快照，用于检测未保存修改（§4.2.5 Unsaved changes） */
@@ -48,10 +52,12 @@ interface AiState {
   selectCourse: (courseId: string) => Promise<void>
   /** 重新拉取当前课程的配置与 Release 列表（进入 AI Tutor 时刷新，避免 Release 列表过期） */
   refreshActiveCourse: () => Promise<void>
-  setMode: (mode: AiMode) => Promise<void>
+  setMode: (mode: AiMode) => void
+  setEditMode: (mode: AiSegmentKey) => void
   patchForm: (patch: Partial<AiForm>) => void
   save: () => Promise<boolean>
-  reset: () => Promise<void>
+  /** 把当前编辑模式的 System Prompt 恢复为模板默认值（只改编辑区，需 Save 才生效） */
+  reset: () => void
   setOnline: (online: boolean) => Promise<void>
   setTutorOnline: (courseId: string, online: boolean) => Promise<void>
   openTutorManager: () => Promise<void>
@@ -65,21 +71,21 @@ interface AiState {
   isDirty: () => boolean
 }
 
-/** 会话按 courseId+mode 隔离存 localStorage（§4.3.2 拍板：不落库） */
-const chatKey = (courseId: string, mode: AiMode) => `aitutor.chat.${courseId}.${mode}`
+/** 会话按 courseId 隔离存 localStorage（2026-10-27：不再按模式隔离，模式切换不重置会话） */
+const chatKey = (courseId: string) => `aitutor.chat.${courseId}`
 
-function loadChat(courseId: string, mode: AiMode): ChatMessage[] | null {
+function loadChat(courseId: string): ChatMessage[] | null {
   try {
-    const raw = localStorage.getItem(chatKey(courseId, mode))
+    const raw = localStorage.getItem(chatKey(courseId))
     return raw ? (JSON.parse(raw) as ChatMessage[]) : null
   } catch {
     return null
   }
 }
 
-function persistChat(courseId: string, mode: AiMode, messages: ChatMessage[]) {
+function persistChat(courseId: string, messages: ChatMessage[]) {
   try {
-    localStorage.setItem(chatKey(courseId, mode), JSON.stringify(messages))
+    localStorage.setItem(chatKey(courseId), JSON.stringify(messages))
   } catch {
     /* 存储满等异常不影响会话 */
   }
@@ -88,20 +94,37 @@ function persistChat(courseId: string, mode: AiMode, messages: ChatMessage[]) {
 const now = () => new Date().toISOString()
 
 /**
- * 按模式构建表单，与后端同口径（2026-10-20 二次改拍）：
- * System Prompt / Welcome 自定义 > 该模式模板默认；Model 取该模式生效模型（已含默认回退）。
+ * 构建表单（2026-10-29 调整）：
+ * - MAIN：用户自定义值优先；null 时用后端传来的 defaultMainSystemPrompt（main.md 内容）填充 textarea
+ *   （运行时 resolvePrompts 也兜底 DEFAULT_MAIN_PROMPT，这里前端展示保持一致）
+ * - LECTURE/SOCRATIC/ASSESSMENT：自定义 > 该模式模板默认
+ * - Welcome Message：课程级共享（config.welcomeMsg > lecture 模板默认欢迎语）
+ * - LLM Model：课程级共享（config.model）
  */
 function buildForm(
   config: AiConfigView | null,
   templates: AiState['templates'],
-  mode: AiMode,
+  editMode: AiSegmentKey,
 ): AiForm {
-  const t = templates[mode]
-  const view = mode === 'LECTURE' ? config?.lecture : config?.socratic
+  if (editMode === 'MAIN') {
+    return {
+      // 用户自定义优先；null 时用 main.md 默认值填充（避免 textarea 空白）
+      systemPrompt: config?.main.systemPrompt ?? config?.defaultMainSystemPrompt ?? '',
+      welcomeMsg: config?.welcomeMsg || templates.LECTURE?.welcomeMsg || '',
+      llmModel: config?.model || '',
+    }
+  }
+  const t = templates[editMode]
+  const view =
+    editMode === 'LECTURE'
+      ? config?.lecture
+      : editMode === 'SOCRATIC'
+        ? config?.socratic
+        : config?.assessment
   return {
     systemPrompt: view?.systemPrompt || t?.systemPrompt || '',
-    welcomeMsg: view?.welcomeMsg || t?.welcomeMsg || '',
-    llmModel: view?.model || '',
+    welcomeMsg: config?.welcomeMsg || templates.LECTURE?.welcomeMsg || '',
+    llmModel: config?.model || '',
   }
 }
 
@@ -109,6 +132,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   courses: [],
   selectedCourseId: null,
   mode: 'LECTURE',
+  editMode: 'LECTURE',
   models: [],
   templates: {},
   config: null,
@@ -131,7 +155,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     ])
     const templates: AiState['templates'] = {}
     for (const p of prompts) {
-      if (p.mode === 'LECTURE' || p.mode === 'SOCRATIC') templates[p.mode] = p
+      if (p.mode === 'LECTURE' || p.mode === 'SOCRATIC' || p.mode === 'ASSESSMENT') templates[p.mode] = p
     }
     set({ courses, models, templates })
     const currentId = get().selectedCourseId
@@ -156,8 +180,8 @@ export const useAiStore = create<AiState>((set, get) => ({
         // 有未保存的配置修改：只刷新版本列表与配置元数据，不覆盖表单。
         set({ config, releases, error: null })
       } else {
-        const { mode, templates } = get()
-        const form = buildForm(config, templates, mode)
+        const { editMode, templates } = get()
+        const form = buildForm(config, templates, editMode)
         set({
           config,
           releases,
@@ -172,14 +196,16 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   async selectCourse(courseId) {
-    const { mode, templates } = get()
+    // 流式回答进行中不切换课程，否则增量会写进另一门课的会话（QA 2026-10-27 A13）
+    if (get().streaming) return
+    const { editMode, templates } = get()
     try {
       const [config, releases] = await Promise.all([
         aiApi.getConfig(courseId),
         knowledgeApi.listReleases(courseId),
       ])
-      const form = buildForm(config, templates, mode)
-      const stored = loadChat(courseId, mode)
+      const form = buildForm(config, templates, editMode)
+      const stored = loadChat(courseId)
       set({
         selectedCourseId: courseId,
         config,
@@ -195,25 +221,26 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
   },
 
-  async setMode(mode) {
-    try {
-      const { selectedCourseId, config, templates } = get()
-      if (!selectedCourseId || !config) {
-        set({ mode })
-        return
-      }
-      // 2026-10-20 二次改拍：System Prompt / Welcome / Model 三者均载入对应模式的值
-      const form = buildForm(config, templates, mode)
-      const stored = loadChat(selectedCourseId, mode)
-      set({
-        mode,
-        form,
-        initialForm: { ...form },
-        messages: stored ?? (form.welcomeMsg ? [{ role: 'ai', content: form.welcomeMsg, createdAt: now() }] : []),
-      })
-    } catch (e) {
-      set({ error: (e as Error).message })
-    }
+  /**
+   * 切换对话注入模式（2026-10-27）：只更新 mode，不重置聊天会话、不切换表单。
+   * 后续请求将以新模式发送，但当前会话消息保留。
+   */
+  setMode(mode) {
+    set({ mode })
+  },
+
+  /**
+   * 切换配置面板编辑分段项（MAIN / Lecture / Socratic / Assessment）：
+   * 重新载入对应 System Prompt 到表单；Welcome / Model 为课程级共享，保持不变。
+   */
+  setEditMode(editMode) {
+    const { config, templates } = get()
+    const form = buildForm(config, templates, editMode)
+    set({
+      editMode,
+      form,
+      initialForm: { ...form },
+    })
   },
 
   patchForm(patch) {
@@ -231,18 +258,29 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   async save() {
-    const { selectedCourseId, form, mode } = get()
+    const { selectedCourseId, form, editMode, config, templates } = get()
     if (!selectedCourseId) return false
     set({ saving: true })
     try {
-      // 2026-10-20 二次改拍：带 mode，只保存当前模式的三项值
+      // 2026-10-29：System Prompt 按 editMode 写入；Welcome / Model 写入课程级共享列。
+      // 所有分段项（含 MAIN）都做「值等于默认值则存空串」优化：
+      // - MAIN 默认值 = config.defaultMainSystemPrompt（main.md 文件内容）
+      // - 其他模式默认值 = 模板默认值
+      // 这样数据库里只有用户自定义值才被固化，main.md 后续更新时自动跟随。
+      const isMain = editMode === 'MAIN'
+      const mainDefault = config?.defaultMainSystemPrompt ?? ''
       const payload: Parameters<typeof aiApi.saveConfig>[0] = {
         courseId: selectedCourseId,
-        mode,
+        releaseId: config?.releaseId ?? undefined,
+        mode: editMode,
         llmProvider: 'openrouter',
         llmModel: form.llmModel,
-        systemPrompt: form.systemPrompt,
-        welcomeMsg: form.welcomeMsg,
+        systemPrompt: isMain
+          ? form.systemPrompt === mainDefault ? '' : form.systemPrompt
+          : form.systemPrompt === templates[editMode]?.systemPrompt
+            ? ''
+            : form.systemPrompt,
+        welcomeMsg: form.welcomeMsg === templates.LECTURE?.welcomeMsg ? '' : form.welcomeMsg,
       }
       const next = await aiApi.saveConfig(payload)
       set({
@@ -259,17 +297,16 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
   },
 
-  async reset() {
-    const { selectedCourseId, mode, templates } = get()
-    if (!selectedCourseId) return
-    // 2026-10-20 二次改拍：只重置当前模式
-    const next = await aiApi.resetConfig(selectedCourseId, mode)
-    const form = buildForm(next, templates, mode)
-    set({
-      config: next,
-      form,
-      initialForm: { ...form },
-    })
+  reset() {
+    const { editMode, templates, form, config } = get()
+    // 2026-10-29：所有分段项 Reset 都恢复为各自默认值（前端显示层恢复）
+    // - MAIN 恢复为 main.md 文件默认值（config.defaultMainSystemPrompt）
+    // - 其他模式恢复为模板默认值
+    // Save 后才真正落库为空串，运行时走文件兜底
+    const defaultPrompt = editMode === 'MAIN'
+      ? (config?.defaultMainSystemPrompt ?? '')
+      : templates[editMode as AiMode]?.systemPrompt ?? ''
+    set({ form: { ...form, systemPrompt: defaultPrompt } })
   },
 
   /** §4.2.6 顶部卡片 Online 开关：切换即时生效（当前选中课程） */
@@ -316,14 +353,14 @@ export const useAiStore = create<AiState>((set, get) => ({
     set({ tutorManagerOpen: false })
   },
 
-  /** §4.3.1 头部 Release 选择器：切换测试所选 Release 并加载其已保存配置（按当前模式） */
+  /** §4.3.1 头部 Release 选择器：切换测试所选 Release 并加载其已保存配置（按当前 editMode） */
   async selectRelease(releaseId) {
-    const { selectedCourseId } = get()
-    if (!selectedCourseId) return
+    const { selectedCourseId, streaming } = get()
+    if (!selectedCourseId || streaming) return
     try {
       const next = await aiApi.setActiveRelease(selectedCourseId, releaseId)
-      const { mode, templates } = get()
-      const form = buildForm(next, templates, mode)
+      const { editMode, templates } = get()
+      const form = buildForm(next, templates, editMode)
       set({ config: next, form, initialForm: { ...form }, error: null })
     } catch (e) {
       set({ error: (e as Error).message })
@@ -349,13 +386,13 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   newChat() {
-    const { selectedCourseId, mode, form } = get()
-    if (!selectedCourseId) return
+    const { selectedCourseId, form, streaming } = get()
+    if (!selectedCourseId || streaming) return
     const fresh = form.welcomeMsg
       ? [{ role: 'ai' as const, content: form.welcomeMsg, createdAt: now() }]
       : []
     set({ messages: fresh, error: null })
-    persistChat(selectedCourseId, mode, fresh)
+    persistChat(selectedCourseId, fresh)
   },
 
   async send(text) {
@@ -368,37 +405,35 @@ export const useAiStore = create<AiState>((set, get) => ({
       .slice(-10)
       .map((m) => ({ role: m.role === 'ai' ? ('assistant' as const) : ('user' as const), content: m.content }))
 
-    const next: ChatMessage[] = [
+    let msgs: ChatMessage[] = [
       ...messages,
       { role: 'user', content, createdAt: now() },
       { role: 'ai', content: '', createdAt: now() },
     ]
-    set({ messages: next, streaming: true, error: null })
+    set({ messages: msgs, streaming: true, error: null })
+    // 会话按课程隔离：增量先累积在本次请求自己的消息列表里，只有仍停留在发起课程时才写回界面，
+    // 落盘也只写发起课程的会话（QA 2026-10-27 A13）
+    const stillHere = () => get().selectedCourseId === selectedCourseId
 
     try {
       await chatStream(
         { courseId: selectedCourseId, message: content, mode, history },
         (e) => {
           if ('delta' in e) {
-            set((s) => {
-              const msgs = [...s.messages]
-              const last = msgs[msgs.length - 1]
-              msgs[msgs.length - 1] = { ...last, content: last.content + e.delta }
-              return { messages: msgs }
-            })
+            const last = msgs[msgs.length - 1]
+            msgs = [...msgs.slice(0, -1), { ...last, content: last.content + e.delta }]
+            if (stillHere()) set({ messages: msgs })
           } else if ('error' in e) {
-            set({ error: e.error })
+            if (stillHere()) set({ error: e.error })
           }
         },
       )
     } catch (e) {
-      set({ error: (e as Error).message })
+      if (stillHere()) set({ error: (e as Error).message })
     } finally {
       // 落盘当前会话（§4.3.2：localStorage 持久化上次聊天）
-      const st = get()
-      const msgs = st.messages
       const aiEmpty = msgs.length > 0 && msgs[msgs.length - 1].role === 'ai' && !msgs[msgs.length - 1].content
-      persistChat(selectedCourseId, mode, aiEmpty ? msgs.slice(0, -1) : msgs)
+      persistChat(selectedCourseId, aiEmpty ? msgs.slice(0, -1) : msgs)
       set({ streaming: false })
     }
   },

@@ -11,6 +11,7 @@ import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { BackofficeModule } from './backoffice/nest/backoffice.module';
+import { CommerceCoursesModule } from './commerce-courses/commerce-courses.module';
 import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
 import { ALL_ROLES, type AppRole } from './app-roles';
 import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
@@ -56,6 +57,7 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
       // Prisma 客户端单例（§7 Phase 2 第 3 项）
       PrismaModule,
       // Knowledge System：员工编写（admin 角色）+ 给 Agent 的内部接口（ks 角色）
+      // KsModule 内部导入 KnowledgeModule，提供 RAG 索引与向量检索能力
       KsModule.register({ authoring: admin, internalApi: ks }),
       // AI Tutor：员工配置与测试（admin 角色）+ 学员对话运行时（agent 角色）
       ...(admin || agent
@@ -69,6 +71,8 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
         : []),
       // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）
       ...(admin ? [BackofficeModule] : []),
+      // 商品课程 v2：课程管理 + 课程包导入导出 + Portal v1 投影（P1a）
+      ...(admin ? [CommerceCoursesModule] : []),
     ],
     controllers: [AppController, HealthController],
     providers: [

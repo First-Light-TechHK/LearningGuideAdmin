@@ -81,4 +81,20 @@ describe('RateLimitService', () => {
     expect(await store.tryHit('k', 1, 60_000)).toBe(false);
     expect(await store.tryHit('k', 2, 60_000)).toBe(true);
   });
+
+  it('后台测试（admin-test）与学员个人对话分开计数（QA A2）', async () => {
+    const svc = create();
+    for (let i = 0; i < 30; i++) {
+      await expect(
+        svc.assertAllowed('course-a', 'admin-test'),
+      ).resolves.toBeUndefined();
+    }
+    await expect(svc.assertAllowed('course-a', 'admin-test')).rejects.toThrow(
+      HttpException,
+    );
+    // 后台测试打满不影响学员个人对话的 10 次额度
+    for (let i = 0; i < 10; i++) {
+      await expect(svc.assertAllowed('course-a')).resolves.toBeUndefined();
+    }
+  });
 });
