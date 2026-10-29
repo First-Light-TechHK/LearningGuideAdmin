@@ -8,6 +8,11 @@ import { assertSecretArn } from "./apprunner-env.mjs";
 
 const region = process.env.REGION || "ap-southeast-1";
 const apply = process.argv.includes("--apply");
+// The same script provisions dev, sit and uat; ADMIN_ENV selects the names.
+// Defaults to dev so the original DEV documentation and command stay valid.
+const environment = (process.env.ADMIN_ENV || "dev").toLowerCase();
+if (!["dev", "sit", "uat"].includes(environment)) throw new Error("ADMIN_ENV must be dev, sit or uat");
+const dbSuffix = environment.replace(/-/g, "_");
 const required = ["VPC_ID", "SUBNET_IDS", "SECURITY_GROUP_ID", "GITHUB_CONNECTION_ARN", "INSTANCE_ROLE_ARN", "VPC_CONNECTOR_ARN"];
 for (const key of required) if (!process.env[key]) throw new Error(`${key} is required`);
 const repositoryUrl = process.env.REPOSITORY_URL || "https://github.com/First-Light-TechHK/LearningGuideAdmin";
@@ -23,9 +28,11 @@ function optional(service, operation, input) {
   catch (error) { if (/ResourceNotFound|NoSuchEntity|DBInstanceNotFound|DBSubnetGroupNotFound/i.test(String(error.stderr))) return null; throw error; }
 }
 
-const plan = { region, apply, steps: [] };
-const dbId = "learning-guide-admin-dev";
-const serviceName = "learning-guide-admin-dev";
+const plan = { region, environment, apply, steps: [] };
+const dbId = `learning-guide-admin-${environment}`;
+const serviceName = `learning-guide-admin-${environment}`;
+const dbName = `learning_guide_admin_${dbSuffix}`;
+const dbUser = `lg_admin_${dbSuffix}`;
 const dbPassword = randomBytes(24).toString("hex");
 
 if (!apply) {
@@ -39,9 +46,9 @@ const groups = optional("rds", "describe-db-subnet-groups", { DBSubnetGroupName:
 if (!groups?.DBSubnetGroups?.length) {
   aws("rds", "create-db-subnet-group", {
     DBSubnetGroupName: dbId,
-    DBSubnetGroupDescription: "Learning Guide admin DEV",
+    DBSubnetGroupDescription: `Learning Guide admin ${environment.toUpperCase()}`,
     SubnetIds: process.env.SUBNET_IDS.split(",").map((value) => value.trim()),
-    Tags: [{ Key: "Environment", Value: "DEV" }, { Key: "Project", Value: "LearningGuide" }]
+    Tags: [{ Key: "Environment", Value: environment.toUpperCase() }, { Key: "Project", Value: "LearningGuide" }]
   });
 }
 
@@ -51,18 +58,18 @@ if (!optional("rds", "describe-db-instances", { DBInstanceIdentifier: dbId })) {
     DBInstanceIdentifier: dbId,
     DBInstanceClass: process.env.DB_INSTANCE_CLASS || "db.t4g.micro",
     Engine: "postgres",
-    // Keep the DEV engine on the same minor line as learning-guide-sit.
+    // Keep every admin engine on the same minor line as its Portal environment.
     EngineVersion: process.env.DB_ENGINE_VERSION || "16.13",
     AllocatedStorage: 20,
-    DBName: "learning_guide_admin_dev",
-    MasterUsername: "lg_admin_dev",
+    DBName: dbName,
+    MasterUsername: dbUser,
     MasterUserPassword: dbPassword,
     VpcSecurityGroupIds: [process.env.SECURITY_GROUP_ID],
     DBSubnetGroupName: dbId,
     PubliclyAccessible: false,
     BackupRetentionPeriod: 1,
     StorageEncrypted: true,
-    Tags: [{ Key: "Environment", Value: "DEV" }, { Key: "Project", Value: "LearningGuide" }]
+    Tags: [{ Key: "Environment", Value: environment.toUpperCase() }, { Key: "Project", Value: "LearningGuide" }]
   });
 }
 
@@ -76,15 +83,15 @@ const instance = aws("rds", "describe-db-instances", { DBInstanceIdentifier: dbI
 if (instance.DBInstanceStatus !== "available") throw new Error(`RDS is ${instance.DBInstanceStatus}`);
 
 // 3) Secrets
-const databaseUrl = `postgresql://lg_admin_dev:${dbPassword}@${instance.Endpoint.Address}:${instance.Endpoint.Port}/learning_guide_admin_dev`;
+const databaseUrl = `postgresql://${dbUser}:${dbPassword}@${instance.Endpoint.Address}:${instance.Endpoint.Port}/${dbName}`;
 const secrets = { DATABASE_URL: databaseUrl, ADMIN_API_KEY: randomBytes(32).toString("hex") };
 const secretArns = {};
 for (const [key, value] of Object.entries(secrets)) {
-  const Name = `learning-guide/admin/dev/${key.toLowerCase()}`;
+  const Name = `learning-guide/admin/${environment}/${key.toLowerCase()}`;
   const existing = optional("secretsmanager", "describe-secret", { SecretId: Name });
   secretArns[key] = existing
     ? existing.ARN
-    : aws("secretsmanager", "create-secret", { Name, SecretString: value, Tags: [{ Key: "Environment", Value: "DEV" }] }).ARN;
+    : aws("secretsmanager", "create-secret", { Name, SecretString: value, Tags: [{ Key: "Environment", Value: environment.toUpperCase() }] }).ARN;
 }
 
 // 4) App Runner service
@@ -108,7 +115,7 @@ const source = {
         Port: "3000",
         RuntimeEnvironmentVariables: {
           NODE_ENV: "production",
-          APP_ENV: "DEV",
+          APP_ENV: environment.toUpperCase(),
           PORT: "3000",
           AWS_REGION: region,
           ...(process.env.AI_AVAILABLE_MODELS ? { AI_AVAILABLE_MODELS: process.env.AI_AVAILABLE_MODELS } : {}),
@@ -146,6 +153,6 @@ const common = {
 };
 const created = existing
   ? aws("apprunner", "update-service", { ServiceArn: existing.ServiceArn, ...common })
-  : aws("apprunner", "create-service", { ServiceName: serviceName, ...common, Tags: [{ Key: "Environment", Value: "DEV" }] });
+  : aws("apprunner", "create-service", { ServiceName: serviceName, ...common, Tags: [{ Key: "Environment", Value: environment.toUpperCase() }] });
 
 console.log(JSON.stringify({ service: created.Service.ServiceArn, url: created.Service.ServiceUrl, operation: created.OperationId, db: instance.Endpoint.Address }, null, 2));
