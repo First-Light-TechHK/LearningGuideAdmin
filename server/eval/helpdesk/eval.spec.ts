@@ -11,8 +11,10 @@ import {
   budgetFrom,
   CALL_PROMPT_TOKENS_MAX,
   callCeilingUsd,
+  caseLanguage,
   chooseModel,
   DEFAULT_BUDGET_USD,
+  EVAL_LANGUAGES,
   EVAL_LOCALES,
   EVAL_PERSONAS,
   FAKE_MODEL_ID,
@@ -20,16 +22,24 @@ import {
   loadCases,
   loadFaqs,
   markdownReport,
+  markdownRetrievalReport,
   memoryQaSource,
   percentile,
   pgQaSource,
+  retrievalQuery,
   runCases,
   runnerFor,
+  runRetrieval,
   summarize,
+  summarizeRetrieval,
+  turnKind,
   writeReport,
   type CaseResult,
+  type EvalCase,
   type EvalModel,
   type EvalReport,
+  type RetrievalReport,
+  type RetrievalResult,
 } from './harness';
 
 /**
@@ -179,6 +189,128 @@ describe('eval dataset', () => {
     writeFileSync(path, '\n');
     expect(() => loadCases(path)).toThrow(`${path}: no cases`);
   });
+
+  it('accepts the optional role, conversation and turn fields', () => {
+    const path = join(tmp, 'roles.jsonl');
+    writeFileSync(
+      path,
+      [
+        { ...cases[0], role: 'parent' },
+        { ...cases[0], id: 't1', conversationId: 'conv-1', turn: 1 },
+        { ...cases[0], id: 't2', conversationId: 'conv-1', turn: 2 },
+        { ...cases[0], id: 'o1', origin: 'batch-01.jsonl#b1-001' },
+      ]
+        .map((c) => JSON.stringify(c))
+        .join('\n'),
+    );
+    expect(
+      loadCases(path).map((c) => [c.role, c.conversationId, c.turn]),
+    ).toEqual([
+      ['parent', undefined, undefined],
+      [undefined, 'conv-1', 1],
+      [undefined, 'conv-1', 2],
+      [undefined, undefined, undefined],
+    ]);
+  });
+
+  it.each([
+    ['an empty role', { role: ' ' }],
+    ['a role that is not text', { role: 7 }],
+    ['a turn without a conversation', { turn: 1 }],
+    ['a conversation without a turn', { conversationId: 'conv-1' }],
+    ['a zero turn', { conversationId: 'conv-1', turn: 0 }],
+    ['a fractional turn', { conversationId: 'conv-1', turn: 1.5 }],
+    ['a turn that is text', { conversationId: 'conv-1', turn: '2' }],
+    ['an empty conversation id', { conversationId: '', turn: 1 }],
+  ])('rejects %s', (_name, patch) => {
+    const path = join(tmp, 'bad3.jsonl');
+    writeFileSync(path, `${JSON.stringify({ ...cases[0], ...patch })}\n`);
+    expect(() => loadCases(path)).toThrow(`${path}:1: malformed case`);
+  });
+});
+
+describe('qa10k dataset (dev.jsonl, test.jsonl, faqs.json)', () => {
+  const QA10K = join(DIR, 'qa10k');
+  const library = loadFaqs(join(QA10K, 'faqs.json'));
+  const dev = loadCases(join(QA10K, 'dev.jsonl'));
+  const test = loadCases(join(QA10K, 'test.jsonl'));
+  const all = [...dev, ...test];
+
+  it('has 5,000 dev and 5,000 test cases with unique ids', () => {
+    expect([dev.length, test.length]).toEqual([5_000, 5_000]);
+    expect(new Set(all.map((c) => c.id)).size).toBe(10_000);
+  });
+
+  it('extends the seed library: the 14 seed FAQs first, unchanged', () => {
+    expect(library).toHaveLength(35);
+    expect(library.slice(0, faqs.length)).toEqual(faqs);
+    expect(new Set(library.map((f) => f.id)).size).toBe(library.length);
+  });
+
+  it('only labels FAQs in its own library, never repeats the expected id as acceptable, and asks about every FAQ in both splits', () => {
+    const ids = new Set(library.map((f) => f.id));
+    for (const item of all) {
+      if (item.expectedFaqId) expect(ids).toContain(item.expectedFaqId);
+      for (const other of item.acceptableFaqIds ?? []) {
+        expect(ids).toContain(other);
+        expect(other).not.toBe(item.expectedFaqId);
+      }
+    }
+    for (const split of [dev, test]) {
+      const asked = new Set(split.map((c) => c.expectedFaqId));
+      for (const faq of library) expect(asked).toContain(faq.id);
+    }
+  });
+
+  it('gives every case a role, keeps each conversation in one split with turns 1..n, and covers every language and case type', () => {
+    for (const item of all) expect(item.role?.trim()).toBeTruthy();
+    const where = new Map<string, Set<string>>();
+    const turns = new Map<string, number[]>();
+    for (const [name, split] of [
+      ['dev', dev],
+      ['test', test],
+    ] as const)
+      for (const item of split)
+        if (item.conversationId) {
+          where.set(
+            item.conversationId,
+            new Set([...(where.get(item.conversationId) ?? []), name]),
+          );
+          turns.set(item.conversationId, [
+            ...(turns.get(item.conversationId) ?? []),
+            item.turn as number,
+          ]);
+        }
+    expect(where.size).toBeGreaterThan(300);
+    for (const splits of where.values()) expect(splits.size).toBe(1);
+    for (const list of turns.values())
+      expect([...list].sort((a, b) => a - b)).toEqual(
+        list.map((_, i) => i + 1),
+      );
+    for (const split of [dev, test]) {
+      for (const language of EVAL_LANGUAGES)
+        expect(
+          split.filter((c) => caseLanguage(c) === language).length,
+        ).toBeGreaterThanOrEqual(300);
+      for (const persona of EVAL_PERSONAS)
+        expect(
+          split.filter((c) => c.persona === persona).length,
+        ).toBeGreaterThanOrEqual(50);
+    }
+  });
+
+  it('labels bare account and payment demands null (the self-service FAQ may be accepted), and unanswerable cases almost always null', () => {
+    const unanswerable = all.filter((c) => c.persona === 'unanswerable');
+    expect(
+      unanswerable.filter((c) => c.expectedFaqId !== null).length /
+        unanswerable.length,
+    ).toBeLessThan(0.01);
+    for (const id of ['qa-02900', 'qa-01381', 'qa-01379', 'qa-00419'])
+      expect(all.find((c) => c.id === id)?.expectedFaqId).toBeNull();
+    expect(all.find((c) => c.id === 'qa-02900')?.acceptableFaqIds).toEqual([
+      FAQ(12),
+    ]);
+  });
 });
 
 function result(
@@ -188,6 +320,9 @@ function result(
     id: 'x',
     locale: 'en-GB',
     persona: 'paraphrase',
+    role: null,
+    conversationId: null,
+    turn: null,
     message: 'm',
     acceptableFaqIds: [],
     reason: over.gotFaqId ? 'answered' : 'no_match',
@@ -323,6 +458,68 @@ describe('report', () => {
       typo: { cases: 1, accuracy: 0, wrongAnswerRate: 1 },
       unanswerable: { cases: 2, accuracy: 1, wrongAnswerRate: 0 },
     });
+  });
+
+  it('breaks results down by role, by language (mixed-language cases on their own) and by turn', () => {
+    const rs = [
+      result({ id: 'p1', expectedFaqId: A, gotFaqId: A, role: 'parent' }),
+      result({ id: 'p2', expectedFaqId: A, gotFaqId: B, role: 'parent' }),
+      result({
+        id: 'm1',
+        expectedFaqId: A,
+        gotFaqId: A,
+        locale: 'zh-CN',
+        persona: 'mixed_language',
+        conversationId: 'c1',
+        turn: 1,
+      }),
+      result({
+        id: 'm2',
+        expectedFaqId: B,
+        gotFaqId: null,
+        locale: 'zh-TW',
+        conversationId: 'c1',
+        turn: 2,
+      }),
+    ];
+    const report = summarize({
+      outcome: { results: rs, spentUsd: 0, stopped: null },
+      totalCases: rs.length,
+      model: real,
+      retrieval: 'postgresql',
+      budgetUsd: 5,
+    });
+    expect(report.byRole).toEqual({
+      '(none)': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0 },
+      parent: { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
+    });
+    expect(report.byLanguage).toEqual({
+      'en-GB': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
+      mixed: { cases: 1, accuracy: 1, wrongAnswerRate: 0 },
+      'zh-TW': { cases: 1, accuracy: 0, wrongAnswerRate: 0 },
+    });
+    expect(report.byTurn).toEqual({
+      first: { cases: 1, accuracy: 1, wrongAnswerRate: 0 },
+      follow_up: { cases: 1, accuracy: 0, wrongAnswerRate: 0 },
+      single: { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
+    });
+    const md = markdownReport(report);
+    expect(md).toContain('## By role');
+    expect(md).toContain('| parent | 2 | 50.0% | 50.0% |');
+    expect(md).toContain('## By language');
+    expect(md).toContain('| mixed | 1 | 100.0% | 0.0% |');
+    expect(md).toContain('## By turn');
+    expect(md).toContain('| follow_up | 1 | 0.0% | 0.0% |');
+  });
+
+  it('names the language of a case by its locale, or mixed for a mixed-language case, and the turn kind', () => {
+    expect(caseLanguage({ locale: 'zh-TW', persona: 'typo' })).toBe('zh-TW');
+    expect(caseLanguage({ locale: 'en-GB', persona: 'mixed_language' })).toBe(
+      'mixed',
+    );
+    expect(turnKind({})).toBe('single');
+    expect(turnKind({ conversationId: 'c', turn: 1 })).toBe('first');
+    expect(turnKind({ conversationId: 'c', turn: 3 })).toBe('follow_up');
   });
 
   it('lists every failure as a wrong answer or a miss, without cost columns', () => {
@@ -561,6 +758,253 @@ describe('report', () => {
       `| r7 | wrong_answer | model | ${A} | ${B} | answered |`,
     );
     expect(text).toContain(`| r10 | missed | model | ${B} | none | no_match |`);
+  });
+});
+
+describe('retrieval only (--retrieval-only)', () => {
+  const A = FAQ(1);
+  const B = FAQ(2);
+  const C = FAQ(3);
+  const base: EvalCase = {
+    id: 'q',
+    locale: 'en-GB',
+    persona: 'paraphrase',
+    message: 'm',
+    expectedFaqId: A,
+  };
+
+  it('asks for candidates exactly as the suggest workflow does (service locale, subject + message, Enquiry Type boost, 8 candidates)', () => {
+    expect(retrievalQuery({ ...base, message: '  forgot password ' })).toEqual({
+      locale: 'en-GB',
+      category: null,
+      text: 'forgot password',
+      limit: 8,
+    });
+    expect(
+      retrievalQuery({ ...base, locale: 'zh-TW', message: '忘記密碼' }),
+    ).toEqual({ locale: 'zh-CN', category: null, text: '忘記密碼', limit: 8 });
+    expect(
+      retrievalQuery({
+        ...base,
+        source: 'submit',
+        subject: ' Invoice ',
+        category: 'payments_subscriptions',
+        message: 'where is it',
+      }),
+    ).toEqual({
+      locale: 'en-GB',
+      category: 'payments_subscriptions',
+      text: 'Invoice\n\nwhere is it',
+      limit: 8,
+    });
+    expect(
+      retrievalQuery({
+        ...base,
+        source: 'submit',
+        subject: 'Video',
+        category: 'technical_support',
+        message: '',
+      }),
+    ).toMatchObject({ category: 'account_technical', text: 'Video' });
+  });
+
+  it('runs only the retrieval: candidates in order and the time per case, no model', async () => {
+    const seen: string[] = [];
+    const qa = {
+      findCandidates: (search: { text: string }) => {
+        seen.push(search.text);
+        return Promise.resolve(
+          [B, A].map((id) => ({
+            id,
+            category: 'other' as const,
+            question: 'q',
+            answer: 'a',
+            score: 1,
+          })),
+        );
+      },
+      findPublished: () => Promise.reject(new Error('not used')),
+    };
+    const progress: number[] = [];
+    const results = await runRetrieval({
+      cases: [
+        { ...base, role: 'parent', conversationId: 'c', turn: 2 },
+        { ...base, id: 'n', expectedFaqId: null },
+      ],
+      qa,
+      onCase: (_r, i) => progress.push(i),
+    });
+    expect(seen).toEqual(['m', 'm']);
+    expect(progress).toEqual([0, 1]);
+    expect(results[0]).toMatchObject({
+      id: 'q',
+      role: 'parent',
+      conversationId: 'c',
+      turn: 2,
+      expectedFaqId: A,
+      acceptableFaqIds: [],
+      candidateIds: [B, A],
+    });
+    expect(results[0].latencyMs).toBeGreaterThanOrEqual(0);
+  });
+
+  function hit(
+    over: Partial<RetrievalResult> & Pick<RetrievalResult, 'candidateIds'>,
+  ): RetrievalResult {
+    return {
+      id: 'x',
+      locale: 'en-GB',
+      persona: 'paraphrase',
+      role: null,
+      conversationId: null,
+      turn: null,
+      message: 'm',
+      expectedFaqId: A,
+      acceptableFaqIds: [],
+      latencyMs: 10,
+      ...over,
+    };
+  }
+  // 5 answerable: rank 1, rank 2, rank 5 (via an acceptable id), rank 8, missing; 2 none (one with no candidates)
+  const rs: RetrievalResult[] = [
+    hit({ id: 'r1', candidateIds: [A, B], latencyMs: 5 }),
+    hit({ id: 'r2', candidateIds: [B, A], locale: 'zh-TW', latencyMs: 20 }),
+    hit({
+      id: 'r3',
+      candidateIds: [B, B, B, B, C, A],
+      acceptableFaqIds: [C],
+      persona: 'mixed_language',
+      locale: 'zh-CN',
+      role: 'parent',
+    }),
+    hit({
+      id: 'r4',
+      candidateIds: [B, B, B, B, B, B, B, A],
+      conversationId: 'c',
+      turn: 2,
+    }),
+    hit({ id: 'r5', candidateIds: [B, C], locale: 'zh-TW', message: 'lost' }),
+    hit({
+      id: 'r6',
+      candidateIds: [],
+      expectedFaqId: null,
+      persona: 'unanswerable',
+    }),
+    hit({
+      id: 'r7',
+      candidateIds: [B],
+      expectedFaqId: null,
+      acceptableFaqIds: [B],
+      latencyMs: 300,
+    }),
+  ];
+  const now = new Date('2026-10-29T10:00:00.000Z');
+  const report = summarizeRetrieval({
+    results: rs,
+    totalCases: 7,
+    retrieval: 'postgresql',
+    faqs: 35,
+    now,
+  });
+
+  it('reports recall@1 / @3 / @8 over answerable cases (an acceptable id counts), latency and empty retrievals for none cases', () => {
+    expect(report).toMatchObject({
+      kind: 'retrieval-only',
+      generatedAt: '2026-10-29T10:00:00.000Z',
+      retrieval: 'postgresql',
+      faqs: 35,
+      cases: { total: 7, run: 7 },
+    });
+    expect(report.note).toMatch(/no model/i);
+    expect(report.overall).toEqual({
+      cases: 7,
+      answerable: 5,
+      recallAt1: 0.2,
+      recallAt3: 0.4,
+      recallAt8: 0.8,
+      meanRank: 4,
+      noneEmpty: 0.5,
+    });
+    expect(report.latencyMs).toEqual({ p50: 10, p95: 300, max: 300 });
+  });
+
+  it('slices recall by locale, language, case type, role and turn', () => {
+    expect(report.byLocale['zh-TW']).toMatchObject({
+      answerable: 2,
+      recallAt1: 0,
+      recallAt3: 0.5,
+      recallAt8: 0.5,
+    });
+    expect(Object.keys(report.byLanguage)).toEqual(['en-GB', 'mixed', 'zh-TW']);
+    expect(report.byLanguage.mixed).toMatchObject({
+      recallAt3: 0,
+      recallAt8: 1,
+    });
+    expect(report.byPersona.unanswerable).toMatchObject({
+      cases: 1,
+      answerable: 0,
+      recallAt8: null,
+      noneEmpty: 1,
+    });
+    expect(report.byRole.parent).toMatchObject({ answerable: 1, recallAt8: 1 });
+    expect(report.byTurn.follow_up).toMatchObject({
+      recallAt3: 0,
+      recallAt8: 1,
+    });
+    expect(report.misses).toEqual([
+      {
+        id: 'r5',
+        locale: 'zh-TW',
+        persona: 'paraphrase',
+        role: null,
+        message: 'lost',
+        expectedFaqId: A,
+        acceptableFaqIds: [],
+        candidateIds: [B, C],
+      },
+    ]);
+  });
+
+  it('writes the retrieval report as JSON or Markdown, saying no model ran', () => {
+    const md = markdownRetrievalReport(report);
+    expect(md).toContain(
+      '# Helpdesk retrieval eval (retrieval only, no model)',
+    );
+    expect(md).toContain('- Retrieval: postgresql');
+    expect(md).toContain('| Recall@1 / @3 / @8 | 20.0% / 40.0% / 80.0% |');
+    expect(md).toContain(
+      '| Retrieval latency p50 / p95 / max | 10 / 300 / 300 ms |',
+    );
+    expect(md).toContain('## By language');
+    expect(md).toContain(
+      '| zh-TW | 2 | 2 | 0.0% | 50.0% | 50.0% | 2.0 | n/a |',
+    );
+    expect(md).toContain(
+      '| r5 | zh-TW | paraphrase | 001 | — | 002, 003 | lost |',
+    );
+    const json = join(tmp, 'retrieval.json');
+    writeReport(json, report);
+    expect(JSON.parse(readFileSync(json, 'utf8'))).toEqual(report);
+    writeReport(join(tmp, 'retrieval.md'), report);
+    expect(readFileSync(join(tmp, 'retrieval.md'), 'utf8')).toBe(md);
+  });
+
+  it('runs the qa10k dev set through the in-memory retrieval', async () => {
+    const library = loadFaqs(join(DIR, 'qa10k', 'faqs.json'));
+    const dev = loadCases(join(DIR, 'qa10k', 'dev.jsonl')).slice(0, 300);
+    const results = await runRetrieval({
+      cases: dev,
+      qa: memoryQaSource(library),
+    });
+    const r: RetrievalReport = summarizeRetrieval({
+      results,
+      totalCases: dev.length,
+      retrieval: 'memory',
+      faqs: library.length,
+    });
+    expect(r.cases).toEqual({ total: 300, run: 300 });
+    expect(r.overall.recallAt8).toBeGreaterThan(0.5);
+    expect(r.note).toMatch(/approximat/);
   });
 });
 
@@ -979,6 +1423,61 @@ describe('npm run eval:helpdesk (cli)', () => {
     }
   });
 
+  it('--retrieval-only runs only the retrieval (never a model, even with a key), on --pg, and exits 0', async () => {
+    const { dir, path } = files();
+    const deps = realDeps(payingRunner(0.001));
+    const out = io();
+    const code = await runCli(
+      [
+        '--cases',
+        path,
+        '--pg',
+        'postgres://eval',
+        '--retrieval-only',
+        '--out',
+        'r.json',
+      ],
+      { env: KEY, cwd: dir, log: out.log, ...deps },
+    );
+    expect(code).toBe(0);
+    expect(deps.runnerFor).not.toHaveBeenCalled();
+    expect(deps.pgQaSource).toHaveBeenCalledTimes(1);
+    expect(deps.close).toHaveBeenCalledTimes(1);
+    const report = JSON.parse(
+      readFileSync(join(dir, 'r.json'), 'utf8'),
+    ) as RetrievalReport;
+    expect(report).toMatchObject({
+      kind: 'retrieval-only',
+      retrieval: 'postgresql',
+      cases: { total: 2, run: 2 },
+    });
+    expect(out.lines.some((l) => l.startsWith('recall@1/@3/@8 '))).toBe(true);
+  });
+
+  it('--retrieval-only takes the qa10k files through --cases and --faqs, with --limit', async () => {
+    const out = io();
+    const dir = mkdtempSync(join(tmp, 'cli-'));
+    const code = await runCli(
+      [
+        '--cases',
+        join(DIR, 'qa10k', 'dev.jsonl'),
+        '--faqs',
+        join(DIR, 'qa10k', 'faqs.json'),
+        '--retrieval-only',
+        '--limit',
+        '40',
+        '--out',
+        'r.md',
+      ],
+      { env: {}, cwd: dir, log: out.log },
+    );
+    expect(code).toBe(0);
+    const md = readFileSync(join(dir, 'r.md'), 'utf8');
+    expect(md).toContain('- Cases: 40 of 5000');
+    expect(md).toContain('- FAQs: 35');
+    expect(md).toContain('- Retrieval: memory');
+  });
+
   it('closes the PostgreSQL schema and exits 2 when the run throws', async () => {
     const { dir, path } = files();
     const deps = realDeps({
@@ -1032,6 +1531,33 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
         await pool.end();
       }
       expect(schemas).toEqual([]);
+    },
+    60_000,
+  );
+
+  pgIt(
+    'runs the qa10k library through the production retrieval in --retrieval-only mode',
+    async () => {
+      const library = loadFaqs(join(DIR, 'qa10k', 'faqs.json'));
+      const some = loadCases(join(DIR, 'qa10k', 'dev.jsonl')).slice(0, 200);
+      const { qa, close } = await pgQaSource(
+        PG_URL as string,
+        library,
+        helpdeskMigrationSql(),
+      );
+      try {
+        const results = await runRetrieval({ cases: some, qa });
+        const report = summarizeRetrieval({
+          results,
+          totalCases: some.length,
+          retrieval: 'postgresql',
+          faqs: library.length,
+        });
+        expect(report.overall.recallAt8).toBeGreaterThan(0.6);
+        expect(report.latencyMs.p95).toBeLessThan(300);
+      } finally {
+        await close();
+      }
     },
     60_000,
   );

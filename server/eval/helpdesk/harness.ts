@@ -6,11 +6,13 @@ import { Pool } from 'pg';
 
 import {
   HelpdeskSuggestService,
+  SUGGEST_CANDIDATES,
   suggestModel,
 } from '../../src/ai/helpdesk/helpdesk-suggest.service';
 import type { HelpdeskSuggestionLog } from '../../src/ai/helpdesk/helpdesk-suggestion.store';
 import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-event.store';
 import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
+import { initialFaqState } from '../../src/ai/helpdesk/workflow/faq-workflow';
 import {
   loadPi,
   openRouterSource,
@@ -27,10 +29,12 @@ import {
 import { uuidv7 } from '../../src/common/uuidv7';
 import {
   FAQ_CATEGORIES,
+  faqCategoryFor,
   HELPDESK_CATEGORIES,
   type FaqCategory,
   type HelpdeskCategory,
   type HelpdeskQaCandidate,
+  type HelpdeskQaSearch,
   type HelpdeskQaSource,
 } from '../../src/contracts/helpdesk-qa';
 
@@ -44,6 +48,8 @@ import {
  * 报告：准确率、答错率、none 的精确率 / 召回率、p50 / p95、费用、按 persona / locale 拆分、失败清单，
  * 检索与模型分开看（recall@8、模型 recall、问过模型的条数、没问模型就“答对”的 none、非法调用），
  * 以及闸门（GATE）：只有真模型、整套用例、PostgreSQL 检索的一次运行才可能通过。
+ * 另按学员角色（role）、语言（en-GB / zh-CN / zh-TW / mixed）与轮次（单条 / 首轮 / 追问）拆分。
+ * --retrieval-only：只跑生产检索（不问模型、不花钱），报 recall@1 / @3 / @8 与检索耗时，同样按切片拆分。
  * zh-TW 用例是繁体字，种子 FAQ 是简体：有几条检索够不着（用例 note 写明），这是生产里同样存在的缺口。
  */
 
@@ -65,6 +71,9 @@ export const EVAL_PERSONAS = [
   'long',
 ] as const;
 export type EvalPersona = (typeof EVAL_PERSONAS)[number];
+/** 报告里的语言切片：locale，混合语言（persona mixed_language）的用例单独算 mixed。 */
+export const EVAL_LANGUAGES = ['en-GB', 'zh-CN', 'zh-TW', 'mixed'] as const;
+export type EvalLanguage = (typeof EVAL_LANGUAGES)[number];
 
 export type EvalCase = {
   id: string;
@@ -81,7 +90,31 @@ export type EvalCase = {
   acceptableFaqIds?: string[];
   /** 数据集说明（例如为什么检索够不着）。 */
   note?: string;
+  /** 学员角色（parent、teacher、attacker …），只用于按角色拆分。 */
+  role?: string;
+  /** 多轮对话：同一个 conversationId 的用例按 turn（1 起）排列；评测仍逐条单独打分，不带上文。 */
+  conversationId?: string;
+  turn?: number;
+  /** 数据集来源（原始批次与行），评测不读。 */
+  origin?: string;
 };
+
+export function caseLanguage(
+  c: Pick<EvalCase, 'locale' | 'persona'>,
+): EvalLanguage {
+  return c.persona === 'mixed_language' ? 'mixed' : c.locale;
+}
+
+export type TurnKind = 'single' | 'first' | 'follow_up';
+
+/** single：不属于多轮对话；first：对话第一轮；follow_up：之后的追问（标签按上文定，评测却不带上文）。 */
+export function turnKind(c: {
+  conversationId?: string | null;
+  turn?: number | null;
+}): TurnKind {
+  if (!c.conversationId) return 'single';
+  return c.turn === 1 ? 'first' : 'follow_up';
+}
 
 export type SeedFaq = Pick<
   HelpdeskFaq,
@@ -146,6 +179,11 @@ export function loadCases(path: string): EvalCase[] {
         typeof value.message === 'string' &&
         (value.expectedFaqId === null || UUID.test(value.expectedFaqId)) &&
         (value.acceptableFaqIds ?? []).every((id) => UUID.test(id)) &&
+        (value.role === undefined || filled(value.role)) &&
+        (value.conversationId === undefined) === (value.turn === undefined) &&
+        (value.conversationId === undefined || filled(value.conversationId)) &&
+        (value.turn === undefined ||
+          (Number.isInteger(value.turn) && value.turn >= 1)) &&
         (source === 'chat'
           ? filled(value.message) &&
             value.subject === undefined &&
@@ -392,6 +430,9 @@ export type CaseResult = {
   id: string;
   locale: EvalLocale;
   persona: EvalPersona;
+  role: string | null;
+  conversationId: string | null;
+  turn: number | null;
   message: string;
   expectedFaqId: string | null;
   acceptableFaqIds: string[];
@@ -494,6 +535,9 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
       id: item.id,
       locale: item.locale,
       persona: item.persona,
+      role: item.role ?? null,
+      conversationId: item.conversationId ?? null,
+      turn: item.turn ?? null,
       message: item.message,
       expectedFaqId: item.expectedFaqId,
       acceptableFaqIds: item.acceptableFaqIds ?? [],
@@ -590,6 +634,12 @@ export type EvalReport = {
   };
   byPersona: Record<string, Slice>;
   byLocale: Record<string, Slice>;
+  /** 学员角色；没写角色的用例归 (none)。 */
+  byRole: Record<string, Slice>;
+  /** en-GB / zh-CN / zh-TW，混合语言的用例归 mixed。 */
+  byLanguage: Record<string, Slice>;
+  /** single / first / follow_up（追问按上文标注，评测不带上文）。 */
+  byTurn: Record<string, Slice>;
   failures: (Pick<
     CaseResult,
     | 'id'
@@ -642,17 +692,43 @@ function slice(results: CaseResult[]): Slice {
   };
 }
 
-function sliceBy(
-  results: CaseResult[],
-  key: 'persona' | 'locale',
-): Record<string, Slice> {
-  const groups = new Map<string, CaseResult[]>();
-  for (const result of results)
-    groups.set(result[key], [...(groups.get(result[key]) ?? []), result]);
+/** 切片的键：locale、case type、角色、语言、轮次。 */
+export type SliceKey = 'locale' | 'persona' | 'role' | 'language' | 'turn';
+
+type Sliceable = Pick<
+  CaseResult,
+  'locale' | 'persona' | 'role' | 'conversationId' | 'turn'
+>;
+
+function sliceName(item: Sliceable, key: SliceKey): string {
+  switch (key) {
+    case 'role':
+      return item.role ?? '(none)';
+    case 'language':
+      return caseLanguage(item);
+    case 'turn':
+      return turnKind(item);
+    default:
+      return item[key];
+  }
+}
+
+/** 按切片分组（名字按字母序）。 */
+export function groupBy<T extends Sliceable>(
+  items: T[],
+  key: SliceKey,
+): [string, T[]][] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const name = sliceName(item, key);
+    groups.set(name, [...(groups.get(name) ?? []), item]);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+function sliceBy(results: CaseResult[], key: SliceKey): Record<string, Slice> {
   return Object.fromEntries(
-    [...groups.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, items]) => [name, slice(items)]),
+    groupBy(results, key).map(([name, items]) => [name, slice(items)]),
   );
 }
 
@@ -754,6 +830,9 @@ export function summarize(input: {
     metrics,
     byPersona: sliceBy(results, 'persona'),
     byLocale: sliceBy(results, 'locale'),
+    byRole: sliceBy(results, 'role'),
+    byLanguage: sliceBy(results, 'language'),
+    byTurn: sliceBy(results, 'turn'),
     failures: results
       .filter((r) => !isRight(r))
       .map((r) => ({
@@ -837,6 +916,28 @@ export function markdownReport(report: EvalReport): string {
     '| --- | --- | --- | --- |',
     rows(report.byLocale),
     '',
+    '## By language',
+    '',
+    'Locale, with mixed-language cases (persona `mixed_language`) counted as `mixed`.',
+    '',
+    '| Language | Cases | Accuracy | Wrong |',
+    '| --- | --- | --- | --- |',
+    rows(report.byLanguage),
+    '',
+    '## By role',
+    '',
+    '| Role | Cases | Accuracy | Wrong |',
+    '| --- | --- | --- | --- |',
+    rows(report.byRole),
+    '',
+    '## By turn',
+    '',
+    '`follow_up` turns are labelled in the context of their conversation, but every turn is scored on its own, without the earlier turns.',
+    '',
+    '| Turn | Cases | Accuracy | Wrong |',
+    '| --- | --- | --- | --- |',
+    rows(report.byTurn),
+    '',
     `## Failures (${report.failures.length})`,
     '',
     '| Case | Kind | Stage | Expected | Got | Reason |',
@@ -850,14 +951,298 @@ export function markdownReport(report: EvalReport): string {
   return lines.join('\n');
 }
 
-/** .md 写 Markdown，其它写 JSON。 */
-export function writeReport(path: string, report: EvalReport): void {
+/* ------------------------------ 只跑检索（--retrieval-only） ------------------------------ */
+
+/** recall@k 的 k：第一个候选、前三个、送给模型的全部 8 个。 */
+export const RETRIEVAL_KS = [1, 3, SUGGEST_CANDIDATES] as const;
+
+/** 和推荐工作流（faq-workflow 的 retrieve 步）完全相同的检索请求。 */
+export function retrievalQuery(item: EvalCase): HelpdeskQaSearch {
+  const submit = item.source === 'submit';
+  return {
+    locale: serviceLocale(item.locale),
+    category: submit ? faqCategoryFor(item.category) : null,
+    text: initialFaqState({
+      locale: serviceLocale(item.locale),
+      category: null,
+      subject: submit ? (item.subject ?? '').trim() : '',
+      message: item.message.trim(),
+    }).queryText,
+    limit: SUGGEST_CANDIDATES,
+  };
+}
+
+export type RetrievalResult = Pick<
+  CaseResult,
+  | 'id'
+  | 'locale'
+  | 'persona'
+  | 'role'
+  | 'conversationId'
+  | 'turn'
+  | 'message'
+  | 'expectedFaqId'
+  | 'acceptableFaqIds'
+  | 'candidateIds'
+  | 'latencyMs'
+>;
+
+/** 每条用例只调一次检索（不问模型、不写日志、不限流），记下候选顺序与耗时。 */
+export async function runRetrieval(options: {
+  cases: EvalCase[];
+  qa: HelpdeskQaSource;
+  onCase?: (result: RetrievalResult, index: number) => void;
+}): Promise<RetrievalResult[]> {
+  const results: RetrievalResult[] = [];
+  for (const [index, item] of options.cases.entries()) {
+    const query = retrievalQuery(item);
+    const started = performance.now();
+    const found =
+      query.text === '' ? [] : await options.qa.findCandidates(query);
+    const latencyMs = performance.now() - started;
+    const result: RetrievalResult = {
+      id: item.id,
+      locale: item.locale,
+      persona: item.persona,
+      role: item.role ?? null,
+      conversationId: item.conversationId ?? null,
+      turn: item.turn ?? null,
+      message: item.message,
+      expectedFaqId: item.expectedFaqId,
+      acceptableFaqIds: item.acceptableFaqIds ?? [],
+      candidateIds: found.slice(0, query.limit).map((c) => c.id),
+      latencyMs,
+    };
+    results.push(result);
+    options.onCase?.(result, index);
+  }
+  return results;
+}
+
+export type RecallSlice = {
+  cases: number;
+  /** expectedFaqId 不为 null 的用例：recall 只在这些上算。 */
+  answerable: number;
+  recallAt1: number | null;
+  recallAt3: number | null;
+  recallAt8: number | null;
+  /** 找到时（前 8 内），第一个可接受的 FAQ 的平均名次（1 起）。 */
+  meanRank: number | null;
+  /** 该是 none 的用例里，检索一个候选都没给（不会问模型）的比例。 */
+  noneEmpty: number | null;
+};
+
+export type RetrievalReport = {
+  kind: 'retrieval-only';
+  generatedAt: string;
+  retrieval: 'memory' | 'postgresql';
+  note: string;
+  faqs: number;
+  cases: { total: number; run: number };
+  overall: RecallSlice;
+  latencyMs: { p50: number; p95: number; max: number };
+  byLocale: Record<string, RecallSlice>;
+  byLanguage: Record<string, RecallSlice>;
+  byPersona: Record<string, RecallSlice>;
+  byRole: Record<string, RecallSlice>;
+  byTurn: Record<string, RecallSlice>;
+  /** 该有答案、可接受的 FAQ 却都不在 8 个候选里的用例。 */
+  misses: Pick<
+    RetrievalResult,
+    | 'id'
+    | 'locale'
+    | 'persona'
+    | 'role'
+    | 'message'
+    | 'expectedFaqId'
+    | 'acceptableFaqIds'
+    | 'candidateIds'
+  >[];
+};
+
+/** 第一个可接受的 FAQ（expected 或 acceptable）在候选里的名次（1 起）；没有为 null。 */
+export function acceptedRank(r: RetrievalResult): number | null {
+  if (r.expectedFaqId === null) return null;
+  const accepted = new Set([r.expectedFaqId, ...r.acceptableFaqIds]);
+  const index = r.candidateIds.findIndex((id) => accepted.has(id));
+  return index < 0 ? null : index + 1;
+}
+
+function recallSlice(results: RetrievalResult[]): RecallSlice {
+  const answerable = results.filter((r) => r.expectedFaqId !== null);
+  const ranks = answerable.map(acceptedRank);
+  const at = (k: number) =>
+    share(
+      ranks.filter((rank) => rank !== null && rank <= k).length,
+      answerable.length,
+    );
+  const found = ranks.filter((rank): rank is number => rank !== null);
+  const none = results.filter((r) => r.expectedFaqId === null);
+  return {
+    cases: results.length,
+    answerable: answerable.length,
+    recallAt1: at(RETRIEVAL_KS[0]),
+    recallAt3: at(RETRIEVAL_KS[1]),
+    recallAt8: at(RETRIEVAL_KS[2]),
+    meanRank: found.length
+      ? round(found.reduce((sum, rank) => sum + rank, 0) / found.length, 2)
+      : null,
+    noneEmpty: share(
+      none.filter((r) => r.candidateIds.length === 0).length,
+      none.length,
+    ),
+  };
+}
+
+function recallBy(
+  results: RetrievalResult[],
+  key: SliceKey,
+): Record<string, RecallSlice> {
+  return Object.fromEntries(
+    groupBy(results, key).map(([name, items]) => [name, recallSlice(items)]),
+  );
+}
+
+export function summarizeRetrieval(input: {
+  results: RetrievalResult[];
+  totalCases: number;
+  retrieval: RetrievalReport['retrieval'];
+  faqs: number;
+  now?: Date;
+}): RetrievalReport {
+  const { results } = input;
+  const latencies = results.map((r) => r.latencyMs);
+  return {
+    kind: 'retrieval-only',
+    generatedAt: (input.now ?? new Date()).toISOString(),
+    retrieval: input.retrieval,
+    note:
+      'Retrieval only: no model was asked. ' +
+      (input.retrieval === 'postgresql'
+        ? 'Candidates come from the production candidate SQL on PostgreSQL.'
+        : 'In-memory retrieval only approximates the production SQL: rerun with --pg.'),
+    faqs: input.faqs,
+    cases: { total: input.totalCases, run: results.length },
+    overall: recallSlice(results),
+    latencyMs: {
+      p50: Math.round(percentile(latencies, 0.5)),
+      p95: Math.round(percentile(latencies, 0.95)),
+      max: Math.round(Math.max(0, ...latencies)),
+    },
+    byLocale: recallBy(results, 'locale'),
+    byLanguage: recallBy(results, 'language'),
+    byPersona: recallBy(results, 'persona'),
+    byRole: recallBy(results, 'role'),
+    byTurn: recallBy(results, 'turn'),
+    misses: results
+      .filter((r) => r.expectedFaqId !== null && acceptedRank(r) === null)
+      .map((r) => ({
+        id: r.id,
+        locale: r.locale,
+        persona: r.persona,
+        role: r.role,
+        message: r.message,
+        expectedFaqId: r.expectedFaqId,
+        acceptableFaqIds: r.acceptableFaqIds,
+        candidateIds: r.candidateIds,
+      })),
+  };
+}
+
+const EVAL_FAQ_ID = /^0192f0e0-0000-7000-8000-0{9}(\d{3})$/;
+/** 评测库的 id 只显示末三位（001 … 035）；别的 id 原样显示。 */
+const shortId = (id: string) => EVAL_FAQ_ID.exec(id)?.[1] ?? id;
+const cell = (text: string, max = 80) => {
+  const flat = text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+};
+
+export function markdownRetrievalReport(report: RetrievalReport): string {
+  const o = report.overall;
+  const rows = (slices: Record<string, RecallSlice>) =>
+    Object.entries(slices)
+      .map(
+        ([name, s]) =>
+          `| ${name} | ${s.cases} | ${s.answerable} | ${pct(s.recallAt1)} | ${pct(s.recallAt3)} | ${pct(s.recallAt8)} | ${s.meanRank === null ? 'n/a' : s.meanRank.toFixed(1)} | ${pct(s.noneEmpty)} |`,
+      )
+      .join('\n');
+  const table = (
+    title: string,
+    label: string,
+    slices: Record<string, RecallSlice>,
+    intro?: string,
+  ) => [
+    `## ${title}`,
+    '',
+    ...(intro ? [intro, ''] : []),
+    `| ${label} | Cases | Answerable | Recall@1 | Recall@3 | Recall@8 | Mean rank | none: no candidates |`,
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    rows(slices),
+    '',
+  ];
+  return [
+    '# Helpdesk retrieval eval (retrieval only, no model)',
+    '',
+    `- Generated: ${report.generatedAt}`,
+    `- Retrieval: ${report.retrieval}`,
+    `- FAQs: ${report.faqs}`,
+    `- Cases: ${report.cases.run} of ${report.cases.total}`,
+    `- ${report.note}`,
+    '',
+    'Recall@k: share of answerable cases (expectedFaqId not null) whose expected FAQ, or an acceptable one, is among the first k candidates. The model sees 8.',
+    '',
+    '## Overall',
+    '',
+    '| Metric | Value |',
+    '| --- | --- |',
+    `| Answerable cases | ${o.answerable} of ${o.cases} |`,
+    `| Recall@1 / @3 / @8 | ${pct(o.recallAt1)} / ${pct(o.recallAt3)} / ${pct(o.recallAt8)} |`,
+    `| Mean rank when found | ${o.meanRank === null ? 'n/a' : o.meanRank.toFixed(2)} |`,
+    `| none cases with no candidates (model not asked) | ${pct(o.noneEmpty)} |`,
+    `| Retrieval latency p50 / p95 / max | ${report.latencyMs.p50} / ${report.latencyMs.p95} / ${report.latencyMs.max} ms |`,
+    '',
+    ...table('By locale', 'Locale', report.byLocale),
+    ...table(
+      'By language',
+      'Language',
+      report.byLanguage,
+      'Locale, with mixed-language cases (persona `mixed_language`) counted as `mixed`.',
+    ),
+    ...table('By case type', 'Case type', report.byPersona),
+    ...table('By role', 'Role', report.byRole),
+    ...table(
+      'By turn',
+      'Turn',
+      report.byTurn,
+      '`follow_up` turns are labelled in the context of their conversation but retrieved on their own text.',
+    ),
+    `## Misses (${report.misses.length})`,
+    '',
+    'Answerable cases whose expected or acceptable FAQ is not among the 8 candidates.',
+    '',
+    '| Case | Locale | Case type | Expected | Also accepted | Candidates | Message |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    ...report.misses.map(
+      (m) =>
+        `| ${m.id} | ${m.locale} | ${m.persona} | ${m.expectedFaqId ? shortId(m.expectedFaqId) : 'none'} | ${m.acceptableFaqIds.length ? m.acceptableFaqIds.map(shortId).join(', ') : '—'} | ${m.candidateIds.length ? m.candidateIds.map(shortId).join(', ') : '—'} | ${cell(m.message)} |`,
+    ),
+    '',
+  ].join('\n');
+}
+
+/** .md 写 Markdown，其它写 JSON（推荐评测或只跑检索的报告）。 */
+export function writeReport(
+  path: string,
+  report: EvalReport | RetrievalReport,
+): void {
   mkdirSync(dirname(path), { recursive: true });
+  const markdown = () =>
+    'kind' in report && report.kind === 'retrieval-only'
+      ? markdownRetrievalReport(report)
+      : markdownReport(report as EvalReport);
   writeFileSync(
     path,
-    path.endsWith('.md')
-      ? markdownReport(report)
-      : `${JSON.stringify(report, null, 2)}\n`,
+    path.endsWith('.md') ? markdown() : `${JSON.stringify(report, null, 2)}\n`,
   );
 }
 
