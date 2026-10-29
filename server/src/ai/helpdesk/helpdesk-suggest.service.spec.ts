@@ -818,24 +818,19 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
 });
 
 describe('Helpdesk suggest: model choice', () => {
-  it('uses HELPDESK_SUGGEST_MODEL, else the first cheap model, else the first, else a default', () => {
-    expect(
-      suggestModel({
-        HELPDESK_SUGGEST_MODEL: ' x/y ',
-        AI_AVAILABLE_MODELS: 'a/b',
-      }),
-    ).toBe('x/y');
-    expect(
-      suggestModel({
-        AI_AVAILABLE_MODELS:
-          'deepseek/deepseek-r1, anthropic/claude-big, google/gemini-3.5-flash, openai/gpt-4o-mini',
-      }),
-    ).toBe('google/gemini-3.5-flash');
-    expect(suggestModel({ AI_AVAILABLE_MODELS: 'a/large, b/huge' })).toBe(
-      'a/large',
-    );
+  it('uses the model fixed in code; HELPDESK_SUGGEST_MODEL only overrides it', () => {
     // 2026-10-29 真模型评测（dev 难例）：gemini-2.5-flash 答错率最低、最快
     expect(suggestModel({})).toBe('google/gemini-2.5-flash');
+    expect(suggestModel({ HELPDESK_SUGGEST_MODEL: '  ' })).toBe(
+      'google/gemini-2.5-flash',
+    );
+    expect(suggestModel({ HELPDESK_SUGGEST_MODEL: ' x/y ' })).toBe('x/y');
+    // AI Tutor 的模型列表不影响推荐用的模型（DEV 上排第一的是 deepseek）
+    expect(
+      suggestModel({
+        AI_AVAILABLE_MODELS: 'deepseek/deepseek-v4.1-flash, openai/gpt-4o-mini',
+      }),
+    ).toBe('google/gemini-2.5-flash');
   });
 });
 

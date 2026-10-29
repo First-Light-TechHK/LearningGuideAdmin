@@ -71,7 +71,9 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
     const warnSpy = jest.spyOn(Logger.prototype, 'warn');
     const errorSpy = jest.spyOn(Logger.prototype, 'error');
     filter.catch(new BadRequestException('参数校验失败'), mockHost);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[400] 参数校验失败'));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[400] 参数校验失败'),
+    );
     expect(errorSpy).not.toHaveBeenCalled();
   });
 

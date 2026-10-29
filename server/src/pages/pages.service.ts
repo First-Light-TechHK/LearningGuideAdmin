@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePageDto } from './dto/create-page.dto';
 import { UpdatePageDto } from './dto/update-page.dto';
@@ -18,10 +22,15 @@ export class PagesService {
       throw new NotFoundException('所属课程不存在');
     }
     const sortOrder =
-      dto.sortOrder ??
-      (await this.prisma.page.count({ where: { courseId } }));
+      dto.sortOrder ?? (await this.prisma.page.count({ where: { courseId } }));
     return this.prisma.page.create({
-      data: { courseId, title: dto.title, contentMd: dto.contentMd, sectionTags: dto.sectionTags, sortOrder },
+      data: {
+        courseId,
+        title: dto.title,
+        contentMd: dto.contentMd,
+        sectionTags: dto.sectionTags,
+        sortOrder,
+      },
     });
   }
 

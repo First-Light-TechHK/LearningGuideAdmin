@@ -61,7 +61,7 @@ describe('accessLog（2026-10-28 复盘 A4）', () => {
 
   it('跳过健康检查，避免淹没业务请求', () => {
     const { req, res } = makeContext('GET', '/api/health');
-    accessLog(req, res, jest.fn() as unknown as NextFunction);
+    accessLog(req, res, jest.fn());
     (res as unknown as EventEmitter).emit('finish');
     expect(logged).toHaveLength(0);
   });
@@ -69,7 +69,7 @@ describe('accessLog（2026-10-28 复盘 A4）', () => {
   it('ACCESS_LOG=0 时完全不记录', () => {
     process.env.ACCESS_LOG = '0';
     const { req, res } = makeContext('POST', '/api/ai/chat-stream');
-    accessLog(req, res, jest.fn() as unknown as NextFunction);
+    accessLog(req, res, jest.fn());
     (res as unknown as EventEmitter).emit('finish');
     expect(logged).toHaveLength(0);
   });

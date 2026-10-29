@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
@@ -41,7 +45,9 @@ export class CoursesService {
    */
   async remove(id: string) {
     await this.ensureExists(id);
-    const releaseCount = await this.prisma.release.count({ where: { courseId: id } });
+    const releaseCount = await this.prisma.release.count({
+      where: { courseId: id },
+    });
     if (releaseCount > 0) {
       throw new ConflictException(
         '该课程已存在发布历史版本，拒绝删除；如需删除请先处理历史版本',

@@ -28,14 +28,20 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-/** CourseAiConfig 中随 Release 复制的列（不含 id / releaseId / 时间戳） */
+/**
+ * CourseAiConfig 中随 Release 复制的列（不含 id / releaseId / 时间戳，不含 SystemPrompt）
+ *
+ * 2026-10-29 A：不再复制 lectureSystemPrompt / socraticSystemPrompt / assessmentSystemPrompt / mainSystemPrompt。
+ * 新建 Release 时这四列保持 null，resolvePrompts 自动走模板兜底 → 始终指向当前最新 md 文件。
+ * 原因：旧 Release 可能存着被固化的旧 md 内容，复制过来就漂移了。
+ * mainSystemPrompt 本来就不在此字段集（此前从未复制），保持不变。
+ * 用户如需在新 Release 上自定义提示词，手动 Save 即可；Reset 恢复默认也直接从模板兜底链取最新值。
+ */
 const AI_CONFIG_COPY_FIELDS = {
   lectureModeId: true,
   socraticModeId: true,
   assessmentModeId: true,
-  lectureSystemPrompt: true,
-  socraticSystemPrompt: true,
-  assessmentSystemPrompt: true,
+  // lectureSystemPrompt / socraticSystemPrompt / assessmentSystemPrompt / mainSystemPrompt 均不复制（2026-10-29 A）
   welcomeMsg: true,
   llmProvider: true,
   model: true,
@@ -235,7 +241,11 @@ export class ReleasesService {
       const chunkCount = await tx.knowledgeChunk.count({
         where: { releaseId: release.id },
       });
-      return { id: release.id, versionTag: release.versionTag, missingChunks: chunkCount === 0 };
+      return {
+        id: release.id,
+        versionTag: release.versionTag,
+        missingChunks: chunkCount === 0,
+      };
     });
 
     if (result.missingChunks) {
