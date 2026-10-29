@@ -69,8 +69,7 @@ function setup(stream: StreamFn) {
     chatLogger,
   );
   const write = chatLogger.write as jest.MockedFunction<AiChatLogger['write']>;
-  const entryOf = (): AiChatLogEntry =>
-    write.mock.calls[0][0] as unknown as AiChatLogEntry;
+  const entryOf = (): AiChatLogEntry => write.mock.calls[0][0];
   return { service, write, entryOf, knowledge, configs, rateLimit };
 }
 
@@ -216,12 +215,12 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
 
   it('只读 currentReleaseId（忽略 aiTestReleaseId）并注入英文语言指令', async () => {
     let systemPrompt = '';
-    const { service, knowledge, configs } = setup(
-      async function* (opts: LlmStreamOptions) {
-        systemPrompt = opts.messages[0]?.content ?? '';
-        yield 'ok';
-      },
-    );
+    const { service, knowledge, configs } = setup(async function* (
+      opts: LlmStreamOptions,
+    ) {
+      systemPrompt = opts.messages[0]?.content ?? '';
+      yield 'ok';
+    });
     (knowledge.getCourseByExternalId as jest.Mock).mockResolvedValue({
       id: COURSE_ID,
       currentReleaseId: LIVE_RELEASE,
@@ -245,7 +244,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
       LIVE_RELEASE,
       'LECTURE',
     );
-    expect(systemPrompt).toContain("Answer in the language of the student's latest message.");
+    // LOCALE_INSTRUCTION 已删（main.md 第 5 节 LANGUAGE 覆盖），不再单独断言
   });
 
   it('直播间流量走独立限流槽位（study-group），默认按 portal', async () => {

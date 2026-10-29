@@ -244,6 +244,7 @@
     "changeCourse": "切换课程",
     "manageOnline": "管理所有上线状态",
     "modes": {
+      "MAIN": "主提示词",
       "LECTURE": "讲授",
       "SOCRATIC": "苏格拉底",
       "ASSESSMENT": "测评"
@@ -264,6 +265,9 @@
     "saveFailed": "保存失败",
     "onlineOn": "已上线（对用户侧开放）",
     "onlineOff": "已下线（不对用户侧开放）",
+    "onlineNotSynced": "请先在 Portal 同步该课程后再开启 Online",
+    "onlineNoLive": "请先将某个版本设为上线后再开启 Online",
+    "chatNoRelease": "请先选择测试版本或将某个版本设为上线",
     "unpublished": "未发布",
     "noReleases": "暂无 Release",
     "live": "已上线",
@@ -280,7 +284,6 @@
     "unsavedTitle": "有未保存的配置改动",
     "unsavedContent": "是否先保存系统提示词 / 欢迎语 / LLM 模型的修改？",
     "unsavedSave": "保存",
-    "unsavedDiscard": "不保存",
     "unsavedStay": "取消",
     "managerTitle": "管理所有上线状态",
     "managerSearch": "搜索 AI 导师",

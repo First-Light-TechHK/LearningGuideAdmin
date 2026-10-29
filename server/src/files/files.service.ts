@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { MarkItDown } from 'markitdown-ts';
 import * as XLSX from 'xlsx';
 import WordExtractor from 'word-extractor';
@@ -45,13 +41,17 @@ export class FilesService {
    * 返回 { title, markdown } 供弹窗预览（2026-10-15 两步流程改拍）。
    * 转换分支：默认 markitdown-ts；.xls→SheetJS、.doc→word-extractor（2026-10-19 扩充）。
    */
-  async convertFile(file: Express.Multer.File | undefined): Promise<ConvertedDocument> {
+  async convertFile(
+    file: Express.Multer.File | undefined,
+  ): Promise<ConvertedDocument> {
     if (!file || !file.buffer?.length) {
       throw new BadRequestException('未选择文件（multipart 字段名须为 file）');
     }
     const originalName = this.fixFilenameEncoding(file.originalname);
     const ext = this.getExtension(originalName);
-    if (!ALLOWED_EXTENSIONS.includes(ext as (typeof ALLOWED_EXTENSIONS)[number])) {
+    if (
+      !ALLOWED_EXTENSIONS.includes(ext as (typeof ALLOWED_EXTENSIONS)[number])
+    ) {
       throw new BadRequestException(
         `格式暂不支持：${ext || '未知'}（支持 ${ALLOWED_EXTENSIONS.join(' / ')}）`,
       );
@@ -61,7 +61,9 @@ export class FilesService {
     }
     // 旧版 .xls 内容签名校验：非 OLE/BIFF 文件直接拒绝，避免 SheetJS 宽松解析产出垃圾表格
     if (ext === '.xls' && !this.isLegacyXls(file.buffer)) {
-      throw new BadRequestException('文件内容不是有效的 .xls 格式（请确认文件类型）');
+      throw new BadRequestException(
+        '文件内容不是有效的 .xls 格式（请确认文件类型）',
+      );
     }
 
     let markdown: string;
@@ -83,7 +85,9 @@ export class FilesService {
       this.logger.warn(
         `文档转换失败 ${originalName}: ${e instanceof Error ? e.message : String(e)}`,
       );
-      throw new BadRequestException('文档转换失败，请检查文件是否损坏或受密码保护');
+      throw new BadRequestException(
+        '文档转换失败，请检查文件是否损坏或受密码保护',
+      );
     }
     if (!markdown) {
       throw new BadRequestException('文档转换结果为空');

@@ -74,10 +74,7 @@ export class AiController {
 
   /** 设置 Online 状态（§4.2.6，开关即时生效） */
   @Put('config/:courseId/online')
-  setOnline(
-    @Param('courseId') courseId: string,
-    @Body() dto: SetOnlineDto,
-  ) {
+  setOnline(@Param('courseId') courseId: string, @Body() dto: SetOnlineDto) {
     return this.configs.setOnline(courseId, dto.online);
   }
 

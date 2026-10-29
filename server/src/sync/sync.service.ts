@@ -172,7 +172,9 @@ export class SyncService {
       );
       // 仅允许用标题回填没有 externalId 的历史页面，避免抢占其他 lesson 的映射
       const byTitle = new Map(
-        pages.filter((page) => !page.externalId).map((page) => [page.title, page]),
+        pages
+          .filter((page) => !page.externalId)
+          .map((page) => [page.title, page]),
       );
       const matchedPageIds = new Set<string>();
 
@@ -181,7 +183,11 @@ export class SyncService {
         if (!page) {
           // 历史数据没有 externalId：仅允许用标题回填，且不抢占其他 lesson 的映射
           const titleMatch = byTitle.get(lesson.title);
-          if (titleMatch && !titleMatch.externalId && !matchedPageIds.has(titleMatch.id)) {
+          if (
+            titleMatch &&
+            !titleMatch.externalId &&
+            !matchedPageIds.has(titleMatch.id)
+          ) {
             page = titleMatch;
           }
         }
@@ -234,13 +240,14 @@ export class SyncService {
     );
     // 仅允许用标题回填没有 externalId 的历史页面，避免抢占其他 lesson 的映射
     const byTitle = new Map(
-      pages.filter((page) => !page.externalId).map((page) => [page.title, page]),
+      pages
+        .filter((page) => !page.externalId)
+        .map((page) => [page.title, page]),
     );
 
     for (const lesson of ext.lessons) {
       const page =
-        byExternalId.get(lesson.externalId) ??
-        byTitle.get(lesson.title);
+        byExternalId.get(lesson.externalId) ?? byTitle.get(lesson.title);
       if (!page) {
         diff += 1;
         continue;

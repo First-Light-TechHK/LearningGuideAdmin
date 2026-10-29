@@ -24,7 +24,9 @@ describe('ApiKeyGuard', () => {
     const guard = new ApiKeyGuard(
       makeConfig({ AUTH_ENABLED: 'true', AUTH_TOKEN: 'secret' }),
     );
-    expect(guard.canActivate(makeContext({ 'x-api-key': 'secret' }))).toBe(true);
+    expect(guard.canActivate(makeContext({ 'x-api-key': 'secret' }))).toBe(
+      true,
+    );
   });
 
   it('开启后：X-API-Key 缺失或不匹配应 401', () => {

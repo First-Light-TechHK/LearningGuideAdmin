@@ -10,7 +10,9 @@ let sharedPool: Pool | undefined;
  * node-postgres 不会，所以原生 SQL 连接必须显式声明 SSL。
  * 本机/容器内开发库默认关闭；可用 PGSSL=true/false 覆盖。
  */
-export function sslConfig(url: string): false | { rejectUnauthorized: boolean } {
+export function sslConfig(
+  url: string,
+): false | { rejectUnauthorized: boolean } {
   const explicit = process.env.PGSSL?.trim().toLowerCase();
   if (explicit === 'false' || explicit === 'disable') return false;
   const isLocal = /@(?:localhost|127\.0\.0\.1|host\.docker\.internal)[:/]/.test(

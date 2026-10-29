@@ -1,6 +1,7 @@
 import { sslConfig } from './db';
 
-const RDS = 'postgresql://u:p@learning-guide-admin-dev.abc.ap-southeast-1.rds.amazonaws.com:5432/db';
+const RDS =
+  'postgresql://u:p@learning-guide-admin-dev.abc.ap-southeast-1.rds.amazonaws.com:5432/db';
 
 describe('sslConfig', () => {
   const original = { ...process.env };
