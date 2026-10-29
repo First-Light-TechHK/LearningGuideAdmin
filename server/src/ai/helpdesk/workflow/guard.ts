@@ -1,5 +1,6 @@
 import * as openccT2cn from 'opencc-js/t2cn';
 
+import { GAP_LABEL_LIMITS } from '../../../contracts/helpdesk-flywheel';
 import {
   EXCERPT_RULES,
   GUARD_LIMITS,
@@ -430,6 +431,45 @@ export function guardExplanation(
   if (firstPhrase(normalized, AI_FILLER)) return fail('ai_filler');
   if (!scriptFits(plain, learner)) return fail('script');
   return { ok: true, text: plain };
+}
+
+/**
+ * 数据飞轮的标签（v5 Part G3 第 3 步）：模型给一组未解决的问题起的话题（topic）与提议的学员问题
+ * （question）。不展示给学员（员工审），但同样只信代码：没写 / 记号或占位符 / 邮箱 / 链接 → 拒；
+ * 数字与用文字写的数量必须在学员的例句里出现过（模型不许编事实，ungrounded）；按学员的文字限长
+ * （GAP_LABEL_LIMITS）；AI 套话、与学员不同的文字 → 拒。退款、免费这类词允许：学员就是这么问的。
+ */
+export function guardGapLabel(
+  field: 'topic' | 'question',
+  raw: unknown,
+  learner: Learner,
+  examples: readonly string[],
+): GuardCheck {
+  if (typeof raw !== 'string' || raw.trim() === '') return fail('missing');
+  const text = raw.trim();
+  if (SHORT_MARKUP.test(text) || /[<>]/.test(text) || hasHiddenCharacters(text))
+    return fail('markup');
+  const normalized = normalizeForGuard(text);
+  if (new RegExp(EMAIL.source, 'iu').test(normalized)) return fail('email');
+  if (new RegExp(URL.source, 'iu').test(normalized)) return fail('link');
+  const source = normalizeForGuard(examples.join('\n'));
+  const compact = (value: string) => value.replace(/\s+/g, '');
+  const runs = new Set(source.match(DIGIT_RUN) ?? []);
+  if ((normalized.match(DIGIT_RUN) ?? []).some((run) => !runs.has(run)))
+    return fail('ungrounded');
+  if (
+    numberWords(normalized).some(
+      (words) => !compact(source).includes(compact(words)),
+    )
+  )
+    return fail('ungrounded');
+  if (DIGIT.test(normalized.replace(/\d/g, ''))) return fail('ungrounded');
+  const limits = GAP_LABEL_LIMITS[field];
+  if (textLength(text) > (learner.script === 'zh' ? limits.zh : limits.en))
+    return fail('too_long');
+  if (firstPhrase(normalized, AI_FILLER)) return fail('ai_filler');
+  if (!scriptFits(text, learner)) return fail('script');
+  return { ok: true, text };
 }
 
 /** 寒暄的意图 → 模板组（Part B §2：hello 与「我有个问题」同一句；谢谢 / 再见一句；跑题一句）。 */

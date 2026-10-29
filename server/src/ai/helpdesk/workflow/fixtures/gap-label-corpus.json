@@ -1,0 +1,25 @@
+{
+  "$comment": "Gap label guard corpus (helpdesk v5 Part G3 step 3). Each case: the field (topic or question), the scrubbed learner examples the label is grounded in, the interface locale, the model's text and the expected result: \"passed\" or the guard reason. guard.spec.ts runs every case; CI runs it with no model (Part G5 guard corpus test).",
+  "cases": [
+    { "field": "question", "examples": ["付款成功了但是课程没有开通", "已经付款了课程还是没开通"], "locale": "zh-CN", "text": "付款成功了课程还没开通怎么办？", "expect": "passed" },
+    { "field": "topic", "examples": ["付款成功了但是课程没有开通"], "locale": "zh-CN", "text": "付款后课程未开通", "expect": "passed" },
+    { "field": "question", "examples": ["付款成功了但是课程没有开通"], "locale": "zh-CN", "text": "付款后一般要等24小时才能开通吗？", "expect": "ungrounded" },
+    { "field": "question", "examples": ["付款成功了但是课程没有开通"], "locale": "zh-CN", "text": "付款后要等两天才开通吗？", "expect": "ungrounded" },
+    { "field": "question", "examples": ["为什么扣了 2 次钱", "扣款两次了"], "locale": "zh-CN", "text": "为什么扣了2次钱？", "expect": "passed" },
+    { "field": "question", "examples": ["为什么扣了２次钱"], "locale": "zh-CN", "text": "为什么扣了2次钱？", "expect": "passed" },
+    { "field": "question", "examples": ["付款成功了但是课程没有开通"], "locale": "zh-CN", "text": "付款后 **课程** 没开通？", "expect": "markup" },
+    { "field": "question", "examples": ["我的邮箱 <email> 收不到验证码"], "locale": "zh-CN", "text": "邮箱 <email> 收不到验证码怎么办？", "expect": "markup" },
+    { "field": "question", "examples": ["收不到验证码"], "locale": "zh-CN", "text": "收不到验证码可以发邮件到 help@example.com 吗？", "expect": "email" },
+    { "field": "question", "examples": ["收不到验证码"], "locale": "zh-CN", "text": "收不到验证码要去 example.com 吗？", "expect": "link" },
+    { "field": "topic", "examples": ["付款成功了但是课程没有开通"], "locale": "zh-CN", "text": "学员付款成功以后课程一直都没有开通的各种情况汇总", "expect": "too_long" },
+    { "field": "question", "examples": ["the reset email never arrives"], "locale": "en-GB", "text": "Great question! Why does the reset email never arrive?", "expect": "ai_filler" },
+    { "field": "question", "examples": ["the reset email never arrives"], "locale": "en-GB", "text": "为什么收不到重置邮件？", "expect": "script" },
+    { "field": "question", "examples": ["the reset email never arrives", "password reset mail not coming"], "locale": "en-GB", "text": "Why does my password reset email never arrive?", "expect": "passed" },
+    { "field": "question", "examples": ["the reset email never arrives"], "locale": "en-GB", "text": "Does the reset email take two hours to arrive?", "expect": "ungrounded" },
+    { "field": "question", "examples": ["忘記密碼收不到郵件"], "locale": "zh-CN", "text": "忘記密碼收不到重設郵件怎麼辦？", "expect": "passed" },
+    { "field": "question", "examples": ["我可以退款吗"], "locale": "zh-CN", "text": "订阅以后还能申请退款吗？", "expect": "passed" },
+    { "field": "topic", "examples": ["收不到验证码"], "locale": "zh-CN", "text": "  ", "expect": "missing" },
+    { "field": "question", "examples": ["收不到验证码"], "locale": "zh-CN", "text": "收不到​验证码？", "expect": "markup" },
+    { "field": "question", "examples": ["can't log in on my iPad", "登录不了 iPad"], "locale": "en-GB", "text": "iPad 上登录不了怎么办？", "expect": "passed" }
+  ]
+}
