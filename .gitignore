@@ -45,6 +45,9 @@ test_files/
 # 设计走查用的临时页面快照
 docs/design/figma/preview/
 
+# Helpdesk 推荐评测报告（npm run eval:helpdesk 的缺省输出）
+helpdesk-eval-report.*
+
 # Figma 整页几何缓存（体积大，可由 scripts/figma-icons.mjs 重新拉取）
 docs/design/figma/course-management/*.geometry.json
 

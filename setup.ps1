@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $MinNodeMajor = 22
-$MinNodeMinor = 12
+$MinNodeMinor = 19
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 

@@ -153,6 +153,74 @@ describe('route access classification', () => {
     });
   });
 
+  it('puts HelpDesk tickets behind the HelpDesk menu: reads are VIEW, every write needs FULL', () => {
+    const h = ['helpDesk'];
+    const cases: [string, string, string][] = [
+      ['GET', '/api/helpdesk/tickets', 'VIEW'],
+      ['GET', '/api/helpdesk/tickets/t1', 'VIEW'],
+      ['GET', '/api/helpdesk/attachments/a1', 'VIEW'],
+      ['POST', '/api/helpdesk/tickets/t1/messages', 'CREATE'],
+      ['POST', '/api/helpdesk/tickets/t1/actions', 'CREATE'],
+      ['PUT', '/api/helpdesk/tickets/t1', 'CREATE'],
+      ['PATCH', '/api/helpdesk/tickets/t1', 'CREATE'],
+      ['DELETE', '/api/helpdesk/tickets/t1', 'CREATE'],
+      ['POST', '/API/HelpDesk/tickets/t1/actions', 'CREATE'],
+    ];
+    for (const [method, path, action] of cases) {
+      assert.deepEqual(
+        routeAccess(method, path),
+        menu(h, action),
+        `${method} ${path}`,
+      );
+    }
+  });
+
+  it('puts the FAQs (Tickets v2 §3) behind the HelpDesk menu too', () => {
+    const h = ['helpDesk'];
+    const cases: [string, string, string][] = [
+      ['GET', '/api/helpdesk/faqs', 'VIEW'],
+      ['GET', '/api/helpdesk/faqs/f1', 'VIEW'],
+      ['GET', '/api/helpdesk/faqs/f1/revisions', 'VIEW'],
+      ['POST', '/api/helpdesk/faqs', 'CREATE'],
+      ['PUT', '/api/helpdesk/faqs/f1', 'CREATE'],
+      ['POST', '/api/helpdesk/faqs/f1/archive', 'CREATE'],
+    ];
+    for (const [method, path, action] of cases) {
+      assert.deepEqual(
+        routeAccess(method, path),
+        menu(h, action),
+        `${method} ${path}`,
+      );
+    }
+  });
+
+  it('exempts only the Portal helpdesk integration routes from the employee login (Bearer only)', () => {
+    for (const [method, path] of [
+      ['GET', '/api/integration/helpdesk/faqs'],
+      ['GET', '/api/integration/helpdesk/faqs?locale=en-GB'],
+      ['GET', '/api/integration/helpdesk/faqs/f1?locale=zh-CN'],
+      ['POST', '/api/integration/helpdesk/suggest'],
+      ['POST', '/api/integration/helpdesk/suggestions/s1/outcome'],
+      ['GET', '/API/Integration/HelpDesk/faqs/'],
+    ]) {
+      assert.deepEqual(
+        routeAccess(method, path.split('?')[0]),
+        { kind: 'helpdeskIntegration' },
+        `${method} ${path}`,
+      );
+    }
+    // 其它 integration 路径、或 helpdesk 前缀的变体都不享受豁免
+    assert.deepEqual(routeAccess('GET', '/api/integration/other'), {
+      kind: 'employeeAdmin',
+    });
+    assert.deepEqual(routeAccess('GET', '/api/integration'), {
+      kind: 'employeeAdmin',
+    });
+    assert.deepEqual(routeAccess('GET', '/api/integration/helpdeskx/faqs'), {
+      kind: 'employeeAdmin',
+    });
+  });
+
   it('gives unregistered endpoints to Admin only', () => {
     assert.deepEqual(routeAccess('GET', '/api/something-new'), {
       kind: 'employeeAdmin',

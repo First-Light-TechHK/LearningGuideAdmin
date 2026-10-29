@@ -22,7 +22,6 @@
     "previous": "上一页",
     "next": "下一页",
     "required": "必填",
-    "close": "关闭",
     "copy": "复制链接",
     "copied": "已复制",
     "language": "语言",
@@ -472,6 +471,325 @@
       "batchOk": "确定",
       "batchCancel": "取消",
       "batchRemoveConfirm": "将删除 {n} 行，是否继续？"
+    }
+  },
+  "helpDesk": {
+    "title": "服务台",
+    "subtitle": "管理学员工单与常见问题",
+    "readOnly": "你的角色只能查看服务台，不能回复或修改。",
+    "notConnectedTitle": "HelpDesk 尚未接通",
+    "notConnectedBody": "当前环境还没有接通 Portal 工单接口，请联系管理员配置。",
+    "tabs": {
+      "enquiries": "工单",
+      "faqs": "常见问题"
+    },
+    "searchPlaceholder": "搜索学员或工单...",
+    "filter": "筛选工单",
+    "filters": {
+      "status": "状态",
+      "category": "工单类型",
+      "tag": "标签",
+      "tagPlaceholder": "任意标签",
+      "any": "全部",
+      "needsReply": "待回复",
+      "clear": "清除筛选",
+      "flagged": "已标记跟进"
+    },
+    "list": {
+      "empty": "还没有工单。",
+      "emptyFiltered": "没有符合搜索或筛选条件的工单。",
+      "loadingMore": "正在加载更多…",
+      "unread": "未读",
+      "flagged": "已标记跟进"
+    },
+    "selectPrompt": "选择一条工单查看对话。",
+    "today": "今天",
+    "yesterday": "昨天",
+    "claim": "接单",
+    "claiming": "正在接单…",
+    "claimHint": "接手这条工单：分配给你并进入处理中；直接回复也会自动接单。",
+    "claimedNotice": "已接单，这条工单已分配给你。",
+    "markReviewed": "标记为已处理",
+    "markReviewedHint": "请学员确认问题已解决；{hours} 小时内没有回应将自动结束。",
+    "reviewedNotice": "已标记为已处理，已请学员确认。",
+    "status": {
+      "OPEN": "待受理",
+      "ASSIGNED": "处理中",
+      "WAITING_USER": "等待用户",
+      "PENDING_CONFIRM": "待用户确认",
+      "CLOSED": "已结束",
+      "CANCELLED": "已撤回"
+    },
+    "category": {
+      "technical_support": "技术支持",
+      "course_content": "课程内容",
+      "payments_subscriptions": "付款与订阅",
+      "other": "其他咨询"
+    },
+    "message": {
+      "learner": "学员",
+      "support": "客服",
+      "internalNote": "内部备注",
+      "attachment": "打开附件 {name}"
+    },
+    "composer": {
+      "reply": "回复学员",
+      "note": "内部备注",
+      "replyPlaceholder": "输入给学员的回复…",
+      "notePlaceholder": "输入内部备注（学员看不到）…",
+      "noteHint": "内部备注只有员工可见。",
+      "send": "发送",
+      "sending": "发送中…",
+      "characters": "{count} / {max}"
+    },
+    "stale": "这条工单已更新，请重新查看。",
+    "notFound": "这条工单不存在或已不可用。",
+    "student": {
+      "title": "学员信息",
+      "accountEmail": "账号邮箱",
+      "contactEmail": "联系邮箱",
+      "joinedAt": "注册日期",
+      "id": "学员 ID",
+      "totalEnquiries": "工单总数",
+      "currentCourse": "当前课程"
+    },
+    "subscription": {
+      "title": "当前订阅方案",
+      "planName": "方案名称",
+      "billingCycle": "计费周期",
+      "status": "状态",
+      "renewalDate": "续费日期"
+    },
+    "billingCycle": {
+      "monthly": "按月",
+      "quarterly": "按季",
+      "annual": "按年",
+      "yearly": "按年",
+      "semiannual": "按半年"
+    },
+    "subscriptionStatus": {
+      "active": "生效中",
+      "trialing": "试用中",
+      "past_due": "逾期未付",
+      "unpaid": "未付款",
+      "incomplete": "未完成",
+      "paused": "已暂停",
+      "cancelled": "已取消",
+      "canceled": "已取消",
+      "expired": "已过期",
+      "cancel_at_period_end": "到期后取消",
+      "grace": "付款宽限期"
+    },
+    "tags": {
+      "title": "标签",
+      "add": "添加标签",
+      "placeholder": "新标签",
+      "remove": "移除标签 {tag}",
+      "empty": "还没有标签。",
+      "invalid": "标签为 1–32 个字符。",
+      "duplicate": "这条工单已有这个标签。",
+      "limit": "每条工单最多 10 个标签。"
+    },
+    "localeName": {
+      "en-GB": "英语（英国）",
+      "zh-CN": "简体中文"
+    },
+    "errors": {
+      "HELPDESK_NOT_CONNECTED": "HelpDesk 尚未接通。",
+      "HELPDESK_UNAVAILABLE": "HelpDesk 暂时不可用，请稍后再试。",
+      "TICKET_NOT_FOUND": "这条工单不存在或已不可用。",
+      "STALE_TICKET": "这条工单已更新，请重新查看。",
+      "INVALID_TRANSITION": "当前状态下不能执行这个操作。",
+      "IDEMPOTENCY_CONFLICT": "这次提交与之前的请求冲突，请刷新后重试。",
+      "TAG_LIMIT_REACHED": "每条工单最多 10 个标签。",
+      "INVALID_INPUT": "请检查填写内容后重试。",
+      "NOT_AUTHORISED": "你的角色只能查看服务台。",
+      "RATE_LIMITED": "请求太频繁，请稍后再试。",
+      "VERSION_CONFLICT": "这条常见问题刚被其他人修改，请刷新后重试。",
+      "generic": "出了点问题，请重试。",
+      "FAQ_NOT_FOUND": "这条常见问题已不存在。",
+      "IDEMPOTENCY_KEY_REUSED": "这次保存与之前的提交冲突，请重试。"
+    },
+    "addFaq": "新增常见问题",
+    "actions": {
+      "label": "操作",
+      "emailStudent": "给学员发邮件",
+      "emailHint": "回复学员：回复保存在这里，并发送到 {email}。",
+      "internalNotes": "内部备注",
+      "internalNotesHint": "这条工单的内部备注，只有员工可见，学员永远看不到。",
+      "flag": "标记跟进",
+      "flagHint": "标记这条工单，稍后跟进。",
+      "unflagHint": "已标记跟进，点击取消标记。",
+      "unavailable": "这条工单当前不能执行这个操作。"
+    },
+    "flaggedNotice": "已标记跟进。",
+    "unflaggedNotice": "已取消跟进标记。",
+    "notes": {
+      "title": "内部备注",
+      "empty": "还没有内部备注。"
+    },
+    "timeline": {
+      "label": "{name} 的工单",
+      "openCard": "打开这条工单"
+    },
+    "ai": {
+      "title": "AI 客服助手",
+      "tag": "AI 生成",
+      "helpful": "学生反馈：已解决",
+      "notHelpful": "学生反馈：仍提交给客服",
+      "noAnswer": "没有匹配的常见问题，助手没有给出答案。"
+    },
+    "trace": {
+      "view": "查看链路",
+      "title": "推荐链路",
+      "subtitle": "助手如何选出这条答案。只读，学员原文已隐藏。",
+      "close": "关闭",
+      "loading": "正在加载链路…",
+      "notFound": "这条答案没有记录链路。",
+      "failed": "链路加载失败，请稍后再试。",
+      "retry": "重试",
+      "summaryTitle": "概要",
+      "eventsTitle": "事件",
+      "fields": {
+        "endReason": "结束原因",
+        "model": "模型",
+        "tokens": "Token",
+        "cost": "费用",
+        "latency": "耗时",
+        "chosen": "选中的常见问题",
+        "candidates": "候选",
+        "traceId": "Trace ID",
+        "conversation": "对话",
+        "feedback": "学生反馈",
+        "toolArgs": "工具参数",
+        "outcome": "结果",
+        "error": "错误",
+        "rejectedArgs": "被拒的参数"
+      },
+      "tokensValue": "输入 {input} / 输出 {output}",
+      "rejectedArgsValue": "已隐藏 {length} 个字符",
+      "latencyValue": "{ms} 毫秒",
+      "offset": {
+        "ms": "+{value} 毫秒",
+        "s": "+{value} 秒",
+        "min": "+{value} 分钟",
+        "h": "+{value} 小时",
+        "d": "+{value} 天"
+      },
+      "conversationValue": "本段对话共 {count} 次推荐",
+      "stepValue": "第 {step} 步",
+      "none": "—",
+      "unknown": "未知",
+      "reasons": {
+        "answered": "已答复",
+        "no_match": "无匹配",
+        "no_candidates": "无候选",
+        "rate_limited": "已限流",
+        "timeout": "超时",
+        "error": "出错",
+        "aborted": "已中止",
+        "no_key": "未配置 API key"
+      },
+      "feedbackValues": {
+        "helpful": "已解决",
+        "solved": "已解决",
+        "not_helpful": "仍提交给客服",
+        "declined": "仍提交给客服",
+        "edited": "修改了问题"
+      }
+    },
+    "faqCategory": {
+      "account_technical": "账户与技术支持",
+      "courses_learning": "课程与学习",
+      "payments_subscriptions": "付款与订阅",
+      "other": "其他问题"
+    },
+    "faqs": {
+      "search": "搜索问题、答案或关键词...",
+      "allCategories": "全部分类",
+      "popularFilter": {
+        "all": "全部常见问题",
+        "popular": "热门",
+        "not_popular": "非热门"
+      },
+      "countOne": "1 条常见问题",
+      "count": "{count} 条常见问题",
+      "columns": {
+        "question": "问题 / 答案",
+        "category": "分类",
+        "popular": "热门",
+        "updated": "最后更新",
+        "action": "操作"
+      },
+      "yes": "是",
+      "no": "否",
+      "edit": "编辑",
+      "preview": "预览",
+      "editLabel": "编辑 {question}",
+      "previewLabel": "预览 {question}",
+      "showing": "显示第 {from}–{to} 条，共 {total} 条",
+      "pagination": "常见问题分页",
+      "page": "第 {page} 页",
+      "previous": "上一页",
+      "next": "下一页",
+      "empty": "还没有常见问题。",
+      "emptyFiltered": "没有符合搜索或筛选条件的常见问题。",
+      "saved": "常见问题已保存。",
+      "deleted": "常见问题已删除。"
+    },
+    "drawer": {
+      "addTitle": "新增常见问题",
+      "editTitle": "编辑常见问题",
+      "subtitle": "修改会同步更新帮助中心展示的常见问题，以及 AI 客服使用的答案。",
+      "close": "关闭",
+      "category": "分类",
+      "categoryPlaceholder": "选择分类",
+      "popular": "热门常见问题",
+      "questionEn": "问题（英文）",
+      "answerEn": "答案（英文）",
+      "questionZh": "问题（中文）",
+      "answerZh": "答案（中文）",
+      "keywords": "关键词（用于搜索和 AI）",
+      "keywordsPlaceholder": "password, 重置, 登录",
+      "toolbar": {
+        "label": "格式",
+        "bold": "粗体",
+        "ordered": "编号列表",
+        "bullet": "项目符号列表",
+        "link": "链接"
+      },
+      "link": {
+        "url": "链接地址",
+        "placeholder": "https://… 或 mailto:…",
+        "insert": "插入链接",
+        "cancel": "取消",
+        "invalid": "地址需以 https://、http:// 或 mailto: 开头"
+      },
+      "cancel": "取消",
+      "save": "保存常见问题",
+      "saving": "保存中…",
+      "delete": "删除常见问题",
+      "deleteConfirm": "删除这条常见问题？删除后它不会再出现在帮助中心和 AI 客服的回答里。",
+      "deleteYes": "删除",
+      "deleteNo": "保留",
+      "discardTitle": "放弃未保存的修改？",
+      "discardYes": "放弃",
+      "discardNo": "继续编辑",
+      "conflict": "这条常见问题刚被其他人修改。已载入最新版本并保留你的修改，再次保存即可覆盖。",
+      "errors": {
+        "required": "必填",
+        "tooLong": "太长了（最多 {max} 个字符）",
+        "tooMany": "最多 20 个关键词",
+        "keywordTooLong": "每个关键词最多 40 个字符",
+        "unsafeLink": "链接需是完整的 https://、http:// 或 mailto: 地址，且不含空格或引号"
+      }
+    },
+    "preview": {
+      "title": "预览常见问题",
+      "hint": "帮助中心里的显示效果",
+      "languages": "预览语言",
+      "en": "EN",
+      "zh": "中文"
     }
   }
 }
