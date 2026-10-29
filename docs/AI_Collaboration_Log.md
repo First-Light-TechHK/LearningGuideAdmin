@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-29 ｜ Helpdesk 推荐 v2：pi-agent-core 工作流 + 链路追踪 + 评测（Admin server + client，Portal 配合）
+
+- **用户拍板**：owner Oliver Zhang（2026-10-28）：不要自主 agent 循环；每一步用原样的 pi-agent-core 跑，步骤由我们写死的工作流决定；追踪照 DeepSeek Harness 的 SessionEvent。方案 `lg-helpdesk/helpdesk-agent-v2-pi-dsh.md`。
+- **变更清单**（设计文档 §4A.8、§4A.11、§5.4、§5.5、§8）：
+  - server：`ai/helpdesk/workflow/`（`engine.ts` 步骤表、`faq-workflow.ts`、`pi-step-runner.ts`）取代旧的 `complete()` + json_schema 路径（旧代码删除）。每个 agent 步只给一个工具，参数枚举锁定，`terminate: true`。闸门：`beforeToolCall` 白名单、一步最多一次调用、`finishTurn` 结束、到期 abort。`@earendil-works/pi-agent-core` / `pi-ai` 1.4.0 不打补丁，server `engines` 改为 Node ≥ 22.19。
+  - server：迁移 `20261029120000_helpdesk_agent_events`（只追加的事件日志，90 天清学员原文）、`trace/`（事件存储、RunTrace、traceparent、查询），以及 BackOffice 只读接口 `GET /api/helpdesk/agent-runs/:runId`、`…/events/:seq`（helpDesk VIEW，导出副本脱敏）。接口经契约 `HELPDESK_TRACE_SOURCE` 注入，`BackofficeModule.register({ helpdeskTrace })`。
+  - server：`/suggest` 收 `runId` / `parentRunId` 与 `traceparent`，客户端断开即 abort。契约样例升到 v3（三份同一文件）。
+  - client：每个 AI 块的「View trace / 查看链路」只读抽屉（`TraceDrawer.tsx`、`lib/helpdeskTrace.ts`）。
+  - 评测：`server/eval/helpdesk/`（120 条用例、种子 FAQ、`npm run eval:helpdesk`、`eval.spec.ts` 进 `npm test`）。
+  - `setup.sh` / `setup.ps1` / README 改为 Node ≥ 22.19（`scripts/node-version.test.mjs` 锁住）。
+  - Portal（同名分支）：`traceparent` 头、预生成 run id、`parentRunId`（Portal `docs/phase1/helpdesk-tickets.md` §18）。
+- **学员可见行为不变**：模型只选候选 id 或 none，答案为库内原文；任何失败返回 null、不阻塞建单；Portal ↔ Admin 契约向后兼容。
+- **自测证据**：
+  - server：`npm run build` 通过；`npm test`（带 `HELPDESK_TEST_DATABASE_URL`，本地临时 PG 16）53 套件、635 通过 + 1 个仓库原有 skip；`npm run test:scripts` 15/15；改动文件 `npx eslint` 无新增问题。
+  - client：`npm run build` 通过，`npm test` 264/264，`npx oxlint` 0 错误（17 条警告，与基线相同）。
+  - 评测（假模型）：`npm run eval:helpdesk` 内存检索与 `--pg` 各跑通一次，报告写出。没有真实 OpenRouter key，**没有真模型成绩**。
+- **待视觉验收**：链路抽屉与「View trace」按钮在 AI 块上的位置（无画板）。
+- **开放问题**：①需要有 key 的人跑一次真模型评测并看闸门；②内存检索只是近似，与生产一致要用 `--pg`；③部署镜像 `node:22-alpine` 须 ≥ 22.19。
+- **Git**：分支 `claude/project-thread-pn4rf0`，未推送。
+
+---
+
 ## 2026-10-28 ｜ HelpDesk v1 完整审查修复（Admin client + server + CI）
 
 - **任务（用户）**：「在fork上跑一遍ci 完整review一遍」「不要引入新的问题 查uiux 后端 打边角用例 看测试锁住功能没有 测试覆盖面」。本条修完整审查里 repo = backoffice 的已核实问题，每条先写失败用例再改。

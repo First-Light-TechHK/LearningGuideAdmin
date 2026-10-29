@@ -820,7 +820,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 ### 4A.8 推荐答案（Agent 角色，Figma addendum §C）
 
 - 代码：`server/src/ai/helpdesk/`（`helpdesk-suggest.service.ts`、`helpdesk-suggestion.store.ts`、`helpdesk-suggest.controller.ts`），只在 `agent` 角色挂载（`AiModule.register({ learnerApi: true, helpdeskQa })`）。候选来源实现在 BackOffice（`createPgHelpdeskQaSource`），由 `app.module.ts` 组装注入；双方互不 import（eslint 边界不变）。
-- 流程：①每学员每小时 10 次（共用 `ai_rate_limit_hits`，key `helpdesk-suggest:<learnerId>`），超出返回 null；②候选 = 该语言已发布问题，英文全文（`english` 配置，OR 连接、去停用词）+ 关键词出现在学员原文中 + 中文双字片段命中问题，同类 ×1.25，取前 8（SQL 先取两路命中再打分：全文一路的 WHERE 就是索引表达式 `@@ to_tsquery`，走 GIN 索引 `helpdesk_questions_search_idx`，PG 用例对真实 `CANDIDATES_SQL` 做 EXPLAIN 锁定；关键词 / 双字一路是「片段出现在原文里」，只能扫该语言已发布的行）；没有候选**不调模型**；③经 `ProviderRegistry` 的 OpenRouter `complete()` 要结构化输出 `{"qaId": string|null}`（`response_format: json_schema`，枚举限定候选 id），回答不是候选 id 一律按 null；模型 `HELPDESK_SUGGEST_MODEL`，缺省取 `AI_AVAILABLE_MODELS` 里第一个名字含 flash / mini / haiku / lite / nano / small 的模型；超时 3 秒；整次推荐（限流 + 检索 + 模型）另有 3.5 秒总期限，低于 Portal 的 4 秒等待：模型只拿剩余时间，过了期限才定下的答案不返回、日志不记 `qa_id`（学员没看到，不计入 shown）；学员原文含控制字符（制表符与换行除外）400 `invalid_request`，不调模型；没有 `OPENROUTER_API_KEY` 或任何错误都返回 null（永不阻塞学员提交）；④返回库里的原答案，模型从不写给学员看的文字；学员原文只放在 user 消息里，system 提示要求忽略其中指令。
+- 流程：①每学员每小时 10 次（共用 `ai_rate_limit_hits`，key `helpdesk-suggest:<learnerId>`），超出返回 null；②候选 = 该语言已发布问题，英文全文（`english` 配置，OR 连接、去停用词）+ 关键词出现在学员原文中 + 中文双字片段命中问题，同类 ×1.25，取前 8（SQL 先取两路命中再打分：全文一路的 WHERE 就是索引表达式 `@@ to_tsquery`，走 GIN 索引 `helpdesk_questions_search_idx`，PG 用例对真实 `CANDIDATES_SQL` 做 EXPLAIN 锁定；关键词 / 双字一路是「片段出现在原文里」，只能扫该语言已发布的行）；没有候选**不调模型**；③（2026-10-29 起，见 §4A.11）由写死的工作流 `retrieve → pick_faq → validate → answer` 决定每一步；只有 `pick_faq` 一步调模型：用原样的 pi-agent-core `Agent`（pi-ai 的 OpenRouter provider）跑一次，只给这一步的工具 `pick_faq`，参数 `faqId` 枚举锁定为候选 id 或 `none`（`terminate: true`），`beforeToolCall` 只放行这一个工具、一步最多一次调用、`finishTurn` 即结束、到期 abort；选 `none`、不调工具、调用不合法都按 null；模型 `HELPDESK_SUGGEST_MODEL`，缺省取 `AI_AVAILABLE_MODELS` 里第一个名字含 flash / mini / haiku / lite / nano / small 的模型；超时 3 秒；整次推荐（限流 + 检索 + 模型）另有 3.5 秒总期限，低于 Portal 的 4 秒等待：模型只拿剩余时间，过了期限才定下的答案不返回、日志不记 `qa_id`（学员没看到，不计入 shown）；学员原文含控制字符（制表符与换行除外）400 `invalid_request`，不调模型；没有 `OPENROUTER_API_KEY` 或任何错误都返回 null（永不阻塞学员提交）；④返回库里的原答案，模型从不写给学员看的文字；学员原文只放在 user 消息里，system 提示要求忽略其中指令。
 - 日志：每次检索写一行 `helpdesk_suggestions`（`id` UUIDv7、`learner_id`、`locale`、`category`、`query_text`、`candidate_ids`、`qa_id|null`、`model|null`、`latency_ms`、`outcome`）。
 - 结果：`POST …/suggestions/:id/outcome { outcome: solved | declined | edited }` 幂等，**首个为准**（条件更新 `WHERE outcome IS NULL`）；同值重复返回 `changed: false`，不同值不覆盖也不报错。
 - 保留：没有定时任务，`query_text` 90 天后由推荐流程顺手清空（每个实例每小时最多一次，失败不影响推荐）；运维也可手动执行 `UPDATE helpdesk_suggestions SET query_text = NULL WHERE created_at < now() - interval '90 days' AND query_text IS NOT NULL`。
@@ -842,6 +842,17 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - **左栏**：标了跟进的行在名字旁有小旗子；筛选弹层多一个「Flagged」勾选（URL `flagged=true`）。
 - **跨应用联调（2026-10-28，Portal `tests/e2e/helpdesk-integration.spec.ts`，脚本在 `lg-helpdesk/integration-harness/`）**：本机 PostgreSQL 16 + 全部 Prisma 迁移、Server、Vite 客户端与 Portal dev 一起跑，令牌只用本地值；模型用 `OPENROUTER_BASE_URL` 指向本地假端点（只回第一个候选 id），另跑一次不配模型 key（chat / submit 返回 null，chip 直接返回 FAQ）。发现并修好的都在客户端，各有组件测试锁住：① 搜索防抖期间改了别的筛选会被防抖写回覆盖（FAQs Tab 与 Enquiries 左栏，`FaqsView.tsx` / `EnquiriesView.tsx` 改为写在最新的地址栏参数上）；② 选中卡片时滚的是整段（卡片 + AI 块 + 对话），比中栏高时把日期分隔顶出去，改为只滚卡片本身、每次选中只滚一次；③ 直接打开较早那张卡片的链接时，上面卡片的详情（正文、AI 块）后到会把它挤出中栏，改为上面每多一张载好的卡片再滚一次（`EnquiryTimeline.tsx`）。
 - **待视觉验收**：Preview 弹窗、Link 地址行、Delete / 放弃修改确认、按钮的展开 / 按下 / 禁用态、回复框与备注面板、当前卡片的高亮边框、卡片上的状态胶囊（放在 meta 行右侧）、左栏小旗子与 Flagged 勾选。截图与对照：`lg-helpdesk/tickets-v2-shots/app-1324-2-*.png`、`app-1379-2-*.png`、`app-1379-299-*.png`、`app-faq-preview-*.png` 与对应 `compare-*.png`。
+
+
+### 4A.11 推荐链路、追踪与评测（2026-10-29，`lg-helpdesk/helpdesk-agent-v2-pi-dsh.md`）
+
+- **没有自主 agent 循环**：工作流（`server/src/ai/helpdesk/workflow/engine.ts` + `faq-workflow.ts`）是写死的步骤表，代码决定下一步；agent 步由 `pi-step-runner.ts` 用**不改动**的 `@earendil-works/pi-agent-core` / `@earendil-works/pi-ai` 1.4.0 执行（ESM，经 `import()` 加载；Node ≥ 22.19）。学员可见行为不变：模型只选候选 id 或 none，答案是库里的原文，任何失败（无 key、3 秒超时、工具调用不合法、abort、限流、错误）返回 null，绝不阻塞建单；Portal ↔ Admin 契约向后兼容。
+- **事件日志**（迁移 `20261029120000_helpdesk_agent_events`，表 `helpdesk_agent_events`）：照 DeepSeek Harness 的 SessionEvent，信封 `{ type, seq, time, data }`，主键 `(run_id, seq)`，`seq` 每个 run 从 1 连续；类型 `turn/start` · `step/start` · `request/context` · `request/header` · `assistant/message` · `tool/call` · `tool/result` · `step/end` · `turn/end` · `feedback`。只追加：触发器拒绝一切 UPDATE / DELETE，唯一例外是 90 天后清学员原文（`turn/start.input`、`assistant/message.text`）。事件在后台写，写失败只记日志、不影响推荐。从不记 key 与鉴权头。
+- **run id 与对话链**：Portal 先生成 `runId`（UUIDv7），它同时是 Portal 的 assist 行 id、Admin 的 suggestion id 与事件日志的 run；`parentRunId` = 该学员 24 小时内最早一条尚未关联工单的 assist 行（没有为 null），`turn/start` 记下它，读接口据此拼出 `chain`。
+- **W3C Trace Context**：Portal 每次调 Admin 都带 `traceparent`（有合法的入站 `traceparent` 就开它的子 span，否则新 trace；版本固定 `00`）；Admin 接收后 `turn/start` 记 `traceId` / `spanId` / `parentSpanId`，发往 OpenRouter 的每次请求再开子 span（`request/header` 事件记下发出的值）。不合法的入站值直接重开 trace。
+- **读接口**（BackOffice，§5.4）：`GET /api/helpdesk/agent-runs/:runId` 与 `…/events/:seq`，helpDesk VIEW 及以上可读，只读、`no-store`，给的是**导出副本**（学员原文脱敏为 `{ redacted: true }`）。BackOffice 只经契约 `src/contracts/helpdesk-trace.ts` 的 `HELPDESK_TRACE_SOURCE` 读（`BackofficeModule.register({ helpdeskTrace })`，`app.module.ts` 组装），不 import ai。
+- **「查看链路」/ View trace（client）**：每个 AI 块右上的链接按钮打开只读抽屉（`TraceDrawer.tsx`，沿用 FAQ 抽屉样式）：概要（结束原因、模型、token、费用、时延、选中的 FAQ、候选、Trace ID、对话中的 run 数）+ 事件列表（时间偏移、类型、步骤、模型 / token / 费用 / 工具参数 / 错误）；没有记录显示「No trace was recorded for this answer.」，加载失败显示稍后再试。**待视觉验收**（无画板）：抽屉与按钮在 AI 块上的位置。
+- **评测**（`server/eval/helpdesk/`）：`cases.jsonl` 120 条（en-GB / zh-CN / zh-TW；paraphrase、terse、typo、mixed_language、unanswerable、injection、over_reach）对着 `faqs.json` 的种子 FAQ，走真正的 `HelpdeskSuggestService` 与 pi 工作流。`npm run eval:helpdesk -- --out report.json|report.md [--pg <url>] [--limit N]`：有 `OPENROUTER_API_KEY` 用真模型（与生产同样按 `HELPDESK_SUGGEST_MODEL` / `AI_AVAILABLE_MODELS` 选），花费上限 `HELPDESK_EVAL_BUDGET_USD`（缺省 5 美元，只给评测用；模型报了 token 却没有价格也会停），闸门不过退出码 1；没有 key 用 pi 的 faux provider（永远选检索第一名），报告标明「不是模型成绩」，退出码 0。报告：准确率、答错率、none 精确率 / 召回率、p50 / p95、费用、按 persona / locale 拆分、失败清单、闸门（答错率 ≤ 2%、p95 ≤ 3 秒）。检索缺省是内存近似，`--pg` 在临时 schema 跑真实的候选 SQL（跑完删掉）。`eval.spec.ts` 随 `npm test` 在 CI 里跑（假模型，不连网）。
 
 ---
 
@@ -1006,16 +1017,18 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | POST | /api/helpdesk/faqs | helpDesk FULL | body `{ category, popular, questionEn, answerEn, questionZh, answerZh, keywords[] }`，可带 `Idempotency-Key`（同 key 不同内容 422 `IDEMPOTENCY_KEY_REUSED`）→ 201 FAQ（保存即发布） |
 | PUT | /api/helpdesk/faqs/:id | helpDesk FULL | 同上 body + `version`；内容与当前一致时原样返回（幂等：丢响应后的重试、没改动的保存不升版本、不写修订）；内容不同且版本不符 409 `VERSION_CONFLICT` |
 | POST | /api/helpdesk/faqs/:id/archive | helpDesk FULL | body `{ version }`；Delete FAQ = 归档，幂等 |
+| GET | /api/helpdesk/agent-runs/:runId | helpDesk VIEW | 2026-10-29，§4A.11：`{ runId, parentRunId, chain, events }`（导出副本，学员原文脱敏），`Cache-Control: no-store`；不存在或 id 不合法 404 `AGENT_RUN_NOT_FOUND`；没有写接口 |
+| GET | /api/helpdesk/agent-runs/:runId/events/:seq | helpDesk VIEW | `{ event, sources, derived }`；`seq` 须为正整数（否则 400 `INVALID_INPUT`），不存在 404 `AGENT_EVENT_NOT_FOUND` |
 
 ### 5.5 Helpdesk 集成接口（Portal → Admin，2026-10-28，§4A.9）
 
 | 方法 | 路径 | 角色 | 说明 |
 |------|------|------|------|
 | GET | /api/integration/helpdesk/faqs?locale=&popular=&category=&q=&limit= · /faqs/:id?locale= | admin | v2：`{ faqs: [{ id, category, popular, question, answer, updatedAt }], etag }`（按 `locale` 取中文或英文；`limit` ≤100），头 `ETag` + `Cache-Control: no-cache`，`If-None-Match` 命中 304；problem code `invalid_request` / `not_found` |
-| POST | /api/integration/helpdesk/suggest | agent | v2 body `{ learnerId, locale, source?: "submit" \| "chat" \| "chip", category?, subject?, message, faqId? }` → `{ suggestion: { id, faqId, question, answer } \| null }`；`chip` 必带 `faqId`、不调模型；submit 每学员每小时 10 次，chat + chip 共 30 次 |
+| POST | /api/integration/helpdesk/suggest | agent | v2 body `{ learnerId, locale, source?: "submit" \| "chat" \| "chip", category?, subject?, message, faqId?, runId?, parentRunId? }`（2026-10-29：`runId` 为 Portal 生成的 UUIDv7，给了就作为 suggestion id；`parentRunId` 串起同一对话，§4A.11） → `{ suggestion: { id, faqId, question, answer } \| null }`；`chip` 必带 `faqId`、不调模型；submit 每学员每小时 10 次，chat + chip 共 30 次 |
 | POST | /api/integration/helpdesk/suggestions/:id/outcome | agent | body `{ outcome }`：submit 取 `solved` / `declined` / `edited`，chat / chip 取 `helpful` / `not_helpful`（不匹配 400 `invalid_request`）→ `{ id, outcome, changed }`（首个为准） |
 
-鉴权均为 `Authorization: Bearer ADMIN_HELPDESK_TOKEN`，错误为 problem+json。
+鉴权均为 `Authorization: Bearer ADMIN_HELPDESK_TOKEN`，错误为 problem+json。Portal 的每次调用带 W3C `traceparent` 头（可选，不合法时 Admin 重开 trace，§4A.11）。
 
 > 对应 Portal 集成接口：`GET/POST /api/integration/helpdesk/tickets…`、`GET /api/integration/helpdesk/attachments/:id`（Portal 侧成功体为纯 JSON、错误为 RFC 9457 problem+json）；BackOffice 对浏览器仍用 §5.3 统一信封。
 
@@ -1229,6 +1242,8 @@ PORTAL_HELPDESK_TOKEN=
 ADMIN_HELPDESK_TOKEN=
 # 推荐答案用的模型（§4A.8）；为空取 AI_AVAILABLE_MODELS 里第一个便宜模型
 HELPDESK_SUGGEST_MODEL=
+# 只给评测脚本 npm run eval:helpdesk 用（§4A.11），服务不读：真模型评测的花费上限（美元，缺省 5）
+# HELPDESK_EVAL_BUDGET_USD=5
 
 # 服务器配置
 PORT=3000
