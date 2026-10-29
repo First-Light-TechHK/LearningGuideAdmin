@@ -5,8 +5,12 @@ import { join } from 'node:path';
 import { Pool } from 'pg';
 
 import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
+import { HELPDESK_CATEGORIES } from '../../src/contracts/helpdesk-qa';
+import { runCli } from './cli';
 import {
   budgetFrom,
+  CALL_PROMPT_TOKENS_MAX,
+  callCeilingUsd,
   chooseModel,
   DEFAULT_BUDGET_USD,
   EVAL_LOCALES,
@@ -24,6 +28,7 @@ import {
   summarize,
   writeReport,
   type CaseResult,
+  type EvalModel,
   type EvalReport,
 } from './harness';
 
@@ -48,16 +53,21 @@ afterAll(() => {
 });
 
 describe('eval dataset', () => {
-  it('has about 120 cases with unique ids', () => {
-    expect(cases.length).toBeGreaterThanOrEqual(120);
+  it('has at least 150 cases with unique ids', () => {
+    expect(cases.length).toBeGreaterThanOrEqual(150);
     expect(new Set(cases.map((c) => c.id)).size).toBe(cases.length);
   });
 
   it('only expects FAQs that exist in the seed library, and asks about every one of them', () => {
     const ids = new Set(faqs.map((f) => f.id));
     expect(ids.size).toBe(faqs.length);
-    for (const item of cases)
+    for (const item of cases) {
       if (item.expectedFaqId) expect(ids).toContain(item.expectedFaqId);
+      for (const other of item.acceptableFaqIds ?? []) {
+        expect(ids).toContain(other);
+        expect(other).not.toBe(item.expectedFaqId);
+      }
+    }
     const asked = new Set(cases.map((c) => c.expectedFaqId));
     for (const faq of faqs) expect(asked).toContain(faq.id);
   });
@@ -77,6 +87,42 @@ describe('eval dataset', () => {
     expect(
       count((c) => c.persona === 'over_reach' && c.expectedFaqId !== null),
     ).toBe(0);
+  });
+
+  it('fills the locale x persona grid (at least 2 cases in every cell)', () => {
+    for (const locale of EVAL_LOCALES)
+      for (const persona of EVAL_PERSONAS)
+        expect([
+          locale,
+          persona,
+          cases.filter((c) => c.locale === locale && c.persona === persona)
+            .length >= 2,
+        ]).toEqual([locale, persona, true]);
+  });
+
+  it('has submit cases with a subject and an Enquiry Type, and inputs longer than the 2000-char prompt cut', () => {
+    const submit = cases.filter((c) => c.source === 'submit');
+    expect(submit.length).toBeGreaterThanOrEqual(4);
+    for (const c of submit) {
+      expect(c.subject?.trim()).toBeTruthy();
+      expect(HELPDESK_CATEGORIES).toContain(c.category);
+    }
+    expect(
+      cases.filter((c) => c.persona === 'long' && c.message.length > 2000)
+        .length,
+    ).toBeGreaterThanOrEqual(4);
+  });
+
+  it('documents the Traditional-script cases that retrieval cannot reach', () => {
+    const noted = cases.filter((c) => c.note);
+    expect(noted.map((c) => c.id)).toEqual([
+      'tw-01',
+      'tw-03',
+      'tw-05',
+      'tw-07',
+      'tw-09',
+    ]);
+    for (const c of noted) expect(c.note).toMatch(/Traditional script/);
   });
 
   it('every seed FAQ has both languages and keywords', () => {
@@ -100,6 +146,39 @@ describe('eval dataset', () => {
     );
     expect(() => loadCases(path)).toThrow(`${path}:3: malformed case`);
   });
+
+  it.each([
+    [
+      'a submit case with neither subject nor message',
+      { source: 'submit', subject: '', message: '' },
+    ],
+    ['a chat case without a message', { message: ' ' }],
+    ['an unknown source', { source: 'chip' }],
+    [
+      'an unknown Enquiry Type',
+      { source: 'submit', subject: 's', category: 'billing' },
+    ],
+    ['a bad acceptable id', { acceptableFaqIds: ['x'] }],
+  ])('rejects %s', (_name, patch) => {
+    const path = join(tmp, 'bad2.jsonl');
+    writeFileSync(path, `${JSON.stringify({ ...cases[0], ...patch })}\n`);
+    expect(() => loadCases(path)).toThrow(`${path}:1: malformed case`);
+  });
+
+  it('accepts a submit case with only a subject', () => {
+    const path = join(tmp, 'subject.jsonl');
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...cases[0], source: 'submit', subject: 'Invoice', category: 'payments_subscriptions', message: '' })}\n`,
+    );
+    expect(loadCases(path)[0]).toMatchObject({ source: 'submit', message: '' });
+  });
+
+  it('says so when the cases file is empty', () => {
+    const path = join(tmp, 'empty.jsonl');
+    writeFileSync(path, '\n');
+    expect(() => loadCases(path)).toThrow(`${path}: no cases`);
+  });
 });
 
 function result(
@@ -110,11 +189,17 @@ function result(
     locale: 'en-GB',
     persona: 'paraphrase',
     message: 'm',
+    acceptableFaqIds: [],
     reason: over.gotFaqId ? 'answered' : 'no_match',
     latencyMs: 100,
     costUsd: 0,
     inputTokens: 0,
     outputTokens: 0,
+    // 缺省：期望的 FAQ 在候选里、问过模型、一次合法调用
+    candidateIds: over.expectedFaqId ? [over.expectedFaqId] : [FAQ(9)],
+    asked: true,
+    validCall: true,
+    unpricedCalls: 0,
     ...over,
   };
 }
@@ -205,6 +290,13 @@ describe('report', () => {
       latencyMs: { p50: 50, p95: 3_500 },
       costUsd: 0.01,
       tokens: { input: 1_000, output: 50 },
+      modelAsked: 10,
+      // 7 条该有答案的里期望的 FAQ 都在候选中；模型答对其中 4 条
+      retrievalRecall: 1,
+      modelRecall: 0.5714,
+      noneWithoutModel: 0,
+      invalidCalls: 0,
+      failedRuns: 1,
     });
     expect(report.cases).toEqual({ total: 10, run: 10 });
     expect(report.budget).toEqual({ capUsd: 5, spentUsd: 0.01, stopped: null });
@@ -241,33 +333,33 @@ describe('report', () => {
       retrieval: 'memory',
       budgetUsd: 5,
     });
-    expect(report.failures.map((f) => [f.id, f.kind, f.reason])).toEqual([
-      ['r7', 'wrong_answer', 'answered'],
-      ['r8', 'wrong_answer', 'answered'],
-      ['r9', 'missed', 'timeout'],
-      ['r10', 'missed', 'no_match'],
+    expect(
+      report.failures.map((f) => [f.id, f.kind, f.stage, f.reason]),
+    ).toEqual([
+      ['r7', 'wrong_answer', 'model', 'answered'],
+      ['r8', 'wrong_answer', 'model', 'answered'],
+      ['r9', 'missed', 'error', 'timeout'],
+      ['r10', 'missed', 'model', 'no_match'],
     ]);
     expect(report.failures[0]).not.toHaveProperty('costUsd');
   });
 
-  it('gates on wrong-answer rate ≤ 2% and p95 ≤ 3 s', () => {
-    const gate = (rs: CaseResult[], model: EvalReport['model'] = real) =>
-      summarize({
-        outcome: { results: rs, spentUsd: 0, stopped: null },
-        totalCases: rs.length,
-        model,
-        retrieval: 'memory',
-        budgetUsd: 5,
-      }).gate;
-    expect(gate(results)).toEqual({
-      wrongAnswerRateMax: 0.02,
-      p95MaxMs: 3_000,
-      pass: false,
-      reasons: ['wrong-answer rate 20.00% > 2%', 'p95 3500 ms > 3000 ms'],
-    });
-
-    // 50 条里 1 条答错（2%）、p95 正好 3 秒：过
-    const ok = Array.from({ length: 50 }, (_, i) =>
+  const gate = (
+    rs: CaseResult[],
+    model: EvalModel = real,
+    retrieval: EvalReport['retrieval'] = 'postgresql',
+    totalCases = rs.length,
+  ) =>
+    summarize({
+      outcome: { results: rs, spentUsd: 0, stopped: null },
+      totalCases,
+      model,
+      retrieval,
+      budgetUsd: 5,
+    }).gate;
+  // 50 条里 1 条答错（2%）、p95 正好 3 秒
+  const fifty = () =>
+    Array.from({ length: 50 }, (_, i) =>
       result({
         id: `ok${i}`,
         expectedFaqId: A,
@@ -275,19 +367,143 @@ describe('report', () => {
         latencyMs: i < 47 ? 1_000 : 3_000,
       }),
     );
+
+  it('gates on wrong-answer rate ≤ 2% and p95 ≤ 3 s', () => {
+    expect(gate(results, real, 'memory')).toEqual({
+      wrongAnswerRateMax: 0.02,
+      p95MaxMs: 3_000,
+      failedRateMax: 0.02,
+      modelRecallMin: 0.8,
+      pass: false,
+      reasons: [
+        'wrong-answer rate 20.00% > 2%',
+        'p95 3500 ms > 3000 ms',
+        '1 of 10 cases ended in error, timeout, aborted, rate_limited or no_key (10.00%) > 2%',
+        'model recall 57.1% < 80% (answerable cases whose FAQ was retrieved)',
+        'in-memory retrieval only approximates production: rerun with --pg',
+      ],
+    });
+    const ok = fifty();
     expect(gate(ok)).toMatchObject({ pass: true, reasons: [] });
     // 再多 1 条答错就不过
     ok[1] = { ...ok[1], gotFaqId: B };
     expect(gate(ok).reasons).toEqual(['wrong-answer rate 4.00% > 2%']);
-
-    // 漏答不算答错
-    const misses = ok.map((r) => ({ ...r, gotFaqId: null }));
-    expect(gate(misses).pass).toBe(true);
-
     // 假模型永远不过
     expect(
-      gate(misses, { kind: 'fake', model: FAKE_MODEL_ID }).reasons,
+      gate(fifty(), { kind: 'fake', model: FAKE_MODEL_ID }).reasons,
     ).toEqual(['fake model: not a real-model result']);
+  });
+
+  it('does not pass when every model call fails or the model always says none', () => {
+    const dead = fifty().map((r) => ({
+      ...r,
+      gotFaqId: null,
+      reason: 'error',
+      validCall: false,
+    }));
+    expect(gate(dead)).toMatchObject({
+      pass: false,
+      reasons: [
+        '50 of 50 cases ended in error, timeout, aborted, rate_limited or no_key (100.00%) > 2%',
+        'model recall 0.0% < 80% (answerable cases whose FAQ was retrieved)',
+      ],
+    });
+    const silent = fifty().map((r) => ({ ...r, gotFaqId: null }));
+    expect(gate(silent).reasons).toEqual([
+      'model recall 0.0% < 80% (answerable cases whose FAQ was retrieved)',
+    ]);
+    // 1 of 50 timing out is within 2%
+    const one = fifty();
+    one[2] = { ...one[2], gotFaqId: null, reason: 'timeout' };
+    expect(gate(one).pass).toBe(true);
+  });
+
+  it('does not pass a partial run (--limit) or in-memory retrieval', () => {
+    expect(gate(fifty(), real, 'postgresql', 120).reasons).toEqual([
+      'partial run: 50 of 120 cases (--limit)',
+    ]);
+    expect(gate(fifty(), real, 'memory').reasons).toEqual([
+      'in-memory retrieval only approximates production: rerun with --pg',
+    ]);
+  });
+
+  it('separates retrieval misses from model misses, and counts none cases the model never saw', () => {
+    const rs = [
+      // expected FAQ not among the candidates: a retrieval miss
+      result({ id: 'a', expectedFaqId: A, gotFaqId: null, candidateIds: [B] }),
+      // no candidates at all: model never asked
+      result({
+        id: 'b',
+        expectedFaqId: A,
+        gotFaqId: null,
+        candidateIds: [],
+        asked: false,
+        validCall: false,
+        reason: 'no_candidates',
+      }),
+      // reachable but the model said none
+      result({ id: 'c', expectedFaqId: A, gotFaqId: null }),
+      // none, right without the model
+      result({
+        id: 'd',
+        expectedFaqId: null,
+        gotFaqId: null,
+        candidateIds: [],
+        asked: false,
+        validCall: false,
+        reason: 'no_candidates',
+      }),
+      // none, the model said none
+      result({ id: 'e', expectedFaqId: null, gotFaqId: null }),
+      // invalid tool call (e.g. an injected id)
+      result({
+        id: 'f',
+        expectedFaqId: null,
+        gotFaqId: null,
+        validCall: false,
+      }),
+      // an acceptable alternative counts as right
+      result({
+        id: 'g',
+        expectedFaqId: null,
+        acceptableFaqIds: [B],
+        gotFaqId: B,
+        candidateIds: [B],
+      }),
+      result({ id: 'h', expectedFaqId: A, gotFaqId: null, reason: 'error' }),
+    ];
+    const report = summarize({
+      outcome: { results: rs, spentUsd: 0, stopped: null },
+      totalCases: rs.length,
+      model: real,
+      retrieval: 'postgresql',
+      budgetUsd: 5,
+    });
+    expect(report.metrics).toMatchObject({
+      accuracy: 0.5,
+      wrongAnswerRate: 0,
+      modelAsked: 6,
+      // answerable a b c h: 2 of 4 had the FAQ among the candidates (c, h)
+      retrievalRecall: 0.5,
+      modelRecall: 0,
+      noneWithoutModel: 1,
+      invalidCalls: 1,
+      failedRuns: 1,
+    });
+    expect(report.failures.map((f) => [f.id, f.kind, f.stage])).toEqual([
+      ['a', 'missed', 'retrieval'],
+      ['b', 'missed', 'retrieval'],
+      ['c', 'missed', 'model'],
+      ['h', 'missed', 'error'],
+    ]);
+    const md = markdownReport(report);
+    expect(md).toContain('| Model asked | 6 of 8 |');
+    expect(md).toContain('| Retrieval recall@8 | 50.0% |');
+    expect(md).toContain('| Model recall (FAQ retrieved) | 0.0% |');
+    expect(md).toContain('| none without the model | 1 |');
+    expect(md).toContain('| Invalid tool calls | 1 |');
+    expect(md).toContain('| Ended in error / timeout | 1 |');
+    expect(md).toContain('| a | missed | retrieval |');
   });
 
   it('a run stopped by the budget does not pass', () => {
@@ -305,6 +521,7 @@ describe('report', () => {
     expect(report.gate.pass).toBe(false);
     expect(report.gate.reasons).toEqual([
       'stopped early (budget) after 4 of 10 cases',
+      'in-memory retrieval only approximates production: rerun with --pg',
     ]);
     expect(report.cases).toEqual({ total: 10, run: 4 });
   });
@@ -340,8 +557,10 @@ describe('report', () => {
     expect(text).toContain('| none recall | 66.7% |');
     expect(text).toContain('| Latency p50 / p95 | 50 / 3500 ms |');
     expect(text).toContain('| zh-TW | 1 | 100.0% | 0.0% |');
-    expect(text).toContain(`| r7 | wrong_answer | ${A} | ${B} | answered |`);
-    expect(text).toContain(`| r10 | missed | ${B} | none | no_match |`);
+    expect(text).toContain(
+      `| r7 | wrong_answer | model | ${A} | ${B} | answered |`,
+    );
+    expect(text).toContain(`| r10 | missed | model | ${B} | none | no_match |`);
   });
 });
 
@@ -382,16 +601,23 @@ describe('model and budget settings', () => {
   });
 });
 
-/** 每一步都花 costUsd、用 tokens，选第一个候选。 */
-function payingRunner(costUsd: number, tokens = 100): AgentStepRunner {
+/** 每一步发一次请求、花 costUsd（null = 没有价格）、用 tokens，选第一个候选。 */
+function payingRunner(costUsd: number | null, tokens = 100): AgentStepRunner {
   return {
     run: (spec, context) => {
+      const at = { turn: context.trace.turn, step: context.step };
+      context.trace.emit('request/context', { ...at, provider: 'stub' });
       context.trace.emit('assistant/message', {
-        turn: context.trace.turn,
-        step: context.step,
+        ...at,
         model: 'stub',
         usage: { inputTokens: tokens, outputTokens: 1 },
         costUsd,
+      });
+      context.trace.emit('tool/call', { ...at, callId: 'c', name: 'pick_faq' });
+      context.trace.emit('tool/result', {
+        ...at,
+        callId: 'c',
+        name: 'pick_faq',
       });
       const [first] = Object.values(spec.tool.enumArgs)[0];
       return Promise.resolve({ kind: 'called', args: { faqId: first } });
@@ -399,12 +625,24 @@ function payingRunner(costUsd: number, tokens = 100): AgentStepRunner {
   };
 }
 
+/** 请求发出去了（OpenRouter 照样计费），但到期被 abort，没有 usage。 */
+const abortedRunner: AgentStepRunner = {
+  run: (_spec, context) => {
+    context.trace.emit('request/context', {
+      turn: context.trace.turn,
+      step: context.step,
+      provider: 'stub',
+    });
+    return Promise.resolve({ kind: 'aborted' });
+  },
+};
+
 const ENV = { OPENROUTER_API_KEY: 'stub', HELPDESK_SUGGEST_MODEL: 'stub' };
 
 describe('running the cases', () => {
   const answerable = cases.filter((c) => c.persona === 'paraphrase');
 
-  it('stops once the spend reaches the budget', async () => {
+  it('stops once the spend reaches the budget (checked before each case: one case may overshoot)', async () => {
     const outcome = await runCases({
       cases: answerable.slice(0, 10),
       qa: memoryQaSource(faqs),
@@ -421,6 +659,9 @@ describe('running the cases', () => {
       inputTokens: 100,
       outputTokens: 1,
       reason: 'answered',
+      asked: true,
+      validCall: true,
+      unpricedCalls: 0,
     });
   });
 
@@ -428,12 +669,68 @@ describe('running the cases', () => {
     const outcome = await runCases({
       cases: answerable.slice(0, 5),
       qa: memoryQaSource(faqs),
+      runner: payingRunner(null),
+      env: ENV,
+      budgetUsd: 5,
+    });
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.results[0].unpricedCalls).toBe(1);
+    expect(outcome.stopped).toBe('unknown_cost');
+  });
+
+  it('runs a free (zero-priced) model through', async () => {
+    const outcome = await runCases({
+      cases: answerable.slice(0, 5),
+      qa: memoryQaSource(faqs),
       runner: payingRunner(0),
+      env: ENV,
+      budgetUsd: 5,
+      callCeilingUsd: 0,
+    });
+    expect(outcome.stopped).toBeNull();
+    expect(outcome.results).toHaveLength(5);
+  });
+
+  it('charges a request that was aborted before its usage arrived at the per-call ceiling', async () => {
+    const outcome = await runCases({
+      cases: answerable.slice(0, 10),
+      qa: memoryQaSource(faqs),
+      runner: abortedRunner,
+      env: ENV,
+      budgetUsd: 1,
+      callCeilingUsd: 0.4,
+    });
+    expect(outcome.stopped).toBe('budget');
+    expect(outcome.results).toHaveLength(3);
+    expect(outcome.spentUsd).toBeCloseTo(1.2, 10);
+    expect(outcome.results[0]).toMatchObject({
+      reason: 'timeout',
+      asked: true,
+      validCall: false,
+      unpricedCalls: 1,
+      costUsd: 0,
+    });
+  });
+
+  it('stops on an aborted request when the price per call is unknown', async () => {
+    const outcome = await runCases({
+      cases: answerable.slice(0, 5),
+      qa: memoryQaSource(faqs),
+      runner: abortedRunner,
       env: ENV,
       budgetUsd: 5,
     });
     expect(outcome.results).toHaveLength(1);
     expect(outcome.stopped).toBe('unknown_cost');
+  });
+
+  it('prices one call from the catalog: the longest prompt plus 80 output tokens, unknown off-catalog', async () => {
+    // gpt-4o-mini: $0.15 / $0.60 per million tokens
+    expect(await callCeilingUsd('openai/gpt-4o-mini')).toBeCloseTo(
+      (CALL_PROMPT_TOKENS_MAX * 0.15 + 80 * 0.6) / 1e6,
+      12,
+    );
+    expect(await callCeilingUsd('acme/brand-new-model')).toBeNull();
   });
 
   it('runs through when every case is within budget', async () => {
@@ -479,14 +776,29 @@ describe('running the cases', () => {
     });
     expect(outcome.stopped).toBeNull();
     expect(outcome.results).toHaveLength(cases.length);
-    // 假模型只会选检索出来的候选，或在没有候选时 none
-    const known = new Set(faqs.map((f) => f.id));
+    // 假模型永远选检索排第一的候选；没有候选时不问模型
     for (const r of outcome.results) {
-      if (r.gotFaqId) expect(known).toContain(r.gotFaqId);
-      expect(r.reason).toMatch(/^(answered|no_match|no_candidates)$/);
+      if (r.candidateIds.length > 0) {
+        expect([r.id, r.gotFaqId, r.reason, r.asked]).toEqual([
+          r.id,
+          r.candidateIds[0],
+          'answered',
+          true,
+        ]);
+      } else {
+        expect([r.id, r.gotFaqId, r.reason, r.asked]).toEqual([
+          r.id,
+          null,
+          'no_candidates',
+          false,
+        ]);
+      }
       expect(r.costUsd).toBe(0);
     }
-    expect(outcome.results.some((r) => r.gotFaqId !== null)).toBe(true);
+    // submit 用例带主题与工单类型走 submit 路径
+    const submit = outcome.results.filter((r) => r.id.startsWith('sub-'));
+    expect(submit.length).toBeGreaterThanOrEqual(4);
+    expect(submit.some((r) => r.gotFaqId !== null)).toBe(true);
 
     const report = summarize({
       outcome,
@@ -517,6 +829,176 @@ describe('running the cases', () => {
       'fake `fake/top-candidate`',
     );
   }, 60_000);
+});
+
+describe('npm run eval:helpdesk (cli)', () => {
+  const two = cases.filter((c) => ['en-01', 'en-07'].includes(c.id));
+  function files(lines = two) {
+    const dir = mkdtempSync(join(tmp, 'cli-'));
+    const path = join(dir, 'cases.jsonl');
+    writeFileSync(path, lines.map((c) => JSON.stringify(c)).join('\n'));
+    return { dir, path };
+  }
+  function io() {
+    const lines: string[] = [];
+    return { lines, log: (line: string) => lines.push(line) };
+  }
+  const read = (path: string) =>
+    JSON.parse(readFileSync(path, 'utf8')) as EvalReport;
+
+  it('without a key runs the fake model, writes the default report next to the cwd and exits 0', async () => {
+    const { dir, path } = files();
+    const out = io();
+    const code = await runCli(['--cases', path], {
+      env: {},
+      cwd: dir,
+      log: out.log,
+    });
+    expect(code).toBe(0);
+    const report = read(join(dir, 'helpdesk-eval-report.json'));
+    expect(report.model.kind).toBe('fake');
+    expect(report.cases).toEqual({ total: 2, run: 2 });
+    expect(out.lines.at(-1)).toBe(
+      `report: ${join(dir, 'helpdesk-eval-report.json')}`,
+    );
+  }, 30_000);
+
+  it.each([
+    [['--limit', '0'], '--limit must be a positive integer'],
+    [['--limit', 'abc'], '--limit must be a positive integer'],
+  ])('exits 2 on %j', async (argv, message) => {
+    const { dir, path } = files();
+    const out = io();
+    expect(
+      await runCli(['--cases', path, ...argv], {
+        env: {},
+        cwd: dir,
+        log: out.log,
+      }),
+    ).toBe(2);
+    expect(out.lines.at(-1)).toBe(message);
+  });
+
+  it('exits 2 with a clear message for an empty cases file', async () => {
+    const { dir } = files();
+    writeFileSync(join(dir, 'empty.jsonl'), '');
+    const out = io();
+    expect(
+      await runCli(['--cases', join(dir, 'empty.jsonl')], {
+        env: {},
+        cwd: dir,
+        log: out.log,
+      }),
+    ).toBe(2);
+    expect(out.lines.at(-1)).toMatch(/no cases$/);
+  });
+
+  function realDeps(
+    runner: AgentStepRunner,
+    ceiling: number | null = 0.001,
+    close = jest.fn(),
+  ) {
+    const runnerFor = jest.fn((model: { model: string }) =>
+      Promise.resolve({
+        runner,
+        env: (base: NodeJS.ProcessEnv) => ({
+          ...base,
+          HELPDESK_SUGGEST_MODEL: model.model,
+        }),
+      }),
+    );
+    const pgQaSource = jest.fn(() =>
+      Promise.resolve({ qa: memoryQaSource(faqs), close }),
+    );
+    return {
+      runnerFor,
+      pgQaSource,
+      close,
+      callCeilingUsd: () => Promise.resolve(ceiling),
+    };
+  }
+  const KEY = {
+    OPENROUTER_API_KEY: 'test-key-local-only',
+    HELPDESK_SUGGEST_MODEL: 'acme/model',
+  };
+
+  it('with a key runs the real model it would use in production, as a paid run, and exits 0 when the gate passes', async () => {
+    const { dir, path } = files();
+    const deps = realDeps(payingRunner(0.001));
+    const code = await runCli(
+      ['--cases', path, '--pg', 'postgres://eval', '--out', 'r/out.json'],
+      { env: KEY, cwd: dir, log: io().log, ...deps },
+    );
+    const report = read(join(dir, 'r', 'out.json'));
+    expect(report.gate.reasons).toEqual([]);
+    expect(code).toBe(0);
+    expect(deps.runnerFor).toHaveBeenCalledWith({
+      kind: 'real',
+      model: 'acme/model',
+    });
+    expect(deps.pgQaSource).toHaveBeenCalledWith(
+      'postgres://eval',
+      expect.any(Array),
+      expect.any(String),
+    );
+    expect(deps.close).toHaveBeenCalledTimes(1);
+    expect(report).toMatchObject({
+      model: { kind: 'real', model: 'acme/model' },
+      retrieval: 'postgresql',
+    });
+  });
+
+  it('exits 1 when the real-model gate fails, and a paid run stops on a missing price', async () => {
+    const { dir, path } = files();
+    // a model missing from the price catalog: no cost per reply, no ceiling
+    const deps = realDeps(payingRunner(null), null);
+    const code = await runCli(['--cases', path, '--pg', 'postgres://eval'], {
+      env: KEY,
+      cwd: dir,
+      log: io().log,
+      ...deps,
+    });
+    expect(code).toBe(1);
+    const report = read(join(dir, 'helpdesk-eval-report.json'));
+    expect(report.budget.stopped).toBe('unknown_cost');
+    expect(report.gate.pass).toBe(false);
+  });
+
+  it('exits 1 for a real-model run on in-memory retrieval or a --limit subset', async () => {
+    const { dir, path } = files();
+    for (const argv of [[], ['--pg', 'postgres://eval', '--limit', '1']]) {
+      const deps = realDeps(payingRunner(0.001));
+      expect(
+        await runCli(['--cases', path, ...argv], {
+          env: KEY,
+          cwd: dir,
+          log: io().log,
+          ...deps,
+        }),
+      ).toBe(1);
+    }
+  });
+
+  it('closes the PostgreSQL schema and exits 2 when the run throws', async () => {
+    const { dir, path } = files();
+    const deps = realDeps({
+      run: () => Promise.reject(new Error('boom')),
+    });
+    const broken = jest.fn(() => {
+      throw new Error('disk full');
+    });
+    const out = io();
+    const code = await runCli(['--cases', path, '--pg', 'postgres://eval'], {
+      env: KEY,
+      cwd: dir,
+      log: out.log,
+      ...deps,
+      writeReport: broken,
+    });
+    expect(code).toBe(2);
+    expect(out.lines.at(-1)).toBe('disk full');
+    expect(deps.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 const PG_URL = process.env.HELPDESK_TEST_DATABASE_URL;
