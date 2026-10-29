@@ -1,0 +1,298 @@
+[
+  {
+    "name": "1 Backoffice Menu & Role",
+    "nodeId": "1:7",
+    "file": "1-backoffice-menu-role-1-7.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 24526
+  },
+  {
+    "name": "CM01 Course Overview",
+    "nodeId": "29:2",
+    "file": "cm01-course-overview-29-2.png",
+    "width": 1384,
+    "height": 941,
+    "bytes": 112622
+  },
+  {
+    "name": "CM03 Course Information",
+    "nodeId": "29:69",
+    "file": "cm03-course-information-29-69.png",
+    "width": 1384,
+    "height": 2273,
+    "bytes": 299113
+  },
+  {
+    "name": "CM04a Course Content · Study & Exploration – Video",
+    "nodeId": "37:2",
+    "file": "cm04a-course-content-study-exploration-video-37-2.png",
+    "width": 1384,
+    "height": 2201,
+    "bytes": 256319
+  },
+  {
+    "name": "CM04b Course Content · Study & Exploration – Text",
+    "nodeId": "40:2",
+    "file": "cm04b-course-content-study-exploration-text-40-2.png",
+    "width": 1384,
+    "height": 2444,
+    "bytes": 282897
+  },
+  {
+    "name": "CM04c Exhibit drawer (Edit / Upload)",
+    "nodeId": "45:2",
+    "file": "cm04c-exhibit-drawer-edit-upload-45-2.png",
+    "width": 1384,
+    "height": 957,
+    "bytes": 216722
+  },
+  {
+    "name": "CM04e Exhibit preview (as learner)",
+    "nodeId": "49:7",
+    "file": "cm04e-exhibit-preview-as-learner-49-7.png",
+    "width": 1384,
+    "height": 1040,
+    "bytes": 397565
+  },
+  {
+    "name": "CM05 Course Content · Understanding",
+    "nodeId": "50:2",
+    "file": "cm05-course-content-understanding-50-2.png",
+    "width": 1384,
+    "height": 1800,
+    "bytes": 233513
+  },
+  {
+    "name": "CM06 Trial",
+    "nodeId": "54:2",
+    "file": "cm06-trial-54-2.png",
+    "width": 1384,
+    "height": 1165,
+    "bytes": 127773
+  },
+  {
+    "name": "CM02 Create course",
+    "nodeId": "55:2",
+    "file": "cm02-create-course-55-2.png",
+    "width": 1384,
+    "height": 941,
+    "bytes": 182014
+  },
+  {
+    "name": "CM07 Add learning language",
+    "nodeId": "60:2",
+    "file": "cm07-add-learning-language-60-2.png",
+    "width": 1384,
+    "height": 2240,
+    "bytes": 372941
+  },
+  {
+    "name": "CM10 Publishing",
+    "nodeId": "64:2",
+    "file": "cm10-publishing-64-2.png",
+    "width": 1384,
+    "height": 1413,
+    "bytes": 140493
+  },
+  {
+    "name": "CM12 Popular Courses",
+    "nodeId": "66:2",
+    "file": "cm12-popular-courses-66-2.png",
+    "width": 1384,
+    "height": 760,
+    "bytes": 95847
+  },
+  {
+    "name": "CM13 Discovery Banner",
+    "nodeId": "67:2",
+    "file": "cm13-discovery-banner-67-2.png",
+    "width": 1384,
+    "height": 988,
+    "bytes": 196106
+  },
+  {
+    "name": "S01 Course header · status bar",
+    "nodeId": "104:38",
+    "file": "s01-course-header-status-bar-104-38.png",
+    "width": 1092,
+    "height": 194,
+    "bytes": 19873
+  },
+  {
+    "name": "S02 Course cover · upload states",
+    "nodeId": "104:53",
+    "file": "s02-course-cover-upload-states-104-53.png",
+    "width": 1092,
+    "height": 362,
+    "bytes": 44603
+  },
+  {
+    "name": "S03 What you'll learn · adding an item",
+    "nodeId": "104:83",
+    "file": "s03-what-youll-learn-adding-an-item-104-83.png",
+    "width": 1092,
+    "height": 404,
+    "bytes": 38180
+  },
+  {
+    "name": "S04 This course provides · add item / full",
+    "nodeId": "104:117",
+    "file": "s04-this-course-provides-add-item-full-104-117.png",
+    "width": 1092,
+    "height": 516,
+    "bytes": 55301
+  },
+  {
+    "name": "S05 New lesson · empty state",
+    "nodeId": "104:176",
+    "file": "s05-new-lesson-empty-state-104-176.png",
+    "width": 836,
+    "height": 994,
+    "bytes": 61250
+  },
+  {
+    "name": "S06 Add exhibit · uploading",
+    "nodeId": "105:38",
+    "file": "s06-add-exhibit-uploading-105-38.png",
+    "width": 600,
+    "height": 892,
+    "bytes": 53300
+  },
+  {
+    "name": "S07 Exhibits · after batch upload",
+    "nodeId": "105:96",
+    "file": "s07-exhibits-after-batch-upload-105-96.png",
+    "width": 836,
+    "height": 624,
+    "bytes": 48548
+  },
+  {
+    "name": "S08 Video · uploading / adding a learning point",
+    "nodeId": "105:172",
+    "file": "s08-video-uploading-adding-a-learning-point-105-172.png",
+    "width": 836,
+    "height": 521,
+    "bytes": 32580
+  },
+  {
+    "name": "S09 Text · empty editor",
+    "nodeId": "105:216",
+    "file": "s09-text-empty-editor-105-216.png",
+    "width": 794,
+    "height": 378,
+    "bytes": 20864
+  },
+  {
+    "name": "S10 Text · Insert exhibit",
+    "nodeId": "105:244",
+    "file": "s10-text-insert-exhibit-105-244.png",
+    "width": 600,
+    "height": 384,
+    "bytes": 29625
+  },
+  {
+    "name": "S11 Recommended reading · adding a row",
+    "nodeId": "106:38",
+    "file": "s11-recommended-reading-adding-a-row-106-38.png",
+    "width": 836,
+    "height": 485,
+    "bytes": 30872
+  },
+  {
+    "name": "S12 Knowledge Test · adding a question",
+    "nodeId": "106:84",
+    "file": "s12-knowledge-test-adding-a-question-106-84.png",
+    "width": 836,
+    "height": 476,
+    "bytes": 25563
+  },
+  {
+    "name": "S13 Knowledge Test · import from sheet",
+    "nodeId": "106:107",
+    "file": "s13-knowledge-test-import-from-sheet-106-107.png",
+    "width": 600,
+    "height": 553,
+    "bytes": 33001
+  },
+  {
+    "name": "S14 Popular Courses · add course",
+    "nodeId": "106:131",
+    "file": "s14-popular-courses-add-course-106-131.png",
+    "width": 600,
+    "height": 344,
+    "bytes": 29923
+  },
+  {
+    "name": "S15 Discovery Banner · choose course",
+    "nodeId": "106:161",
+    "file": "s15-discovery-banner-choose-course-106-161.png",
+    "width": 600,
+    "height": 317,
+    "bytes": 23028
+  },
+  {
+    "name": "S16 Text · learning point check",
+    "nodeId": "127:156",
+    "file": "s16-text-learning-point-check-127-156.png",
+    "width": 794,
+    "height": 484,
+    "bytes": 34971
+  },
+  {
+    "name": "S19 Import Understanding · all lessons",
+    "nodeId": "130:63",
+    "file": "s19-import-understanding-all-lessons-130-63.png",
+    "width": 1160,
+    "height": 638,
+    "bytes": 64236
+  },
+  {
+    "name": "S20 Import · menu and Recommended reading",
+    "nodeId": "144:2",
+    "file": "s20-import-menu-and-recommended-reading-144-2.png",
+    "width": 880,
+    "height": 604,
+    "bytes": 55861
+  },
+  {
+    "name": "CM08 Approve for release",
+    "nodeId": "147:2",
+    "file": "cm08-approve-for-release-147-2.png",
+    "width": 1384,
+    "height": 1413,
+    "bytes": 204320
+  },
+  {
+    "name": "CM09 Go Live confirm",
+    "nodeId": "147:243",
+    "file": "cm09-go-live-confirm-147-243.png",
+    "width": 1384,
+    "height": 1413,
+    "bytes": 203934
+  },
+  {
+    "name": "CM11 Change status",
+    "nodeId": "147:511",
+    "file": "cm11-change-status-147-511.png",
+    "width": 1384,
+    "height": 1413,
+    "bytes": 221099
+  },
+  {
+    "name": "CM14 Restore version",
+    "nodeId": "147:736",
+    "file": "cm14-restore-version-147-736.png",
+    "width": 1384,
+    "height": 1413,
+    "bytes": 205948
+  },
+  {
+    "name": "S17 Publishing · Current section states",
+    "nodeId": "148:2",
+    "file": "s17-publishing-current-section-states-148-2.png",
+    "width": 1092,
+    "height": 1964,
+    "bytes": 160632
+  }
+]

@@ -5,6 +5,14 @@
 
 导出的画板 PNG 放在 `docs/design/figma/`，节点树快照放在 `docs/design/674-1186.metadata.json`。
 
+课程管理设计源：Figma `course management` / 画布 `Page 1`（`0:1`）
+文件 Key：`Z6GJpeiHIsRJYVPQvfsgTz`；37 个画板（CM 主流程 + S 状态细则）导出到
+`docs/design/figma/course-management/`，画板清单见同目录 `manifest.json`，节点树快照为 `0-1.metadata.json`。
+
+课程管理的矢量图标（100 个，几何取自设计稿）在 `docs/design/figma/course-management/icons/`：
+`*.svg` + `manifest.json`（尺寸/节点/颜色/是否可着色/出处画板）+ `preview.html` + `_overview.png`，
+说明见该目录 `README.md`。后续 Course 功能页实现须严格参照设计稿（含矢量图标）。
+
 ## 页面 ↔ 画板对照
 
 | PRD 页面 / 路由 | 对应画板 | 状态 |
@@ -24,6 +32,12 @@
 ```bash
 # 重新导出画板 PNG（需要 .figma-token，只读 file_content:read）
 node scripts/figma-export.mjs
+
+# 导出其它文件 / 画布（如课程管理）
+node scripts/figma-export.mjs --file Z6GJpeiHIsRJYVPQvfsgTz --node 0:1 --out docs/design/figma/course-management
+
+# 导出课程管理矢量图标（几何取自设计稿，重建为独立 SVG）
+node scripts/figma-icons.mjs
 
 # 打印某画板的规格表（几何 / 填充 / 圆角 / 自动布局 / 字体）
 node scripts/figma-spec.mjs 778:620

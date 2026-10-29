@@ -11,6 +11,7 @@ import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { BackofficeModule } from './backoffice/nest/backoffice.module';
+import { CommerceCoursesModule } from './commerce-courses/commerce-courses.module';
 import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
 import { ALL_ROLES, type AppRole } from './app-roles';
 import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
@@ -70,6 +71,8 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
         : []),
       // BackOffice 员工登录、账号与菜单级权限（PRD v1.1）
       ...(admin ? [BackofficeModule] : []),
+      // 商品课程 v2：课程管理 + 课程包导入导出 + Portal v1 投影（P1a）
+      ...(admin ? [CommerceCoursesModule] : []),
     ],
     controllers: [AppController, HealthController],
     providers: [
