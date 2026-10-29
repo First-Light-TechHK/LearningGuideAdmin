@@ -65,10 +65,10 @@ describe('HelpDesk client against the Portal contract', () => {
     assert.equal(subscriptionTone('cancel_at_period_end'), 'neutral')
   })
 
-  test('every 409 Portal can answer an agent has its own message', () => {
+  test('every 409 and 422 Portal can answer an agent has its own message', () => {
     const generic = errorMessage('en-GB', 'NO_SUCH_CODE')
     for (const locale of LOCALES) {
-      for (const code of fixture.enums.agentProblemCode['409']) {
+      for (const code of [...fixture.enums.agentProblemCode['409'], ...fixture.enums.agentProblemCode['422']]) {
         const message = errorMessage(locale, code.toUpperCase())
         assert.notEqual(message, errorMessage(locale, 'NO_SUCH_CODE'), `${locale} ${code} falls back to the generic message`)
       }

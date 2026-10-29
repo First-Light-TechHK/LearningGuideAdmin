@@ -351,6 +351,8 @@ describe('Portal HelpDesk client', () => {
       [problem(409, 'stale_ticket'), 409, 'STALE_TICKET'],
       [problem(409, 'invalid_transition'), 409, 'INVALID_TRANSITION'],
       [problem(409, 'idempotency_conflict'), 409, 'IDEMPOTENCY_CONFLICT'],
+      // Portal answers a reused Idempotency-Key with a different payload with 422 (IETF idempotency-key draft).
+      [problem(422, 'idempotency_conflict'), 422, 'IDEMPOTENCY_CONFLICT'],
       [problem(409, 'reopen_window_passed'), 409, 'REOPEN_WINDOW_PASSED'],
       [problem(404, 'not_found'), 404, 'TICKET_NOT_FOUND'],
       [problem(400, 'validation_failed'), 400, 'INVALID_INPUT'],

@@ -230,6 +230,9 @@ describe('Helpdesk contract fixture: Admin reads Portal', () => {
       expected.not_found = { status: 404, code: 'TICKET_NOT_FOUND' };
       for (const code of fixture.enums.agentProblemCode['409'])
         expected[code] = { status: 409, code: code.toUpperCase() };
+      // A reused Idempotency-Key with a different payload (IETF idempotency-key draft).
+      for (const code of fixture.enums.agentProblemCode['422'])
+        expected[code] = { status: 422, code: code.toUpperCase() };
       expected.integration_disabled = {
         status: 503,
         code: 'HELPDESK_NOT_CONNECTED',
