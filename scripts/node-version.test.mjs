@@ -28,3 +28,14 @@ test("setup.ps1 checks the server minimum", () => {
 test("the README states the same minimum", () => {
   assert.match(read("README.md"), new RegExp(`Node\\.js ≥ ${major}\\.${minor}（`));
 });
+
+// pi is ESM loaded with a real import(): Jest only allows that under --experimental-vm-modules.
+test("every server script that runs Jest passes --experimental-vm-modules", () => {
+  const scripts = JSON.parse(read("server/package.json")).scripts;
+  const jest = Object.entries(scripts).filter(([, command]) => /\bjest\b/.test(command));
+  assert.ok(jest.length >= 5, "test, test:watch, test:cov, test:debug, test:e2e");
+  for (const [name, command] of jest) {
+    assert.match(command, /^node (--\S+ )*--experimental-vm-modules /, name);
+    assert.match(command, /node_modules\/jest\/bin\/jest\.js/, name);
+  }
+});
