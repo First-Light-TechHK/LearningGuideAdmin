@@ -17,21 +17,9 @@ export interface LlmStreamOptions {
   baseUrl: string;
 }
 
-/** 非流式调用（2026-10-28 Helpdesk 推荐用）：一次拿到完整回答，可要求结构化输出。 */
-export interface LlmCompleteOptions extends LlmStreamOptions {
-  /** OpenAI 兼容的 response_format（如 json_schema），原样透传 */
-  responseFormat?: unknown;
-  temperature?: number;
-  maxTokens?: number;
-  /** 调用方超时 / 取消 */
-  signal?: AbortSignal;
-}
-
 export interface LlmProvider {
   /** 与 CourseAiConfig.llmProvider 对应的标识，如 "openrouter" */
   readonly name: string;
   /** 流式对话：逐个产出文本增量（delta），正常结束即迭代完成 */
   stream(opts: LlmStreamOptions): AsyncGenerator<string>;
-  /** 非流式：返回完整文本；不支持的 Provider 可不实现 */
-  complete?(opts: LlmCompleteOptions): Promise<string>;
 }

@@ -2,6 +2,7 @@ import { INestApplication, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import http from 'node:http';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 
@@ -96,8 +97,72 @@ describe('Helpdesk suggest integration endpoints', () => {
     expect(res.headers['content-type']).toMatch(/^application\/json/);
     expect(res.headers['cache-control']).toBe('no-store');
     expect(res.body).toEqual({ suggestion });
-    expect(service.suggest).toHaveBeenCalledWith(body);
+    expect(service.suggest).toHaveBeenCalledWith(body, {
+      traceparent: undefined,
+      signal: expect.any(AbortSignal),
+    });
     expect(resolveSession).not.toHaveBeenCalled();
+  });
+
+  it('passes the W3C traceparent header through to the service', async () => {
+    service.suggest.mockResolvedValue({ suggestion: null });
+    const traceparent =
+      '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    await request(server())
+      .post('/api/integration/helpdesk/suggest')
+      .set('Authorization', `Bearer ${TOKEN}`)
+      .set('traceparent', traceparent)
+      .send(body)
+      .expect(200);
+    const [, context] = service.suggest.mock.calls[0] as [
+      unknown,
+      { traceparent?: string; signal: AbortSignal },
+    ];
+    expect(context.traceparent).toBe(traceparent);
+    // a finished response does not count as an abort
+    expect(context.signal.aborted).toBe(false);
+  });
+
+  it('aborts the run when Portal gives up and closes the connection', async () => {
+    let seen: AbortSignal | undefined;
+    const aborted = new Promise<boolean>((resolve) => {
+      service.suggest.mockImplementation(
+        (_raw: unknown, context: { signal: AbortSignal }) => {
+          seen = context.signal;
+          return new Promise((done) => {
+            context.signal.addEventListener('abort', () => {
+              resolve(true);
+              done({ suggestion: null });
+            });
+          });
+        },
+      );
+    });
+    await app.listen(0);
+    const address = (
+      app.getHttpServer() as unknown as http.Server
+    ).address() as {
+      port: number;
+    };
+    const payload = JSON.stringify(body);
+    const req = http.request({
+      host: '127.0.0.1',
+      port: address.port,
+      method: 'POST',
+      path: '/api/integration/helpdesk/suggest',
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+      },
+    });
+    req.on('error', () => undefined);
+    req.end(payload);
+    for (let i = 0; !seen && i < 400; i += 1)
+      await new Promise((r) => setTimeout(r, 5));
+    expect(seen?.aborted).toBe(false);
+    req.destroy();
+    await expect(aborted).resolves.toBe(true);
   });
 
   it('returns { suggestion: null } as is', async () => {

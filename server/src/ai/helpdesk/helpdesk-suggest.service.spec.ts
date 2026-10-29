@@ -4,10 +4,7 @@ import type {
   HelpdeskQaCandidate,
   HelpdeskQaSource,
 } from '../../contracts/helpdesk-qa';
-import type {
-  LlmCompleteOptions,
-  LlmProvider,
-} from '../providers/llm-provider.interface';
+import type { JsonObject } from '../../contracts/helpdesk-trace';
 import { MemoryRateLimitStore } from '../rate-limit.service';
 import {
   ASSIST_RATE_LIMIT,
@@ -23,12 +20,19 @@ import {
   type SuggestionLogEntry,
   type SuggestionOutcome,
 } from './helpdesk-suggestion.store';
+import { createMemoryAgentEventLog } from './trace/agent-event.store';
+import type {
+  AgentStepContext,
+  AgentStepOutcome,
+  AgentStepSpec,
+} from './workflow/engine';
 
 /**
- * Helpdesk addendum §C：Agent 推荐答案。
- * 候选为空不调模型；模型只能在候选 id 里选（否则 null）；3 秒超时、无 key、任何错误、
+ * Helpdesk addendum §C：Agent 推荐答案（v2：写死的 FAQ 工作流 + 每个 agent 步一个 pi Agent）。
+ * 候选为空不调模型；模型只能经 pick_faq 在候选 id 里选（否则 null）；3 秒超时、无 key、任何错误、
  * 超过每学员每小时 10 次都返回 null；展示给学员的永远是库里的原答案；每次检索都记日志。
- * 不连真实模型：provider 是假的，API key 是本地测试值。
+ * 不连真实模型：agent 步的 runner 是假的（真的 pi 见 workflow/pi-step-runner.spec.ts），
+ * API key 是本地测试值。
  */
 const LEARNER = 'portal-user-1';
 
@@ -95,24 +99,23 @@ function memoryLog() {
   return { rows, log, purgeQueryText };
 }
 
-function fakeProvider(reply: (opts: LlmCompleteOptions) => Promise<string>) {
-  const complete = jest.fn(reply);
-  const provider: LlmProvider = {
-    name: 'openrouter',
-    // 本用例只用 complete；stream 不会被调用
-    // eslint-disable-next-line require-yield, @typescript-eslint/require-await
-    async *stream() {
-      return;
-    },
-    complete,
-  };
-  return { complete, providers: { get: jest.fn(() => provider) } };
+type RunnerReply = (
+  spec: AgentStepSpec,
+  context: AgentStepContext,
+) => Promise<AgentStepOutcome>;
+
+const pick = (faqId: string): Promise<AgentStepOutcome> =>
+  Promise.resolve({ kind: 'called', args: { faqId } });
+
+function fakeRunner(reply: RunnerReply) {
+  const run = jest.fn(reply);
+  return { run, runner: { run } };
 }
 
 function setup(
   options: {
     found?: HelpdeskQaCandidate[];
-    reply?: (opts: LlmCompleteOptions) => Promise<string>;
+    reply?: RunnerReply;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
     now?: () => number;
@@ -128,10 +131,10 @@ function setup(
     );
   });
   const qa: HelpdeskQaSource = { findCandidates, findPublished };
-  const { complete, providers } = fakeProvider(
-    options.reply ??
-      (() => Promise.resolve(JSON.stringify({ faqId: candidates[0].id }))),
+  const { run: complete, runner } = fakeRunner(
+    options.reply ?? (() => pick(candidates[0].id)),
   );
+  const events = createMemoryAgentEventLog();
   const { rows, log, purgeQueryText } = memoryLog();
   const rateLimit = new MemoryRateLimitStore();
   const env: NodeJS.ProcessEnv = options.env ?? {
@@ -141,9 +144,10 @@ function setup(
   };
   const service = new HelpdeskSuggestService({
     qa,
-    providers,
+    runner,
     rateLimit,
     log,
+    events,
     env: () => env,
     timeoutMs: options.timeoutMs,
     now: options.now,
@@ -154,7 +158,7 @@ function setup(
     findCandidates,
     findPublished,
     complete,
-    providers,
+    events,
     rows,
     log,
     purgeQueryText,
@@ -197,7 +201,7 @@ describe('Helpdesk suggest: happy path', () => {
     expect(complete).toHaveBeenCalledTimes(1);
   });
 
-  it('asks the model for structured output limited to the candidate ids', async () => {
+  it('gives the pick_faq step only the candidate ids (or none), with learner text only in the prompt', async () => {
     const { service, complete, findCandidates } = setup();
     await service.suggest(input);
     // the ticket's Enquiry Type boosts the FAQ category on the same topic
@@ -207,34 +211,40 @@ describe('Helpdesk suggest: happy path', () => {
       text: `${input.subject}\n\n${input.message}`,
       limit: 8,
     });
-    const opts = complete.mock.calls[0][0];
-    expect(opts).toMatchObject({
+    const [spec, context] = complete.mock.calls[0];
+    expect(context.model).toEqual({
+      provider: 'openrouter',
       model: 'test/cheap-model',
       apiKey: 'test-openrouter-key-local-only',
       baseUrl: 'http://llm.test/v1',
-      temperature: 0,
     });
-    expect(opts.signal).toBeInstanceOf(AbortSignal);
-    const schema = JSON.stringify(opts.responseFormat);
-    expect(schema).toContain('json_schema');
-    for (const c of candidates) expect(schema).toContain(c.id);
-    // 学员原文只放在 user 消息里，system 提示不含学员内容
-    const system =
-      opts.messages.find((m) => m.role === 'system')?.content ?? '';
-    const user = opts.messages.find((m) => m.role === 'user')?.content ?? '';
-    expect(system).not.toContain('Ignore previous instructions');
-    expect(user).toContain('Ignore previous instructions');
-    expect(user).toContain(candidates[1].id);
+    expect(context.signal).toBeInstanceOf(AbortSignal);
+    expect(context.name).toBe('pick_faq');
+    expect(spec.tool).toEqual({
+      name: 'pick_faq',
+      description: expect.any(String),
+      enumArgs: { faqId: [...candidates.map((c) => c.id), 'none'] },
+    });
+    // 学员原文只放在 prompt 里，system 提示不含学员内容
+    expect(spec.system).not.toContain('Ignore previous instructions');
+    expect(spec.prompt).toContain('Ignore previous instructions');
+    expect(spec.prompt).toContain(candidates[1].id);
+    expect(spec.prompt).toContain(candidates[1].answer);
   });
 
-  it('accepts a JSON answer wrapped in a code fence', async () => {
-    const { service } = setup({
-      reply: () =>
-        Promise.resolve('```json\n{"faqId": "' + candidates[1].id + '"}\n```'),
+  it('reads the key, model and base URL on every call (hot reload)', async () => {
+    const { service, complete, env } = setup();
+    await service.suggest(input);
+    env.OPENROUTER_API_KEY = 'rotated-key-local-only';
+    env.HELPDESK_SUGGEST_MODEL = 'test/other-model';
+    delete env.OPENROUTER_BASE_URL;
+    await service.suggest(input);
+    expect(complete.mock.calls[1][1].model).toEqual({
+      provider: 'openrouter',
+      model: 'test/other-model',
+      apiKey: 'rotated-key-local-only',
+      baseUrl: 'https://openrouter.ai/api/v1',
     });
-    expect((await service.suggest(input)).suggestion?.faqId).toBe(
-      candidates[1].id,
-    );
   });
 });
 
@@ -251,18 +261,22 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
   });
 
   it.each([
+    ['picks none', () => pick('none')],
+    // the runner's enum lock should stop this; the validate step checks again
     [
-      'an id that is not a candidate',
-      '{"faqId":"0192bbbb-0000-7000-8000-0000000000ff"}',
+      'picks an id that is not a candidate',
+      () => pick('0192bbbb-0000-7000-8000-0000000000ff'),
     ],
-    ['an explicit null', '{"faqId":null}'],
-    ['free text', 'The answer is to reset your password.'],
-    ['a wrong shape', '{"id":"0192bbbb-0000-7000-8000-000000000001"}'],
-    // v1 used qaId; the v2 schema only knows faqId
-    ['the old v1 key', '{"qaId":"0192bbbb-0000-7000-8000-000000000001"}'],
-    ['a number', '{"faqId":1}'],
-  ])('returns null when the model answers %s', async (_name, reply) => {
-    const { service, rows } = setup({ reply: () => Promise.resolve(reply) });
+    [
+      'makes no valid tool call',
+      () => Promise.resolve({ kind: 'no_call' as const }),
+    ],
+    [
+      'fails',
+      () => Promise.resolve({ kind: 'error' as const, message: '502' }),
+    ],
+  ])('returns null when the model step %s', async (_name, reply) => {
+    const { service, rows } = setup({ reply });
     await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
     expect(rows[0].faqId).toBeNull();
   });
@@ -271,9 +285,9 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     let signal: AbortSignal | undefined;
     const { service } = setup({
       timeoutMs: 30,
-      reply: (opts) => {
-        signal = opts.signal;
-        return new Promise<string>(() => undefined);
+      reply: (_spec, context) => {
+        signal = context.signal;
+        return new Promise<AgentStepOutcome>(() => undefined);
       },
     });
     const started = Date.now();
@@ -388,7 +402,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now: () => now,
       reply: () => {
         now += 2_600;
-        return Promise.resolve(JSON.stringify({ faqId: candidates[0].id }));
+        return pick(candidates[0].id);
       },
     });
     findCandidates.mockImplementation(() => {
@@ -405,9 +419,9 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     let signal: AbortSignal | undefined;
     const { service, findCandidates } = setup({
       now: () => now,
-      reply: (opts) => {
-        signal = opts.signal;
-        return new Promise<string>(() => undefined);
+      reply: (_spec, context) => {
+        signal = context.signal;
+        return new Promise<AgentStepOutcome>(() => undefined);
       },
     });
     findCandidates.mockImplementation(() => {
@@ -426,7 +440,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now: () => now,
       reply: () => {
         now += 2_000;
-        return Promise.resolve(JSON.stringify({ faqId: candidates[0].id }));
+        return pick(candidates[0].id);
       },
     });
     findCandidates.mockImplementation(() => {
@@ -788,5 +802,224 @@ describe('Helpdesk suggest: 90-day query text retention', () => {
     now += 3_600_001;
     await service.suggest(input);
     expect(purgeQueryText).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
+  const TRACE = '4bf92f3577b34da6a3ce929d0e0e4736';
+  const TRACEPARENT = `00-${TRACE}-00f067aa0ba902b7-01`;
+  const RUN = '0192eeee-0000-7000-8000-0000000000a1';
+  const ROOT = '0192eeee-0000-7000-8000-0000000000a0';
+
+  async function runLog(
+    ctx: {
+      service: HelpdeskSuggestService;
+      events: ReturnType<typeof createMemoryAgentEventLog>;
+    },
+    runId: string,
+  ) {
+    await ctx.service.flushTraces();
+    return ctx.events.read(runId);
+  }
+  const reasonOf = async (ctx: Parameters<typeof runLog>[0], runId: string) =>
+    (await runLog(ctx, runId)).find((e) => e.type === 'turn/end')?.data.reason;
+
+  it('writes one contiguous run per suggestion, keyed by the run id Portal sends', async () => {
+    const ctx = setup();
+    const { suggestion } = await ctx.service.suggest(
+      { ...input, runId: RUN.toUpperCase(), parentRunId: ROOT },
+      { traceparent: TRACEPARENT },
+    );
+    expect(suggestion?.id).toBe(RUN);
+    expect(ctx.rows[0].id).toBe(RUN);
+    const log = await runLog(ctx, RUN);
+    expect(log.map((e) => e.seq)).toEqual(log.map((_e, i) => i + 1));
+    expect(log.map((e) => [e.type, e.data.name ?? null])).toEqual([
+      ['turn/start', null],
+      ['step/start', 'retrieve'],
+      ['step/end', 'retrieve'],
+      ['step/start', 'pick_faq'],
+      ['step/end', 'pick_faq'],
+      ['step/start', 'validate'],
+      ['step/end', 'validate'],
+      ['step/start', 'answer'],
+      ['step/end', 'answer'],
+      ['turn/end', null],
+    ]);
+    expect(log[0].data).toEqual({
+      turn: 1,
+      workflow: 'faq',
+      source: 'submit',
+      locale: 'en-GB',
+      category: 'technical_support',
+      parentRunId: ROOT,
+      traceId: TRACE,
+      spanId: expect.stringMatching(/^[0-9a-f]{16}$/),
+      parentSpanId: '00f067aa0ba902b7',
+      input: { subject: input.subject, message: input.message },
+    });
+    expect(log[2].data.output).toEqual({
+      candidates: candidates.map((c) => ({ id: c.id, score: c.score })),
+    });
+    expect(log[4].data).toMatchObject({
+      outcome: 'called',
+      args: { faqId: candidates[0].id },
+    });
+    expect(log.at(-1)?.data).toEqual({
+      turn: 1,
+      reason: 'answered',
+      faqId: candidates[0].id,
+      model: 'test/cheap-model',
+      latencyMs: expect.any(Number),
+    });
+  });
+
+  it('gives the model a child traceparent of the incoming trace', async () => {
+    const ctx = setup();
+    await ctx.service.suggest(input, { traceparent: TRACEPARENT });
+    const child = ctx.complete.mock.calls[0][1].traceparent();
+    expect(child).toMatch(new RegExp(`^00-${TRACE}-[0-9a-f]{16}-01$`));
+    expect(child).not.toContain('00f067aa0ba902b7');
+  });
+
+  it('starts a new trace when the traceparent is missing or invalid', async () => {
+    const ctx = setup();
+    await ctx.service.suggest(
+      { ...input, runId: RUN },
+      { traceparent: `ff-${TRACE}-00f067aa0ba902b7-01` },
+    );
+    const [start] = await runLog(ctx, RUN);
+    expect(start.data.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(start.data.traceId).not.toBe(TRACE);
+    expect(start.data.parentSpanId).toBeNull();
+    expect(start.data.parentRunId).toBeNull();
+  });
+
+  it.each([
+    ['answered', {}],
+    ['no_match', { reply: () => pick('none') }],
+    ['no_candidates', { found: [] }],
+    [
+      'error',
+      {
+        reply: () =>
+          Promise.resolve({ kind: 'error' as const, message: '502' }),
+      },
+    ],
+    ['no_key', { env: {} }],
+    [
+      'timeout',
+      {
+        timeoutMs: 30,
+        reply: () => new Promise<AgentStepOutcome>(() => undefined),
+      },
+    ],
+  ])('ends the turn with reason %s', async (reason, options) => {
+    const ctx = setup(options);
+    await ctx.service.suggest({ ...input, runId: RUN });
+    expect(await reasonOf(ctx, RUN)).toBe(reason);
+  });
+
+  it('ends the turn with reason rate_limited', async () => {
+    const ctx = setup();
+    for (let i = 0; i < 10; i++) await ctx.service.suggest(input);
+    await ctx.service.suggest({ ...input, runId: RUN });
+    expect(await reasonOf(ctx, RUN)).toBe('rate_limited');
+  });
+
+  it('ends the turn with reason aborted when the caller goes away', async () => {
+    const caller = new AbortController();
+    const ctx = setup({
+      reply: () => {
+        setTimeout(() => caller.abort(), 10);
+        return new Promise<AgentStepOutcome>(() => undefined);
+      },
+    });
+    await expect(
+      ctx.service.suggest({ ...input, runId: RUN }, { signal: caller.signal }),
+    ).resolves.toEqual({ suggestion: null });
+    expect(await reasonOf(ctx, RUN)).toBe('aborted');
+  });
+
+  it('ends a decided answer that came too late as timeout, not answered', async () => {
+    let now = Date.UTC(2026, 9, 28, 9, 0, 0);
+    const ctx = setup({
+      now: () => now,
+      reply: () => {
+        now += SUGGEST_DEADLINE_MS + 1;
+        return pick(candidates[0].id);
+      },
+    });
+    await ctx.service.suggest({ ...input, runId: RUN });
+    const end = (await runLog(ctx, RUN)).at(-1)?.data as JsonObject;
+    expect(end).toMatchObject({ reason: 'timeout', faqId: null });
+  });
+
+  it('records the chip workflow without a model step', async () => {
+    const ctx = setup({ env: {} });
+    await ctx.service.suggest({
+      learnerId: LEARNER,
+      locale: 'en-GB',
+      source: 'chip',
+      faqId: candidates[0].id,
+      runId: RUN,
+    });
+    const log = await runLog(ctx, RUN);
+    expect(log.map((e) => e.type)).toEqual([
+      'turn/start',
+      'step/start',
+      'step/end',
+      'turn/end',
+    ]);
+    expect(log[0].data.workflow).toBe('chip');
+    expect(log.at(-1)?.data.reason).toBe('answered');
+  });
+
+  it.each([
+    ['runId', { runId: 'run-1' }],
+    ['parentRunId', { parentRunId: 42 }],
+  ])('rejects a malformed %s with 400', async (_name, patch) => {
+    const { service } = setup();
+    const error = await service
+      .suggest({ ...input, ...patch })
+      .catch((e: unknown) => e);
+    expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
+  });
+
+  it('never appends a second turn to an existing run', async () => {
+    const ctx = setup();
+    await ctx.service.suggest({ ...input, runId: RUN });
+    await ctx.service.suggest({ ...input, runId: RUN });
+    const log = await runLog(ctx, RUN);
+    expect(log.filter((e) => e.type === 'turn/start')).toHaveLength(1);
+  });
+
+  it('keeps answering when the event log is down', async () => {
+    const ctx = setup();
+    jest.spyOn(ctx.events, 'append').mockRejectedValue(new Error('db down'));
+    expect((await ctx.service.suggest(input)).suggestion?.faqId).toBe(
+      candidates[0].id,
+    );
+    await expect(ctx.service.flushTraces()).resolves.toBeUndefined();
+  });
+
+  it('appends the learner feedback to the run, first outcome only', async () => {
+    const ctx = setup();
+    await ctx.service.suggest({ ...input, runId: RUN });
+    await ctx.service.recordOutcome(RUN, { outcome: 'solved' });
+    await ctx.service.recordOutcome(RUN, { outcome: 'declined' });
+    const log = await runLog(ctx, RUN);
+    expect(log.slice(-2).map((e) => [e.type, e.data])).toEqual([
+      ['turn/end', expect.objectContaining({ reason: 'answered' })],
+      ['feedback', { outcome: 'solved' }],
+    ]);
+  });
+
+  it('clears learner text in the event log with the 90-day purge', async () => {
+    const now = Date.UTC(2026, 9, 28, 8, 0, 0);
+    const ctx = setup({ now: () => now });
+    const purge = jest.spyOn(ctx.events, 'purgeLearnerText');
+    await ctx.service.suggest(input);
+    expect(purge).toHaveBeenCalledWith(new Date(now - 90 * 24 * 3_600_000));
   });
 });

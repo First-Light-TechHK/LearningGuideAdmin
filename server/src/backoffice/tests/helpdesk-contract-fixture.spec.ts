@@ -15,7 +15,7 @@ import {
 } from '../../ai/helpdesk/helpdesk-suggestion.store';
 import { HelpdeskSuggestService } from '../../ai/helpdesk/helpdesk-suggest.service';
 import { MemoryRateLimitStore } from '../../ai/rate-limit.service';
-import type { LlmProvider } from '../../ai/providers/llm-provider.interface';
+import { createMemoryAgentEventLog } from '../../ai/helpdesk/trace/agent-event.store';
 import type { SessionEmployee } from '../contracts/employee';
 import {
   AGENT_ACTIONS,
@@ -71,6 +71,7 @@ const fixture = JSON.parse(
     suggestChipRequest: Obj;
     suggestResponse: { suggestion: Obj };
     suggestNoMatchResponse: { suggestion: null };
+    traceparentHeader: string;
     outcomeRequest: Obj;
     helpfulOutcomeRequest: Obj;
     outcomeResponse: Obj;
@@ -469,24 +470,22 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
 
   function suggestService(candidate: HelpdeskQaCandidate) {
     const logged: SuggestionLogEntry[] = [];
+    // the model step picks the candidate (the real pi runner is tested in workflow/)
     const complete = jest.fn(() =>
-      Promise.resolve(JSON.stringify({ faqId: candidate.id })),
+      Promise.resolve({
+        kind: 'called' as const,
+        args: { faqId: candidate.id },
+      }),
     );
-    const provider: LlmProvider = {
-      name: 'openrouter',
-      // eslint-disable-next-line require-yield, @typescript-eslint/require-await
-      async *stream() {
-        return;
-      },
-      complete,
-    };
+    const events = createMemoryAgentEventLog();
     const service = new HelpdeskSuggestService({
       qa: {
         findCandidates: () => Promise.resolve([candidate]),
         findPublished: (id) =>
           Promise.resolve(id === candidate.id ? candidate : null),
       },
-      providers: { get: () => provider },
+      runner: { run: complete },
+      events,
       rateLimit: new MemoryRateLimitStore(),
       log: {
         record: (entry) => {
@@ -503,24 +502,34 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
         HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
       }),
     });
-    return { service, logged, complete };
+    return { service, logged, complete, events };
   }
 
   it('accepts the submit, chat and chip suggest requests and answers with faqId', async () => {
     const chosen = toAdmin.suggestResponse.suggestion;
-    const { service, logged, complete } = suggestService({
+    const { service, logged, complete, events } = suggestService({
       id: text(chosen.faqId),
       category: 'account_technical',
       question: text(chosen.question),
       answer: text(chosen.answer),
       score: 1,
     });
+    const [name, traceparent] = toAdmin.traceparentHeader.split(': ');
+    expect(name).toBe('traceparent');
     for (const request of [
       toAdmin.suggestRequest,
       toAdmin.suggestChatRequest,
       toAdmin.suggestChipRequest,
     ]) {
-      const answer = await service.suggest(request);
+      const answer = await service.suggest(request, { traceparent });
+      // the suggestion id is the run id Portal sent (its assist row id)
+      expect(answer.suggestion?.id).toBe(request.runId);
+      await service.flushTraces();
+      const [start] = await events.read(text(request.runId));
+      expect(start.type).toBe('turn/start');
+      expect(start.data.parentRunId).toBe(request.parentRunId);
+      expect(start.data.traceId).toBe(traceparent.split('-')[1]);
+      expect(start.data.parentSpanId).toBe(traceparent.split('-')[2]);
       expect(shape(answer as unknown as Json)).toEqual(
         shape(toAdmin.suggestResponse as unknown as Json),
       );
@@ -537,6 +546,7 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
     ]);
     // the chip answer needs no model call
     expect(complete).toHaveBeenCalledTimes(2);
+    expect(toAdmin.suggestRequest.runId).toBe(chosen.id);
   });
 
   it('answers no match as the contract null', async () => {

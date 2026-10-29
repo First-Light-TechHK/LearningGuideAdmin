@@ -9,6 +9,8 @@ import { HELPDESK_QA_SOURCE } from '../contracts/helpdesk-qa';
 import { HelpdeskSuggestController } from './helpdesk/helpdesk-suggest.controller';
 import { HelpdeskSuggestService } from './helpdesk/helpdesk-suggest.service';
 import { PrismaHelpdeskSuggestionStore } from './helpdesk/helpdesk-suggestion.store';
+import { PrismaAgentEventLog } from './helpdesk/trace/agent-event.store';
+import { PiStepRunner } from './helpdesk/workflow/pi-step-runner';
 import { OpenRouterProvider } from './providers/openrouter.provider';
 import { ProviderRegistry } from './providers/provider.registry';
 import { PrismaRateLimitStore, RateLimitService } from './rate-limit.service';
@@ -18,8 +20,9 @@ import { PrismaRateLimitStore, RateLimitService } from './rate-limit.service';
  * PromptTemplate/配置接口 + AI Gateway Proxy（策略模式）+ SSE 流式对话 + 限流。
  * 课程与 Release 经 KNOWLEDGE_CLIENT 读取，由组装方（AppModule）决定同进程还是走 HTTP。
  * RAG 检索经 KnowledgeClient.retrieveChunks() 由 KS 侧完成，本模块不直接访问向量数据。
- * Helpdesk 推荐（agent 角色，2026-10-28）：候选经契约 HELPDESK_QA_SOURCE 读 BackOffice 的已发布问答，
- * 模型走 ProviderRegistry（OpenRouter），限流共用 ai_rate_limit_hits，日志写 helpdesk_suggestions。
+ * Helpdesk 推荐（agent 角色，2026-10-28；v2 2026-10-29）：候选经契约 HELPDESK_QA_SOURCE 读 BackOffice
+ * 的已发布问答，写死的工作流每个 agent 步跑一个 pi-agent-core Agent（经 pi-ai 的 OpenRouter provider），
+ * 限流共用 ai_rate_limit_hits，日志写 helpdesk_suggestions，链路事件写 helpdesk_agent_events。
  *
  * 2026-10-26 修复：同进程模式下 `KNOWLEDGE_CLIENT` 用 `useClass: PrismaKnowledgeClient` 注册在
  * 本模块上下文，而 `PrismaKnowledgeClient` 依赖 `EmbeddingService`；`EmbeddingService` 由
@@ -70,22 +73,29 @@ export class AiModule {
           ? [
               options.helpdeskQa,
               PrismaHelpdeskSuggestionStore,
+              PrismaAgentEventLog,
               {
                 provide: HelpdeskSuggestService,
                 useFactory: (
                   qa: ConstructorParameters<
                     typeof HelpdeskSuggestService
                   >[0]['qa'],
-                  providers: ProviderRegistry,
                   rateLimit: PrismaRateLimitStore,
                   log: PrismaHelpdeskSuggestionStore,
+                  events: PrismaAgentEventLog,
                 ) =>
-                  new HelpdeskSuggestService({ qa, providers, rateLimit, log }),
+                  new HelpdeskSuggestService({
+                    qa,
+                    runner: new PiStepRunner(),
+                    rateLimit,
+                    log,
+                    events,
+                  }),
                 inject: [
                   HELPDESK_QA_SOURCE,
-                  ProviderRegistry,
                   PrismaRateLimitStore,
                   PrismaHelpdeskSuggestionStore,
+                  PrismaAgentEventLog,
                 ],
               },
             ]
