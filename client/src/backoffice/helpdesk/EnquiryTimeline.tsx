@@ -23,6 +23,8 @@ import {
   initials,
   isImeComposing,
   listTime,
+  ratingValue,
+  showTicketRating,
   splitNotes,
   splitThread,
   visibleBusy,
@@ -128,6 +130,7 @@ function MessageCard({ message, ticket, locale }: { message: TicketMessage; tick
 
 function AiBlock({ assist, locale, onTrace }: { assist: TicketAiAssist; locale: Locale; onTrace: (runId: string) => void }) {
   const tone = assistFeedbackTone(assist.feedback)
+  const rating = ratingValue(assist.rating)
   return (
     <div className="hdAiRow">
       <section className="hdAiBlock" aria-label={t(locale, 'helpDesk.ai.title')}>
@@ -150,6 +153,8 @@ function AiBlock({ assist, locale, onTrace }: { assist: TicketAiAssist; locale: 
             {t(locale, tone === 'positive' ? 'helpDesk.ai.helpful' : 'helpDesk.ai.notHelpful')}
           </p>
         ) : null}
+        {/* v3 §2：学员在「本次服务满意吗？」里给的星级；没评（或跳过）不显示。无画板，沿用反馈行样式（待视觉验收） */}
+        {rating !== null ? <p className="hdAiRating">{t(locale, 'helpDesk.rating.value', { n: rating })}</p> : null}
       </section>
       <span className="hdBotAvatar" aria-hidden="true">
         <HdBotIcon />
@@ -281,6 +286,7 @@ export function EnquiryTimeline(props: Props) {
             const draftKey = (kind: string) => `${row.id}:${kind}`
             const unavailable = t(locale, 'helpDesk.actions.unavailable')
             const reviewEnabled = controls.claim || controls.markReviewed
+            const ticketRating = ratingValue(ticket.rating)
             return (
               <div
                 key={row.id}
@@ -330,6 +336,14 @@ export function EnquiryTimeline(props: Props) {
                         </p>
                         {/* 状态：Figma 卡片上没有，放在 meta 行右侧，不挤占主题与类型（待视觉验收） */}
                         <span className={`hdStatusPill hdStatus${ticket.status}`}>{statusLabel(locale, ticket.status)}</span>
+                        {/* v3 §2：学员给工单的评分「评分 n/5 / 未评分」，跟在状态胶囊后、同一套胶囊样式（无画板，待视觉验收） */}
+                        {showTicketRating(ticket) ? (
+                          <span className="hdStatusPill hdTicketRating">
+                            {ticketRating === null
+                              ? t(locale, 'helpDesk.rating.none')
+                              : t(locale, 'helpDesk.rating.value', { n: ticketRating })}
+                          </span>
+                        ) : null}
                       </div>
                     </header>
                     <div className="hdDivider" />

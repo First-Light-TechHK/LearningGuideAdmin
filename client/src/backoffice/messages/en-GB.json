@@ -636,6 +636,10 @@
       "notHelpful": "Student feedback: No, I still submit to support team",
       "noAnswer": "No FAQ matched, so the assistant showed no answer."
     },
+    "rating": {
+      "value": "Rating {n}/5",
+      "none": "Not rated"
+    },
     "trace": {
       "view": "View trace",
       "title": "Agent trace",

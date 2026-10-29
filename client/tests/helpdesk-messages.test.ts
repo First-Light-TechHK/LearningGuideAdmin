@@ -63,6 +63,13 @@ describe('HelpDesk messages', () => {
     assert.equal(get(h, 'ai.notHelpful'), 'Student feedback: No, I still submit to support team')
   })
 
+  test('v3 §2 rating wording: "评分 n/5 / Rating n/5", "未评分 / Not rated"', () => {
+    assert.equal(get(enGB.helpDesk, 'rating.value'), 'Rating {n}/5')
+    assert.equal(get(enGB.helpDesk, 'rating.none'), 'Not rated')
+    assert.equal(get(zhCN.helpDesk, 'rating.value'), '评分 {n}/5')
+    assert.equal(get(zhCN.helpDesk, 'rating.none'), '未评分')
+  })
+
   test('Figma 1379:2 / 1379:299 wording (en-GB)', () => {
     const h = enGB.helpDesk as Record<string, unknown>
     assert.equal(get(h, 'faqs.search'), 'Search questions, answers or keywords...')

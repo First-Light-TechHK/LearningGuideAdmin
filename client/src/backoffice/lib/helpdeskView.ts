@@ -12,6 +12,7 @@ import {
   type HelpdeskCategory,
   type ListStatusFilter,
   type TicketMessage,
+  type TicketStatus,
 } from '../contracts/helpdesk'
 import type { Locale } from './i18n/config'
 
@@ -294,6 +295,20 @@ export function assistFeedbackTone(feedback: AssistFeedback | null): 'positive' 
   if (feedback === 'helpful' || feedback === 'solved') return 'positive'
   if (feedback === 'not_helpful' || feedback === 'declined') return 'negative'
   return null
+}
+
+/** v3 §2：学员评分只认 1–5 的整数，其它（没评、跳过、旧数据、越界）都当没有评分。 */
+export function ratingValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5 ? value : null
+}
+
+/**
+ * v3 §2：工单卡片上的「评分 n/5 / 未评分」何时出现。与 Portal EnquiryDetail 的评分区一致：
+ * 关闭后学员才能评，所以已关闭的显示（没评就是「未评分」）；评过之后重新打开的仍显示评分。
+ * 未关闭且没评分的不显示，免得每张进行中的卡片都挂一个「未评分」。
+ */
+export function showTicketRating(ticket: { status: TicketStatus; rating?: number | null }): boolean {
+  return ticket.status === 'CLOSED' || ratingValue(ticket.rating) !== null
 }
 
 /** 中栏：第一条公开的学员消息是 Enquiry 卡片，其余按原顺序排在下面。 */
