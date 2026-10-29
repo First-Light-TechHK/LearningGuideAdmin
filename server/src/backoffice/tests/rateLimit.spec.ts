@@ -6,7 +6,11 @@ describe('rate limiting', () => {
   it('allows exactly the configured number of attempts', async () => {
     const key = `test-allow-${Date.now()}`;
     for (let i = 0; i < 3; i += 1) {
-      assert.equal((await consume(key, 3, 5)).allowed, true, `attempt ${i + 1}`);
+      assert.equal(
+        (await consume(key, 3, 5)).allowed,
+        true,
+        `attempt ${i + 1}`,
+      );
     }
     assert.equal((await consume(key, 3, 5)).allowed, false);
   });
@@ -28,7 +32,8 @@ describe('rate limiting', () => {
 
   it('peeks without counting and clears a window on demand', async () => {
     const key = `test-peek-${Date.now()}`;
-    for (let i = 0; i < 5; i += 1) assert.equal((await peek(key, 2)).allowed, true);
+    for (let i = 0; i < 5; i += 1)
+      assert.equal((await peek(key, 2)).allowed, true);
     await consume(key, 2, 5);
     await consume(key, 2, 5);
     assert.equal((await peek(key, 2)).allowed, false);

@@ -27,12 +27,19 @@ describe('Commerce course workflow (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.commerceCourse.deleteMany({ where: { code: { in: [`${code}-L`, `${code}-O`] } } });
+    await prisma.commerceCourse.deleteMany({
+      where: { code: { in: [`${code}-L`, `${code}-O`] } },
+    });
     const course = await prisma.commerceCourse.findFirst({ where: { code } });
     if (course) {
-      await prisma.commerceCourse.update({ where: { id: course.id }, data: { liveVersionId: null } });
+      await prisma.commerceCourse.update({
+        where: { id: course.id },
+        data: { liveVersionId: null },
+      });
       await prisma.courseVersion.deleteMany({ where: { courseId: course.id } });
-      await prisma.commerceCourse.delete({ where: { id: course.id } }).catch(() => undefined);
+      await prisma.commerceCourse
+        .delete({ where: { id: course.id } })
+        .catch(() => undefined);
     }
     await app.close();
   });
@@ -59,7 +66,9 @@ describe('Commerce course workflow (e2e)', () => {
     ]);
     expect(lives.map((r) => r.status)).toEqual([200, 200]);
 
-    const versions = await prisma.courseVersion.findMany({ where: { courseId: id } });
+    const versions = await prisma.courseVersion.findMany({
+      where: { courseId: id },
+    });
     expect(versions).toHaveLength(1);
     const course = await prisma.commerceCourse.findUnique({ where: { id } });
     expect(course?.lifecycleStatus).toBe('LIVE');
@@ -86,11 +95,18 @@ describe('Commerce course workflow (e2e)', () => {
 
     // 同时新建两节课：序号和默认 code 各不相同
     const made = await Promise.all([
-      agent.post(`/api/backoffice/courses/${id}/lessons`).send({ title: 'One' }),
-      agent.post(`/api/backoffice/courses/${id}/lessons`).send({ title: 'Two' }),
+      agent
+        .post(`/api/backoffice/courses/${id}/lessons`)
+        .send({ title: 'One' }),
+      agent
+        .post(`/api/backoffice/courses/${id}/lessons`)
+        .send({ title: 'Two' }),
     ]);
     expect(made.map((r) => r.status)).toEqual([201, 201]);
-    const lessons = await prisma.lesson.findMany({ where: { courseId: id }, orderBy: { sortOrder: 'asc' } });
+    const lessons = await prisma.lesson.findMany({
+      where: { courseId: id },
+      orderBy: { sortOrder: 'asc' },
+    });
     expect(lessons.map((l) => l.sortOrder)).toEqual([1, 2]);
     expect(new Set(lessons.map((l) => l.code)).size).toBe(2);
 
@@ -100,7 +116,9 @@ describe('Commerce course workflow (e2e)', () => {
       .send({ code: lessons[0].code, title: 'Should not stick' });
     expect(dup.status).toBe(409);
     expect(dup.body.error.code).toBe('LESSON_CODE_DUPLICATE');
-    const title = await prisma.lessonLocalization.findFirst({ where: { lessonId: lessons[1].id } });
+    const title = await prisma.lessonLocalization.findFirst({
+      where: { lessonId: lessons[1].id },
+    });
     expect(title?.title).toBe('Two');
 
     // 重复删除：一次 200，一次 404
@@ -113,20 +131,34 @@ describe('Commerce course workflow (e2e)', () => {
 
   it('refuses to reorder lessons that belong to another course', async () => {
     const agent = await signInAs(app, 'ADMIN');
-    const mine = await agent.post('/api/backoffice/courses').send({ code: `${code}-O`, title: 'Order e2e' });
-    const other = await prisma.commerceCourse.findFirst({ where: { code: `${code}-L` } });
+    const mine = await agent
+      .post('/api/backoffice/courses')
+      .send({ code: `${code}-O`, title: 'Order e2e' });
+    const other = await prisma.commerceCourse.findFirst({
+      where: { code: `${code}-L` },
+    });
     const myId: string = mine.body.data.id;
-    await agent.post(`/api/backoffice/courses/${myId}/lessons`).send({ title: 'Mine' });
-    const myLesson = await prisma.lesson.findFirstOrThrow({ where: { courseId: myId } });
-    const otherLesson = await prisma.lesson.findFirstOrThrow({ where: { courseId: other!.id } });
+    await agent
+      .post(`/api/backoffice/courses/${myId}/lessons`)
+      .send({ title: 'Mine' });
+    const myLesson = await prisma.lesson.findFirstOrThrow({
+      where: { courseId: myId },
+    });
+    const otherLesson = await prisma.lesson.findFirstOrThrow({
+      where: { courseId: other!.id },
+    });
 
     const res = await agent
       .put(`/api/backoffice/courses/${myId}/lessons/reorder`)
       .send({ lessonIds: [myLesson.id, otherLesson.id] });
     expect(res.status).toBe(404);
-    const untouched = await prisma.lesson.findUniqueOrThrow({ where: { id: otherLesson.id } });
+    const untouched = await prisma.lesson.findUniqueOrThrow({
+      where: { id: otherLesson.id },
+    });
     expect(untouched.sortOrder).toBe(otherLesson.sortOrder);
-    const unchanged = await prisma.lesson.findUniqueOrThrow({ where: { id: myLesson.id } });
+    const unchanged = await prisma.lesson.findUniqueOrThrow({
+      where: { id: myLesson.id },
+    });
     expect(unchanged.sortOrder).toBe(myLesson.sortOrder);
 
     await agent
@@ -138,19 +170,34 @@ describe('Commerce course workflow (e2e)', () => {
   it('imports a confirmed package at most once and never cancels one that is importing', async () => {
     const agent = await signInAs(app, 'ADMIN');
     const job = await prisma.coursePackageJob.create({
-      data: { kind: 'IMPORT', status: 'AWAITING_CONFIRM', sourceFileName: 'e2e.zip' },
+      data: {
+        kind: 'IMPORT',
+        status: 'AWAITING_CONFIRM',
+        sourceFileName: 'e2e.zip',
+      },
     });
     try {
       const confirms = await Promise.all([
-        agent.post(`/api/backoffice/courses/import/${job.id}/confirm`).send({ onConflict: 'ABORT' }),
-        agent.post(`/api/backoffice/courses/import/${job.id}/confirm`).send({ onConflict: 'ABORT' }),
+        agent
+          .post(`/api/backoffice/courses/import/${job.id}/confirm`)
+          .send({ onConflict: 'ABORT' }),
+        agent
+          .post(`/api/backoffice/courses/import/${job.id}/confirm`)
+          .send({ onConflict: 'ABORT' }),
       ]);
       // 只有一次能认领任务；另一次 409。认领到的那次因为暂存文件不存在而失败，这里不关心
       expect(confirms.filter((r) => r.status === 409)).toHaveLength(1);
 
-      await prisma.coursePackageJob.update({ where: { id: job.id }, data: { status: 'IMPORTING' } });
-      await agent.post(`/api/backoffice/courses/import/${job.id}/cancel`).expect(409);
-      const after = await prisma.coursePackageJob.findUniqueOrThrow({ where: { id: job.id } });
+      await prisma.coursePackageJob.update({
+        where: { id: job.id },
+        data: { status: 'IMPORTING' },
+      });
+      await agent
+        .post(`/api/backoffice/courses/import/${job.id}/cancel`)
+        .expect(409);
+      const after = await prisma.coursePackageJob.findUniqueOrThrow({
+        where: { id: job.id },
+      });
       expect(after.status).toBe('IMPORTING');
     } finally {
       await prisma.coursePackageJob.delete({ where: { id: job.id } });

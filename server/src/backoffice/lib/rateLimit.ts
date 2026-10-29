@@ -112,14 +112,22 @@ export async function consume(
   // 偶尔顺手清掉早已过期的窗口，表不会无限增长
   if (Math.random() < 0.01) {
     void pool()
-      .query(`DELETE FROM backoffice_rate_limits WHERE resets_at < now() - interval '1 hour'`)
+      .query(
+        `DELETE FROM backoffice_rate_limits WHERE resets_at < now() - interval '1 hour'`,
+      )
       .catch(() => undefined);
   }
-  return { allowed: row.count <= limit, retryAfterSeconds: retryAfter(row.resets_at) };
+  return {
+    allowed: row.count <= limit,
+    retryAfterSeconds: retryAfter(row.resets_at),
+  };
 }
 
 /** 只查不计数：窗口内已达上限则返回 false。 */
-export async function peek(key: string, limit: number): Promise<RateLimitResult> {
+export async function peek(
+  key: string,
+  limit: number,
+): Promise<RateLimitResult> {
   if (useMemoryStore()) return peekMemory(key, limit);
   const { rows } = await pool().query<{ count: number; resets_at: Date }>(
     `SELECT count, resets_at FROM backoffice_rate_limits WHERE key = $1 AND resets_at > now()`,
@@ -133,5 +141,7 @@ export async function peek(key: string, limit: number): Promise<RateLimitResult>
 /** 清掉某个 key 的窗口（例如登录成功后清零失败计数）。 */
 export async function clear(key: string): Promise<void> {
   if (useMemoryStore()) return clearMemory(key);
-  await pool().query(`DELETE FROM backoffice_rate_limits WHERE key = $1`, [key]);
+  await pool().query(`DELETE FROM backoffice_rate_limits WHERE key = $1`, [
+    key,
+  ]);
 }

@@ -142,7 +142,11 @@ export class BackofficeAuthController {
         outcome.code === 'INVALID_INPUT'
       ) {
         await consume(ipKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
-        await consume(pairKey, SIGN_IN_MAX_PER_WINDOW, RATE_LIMIT_WINDOW_MINUTES);
+        await consume(
+          pairKey,
+          SIGN_IN_MAX_PER_WINDOW,
+          RATE_LIMIT_WINDOW_MINUTES,
+        );
       }
       throw backofficeError(outcome.code, 'Sign-in rejected');
     }
@@ -197,7 +201,10 @@ export class BackofficeAuthController {
     @Query('token') token?: string,
     @Query('purpose') purpose?: string,
   ) {
-    await limit(`token-status:${clientIp(request)}`, TOKEN_STATUS_MAX_PER_WINDOW);
+    await limit(
+      `token-status:${clientIp(request)}`,
+      TOKEN_STATUS_MAX_PER_WINDOW,
+    );
     if (purpose !== 'activation' && purpose !== 'reset')
       throw backofficeError('INVALID_INPUT', 'Unsupported purpose');
     const status = await inspectLinkStatus(
@@ -210,7 +217,10 @@ export class BackofficeAuthController {
   @Post('auth/forgot-password')
   @HttpCode(200)
   async forgotPassword(@Req() request: Request, @Body() raw: unknown) {
-    await limit(`forgot-password:${clientIp(request)}`, EMAIL_SEND_MAX_PER_WINDOW);
+    await limit(
+      `forgot-password:${clientIp(request)}`,
+      EMAIL_SEND_MAX_PER_WINDOW,
+    );
     const body = asBody(raw);
     limit(
       `forgot-password-email:${normaliseEmail(readString(body, 'email'))}`,

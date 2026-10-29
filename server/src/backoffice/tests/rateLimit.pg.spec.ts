@@ -33,14 +33,19 @@ describeDb('rate limiting (PostgreSQL store)', () => {
         'utf8',
       ),
     );
-    await db.query(`DELETE FROM backoffice_rate_limits WHERE key LIKE 'pg-test-%'`);
+    await db.query(
+      `DELETE FROM backoffice_rate_limits WHERE key LIKE 'pg-test-%'`,
+    );
   });
 
   afterAll(async () => {
-    await db.query(`DELETE FROM backoffice_rate_limits WHERE key LIKE 'pg-test-%'`);
+    await db.query(
+      `DELETE FROM backoffice_rate_limits WHERE key LIKE 'pg-test-%'`,
+    );
     await db.closePool();
     process.env.DATABASE_URL = saved.url;
-    if (saved.store === undefined) delete process.env.BACKOFFICE_RATE_LIMIT_STORE;
+    if (saved.store === undefined)
+      delete process.env.BACKOFFICE_RATE_LIMIT_STORE;
     else process.env.BACKOFFICE_RATE_LIMIT_STORE = saved.store;
   });
 
