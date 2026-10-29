@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
 import type { Prisma } from '@prisma/client';
@@ -10,7 +11,7 @@ import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 import { PackageInspector, PackageError } from './package-inspector';
 import { PackageImporter, ImportError } from './package-importer';
 import type { PackageManifest, PackageValidationReport } from './contracts/manifest';
-import { buildPackageFromRawZip } from './excel-package';
+import { runImportWorker } from './heavy-tasks';
 
 export interface JobReport {
   errors: PackageValidationReport['errors'];
@@ -98,24 +99,41 @@ export class PackageJobsService {
     actorEmployeeId: string | null,
     idempotencyKey?: string,
   ) {
-    let built: Awaited<ReturnType<typeof buildPackageFromRawZip>>;
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-raw-'));
     try {
-      built = await buildPackageFromRawZip(file.bytes);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '原始素材解析失败';
-      throw new PackageError('RAW_MATERIALS_INVALID', 422, message);
+      const rawPath = path.join(tmp, 'raw.zip');
+      const outPath = path.join(tmp, 'package.zip');
+      await fs.writeFile(rawPath, file.bytes);
+      let built: {
+        warnings: string[];
+        courseCode: string;
+        slug: string;
+        title: string;
+        lessonCount: number;
+        mediaCount: number;
+      };
+      try {
+        // 原始素材转换是 CPU 重活，放到 worker 线程，避免阻塞事件循环
+        built = await runImportWorker<typeof built>('raw', { rawPath, outPath });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '原始素材解析失败';
+        throw new PackageError('RAW_MATERIALS_INVALID', 422, message);
+      }
+      const pkgBytes = await fs.readFile(outPath);
+      const job = await this.createImportJob(
+        { name: `${built.courseCode}.lgcourse.zip`, bytes: pkgBytes },
+        actorEmployeeId,
+        idempotencyKey,
+      );
+      return {
+        ...job,
+        sourceFileName: file.name,
+        rawWarnings: built.warnings,
+        raw: { courseCode: built.courseCode, slug: built.slug, title: built.title, lessonCount: built.lessonCount, mediaCount: built.mediaCount },
+      };
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
-    const job = await this.createImportJob(
-      { name: `${built.courseCode}.lgcourse.zip`, bytes: built.bytes },
-      actorEmployeeId,
-      idempotencyKey,
-    );
-    return {
-      ...job,
-      sourceFileName: file.name,
-      rawWarnings: built.warnings,
-      raw: { courseCode: built.courseCode, slug: built.slug, title: built.title, lessonCount: built.lessonCount, mediaCount: built.mediaCount },
-    };
   }
 
   /**
@@ -153,39 +171,51 @@ export class PackageJobsService {
   private async runValidation(jobId: string): Promise<void> {
     const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
     if (!job || !job.storageKey) return;
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-ins-'));
     try {
       const zipBytes = await this.storage.getStaging(job.storageKey);
-      const { manifest, files, report } = await this.inspector.inspect(zipBytes);
-      // 保存解压文件供确认时导入
+      const packagePath = path.join(tmp, 'package.zip');
+      const outDir = path.join(tmp, 'files');
+      await fs.mkdir(outDir, { recursive: true });
+      await fs.writeFile(packagePath, zipBytes);
+      // 解压 + 全面校验是 CPU 重活，放到 worker 线程，避免阻塞事件循环
+      const result = await runImportWorker<{
+        manifest: PackageManifest;
+        report: PackageValidationReport;
+        files: string[];
+      }>('inspect', { packagePath, outDir, config: this.config });
       await this.prisma.coursePackageJob.update({
         where: { id: jobId },
         data: {
-          status: report.errors.length > 0 ? 'FAILED' : 'AWAITING_CONFIRM',
+          status: result.report.errors.length > 0 ? 'FAILED' : 'AWAITING_CONFIRM',
           stage: 'VALIDATED',
           progress: 100,
-          manifest: manifest as unknown as Prisma.InputJsonValue,
-          report: { errors: report.errors, warnings: report.warnings } as unknown as Prisma.InputJsonValue,
-          error: report.errors.length > 0 ? report.errors[0].message : null,
+          manifest: result.manifest as unknown as Prisma.InputJsonValue,
+          report: { errors: result.report.errors, warnings: result.report.warnings } as unknown as Prisma.InputJsonValue,
+          error: result.report.errors.length > 0 ? result.report.errors[0].message : null,
         },
       });
-      // 暂存解压内容到 staging（JSON 化 + 媒体二进制）
-      await this.persistExtracted(jobId, files, manifest);
+      // 暂存解压内容到 staging（媒体二进制 + manifest）
+      await this.persistExtractedFromDir(jobId, outDir, result.files, result.manifest);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Validation failed';
       await this.prisma.coursePackageJob.update({
         where: { id: jobId },
         data: { status: 'FAILED', error: message, progress: 100 },
       });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
-  private async persistExtracted(
+  private async persistExtractedFromDir(
     jobId: string,
-    files: Map<string, Buffer>,
+    outDir: string,
+    names: string[],
     manifest: PackageManifest,
   ): Promise<void> {
-    for (const [name, bytes] of files) {
-      if (name === 'manifest.json' || name === 'checksums.sha256') continue;
+    for (const name of names) {
+      const bytes = await fs.readFile(path.join(outDir, name));
       await this.storage.putStaging(this.storage.stagingKey(jobId, name), bytes);
     }
     await this.storage.putStaging(
