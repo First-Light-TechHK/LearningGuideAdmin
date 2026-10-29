@@ -68,7 +68,7 @@ npx prisma db seed       # 种子数据（幂等）
 npm run start:dev        # http://localhost:3000
 ```
 
-Helpdesk 推荐评测（设计文档 §4A.11）：`npm run eval:helpdesk -- --out helpdesk-eval-report.md`。有 `OPENROUTER_API_KEY` 时用真模型、花费上限 `HELPDESK_EVAL_BUDGET_USD`（缺省 5 美元）；没有 key 时用假模型，报告注明不是模型成绩。
+Helpdesk 推荐评测（设计文档 §4A.11）：`npm run eval:helpdesk -- --out helpdesk-eval-report.md`。有 `OPENROUTER_API_KEY` 时用真模型、花费上限 `HELPDESK_EVAL_BUDGET_USD`（缺省 5 美元）；没有 key 时用假模型，报告注明不是模型成绩。只有真模型、整套用例且加 `--pg <DATABASE_URL>` 的运行才可能过闸（退出码 0）。
 
 ### 前端（client/）
 
