@@ -85,10 +85,10 @@ export function ConfigPanel() {
     await selectCourse(v)
   }
 
-  /** 切换编辑模式（Lecture / Socratic / Assessment）前先过未保存提醒 */
+  /** 切换编辑分段项（MAIN / Lecture / Socratic / Assessment）前先过未保存提醒 */
   const onEditModeChange = async (v: string) => {
     if (!(await guard())) return
-    setEditMode(v as 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT')
+    setEditMode(v as 'MAIN' | 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT')
   }
 
   /** Reset 只改编辑区，Save 后才生效（REQ-0147，QA 2026-10-27 A4） */
@@ -98,6 +98,18 @@ export function ConfigPanel() {
   }
 
   const onOnlineChange = async (checked: boolean) => {
+    // 2026-10-29：打开 Online 需先满足 Portal 同步 + 有上线版本两个前提；
+    // 不满足时拦截并弹 warning，开关不会真的打开（Switch 会弹回）。
+    if (checked) {
+      if (!config?.externalId) {
+        message.warning(text('onlineNotSynced'))
+        return
+      }
+      if (!config?.hasLiveRelease) {
+        message.warning(text('onlineNoLive'))
+        return
+      }
+    }
     try {
       await setOnline(checked)
       message.success(checked ? text('onlineOn') : text('onlineOff'))
@@ -205,13 +217,14 @@ export function ConfigPanel() {
           },
         }}
       >
-        {/* 模式切换（2026-10-27 新增）：Lecture / Socratic / Assessment，决定下方 System Prompt 编辑的是哪个模式 */}
+        {/* 分段控件（2026-10-29 新增 MAIN 主提示词项，置于最前）：蓝色滑块样式与对话区对齐 */}
         <div style={{ marginBottom: tokens.spacing.md, flexShrink: 0 }}>
           <Segmented
             block
+            className="ai-segmented"
             value={editMode}
             onChange={(v) => void onEditModeChange(v as string)}
-            options={(['LECTURE', 'SOCRATIC', 'ASSESSMENT'] as const).map((m) => ({
+            options={(['MAIN', 'LECTURE', 'SOCRATIC', 'ASSESSMENT'] as const).map((m) => ({
               label: modeLabel(m),
               value: m,
             }))}
@@ -277,6 +290,7 @@ export function ConfigPanel() {
             okText={text('resetConfirm')}
             cancelText={text('unsavedStay')}
             onConfirm={onReset}
+            overlayInnerStyle={{ width: 416 }}
           >
             <Button type="link" style={{ padding: 0, height: 'auto' }}>
               <span style={{ textDecoration: 'underline' }}>{text('reset')}</span>

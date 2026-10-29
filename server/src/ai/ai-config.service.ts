@@ -4,7 +4,9 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CourseAiConfig } from '@prisma/client';
@@ -16,6 +18,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 import { SaveAiConfigDto } from './dto/save-config.dto';
 import {
+  DEFAULT_MAIN_PROMPT,
   DEFAULT_PROMPTS,
   defaultWelcome,
   promptTemplateSeeds,
@@ -40,11 +43,19 @@ export interface AiConfigView {
   llmProvider: string;
   /** 是否对用户侧开放（课程级，§4.2.6；2026-10-20 由 CourseAiConfig.online 搬到 Course.aiTutorOnline） */
   online: boolean;
+  /** Portal course.slug；null 表示还没和 Portal 课程对应（Online 开开关联前提 1） */
+  externalId: string | null;
+  /** 是否存在上线版本 Online 开开关联前提 2） */
+  hasLiveRelease: boolean;
   hasApiKey: boolean;
   /** 课程级统一 Welcome Message（2026-10-27 起不再按模式区分） */
   welcomeMsg: string | null;
   /** 课程级统一 LLM Model（2026-10-27 起不再按模式区分；null 回退 AI_AVAILABLE_MODELS[0]） */
   model: string;
+  /** 主提示词（讲授/苏格拉底共享；2026-10-29 新增） */
+  main: AiModeView;
+  /** MAIN 分段项的默认值（main.md 文件内容），前端 Reset / 新建 Release 时用此值填充 textarea */
+  defaultMainSystemPrompt: string;
   /** Lecture 模式的 System Prompt（§4.2.1） */
   lecture: AiModeView;
   /** Socratic 模式的 System Prompt */
@@ -111,6 +122,7 @@ export type WelcomeLocale = 'zh-CN' | 'en-GB';
 /** 课程级关键字段（用于解析「测试所选 Release」与 Online 状态） */
 interface CourseRef {
   id: string;
+  externalId: string | null;
   currentReleaseId: string | null;
   aiTestReleaseId: string | null;
   aiTutorOnline: boolean;
@@ -124,7 +136,9 @@ function toPromptMode(mode: string): PromptMode | null {
 }
 
 @Injectable()
-export class AiConfigService {
+export class AiConfigService implements OnModuleInit {
+  private readonly logger = new Logger(AiConfigService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
@@ -132,6 +146,38 @@ export class AiConfigService {
     // 课程与 Release 归 KS 所有，只经契约读写（docs/Engine_Split_Implementation.md）
     @Inject(KNOWLEDGE_CLIENT) private readonly knowledge: KnowledgeClient,
   ) {}
+
+  /**
+   * Nest 启动时自动同步三个默认模板到 PromptTemplate 表（2026-10-29 新增）。
+   * 解决云端部署后 md 文件更新但模板表仍旧值的漂移问题。
+   * - 幂等 upsert，重复跑无副作用
+   * - main 不进表（main 不是模式模板，直接走 DEFAULT_MAIN_PROMPT 兜底）
+   * - 失败只告警，不阻塞应用启动
+   * - 本地手动 `npm run prompts:sync` 仍保留作为修复手段
+   */
+  async onModuleInit(): Promise<void> {
+    try {
+      let synced = 0;
+      for (const seed of promptTemplateSeeds()) {
+        await this.prisma.promptTemplate.upsert({
+          where: { id: seed.id },
+          update: {
+            systemPrompt: seed.systemPrompt,
+            welcomeMsg: seed.welcomeMsg,
+          },
+          create: seed,
+        });
+        synced++;
+      }
+      this.logger.log(
+        `PromptTemplate 默认模板已同步（${synced} 行，来自 prompts/*.md）`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `PromptTemplate 默认模板同步失败（将在首次 prompts:sync 手动修复）：${(err as Error).message}`,
+      );
+    }
+  }
 
   defaultModel(): string {
     return this.availableModels()[0] ?? 'openai/gpt-4o-mini';
@@ -215,11 +261,16 @@ export class AiConfigService {
       throw new BadRequestException(`不支持的 LLM 模型：${dto.llmModel}`);
     }
 
-    // System Prompt 按 mode 写入；Welcome / Model 写入共享列
+    // System Prompt 按分段项写入；Welcome / Model 写入共享列
     const systemPromptField: Record<string, string | null> = {};
-    if (dto.mode === 'LECTURE') systemPromptField.lectureSystemPrompt = dto.systemPrompt || null;
-    else if (dto.mode === 'SOCRATIC') systemPromptField.socraticSystemPrompt = dto.systemPrompt || null;
-    else if (dto.mode === 'ASSESSMENT') systemPromptField.assessmentSystemPrompt = dto.systemPrompt || null;
+    if (dto.mode === 'MAIN')
+      systemPromptField.mainSystemPrompt = dto.systemPrompt || null;
+    else if (dto.mode === 'LECTURE')
+      systemPromptField.lectureSystemPrompt = dto.systemPrompt || null;
+    else if (dto.mode === 'SOCRATIC')
+      systemPromptField.socraticSystemPrompt = dto.systemPrompt || null;
+    else if (dto.mode === 'ASSESSMENT')
+      systemPromptField.assessmentSystemPrompt = dto.systemPrompt || null;
 
     // 省略的字段不写，由数据库保留原值：不再先读后写，避免并发保存把 apiKey 覆盖回旧值（QA 2026-10-27 A11）
     const data = {
@@ -228,7 +279,9 @@ export class AiConfigService {
       ...(dto.apiKey !== undefined
         ? { apiKey: dto.apiKey === '' ? null : this.crypto.encrypt(dto.apiKey) }
         : {}),
-      ...(dto.welcomeMsg !== undefined ? { welcomeMsg: dto.welcomeMsg || null } : {}),
+      ...(dto.welcomeMsg !== undefined
+        ? { welcomeMsg: dto.welcomeMsg || null }
+        : {}),
       ...systemPromptField,
     };
     const cfg = await this.prisma.courseAiConfig.upsert({
@@ -240,19 +293,22 @@ export class AiConfigService {
   }
 
   /**
-   * §4.2.4（2026-10-27 调整）：重置 = 清除「测试所选 Release」中**当前模式**的 System Prompt 自定义覆盖，
-   * 恢复该模式默认模板。Welcome / Model 为课程级共享，重置不影响它们（保持用户已设置的值）。
+   * §4.2.4（2026-10-29 调整）：重置 = 清除「测试所选 Release」中**当前分段项**的自定义覆盖，
+   * 恢复默认值。重置 MAIN 只清空 mainSystemPrompt 列，不影响其他模式。
+   * Welcome / Model 为课程级共享，重置不影响它们。
    */
   async resetConfig(
     courseId: string,
-    mode: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT',
+    mode: 'MAIN' | 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT',
     requestedReleaseId?: string,
   ): Promise<AiConfigView> {
     const course = await this.ensureCourse(courseId);
     const releaseId = await this.targetReleaseId(course, requestedReleaseId);
     const systemPromptField: Record<string, null> = {};
     const modeIdField: Record<string, null> = {};
-    if (mode === 'LECTURE') {
+    if (mode === 'MAIN') {
+      systemPromptField.mainSystemPrompt = null;
+    } else if (mode === 'LECTURE') {
       systemPromptField.lectureSystemPrompt = null;
       modeIdField.lectureModeId = null;
     } else if (mode === 'SOCRATIC') {
@@ -400,9 +456,11 @@ export class AiConfigService {
   }
 
   /**
-   * 对话用有效提示词解析（§4.4.2 第 4 步）：
-   * System Prompt 按模式取（自定义 > 课程绑定模板 > 默认模板）；
-   * Welcome 为课程级共享（2026-10-27）。
+   * 对话用有效提示词解析（§4.4.2 第 4 步，2026-10-29 重写；2026-10-29 简化）：
+   * - 拼接顺序（LECTURE/SOCRATIC）：main（兜底 DEFAULT_MAIN_PROMPT）→ 模式 prompt
+   * - ASSESSMENT：只返回模式 prompt（不拼 main）
+   * - Welcome 为课程级共享。
+   * - MAIN_ANCHOR 已删：main.md 第 9 节 PRECEDENCE 正式覆盖回指语义，不再硬编码追加。
    */
   async resolvePrompts(
     courseId: string,
@@ -421,33 +479,45 @@ export class AiConfigService {
           ? cfg?.socraticModeId
           : cfg?.assessmentModeId;
     const template = modeIdField
-      ? await this.prisma.promptTemplate.findUnique({ where: { id: modeIdField } })
+      ? await this.prisma.promptTemplate.findUnique({
+          where: { id: modeIdField },
+        })
       : await this.prisma.promptTemplate.findFirst({
           where: { mode, isDefault: true },
         });
-    // System Prompt 按模式取自定义覆盖
+    // System Prompt 按模式取自定义覆盖 → 模板 → 文件默认
     const customPrompt =
       mode === 'LECTURE'
         ? cfg?.lectureSystemPrompt
         : mode === 'SOCRATIC'
           ? cfg?.socraticSystemPrompt
           : cfg?.assessmentSystemPrompt;
-    // 库中无模板时回退 `src/ai/prompts/` 文件默认值（2026-10-26）
+    const modePrompt =
+      customPrompt ||
+      template?.systemPrompt ||
+      DEFAULT_PROMPTS[mode].systemPrompt;
+
+    // 主提示词：只对 LECTURE / SOCRATIC 生效；ASSESSMENT 独立
+    if (mode === 'ASSESSMENT') {
+      return {
+        systemPrompt: modePrompt,
+        welcomeMsg: cfg?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
+      };
+    }
+    const mainPrompt = cfg?.mainSystemPrompt ?? DEFAULT_MAIN_PROMPT;
+    const systemPrompt = `${mainPrompt}\n\n${modePrompt}`;
     return {
-      systemPrompt:
-        customPrompt ||
-        template?.systemPrompt ||
-        DEFAULT_PROMPTS[mode].systemPrompt,
+      systemPrompt,
       welcomeMsg: cfg?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
     };
   }
 
   /** 对话用运行参数：Provider/模型/明文 key（该 Release 配置解密，回退 env 全局）/baseUrl。
-   *  2026-10-27：model 为课程级共享，不再按模式区分。 */
+   *  2026-10-27：model 为课程级共享，不再按模式区分；mode 保留签名对齐 resolvePrompts，标 _ 忽略未使用。 */
   async resolveRuntime(
     courseId: string,
     releaseId: string | null,
-    mode: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT',
+    _mode: 'LECTURE' | 'SOCRATIC' | 'ASSESSMENT',
   ): Promise<{
     provider: string;
     model: string;
@@ -526,9 +596,13 @@ export class AiConfigService {
       releaseTag,
       isLive: releaseId != null && releaseId === course.currentReleaseId,
       llmProvider: cfg?.llmProvider ?? 'openrouter',
-      // 2026-10-27：Welcome / Model 为课程级共享；System Prompt 按模式分开
+      // 2026-10-29：main 为共享主提示词（讲授/苏格拉底拼接最前）；Welcome / Model 为课程级共享；System Prompt 按模式分开
       welcomeMsg: cfg?.welcomeMsg ?? null,
       model: cfg?.model ?? this.defaultModel(),
+      main: {
+        systemPrompt: cfg?.mainSystemPrompt ?? null,
+      },
+      defaultMainSystemPrompt: DEFAULT_MAIN_PROMPT,
       lecture: {
         systemPrompt: cfg?.lectureSystemPrompt ?? null,
       },
@@ -540,6 +614,8 @@ export class AiConfigService {
       },
       hasApiKey: Boolean(cfg?.apiKey),
       online: course.aiTutorOnline,
+      externalId: course.externalId,
+      hasLiveRelease: Boolean(course.currentReleaseId),
     };
   }
 

@@ -243,6 +243,7 @@
     "changeCourse": "Change Course",
     "manageOnline": "Manage all online tutors",
     "modes": {
+      "MAIN": "Main",
       "LECTURE": "Lecture",
       "SOCRATIC": "Socratic",
       "ASSESSMENT": "Assessment"
@@ -263,6 +264,9 @@
     "saveFailed": "Could not save the configuration",
     "onlineOn": "Online: students can use this tutor",
     "onlineOff": "Offline: students cannot use this tutor",
+    "onlineNotSynced": "Sync this course to Portal before enabling Online",
+    "onlineNoLive": "Set a release live before enabling Online",
+    "chatNoRelease": "Select a test release or set a release live first",
     "unpublished": "Not published",
     "noReleases": "No releases yet",
     "live": "Live",
@@ -279,7 +283,6 @@
     "unsavedTitle": "You have unsaved configuration changes",
     "unsavedContent": "Save the System Prompt / Welcome Message / LLM Model changes before continuing?",
     "unsavedSave": "Save",
-    "unsavedDiscard": "Discard",
     "unsavedStay": "Cancel",
     "managerTitle": "Manage all online tutors",
     "managerSearch": "Search AI Tutor",

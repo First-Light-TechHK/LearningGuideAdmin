@@ -4,6 +4,7 @@ import {
   chatStream,
   type AiConfigView,
   type AiMode,
+  type AiSegmentKey,
   type AiTutorListView,
   type PromptTemplate,
 } from '../api/ai'
@@ -27,8 +28,8 @@ interface AiState {
   selectedCourseId: string | null
   /** 对话注入模式（仅 Lecture / Socratic；切换不重置会话，2026-10-27） */
   mode: AiMode
-  /** 配置面板当前编辑的模式（Lecture / Socratic / Assessment），与对话 mode 解耦 */
-  editMode: AiMode
+  /** 配置面板当前编辑的分段项（MAIN / Lecture / Socratic / Assessment），与对话 mode 解耦 */
+  editMode: AiSegmentKey
   models: string[]
   templates: { LECTURE?: PromptTemplate; SOCRATIC?: PromptTemplate; ASSESSMENT?: PromptTemplate }
   config: AiConfigView | null
@@ -52,7 +53,7 @@ interface AiState {
   /** 重新拉取当前课程的配置与 Release 列表（进入 AI Tutor 时刷新，避免 Release 列表过期） */
   refreshActiveCourse: () => Promise<void>
   setMode: (mode: AiMode) => void
-  setEditMode: (mode: AiMode) => void
+  setEditMode: (mode: AiSegmentKey) => void
   patchForm: (patch: Partial<AiForm>) => void
   save: () => Promise<boolean>
   /** 把当前编辑模式的 System Prompt 恢复为模板默认值（只改编辑区，需 Save 才生效） */
@@ -93,16 +94,26 @@ function persistChat(courseId: string, messages: ChatMessage[]) {
 const now = () => new Date().toISOString()
 
 /**
- * 构建表单（2026-10-27 调整）：
- * - System Prompt：取 editMode 对应模式的自定义 > 该模式模板默认
+ * 构建表单（2026-10-29 调整）：
+ * - MAIN：用户自定义值优先；null 时用后端传来的 defaultMainSystemPrompt（main.md 内容）填充 textarea
+ *   （运行时 resolvePrompts 也兜底 DEFAULT_MAIN_PROMPT，这里前端展示保持一致）
+ * - LECTURE/SOCRATIC/ASSESSMENT：自定义 > 该模式模板默认
  * - Welcome Message：课程级共享（config.welcomeMsg > lecture 模板默认欢迎语）
  * - LLM Model：课程级共享（config.model）
  */
 function buildForm(
   config: AiConfigView | null,
   templates: AiState['templates'],
-  editMode: AiMode,
+  editMode: AiSegmentKey,
 ): AiForm {
+  if (editMode === 'MAIN') {
+    return {
+      // 用户自定义优先；null 时用 main.md 默认值填充（避免 textarea 空白）
+      systemPrompt: config?.main.systemPrompt ?? config?.defaultMainSystemPrompt ?? '',
+      welcomeMsg: config?.welcomeMsg || templates.LECTURE?.welcomeMsg || '',
+      llmModel: config?.model || '',
+    }
+  }
   const t = templates[editMode]
   const view =
     editMode === 'LECTURE'
@@ -219,8 +230,8 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   /**
-   * 切换配置面板编辑模式（Lecture / Socratic / Assessment）：
-   * 重新载入该模式的 System Prompt 到表单；Welcome / Model 为课程级共享，保持不变。
+   * 切换配置面板编辑分段项（MAIN / Lecture / Socratic / Assessment）：
+   * 重新载入对应 System Prompt 到表单；Welcome / Model 为课程级共享，保持不变。
    */
   setEditMode(editMode) {
     const { config, templates } = get()
@@ -251,17 +262,24 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (!selectedCourseId) return false
     set({ saving: true })
     try {
-      // 2026-10-27：System Prompt 按 editMode 写入；Welcome / Model 写入课程级共享列。
-      // 与模板默认值相同的文本按「未自定义」保存（空串），这样课程继续跟随模板更新，
-      // Reset 后点 Save 也就等于清除自定义（QA 2026-10-27 A4）。
+      // 2026-10-29：System Prompt 按 editMode 写入；Welcome / Model 写入课程级共享列。
+      // 所有分段项（含 MAIN）都做「值等于默认值则存空串」优化：
+      // - MAIN 默认值 = config.defaultMainSystemPrompt（main.md 文件内容）
+      // - 其他模式默认值 = 模板默认值
+      // 这样数据库里只有用户自定义值才被固化，main.md 后续更新时自动跟随。
+      const isMain = editMode === 'MAIN'
+      const mainDefault = config?.defaultMainSystemPrompt ?? ''
       const payload: Parameters<typeof aiApi.saveConfig>[0] = {
         courseId: selectedCourseId,
         releaseId: config?.releaseId ?? undefined,
         mode: editMode,
         llmProvider: 'openrouter',
         llmModel: form.llmModel,
-        systemPrompt:
-          form.systemPrompt === templates[editMode]?.systemPrompt ? '' : form.systemPrompt,
+        systemPrompt: isMain
+          ? form.systemPrompt === mainDefault ? '' : form.systemPrompt
+          : form.systemPrompt === templates[editMode]?.systemPrompt
+            ? ''
+            : form.systemPrompt,
         welcomeMsg: form.welcomeMsg === templates.LECTURE?.welcomeMsg ? '' : form.welcomeMsg,
       }
       const next = await aiApi.saveConfig(payload)
@@ -280,10 +298,15 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   reset() {
-    const { editMode, templates, form } = get()
-    // 只把编辑区恢复为该模式模板默认值并标记未保存，点 Save 才落库（REQ-0147，QA 2026-10-27 A4）；
-    // 共享 Welcome / Model 不受影响
-    set({ form: { ...form, systemPrompt: templates[editMode]?.systemPrompt ?? '' } })
+    const { editMode, templates, form, config } = get()
+    // 2026-10-29：所有分段项 Reset 都恢复为各自默认值（前端显示层恢复）
+    // - MAIN 恢复为 main.md 文件默认值（config.defaultMainSystemPrompt）
+    // - 其他模式恢复为模板默认值
+    // Save 后才真正落库为空串，运行时走文件兜底
+    const defaultPrompt = editMode === 'MAIN'
+      ? (config?.defaultMainSystemPrompt ?? '')
+      : templates[editMode as AiMode]?.systemPrompt ?? ''
+    set({ form: { ...form, systemPrompt: defaultPrompt } })
   },
 
   /** §4.2.6 顶部卡片 Online 开关：切换即时生效（当前选中课程） */

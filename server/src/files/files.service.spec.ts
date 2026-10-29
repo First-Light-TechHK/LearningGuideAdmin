@@ -23,7 +23,10 @@ describe('FilesService', () => {
   });
 
   it('md 文件应本地转换返回 title+markdown（标题=文件名去扩展名）', async () => {
-    const file = mkFile('我的笔记.md', Buffer.from('# 标题\n\n正文内容', 'utf8'));
+    const file = mkFile(
+      '我的笔记.md',
+      Buffer.from('# 标题\n\n正文内容', 'utf8'),
+    );
     const result = await service.convertFile(file);
     expect(result.title).toBe('我的笔记');
     expect(result.markdown).toContain('正文内容');
@@ -87,7 +90,9 @@ describe('FilesService', () => {
   });
 
   it('旧版 .doc/.xls 已纳入白名单：.doc 损坏内容报「转换失败」而非「格式暂不支持」', async () => {
-    expect(ALLOWED_EXTENSIONS).toEqual(expect.arrayContaining(['.doc', '.xls']));
+    expect(ALLOWED_EXTENSIONS).toEqual(
+      expect.arrayContaining(['.doc', '.xls']),
+    );
     await expect(
       service.convertFile(mkFile('broken.doc', Buffer.from('not a real doc'))),
     ).rejects.toThrow('文档转换失败');
@@ -101,7 +106,9 @@ describe('FilesService', () => {
     ).rejects.toThrow('不是有效的 .xls');
     // 白名单内的其它扩展名不走此校验（.md 正常转换）
     await expect(
-      service.convertFile(mkFile('ok.md', Buffer.from('# 标题\n\n正文', 'utf8'))),
+      service.convertFile(
+        mkFile('ok.md', Buffer.from('# 标题\n\n正文', 'utf8')),
+      ),
     ).resolves.toMatchObject({ title: 'ok' });
   });
 

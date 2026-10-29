@@ -247,10 +247,12 @@ function Bubble({ msg }: { msg: ChatMessage }) {
  * AI Tutor 右侧对话面板（§4.3）：模式切换 / New Chat / 流式消息列表 / 输入框。
  */
 export function ChatWindow() {
+  const { message } = App.useApp()
   const mode = useAiStore((s) => s.mode)
   const messages = useAiStore((s) => s.messages)
   const streaming = useAiStore((s) => s.streaming)
   const error = useAiStore((s) => s.error)
+  const config = useAiStore((s) => s.config)
   const selectedCourseId = useAiStore((s) => s.selectedCourseId)
   const setMode = useAiStore((s) => s.setMode)
   const newChat = useAiStore((s) => s.newChat)
@@ -267,9 +269,15 @@ export function ChatWindow() {
   }, [messages, streaming])
 
   const onSend = async () => {
-    const text = input
+    const t = input
+    if (!t.trim()) return
+    // 2026-10-29：没有可用版本（releaseId 为 null）时禁止发送
+    if (!config?.releaseId) {
+      message.warning(text('chatNoRelease'))
+      return
+    }
     setInput('')
-    await send(text)
+    await send(t)
   }
 
   /**
@@ -290,7 +298,7 @@ export function ChatWindow() {
           <ReleaseSelector />
           {/* 中间：模式切换（蓝色高亮选中项） */}
           <Segmented
-            className="ai-mode-segmented"
+            className="ai-segmented"
             value={mode}
             onChange={(v) => onModeChange(v as string)}
             options={(['LECTURE', 'SOCRATIC'] as const).map((m) => ({
@@ -304,7 +312,14 @@ export function ChatWindow() {
             icon={<PlusOutlined />}
             style={{ fontWeight: tokens.fontWeight.semibold }}
             disabled={streaming}
-            onClick={newChat}
+            onClick={() => {
+              // 2026-10-29：没有可用版本时禁止 New Chat
+              if (!config?.releaseId) {
+                message.warning(text('chatNoRelease'))
+                return
+              }
+              newChat()
+            }}
           >
             {text('newChat')}
           </Button>

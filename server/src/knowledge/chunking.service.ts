@@ -84,11 +84,7 @@ export class ChunkingService {
    * @param contentMd Markdown 内容
    * @param startOrder 起始 sortOrder（用于跨页面连续编号）
    */
-  chunkPage(
-    pageTitle: string,
-    contentMd: string,
-    startOrder: number,
-  ): Chunk[] {
+  chunkPage(pageTitle: string, contentMd: string, startOrder: number): Chunk[] {
     const content = contentMd?.trim();
     if (!content) return [];
 
