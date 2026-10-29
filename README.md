@@ -40,7 +40,7 @@ client/      前端（React + Vite + Ant Design 5.x，Phase 1 已搭建）
 
 本项目为 **Node.js** 工程（**无 Python / venv**）：依赖版本由 `server/package-lock.json`、`client/package-lock.json` 锁定，Node 版本见 `.nvmrc` 与各 `package.json` 的 `engines`；JS 依赖就地隔离在各自的 `node_modules`（等价于 Python 的 venv）。
 
-前置要求：Node.js ≥ 22.12（`nvm use` 自动读取 `.nvmrc`）、npm ≥ 10；数据库二选一——本机 PostgreSQL，或 Docker 一键起库。
+前置要求：Node.js ≥ 22.19（server 的 pi-agent-core 需要；`nvm use` 自动读取 `.nvmrc`）、npm ≥ 10；数据库二选一——本机 PostgreSQL，或 Docker 一键起库。
 
 ```powershell
 # Windows
