@@ -176,6 +176,32 @@ describe('Commerce course workflow (e2e)', () => {
         sourceFileName: 'e2e.zip',
       },
     });
+    // 让两次确认都先读到 AWAITING_CONFIRM 再往下走：并发窗口在本机只有一两毫秒，
+    // 不卡住就很难撞上。旧代码（先查再改）在这里会两次都开始导入，没有 409。
+    // 只拦确认接口里的读（看调用栈），别的地方读同一任务照常放行。
+    const delegate = prisma.coursePackageJob;
+    const original = delegate.findUnique.bind(
+      delegate,
+    ) as typeof delegate.findUnique;
+    let arrived = 0;
+    let done = 0;
+    let release: () => void = () => undefined;
+    const bothRead = new Promise<void>((resolve) => (release = resolve));
+    const spy = jest.spyOn(delegate, 'findUnique').mockImplementation(((
+      args: Parameters<typeof original>[0],
+    ) => {
+      const read = original(args);
+      const fromConfirm = new Error().stack?.includes('confirmImport');
+      if (args.where.id !== job.id || !fromConfirm || arrived >= 2) return read;
+      arrived += 1;
+      // 两次读都拿到结果之后才一起放行，保证两边看到的都是 AWAITING_CONFIRM
+      return read.then(async (row) => {
+        done += 1;
+        if (done === 2) release();
+        await bothRead;
+        return row;
+      });
+    }) as unknown as typeof delegate.findUnique);
     try {
       const confirms = await Promise.all([
         agent
@@ -186,7 +212,9 @@ describe('Commerce course workflow (e2e)', () => {
           .send({ onConflict: 'ABORT' }),
       ]);
       // 只有一次能认领任务；另一次 409。认领到的那次因为暂存文件不存在而失败，这里不关心
+      expect(arrived).toBe(2);
       expect(confirms.filter((r) => r.status === 409)).toHaveLength(1);
+      spy.mockRestore();
 
       await prisma.coursePackageJob.update({
         where: { id: job.id },
@@ -200,6 +228,7 @@ describe('Commerce course workflow (e2e)', () => {
       });
       expect(after.status).toBe('IMPORTING');
     } finally {
+      spy.mockRestore();
       await prisma.coursePackageJob.delete({ where: { id: job.id } });
     }
   });
