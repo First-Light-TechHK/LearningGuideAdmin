@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -406,23 +407,27 @@ export class CommerceCoursesService {
         })
       )?.defaultContentLanguage ||
       'en-GB';
-    const last = await this.prisma.lesson.findFirst({
-      where: { courseId: id },
-      orderBy: { sortOrder: 'desc' },
-      select: { sortOrder: true },
-    });
-    const sortOrder = (last?.sortOrder ?? 0) + 1;
-    const code = body.code?.trim() || `L${sortOrder}`;
     try {
-      await this.prisma.lesson.create({
-        data: {
-          courseId: id,
-          code,
-          sortOrder,
-          localizations: {
-            create: { language, title: body.title || code },
+      // 锁住课程行再取下一个序号：同时新建两节课不会拿到同一个 sortOrder / 默认 code
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "CommerceCourse" WHERE id = ${id} FOR UPDATE`;
+        const last = await tx.lesson.findFirst({
+          where: { courseId: id },
+          orderBy: { sortOrder: 'desc' },
+          select: { sortOrder: true },
+        });
+        const sortOrder = (last?.sortOrder ?? 0) + 1;
+        const code = body.code?.trim() || `L${sortOrder}`;
+        await tx.lesson.create({
+          data: {
+            courseId: id,
+            code,
+            sortOrder,
+            localizations: {
+              create: { language, title: body.title || code },
+            },
           },
-        },
+        });
       });
     } catch (error) {
       if (
@@ -467,33 +472,49 @@ export class CommerceCoursesService {
         })
       )?.defaultContentLanguage ||
       'en-GB';
-    await this.prisma.lesson.update({
-      where: { id: lessonId },
-      data: {
-        ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
-      },
-    });
-    if (
-      body.title !== undefined ||
-      body.description !== undefined ||
-      body.textHtml !== undefined
-    ) {
-      const existing = await this.prisma.lessonLocalization.findUnique({
-        where: { lessonId_language: { lessonId, language } },
-        select: { title: true, description: true, textHtml: true },
+    // 课时字段与本地化一起写：任何一步失败都不留下半截修改；改成重复的 code 返回 409 而不是 500
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.lesson.update({
+          where: { id: lessonId },
+          data: {
+            ...(body.code !== undefined ? { code: body.code.trim() } : {}),
+            ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+          },
+        });
+        if (
+          body.title !== undefined ||
+          body.description !== undefined ||
+          body.textHtml !== undefined
+        ) {
+          const existing = await tx.lessonLocalization.findUnique({
+            where: { lessonId_language: { lessonId, language } },
+            select: { title: true, description: true, textHtml: true },
+          });
+          const payload = {
+            title: body.title ?? existing?.title ?? 'Untitled',
+            description:
+              body.description !== undefined ? body.description : existing?.description ?? null,
+            textHtml: body.textHtml !== undefined ? body.textHtml : existing?.textHtml ?? null,
+          };
+          await tx.lessonLocalization.upsert({
+            where: { lessonId_language: { lessonId, language } },
+            create: { lessonId, language, ...payload },
+            update: payload,
+          });
+        }
       });
-      const payload = {
-        title: body.title ?? existing?.title ?? 'Untitled',
-        description:
-          body.description !== undefined ? body.description : existing?.description ?? null,
-        textHtml: body.textHtml !== undefined ? body.textHtml : existing?.textHtml ?? null,
-      };
-      await this.prisma.lessonLocalization.upsert({
-        where: { lessonId_language: { lessonId, language } },
-        create: { lessonId, language, ...payload },
-        update: payload,
-      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException({
+          code: 'LESSON_CODE_DUPLICATE',
+          message: 'A lesson with this code already exists in the course.',
+        });
+      }
+      throw error;
     }
     return this.detail(id);
   }
@@ -506,20 +527,35 @@ export class CommerceCoursesService {
     if (!lesson || lesson.courseId !== id) {
       throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
     }
-    await this.prisma.lesson.delete({ where: { id: lessonId } });
+    // 条件删除：重复点击时第二次删不到就按 404 返回，而不是 Prisma P2025 的 500
+    const removed = await this.prisma.lesson.deleteMany({ where: { id: lessonId, courseId: id } });
+    if (removed.count === 0) {
+      throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
+    }
     return this.detail(id);
   }
 
   async reorderLessons(id: string, lessonIds: string[]) {
     await this.assertExists(id);
-    await this.prisma.$transaction(
-      lessonIds.map((lessonId, index) =>
-        this.prisma.lesson.update({
-          where: { id: lessonId },
+    if (
+      !Array.isArray(lessonIds) ||
+      lessonIds.some((lessonId) => typeof lessonId !== 'string') ||
+      new Set(lessonIds).size !== lessonIds.length
+    ) {
+      throw new BadRequestException({ code: 'LESSON_ORDER_INVALID', message: 'lessonIds must be a list of distinct lesson ids' });
+    }
+    // 只动本课程的课时：别的课程的课时 id 或不存在的 id 整批拒绝（404），不留半截排序
+    await this.prisma.$transaction(async (tx) => {
+      for (const [index, lessonId] of lessonIds.entries()) {
+        const moved = await tx.lesson.updateMany({
+          where: { id: lessonId, courseId: id },
           data: { sortOrder: index + 1 },
-        }),
-      ),
-    );
+        });
+        if (moved.count === 0) {
+          throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
+        }
+      }
+    });
     return this.detail(id);
   }
 
