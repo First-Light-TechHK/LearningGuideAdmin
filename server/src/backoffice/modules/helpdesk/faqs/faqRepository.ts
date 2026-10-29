@@ -1,6 +1,8 @@
 import {
+  FAQ_SIGNALS,
   isHelpdeskLocale,
   type FaqCategory,
+  type FaqSignal,
   type HelpdeskQaSource,
 } from '../../../../contracts/helpdesk-qa';
 import { query, withTransaction } from '../../../lib/db';
@@ -88,6 +90,7 @@ export type FaqPatch = Partial<
     | 'questionZh'
     | 'answerZh'
     | 'keywords'
+    | 'signals'
     | 'status'
   >
 >;
@@ -121,7 +124,7 @@ export type FaqRepository = {
 };
 
 const COLUMNS = `id, category, popular, question_en, answer_en, question_zh, answer_zh,
-  keywords, status, version, created_by, updated_by, created_at, updated_at`;
+  keywords, signals, status, version, created_by, updated_by, created_at, updated_at`;
 
 const PATCH_COLUMNS: Record<keyof FaqPatch, string> = {
   category: 'category',
@@ -131,8 +134,19 @@ const PATCH_COLUMNS: Record<keyof FaqPatch, string> = {
   questionZh: 'question_zh',
   answerZh: 'answer_zh',
   keywords: 'keywords',
+  signals: 'signals',
   status: 'status',
 };
+
+/** text[] 列（参数要显式转型）。 */
+const ARRAY_COLUMNS: readonly (keyof FaqPatch)[] = ['keywords', 'signals'];
+
+/** 读出的信号：只留认识的，按 chip 优先级排（与写入时一致）。 */
+function signalsOf(value: unknown): FaqSignal[] {
+  if (!Array.isArray(value)) return [];
+  const stored = new Set(value.map(String));
+  return FAQ_SIGNALS.filter((signal) => stored.has(signal));
+}
 
 function iso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -149,6 +163,7 @@ function toFaq(row: Row): HelpdeskFaq {
     questionZh: String(row.question_zh),
     answerZh: String(row.answer_zh),
     keywords: Array.isArray(row.keywords) ? row.keywords.map(String) : [],
+    signals: signalsOf(row.signals),
     status: row.status as FaqStatus,
     version: Number(row.version),
     createdBy: (row.created_by as string | null) ?? null,
@@ -317,7 +332,7 @@ WITH input AS (
      AND ($8::boolean IS NULL OR f.popular = $8::boolean)
 )
 SELECT id, category, popular, question_en, answer_en, question_zh, answer_zh, keywords,
-       status, version, created_by, updated_by, created_at, updated_at,
+       signals, status, version, created_by, updated_by, created_at, updated_at,
        CASE WHEN $1 = 'zh-CN' THEN question_zh ELSE question_en END AS question,
        ((text_rank + 0.3 * keyword_hits + 0.15 * keyword_prefix_hits
          + 0.25 * question_bigrams + 0.08 * answer_bigrams + 0.2 * typo_hits)
@@ -387,8 +402,8 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
         const { rows } = await client.query(
           `INSERT INTO helpdesk_faqs
              (id, category, popular, question_en, answer_en, question_zh, answer_zh,
-              keywords, status, version, idempotency_key, created_by, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, 1, $10, $11, $11)
+              keywords, status, version, idempotency_key, created_by, updated_by, signals)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, 1, $10, $11, $11, $12::text[])
            ON CONFLICT (idempotency_key) DO NOTHING
            RETURNING ${COLUMNS}`,
           [
@@ -403,6 +418,7 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
             faq.status,
             idempotencyKey,
             employeeId,
+            faq.signals,
           ],
         );
         if (rows.length === 0) {
@@ -434,7 +450,7 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
           if (patch[key] === undefined) continue;
           params.push(patch[key]);
           sets.push(
-            `${column} = $${params.length}${key === 'keywords' ? '::text[]' : ''}`,
+            `${column} = $${params.length}${ARRAY_COLUMNS.includes(key) ? '::text[]' : ''}`,
           );
         }
         const { rows } = await client.query(

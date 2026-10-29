@@ -1,5 +1,6 @@
 import type {
   FaqCategory,
+  FaqSignal,
   HelpdeskLocale,
 } from '../../../../contracts/helpdesk-qa';
 
@@ -23,6 +24,8 @@ export const FAQ_LIMITS = {
   publicLimitMax: 100,
   publicLimitDefault: 50,
   candidatesMax: 8,
+  /** v5 Part A：每条 FAQ 的信号标签至多这么多个（= FAQ_SIGNALS 的个数）。 */
+  signalsMax: 8,
 } as const;
 
 export type HelpdeskFaq = {
@@ -35,6 +38,8 @@ export type HelpdeskFaq = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
+  /** v5 Part A：这条 FAQ 适合哪些学员情境（FAQ_SIGNALS，按 chip 优先级排好、去重）；迁移 20261030080000。 */
+  signals: FaqSignal[];
   status: FaqStatus;
   version: number;
   createdBy: string | null;
@@ -70,6 +75,8 @@ export type PublicFaq = {
   popular: boolean;
   question: string;
   answer: string;
+  /** v5 Part A（契约 fixture v6，增量）：旧的 Portal 不读。 */
+  signals: FaqSignal[];
   updatedAt: string;
 };
 

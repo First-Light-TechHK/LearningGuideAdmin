@@ -47,6 +47,7 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     questionZh: `问题 ${counter}`,
     answerZh: '答案',
     keywords: [],
+    signals: [],
     status: 'published',
     version: 1,
     createdBy: EMP,
@@ -240,6 +241,60 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       faq({ keywords: Array.from({ length: 21 }, (_, i) => `k${i}`) }),
     ]) {
       await expect(repo.insert(bad, EMP, null)).rejects.toThrow();
+    }
+  });
+
+  it('v5 Part A: stores, updates and returns the signals (list, search, Portal list, revisions); the table refuses unknown ones', async () => {
+    const { faq: created } = await repo.insert(
+      faq({
+        questionEn: 'My payment failed',
+        signals: ['payment_failed', 'recent_purchase'],
+      }),
+      EMP,
+      null,
+    );
+    expect(created.signals).toEqual(['payment_failed', 'recent_purchase']);
+    expect((await repo.get(created.id))?.signals).toEqual([
+      'payment_failed',
+      'recent_purchase',
+    ]);
+    const updated = await repo.update(
+      created.id,
+      1,
+      { signals: ['email_unverified'] },
+      'update',
+      EMP,
+    );
+    expect(updated).toMatchObject({
+      kind: 'ok',
+      value: { signals: ['email_unverified'], version: 2 },
+    });
+    const listed = await repo.listPublished({ limit: 100 });
+    expect(listed.find((f) => f.id === created.id)?.signals).toEqual([
+      'email_unverified',
+    ]);
+    const found = await repo.searchPublished({
+      locale: 'en-GB',
+      boost: null,
+      text: 'payment failed',
+      limit: 8,
+    });
+    expect(found.find((f) => f.id === created.id)?.signals).toEqual([
+      'email_unverified',
+    ]);
+    const [latest] = await repo.revisions(created.id);
+    expect(latest.snapshot).toMatchObject({ signals: ['email_unverified'] });
+    // an older row (inserted without the column) reads as no signals
+    const { rows } = await pool.query<{ signals: string[] }>(
+      `INSERT INTO helpdesk_faqs (id, category, question_en, answer_en, question_zh, answer_zh)
+       VALUES ('0192cccc-0000-7000-8000-0000000fffff', 'other', 'Q', 'A', '问', '答')
+       RETURNING signals`,
+    );
+    expect(rows[0].signals).toEqual([]);
+    for (const bad of [['nope'], ['open_ticket_waiting']]) {
+      await expect(
+        repo.insert(faq({ signals: bad as never }), EMP, null),
+      ).rejects.toThrow(/helpdesk_faqs_signals_check/);
     }
   });
 

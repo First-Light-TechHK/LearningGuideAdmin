@@ -29,6 +29,7 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     questionZh: '如何重置密码？',
     answerZh: '在登录页点击“忘记密码”。',
     keywords: ['password'],
+    signals: [],
     status: 'published',
     version: 1,
     createdBy: null,
@@ -416,7 +417,16 @@ describe('FAQs: what Portal reads (§2, published only, by locale, ETag)', () =>
       'Reset password',
     ]);
     expect(Object.keys(en.body.faqs[0]).sort()).toEqual(
-      ['answer', 'category', 'id', 'popular', 'question', 'updatedAt'].sort(),
+      // v5 Part A: signals is part of the public shape (contract fixture v6)
+      [
+        'answer',
+        'category',
+        'id',
+        'popular',
+        'question',
+        'signals',
+        'updatedAt',
+      ].sort(),
     );
     const zh = await service.published({ locale: 'zh-CN' });
     expect(zh.body.faqs[1]).toMatchObject({
@@ -529,5 +539,85 @@ describe('FAQs: what Portal reads (§2, published only, by locale, ETag)', () =>
     expect(
       await rejection(service.publishedOne(rows[0].id, { locale: 'de' })),
     ).toMatchObject({ status: 400 });
+  });
+});
+
+describe('FAQs: situation signals (v5 Part A)', () => {
+  it('stores the signals staff pick, deduped in the chip priority order, and Portal reads them', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, {
+      ...validInput,
+      signals: ['recent_purchase', 'payment_failed', 'recent_purchase'],
+    });
+    expect(created.signals).toEqual(['payment_failed', 'recent_purchase']);
+    const read = await service.published({ locale: 'en-GB' });
+    expect(read.body.faqs[0].signals).toEqual([
+      'payment_failed',
+      'recent_purchase',
+    ]);
+    await expect(
+      service.publishedOne(created.id, { locale: 'zh-CN' }),
+    ).resolves.toMatchObject({
+      signals: ['payment_failed', 'recent_purchase'],
+    });
+  });
+
+  it('defaults to none, and a save without signals (an older BackOffice) keeps the stored ones', async () => {
+    const { service } = setup();
+    const plain = await service.create(employee, validInput);
+    expect(plain.signals).toEqual([]);
+    const tagged = await service.create(employee, {
+      ...validInput,
+      questionEn: 'Payment failed',
+      signals: ['payment_failed'],
+    });
+    const saved = await service.update(employee, tagged.id, {
+      ...validInput,
+      questionEn: 'Payment failed',
+      answerEn: 'Try another card.',
+      version: tagged.version,
+    });
+    expect(saved.signals).toEqual(['payment_failed']);
+    expect(saved.version).toBe(2);
+    const cleared = await service.update(employee, tagged.id, {
+      ...validInput,
+      questionEn: 'Payment failed',
+      answerEn: 'Try another card.',
+      signals: [],
+      version: saved.version,
+    });
+    expect(cleared.signals).toEqual([]);
+    expect(cleared.version).toBe(3);
+  });
+
+  it('a signals-only change is a real change (new version), the same signals again are not', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, validInput);
+    const tagged = await service.update(employee, created.id, {
+      ...validInput,
+      signals: ['email_unverified'],
+      version: 1,
+    });
+    expect(tagged.version).toBe(2);
+    const again = await service.update(employee, created.id, {
+      ...validInput,
+      signals: ['email_unverified'],
+      version: 1,
+    });
+    expect(again.version).toBe(2);
+  });
+
+  it('refuses unknown signals, open_ticket_waiting (not an FAQ) and a non-list with 400', async () => {
+    const { service } = setup();
+    for (const signals of [
+      ['payment_failed', 'nope'],
+      ['open_ticket_waiting'],
+      'payment_failed',
+      [1],
+    ]) {
+      expect(
+        await rejection(service.create(employee, { ...validInput, signals })),
+      ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+    }
   });
 });

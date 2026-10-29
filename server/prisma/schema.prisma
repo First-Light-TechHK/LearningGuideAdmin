@@ -410,6 +410,8 @@ model HelpdeskFaq {
   questionZh     String   @map("question_zh")
   answerZh       String   @map("answer_zh")
   keywords       String[] @default([])
+  /// v5 Part A：学员情境信号标签（FAQ_SIGNALS；迁移 20261030080000_helpdesk_faq_signals）
+  signals        String[] @default([])
   status         String   @default("published")
   version        Int      @default(1)
   idempotencyKey String?  @unique @map("idempotency_key") @db.Uuid

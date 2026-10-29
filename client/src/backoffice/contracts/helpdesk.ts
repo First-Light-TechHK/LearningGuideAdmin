@@ -229,6 +229,22 @@ export const TIMELINE_LIMIT = 10;
 export const FAQ_CATEGORIES = ["account_technical", "courses_learning", "payments_subscriptions", "other"] as const;
 export type FaqCategory = (typeof FAQ_CATEGORIES)[number];
 
+/**
+ * v5 Part A：FAQ 可打的学员情境信号（服务端 FAQ_SIGNALS，契约 fixture v6 的 faqSignal；顺序 = Portal 选
+ * 「你可能遇到的问题」的优先级）。open_ticket_waiting 不是 FAQ，不在这里。
+ */
+export const FAQ_SIGNALS = [
+  "payment_failed",
+  "payment_pending",
+  "recent_purchase",
+  "trial_ending",
+  "subscription_expired",
+  "subscription_cancelled",
+  "email_unverified",
+  "from_order",
+] as const;
+export type FaqSignal = (typeof FAQ_SIGNALS)[number];
+
 /** 一条中英双语 FAQ（保存即发布；删除 = 归档，列表里看不到）。 */
 export type HelpdeskFaq = {
   id: string;
@@ -239,6 +255,8 @@ export type HelpdeskFaq = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
+  /** v5 Part A：服务端总会给（迁移 20261030080000）；编辑器多选（待视觉验收）。 */
+  signals?: FaqSignal[];
   status: "published" | "archived";
   version: number;
   createdBy: string | null;
@@ -257,4 +275,6 @@ export type FaqBody = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
+  /** v5 Part A：不带 = 保留已存的标签（旧的编辑器只改文字不会清掉）。 */
+  signals?: FaqSignal[];
 };

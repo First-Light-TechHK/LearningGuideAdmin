@@ -5,9 +5,11 @@ import { isUuid, uuidv7 } from '../../common/uuidv7';
 import {
   faqCategoryFor,
   isHelpdeskLocale,
+  parseSuggestContext,
   type FaqCategory,
   type HelpdeskQaCandidate,
   type HelpdeskQaSource,
+  type SuggestRequestContext,
 } from '../../contracts/helpdesk-qa';
 import type { TurnEndReason } from '../../contracts/helpdesk-trace';
 import type { RateLimitStore } from '../rate-limit.service';
@@ -125,6 +127,11 @@ type SuggestInput = {
   parentRunId: string | null;
   /** 这段对话里刚给学员看过的 FAQ（Portal 给，小写 uuid）：不再出现在 alternatives 里。 */
   shownFaqIds: string[];
+  /**
+   * v5（契约 fixture v6）：屏幕上的卡、会话 id 与最近几轮学员原文；null = 旧的 Portal（回包与 v5 逐字相同）。
+   * 有 context 时回包加 SuggestTurnFields（helpdesk-qa.ts），由 v5 的工作流填。
+   */
+  context: SuggestRequestContext | null;
 };
 
 export type SuggestContext = {
@@ -243,7 +250,16 @@ function parseInput(raw: unknown): SuggestInput {
     runId: optionalUuid(body, 'runId'),
     parentRunId: optionalUuid(body, 'parentRunId'),
     shownFaqIds: optionalUuids(body, 'shownFaqIds', LIMITS.shownFaqIdsMax),
+    context: suggestContext(body.context),
   };
+}
+
+function suggestContext(raw: unknown): SuggestRequestContext | null {
+  try {
+    return parseSuggestContext(raw);
+  } catch (error) {
+    throw invalid(error instanceof Error ? error.message : 'invalid context');
+  }
 }
 
 /** 跑过的检索候选（decide 中途出错时也留得住，给 alternatives 用）。 */

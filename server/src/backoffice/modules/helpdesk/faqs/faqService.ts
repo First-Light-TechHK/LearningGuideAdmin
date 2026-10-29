@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto';
 
 import type { SessionEmployee } from '../../../contracts/employee';
 import {
+  FAQ_SIGNALS,
   isFaqCategory,
+  isFaqSignal,
   isHelpdeskLocale,
   type FaqCategory,
+  type FaqSignal,
   type HelpdeskLocale,
 } from '../../../../contracts/helpdesk-qa';
 import { isUuid, uuidv7 } from '../../../../common/uuidv7';
@@ -25,6 +28,7 @@ import {
   type WriteResult,
 } from './faqRepository';
 import { unsafeLinks } from './faqMarkdown';
+import { ifNoneMatchHits } from './faqRelease';
 
 /**
  * Helpdesk FAQ 业务规则（Tickets v2 §1 / §2 / §3）：
@@ -121,6 +125,19 @@ function keywords(value: unknown): string[] {
   return out;
 }
 
+/**
+ * v5 Part A：FAQ 的信号标签。没给（旧的 BackOffice）→ undefined：新建按 []，编辑保留原值；
+ * 给了就只收 FAQ_SIGNALS 里的（open_ticket_waiting 不是 FAQ），去重并按 chip 优先级排好。
+ */
+function signals(value: unknown): FaqSignal[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw invalid('signals must be a list');
+  for (const item of value)
+    if (!isFaqSignal(item))
+      throw invalid(`Unknown signal: ${String(item).slice(0, 40)}`);
+  return FAQ_SIGNALS.filter((signal) => value.includes(signal));
+}
+
 type Editable = Required<
   Pick<
     FaqPatch,
@@ -132,7 +149,7 @@ type Editable = Required<
     | 'answerZh'
     | 'keywords'
   >
->;
+> & { signals: FaqSignal[] | undefined };
 
 function editable(body: Record<string, unknown>): Editable {
   if (!isFaqCategory(body.category)) throw invalid('Unknown category');
@@ -147,11 +164,14 @@ function editable(body: Record<string, unknown>): Editable {
     questionZh: text(body.questionZh, 'questionZh', FAQ_LIMITS.questionMax),
     answerZh: answer(body.answerZh, 'answerZh'),
     keywords: keywords(body.keywords),
+    signals: signals(body.signals),
   };
 }
 
+/** 没给 signals 的编辑与原值比较时按原值算（只改文字的旧 BackOffice 不会清掉标签）。 */
 function sameFields(a: Editable, b: HelpdeskFaq): boolean {
   return (
+    (a.signals ?? b.signals).join('\n') === b.signals.join('\n') &&
     a.category === b.category &&
     a.popular === b.popular &&
     a.questionEn === b.questionEn &&
@@ -174,6 +194,7 @@ function publicShape(faq: HelpdeskFaq, locale: HelpdeskLocale): PublicFaq {
     category: faq.category,
     popular: faq.popular,
     ...localised(faq, locale),
+    signals: faq.signals,
     updatedAt: faq.updatedAt,
   };
 }
@@ -184,16 +205,6 @@ export function publishedEtag(faqs: PublicFaq[]): string {
     .update(JSON.stringify(faqs))
     .digest('base64url');
   return `"${digest.slice(0, 27)}"`;
-}
-
-/** RFC 9110 §13.1.2 If-None-Match：逗号分隔、弱比较、* 命中任意。 */
-function ifNoneMatchHits(header: string | undefined, etag: string): boolean {
-  if (!header) return false;
-  const strip = (tag: string) => tag.trim().replace(/^W\//, '');
-  return header
-    .split(',')
-    .map(strip)
-    .some((tag) => tag === '*' || tag === strip(etag));
 }
 
 /** 查询参数只收一个字符串，其它（?q=a&q=b 的数组、对象、数字）一律 400，不是 500。 */
@@ -333,6 +344,7 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
         {
           id: uuidv7(),
           ...fields,
+          signals: fields.signals ?? [],
           status: 'published',
           version: 1,
           createdBy: employee.employeeId,
@@ -367,11 +379,12 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
       // 就原样返回，不升版本、不写修订；内容不同而 version 过期才是冲突
       if (sameFields(fields, current)) return current;
       if (current.version !== expected) throw conflict(current.version);
+      const { signals: picked, ...rest } = fields;
       return written(
         await repository.update(
           id,
           expected,
-          fields,
+          picked === undefined ? rest : { ...rest, signals: picked },
           'update',
           employee.employeeId,
         ),

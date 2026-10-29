@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import {
   ASSIST_FEEDBACK,
   FAQ_CATEGORIES,
+  FAQ_SIGNALS,
   HELPDESK_CATEGORIES,
   HELPDESK_LOCALES,
   ORDER_KINDS,
@@ -18,6 +19,7 @@ import {
   categoryLabel,
   errorMessage,
   faqCategoryLabel,
+  faqSignalLabel,
   formatOrderAmount,
   orderStatusLabel,
   paymentModeLabel,
@@ -143,5 +145,19 @@ describe('HelpDesk client against the Portal contract', () => {
     assert.equal(order.currency, 'usd')
     for (const locale of LOCALES) assert.match(formatOrderAmount(locale, order.amount as number, order.currency as string), /39\.00/)
     assert.ok(fixture.adminToPortal.listResponse.tickets.some((ticket) => typeof ticket.orderId === 'string'))
+  })
+
+  test('v6: FAQ signals match the contract (chip priority order) and every one has a label in both languages', () => {
+    assert.deepEqual([...FAQ_SIGNALS], fixture.enums.faqSignal)
+    assert.ok(!fixture.enums.faqSignal.includes('open_ticket_waiting'), 'not an FAQ: Portal shows a fixed card')
+    for (const locale of LOCALES) {
+      const labels = fixture.enums.faqSignal.map((signal) => faqSignalLabel(locale, signal))
+      for (const [index, signal] of fixture.enums.faqSignal.entries()) {
+        assert.notEqual(labels[index], signal, `${locale} signal ${signal} has no label`)
+        assert.doesNotMatch(labels[index], /_/, `${locale} ${signal}`)
+      }
+      assert.equal(new Set(labels).size, labels.length, `${locale} labels are distinct`)
+    }
+    assert.equal(faqSignalLabel('zh-CN', 'payment_failed'), '付款失败')
   })
 })

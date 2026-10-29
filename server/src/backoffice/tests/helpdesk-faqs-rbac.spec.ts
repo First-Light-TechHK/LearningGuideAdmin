@@ -48,6 +48,7 @@ const seed: HelpdeskFaq = {
   questionZh: '如何重置密码？',
   answerZh: '点击**忘记密码**。',
   keywords: ['password'],
+  signals: [],
   status: 'published',
   version: 1,
   createdBy: null,
@@ -338,6 +339,8 @@ describe('FAQ endpoints', () => {
             popular: true,
             question: seed.questionZh,
             answer: seed.answerZh,
+            // v5 Part A (contract fixture v6)
+            signals: [],
             updatedAt: seed.updatedAt,
           },
         ],
@@ -370,6 +373,7 @@ describe('FAQ endpoints', () => {
         popular: true,
         question: seed.questionEn,
         answer: seed.answerEn,
+        signals: [],
         updatedAt: seed.updatedAt,
       });
       expect(one.headers['cache-control']).toBe('no-cache');

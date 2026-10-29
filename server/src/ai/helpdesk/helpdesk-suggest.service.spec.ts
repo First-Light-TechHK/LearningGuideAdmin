@@ -1377,3 +1377,34 @@ describe('Helpdesk suggest v3: alternatives (你可能想问, spec v3 §1)', () 
     expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
   });
 });
+
+describe('suggest request context (v5, contract fixture v6)', () => {
+  it('accepts the context a v5 Portal sends and still answers', async () => {
+    const { service } = setup();
+    await expect(
+      service.suggest({
+        ...input,
+        context: {
+          nodeId: '0192bbbb-0000-7000-8000-000000000001',
+          sessionId: '0192bbbb-0000-7000-8000-000000000002',
+          recentTurns: ['I paid but my plan is not active'],
+        },
+      }),
+    ).resolves.toHaveProperty('suggestion');
+  });
+
+  it.each([
+    ['not an object', { context: 'x' }],
+    ['a malformed nodeId', { context: { nodeId: 'faq-1' } }],
+    [
+      'more than 3 recent turns',
+      { context: { recentTurns: ['a', 'b', 'c', 'd'] } },
+    ],
+  ])('rejects a context that is %s with 400', async (_name, patch) => {
+    const { service } = setup();
+    const error = await service
+      .suggest({ ...input, ...patch })
+      .catch((e: unknown) => e);
+    expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
+  });
+});

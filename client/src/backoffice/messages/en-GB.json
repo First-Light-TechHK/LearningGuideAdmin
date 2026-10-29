@@ -737,6 +737,16 @@
       "payments_subscriptions": "Payments & Subscriptions",
       "other": "Other Enquiries"
     },
+    "faqSignal": {
+      "payment_failed": "Payment failed",
+      "payment_pending": "Payment pending",
+      "recent_purchase": "Recent purchase",
+      "trial_ending": "Trial ending soon",
+      "subscription_expired": "Subscription expired",
+      "subscription_cancelled": "Subscription cancelled",
+      "email_unverified": "Email not verified",
+      "from_order": "Asking about an order"
+    },
     "faqs": {
       "search": "Search questions, answers or keywords...",
       "allCategories": "All categories",

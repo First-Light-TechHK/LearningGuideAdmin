@@ -737,6 +737,16 @@
       "payments_subscriptions": "付款与订阅",
       "other": "其他问题"
     },
+    "faqSignal": {
+      "payment_failed": "付款失败",
+      "payment_pending": "付款处理中",
+      "recent_purchase": "最近购买",
+      "trial_ending": "试用即将结束",
+      "subscription_expired": "订阅已过期",
+      "subscription_cancelled": "订阅已取消",
+      "email_unverified": "邮箱未验证",
+      "from_order": "从订单联系客服"
+    },
     "faqs": {
       "search": "搜索问题、答案或关键词...",
       "allCategories": "全部分类",

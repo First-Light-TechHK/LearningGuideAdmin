@@ -39,7 +39,11 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
       action,
       employeeId,
       at: row.updatedAt,
-      snapshot: { ...row, keywords: [...row.keywords] },
+      snapshot: {
+        ...row,
+        keywords: [...row.keywords],
+        signals: [...row.signals],
+      },
     });
   }
 
@@ -100,6 +104,7 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
       const row: HelpdeskFaq = {
         ...faq,
         keywords: [...faq.keywords],
+        signals: [...faq.signals],
         version: 1,
         createdBy: employeeId,
         updatedBy: employeeId,

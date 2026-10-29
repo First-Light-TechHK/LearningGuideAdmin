@@ -341,6 +341,8 @@ export async function pgQaSource(
     for (const faq of faqs) {
       await repository.insert(
         {
+          // v5 Part A: the eval library carries no signals yet
+          signals: [],
           ...faq,
           status: 'published',
           version: 1,

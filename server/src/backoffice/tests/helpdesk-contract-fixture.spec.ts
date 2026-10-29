@@ -2,9 +2,22 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  CONFIDENCE_LEVELS,
   FAQ_CATEGORIES,
+  FAQ_EDGE_KINDS,
+  FAQ_NODE_TYPES,
+  FAQ_SIGNALS,
+  GUARD_REASONS,
+  GUARD_RESULTS,
+  GUARDED_FIELDS,
   HELPDESK_CATEGORIES,
   HELPDESK_LOCALES,
+  SITUATION_SIGNALS,
+  SUGGEST_INTENTS,
+  SUGGEST_KINDS,
+  SUGGEST_TURN_FIELDS,
+  parseSuggestContext,
+  suggestTurnProblems,
   type HelpdeskQaCandidate,
 } from '../../contracts/helpdesk-qa';
 import {
@@ -75,6 +88,14 @@ const fixture = JSON.parse(
     suggestResponse: { suggestion: Obj; alternatives: Obj[] };
     suggestNoMatchResponse: { suggestion: null; alternatives: Obj[] };
     suggestAlternativesResponse: { suggestion: null; alternatives: Obj[] };
+    suggestContextRequest: Obj & { context: Obj };
+    suggestAnswerContextResponse: Obj;
+    suggestChoiceResponse: Obj;
+    suggestSmalltalkResponse: Obj;
+    suggestSmalltalkFallbackResponse: Obj;
+    suggestClarifyResponse: Obj;
+    suggestClarifyNotCoveredResponse: Obj;
+    suggestNoMatchContextResponse: Obj;
     traceparentHeader: string;
     outcomeRequest: Obj;
     helpfulOutcomeRequest: Obj;
@@ -136,6 +157,19 @@ describe('Helpdesk contract fixture: enums', () => {
     expect([...ORDER_STATUSES]).toEqual(fixture.enums.orderStatus);
     expect([...ORDER_KINDS]).toEqual(fixture.enums.orderKind);
     expect([...PAYMENT_MODES]).toEqual(fixture.enums.paymentMode);
+  });
+
+  it('v6: the situation signals, FAQ signals (chip priority order), graph and suggest-turn enums', () => {
+    expect([...SITUATION_SIGNALS]).toEqual(fixture.enums.situationSignal);
+    expect([...FAQ_SIGNALS]).toEqual(fixture.enums.faqSignal);
+    expect([...FAQ_NODE_TYPES]).toEqual(fixture.enums.faqNodeType);
+    expect([...FAQ_EDGE_KINDS]).toEqual(fixture.enums.faqEdgeKind);
+    expect([...SUGGEST_KINDS]).toEqual(fixture.enums.suggestKind);
+    expect([...SUGGEST_INTENTS]).toEqual(fixture.enums.suggestIntent);
+    expect([...CONFIDENCE_LEVELS]).toEqual(fixture.enums.confidence);
+    expect([...GUARD_RESULTS]).toEqual(fixture.enums.guardResult);
+    expect([...GUARD_REASONS]).toEqual(fixture.enums.guardReason);
+    expect([...GUARDED_FIELDS]).toEqual(fixture.enums.guardedField);
   });
 });
 
@@ -462,6 +496,7 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
       answerZh:
         '1. 检查垃圾邮件\n2. 在 [忘记密码](https://www.ilovelearningguide.com/zh-CN/forgot-password) 重新申请',
       keywords: ['password', 'reset'],
+      signals: [],
       status: 'published',
       version: 3,
       createdBy: null,
@@ -640,6 +675,93 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
     );
     expect(complete).not.toHaveBeenCalled();
     expect(expected.alternatives.length).toBeLessThanOrEqual(3);
+  });
+
+  /** v6 的七个回包例子（请求带 context 时 Admin 回的形状）。 */
+  const v6Responses = () => ({
+    answer: toAdmin.suggestAnswerContextResponse,
+    choice: toAdmin.suggestChoiceResponse,
+    smalltalk: toAdmin.suggestSmalltalkResponse,
+    smalltalkFallback: toAdmin.suggestSmalltalkFallbackResponse,
+    clarify: toAdmin.suggestClarifyResponse,
+    clarifyNotCovered: toAdmin.suggestClarifyNotCoveredResponse,
+    noMatch: toAdmin.suggestNoMatchContextResponse,
+  });
+
+  it('v6: accepts the context request (Portal sends learner text only, never learner data)', async () => {
+    const request = toAdmin.suggestContextRequest;
+    expect(parseSuggestContext(request.context)).toEqual(request.context);
+    expect(Object.keys(request.context).sort()).toEqual(
+      ['nodeId', 'recentTurns', 'sessionId'].sort(),
+    );
+    // keys only: the learner's own words may mention a plan, the payload never carries their data
+    expect(
+      [...Object.keys(request), ...Object.keys(request.context)].join(' '),
+    ).not.toMatch(/order|signal|plan|subscription|email/i);
+    const { service, logged } = suggestService({
+      id: text(toAdmin.suggestAnswerContextResponse.nodeId),
+      category: 'payments_subscriptions',
+      question: 'I paid but my plan is not active',
+      answer: 'stored answer',
+      score: 1,
+    });
+    await expect(service.suggest(request)).resolves.toHaveProperty(
+      'alternatives',
+    );
+    expect(logged.map((entry) => entry.source)).toEqual(['chat']);
+  });
+
+  it('v6: every context answer follows the per-kind rules, and every kind is shown', () => {
+    const examples = v6Responses();
+    for (const [name, example] of Object.entries(examples))
+      expect({ name, problems: suggestTurnProblems(example) }).toEqual({
+        name,
+        problems: [],
+      });
+    expect(
+      [...new Set(Object.values(examples).map((e) => e.kind))].sort(),
+    ).toEqual([...SUGGEST_KINDS].sort());
+    // the answer example is a real excerpt of a 4-block answer, framed by an opening and a closing
+    expect(examples.answer).toMatchObject({
+      blocks: ['b2', 'b3'],
+      guard: { result: 'passed' },
+    });
+    expect(examples.choice).toMatchObject({
+      confidence: 'unsure',
+      opening: null,
+    });
+    expect(examples.clarifyNotCovered).toMatchObject({
+      covered: false,
+      explanation: null,
+      guard: { result: 'fallback', reason: 'not_covered' },
+    });
+    expect(examples.smalltalkFallback).toMatchObject({
+      releaseVersion: null,
+      guard: { result: 'fallback', fallback: ['reply'] },
+    });
+  });
+
+  it('v6: a request without context keeps exactly the v5 answer (no new fields)', () => {
+    for (const legacy of [
+      toAdmin.suggestResponse,
+      toAdmin.suggestNoMatchResponse,
+      toAdmin.suggestAlternativesResponse,
+    ]) {
+      expect(Object.keys(legacy).sort()).toEqual([
+        'alternatives',
+        'suggestion',
+      ]);
+      for (const field of SUGGEST_TURN_FIELDS)
+        expect(legacy).not.toHaveProperty(field);
+    }
+  });
+
+  it('v6: public FAQs carry signals, only the FAQ signal values', () => {
+    for (const faq of [...toAdmin.faqsResponse.faqs, toAdmin.faqResponse]) {
+      expect(Array.isArray(faq.signals)).toBe(true);
+      for (const signal of faq.signals as string[])
+        expect(fixture.enums.faqSignal).toContain(signal);
+    }
   });
 
   it('records the contract outcomes', async () => {

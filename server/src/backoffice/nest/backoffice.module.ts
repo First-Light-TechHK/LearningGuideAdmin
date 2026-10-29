@@ -8,6 +8,10 @@ import {
 } from '@nestjs/common';
 
 import { closePool } from '../lib/db';
+import {
+  HELPDESK_FAQ_RELEASE_SOURCE,
+  noFaqReleases,
+} from '../modules/helpdesk/faqs/faqRelease';
 import { createFaqService } from '../modules/helpdesk/faqs/faqService';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
 import {
@@ -17,6 +21,7 @@ import {
 import { BackofficeAuthController } from './auth.controller';
 import { BackofficeEmployeesController } from './employees.controller';
 import { BackofficeHelpdeskAgentRunsController } from './helpdesk-agent-runs.controller';
+import { HelpdeskIntegrationFaqReleaseController } from './helpdesk-faq-release.controller';
 import {
   BackofficeHelpdeskController,
   HELPDESK_SERVICE,
@@ -52,6 +57,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         BackofficeHelpdeskController,
         BackofficeHelpdeskFaqsController,
         HelpdeskIntegrationFaqsController,
+        HelpdeskIntegrationFaqReleaseController,
         BackofficeHelpdeskAgentRunsController,
       ],
       providers: [
@@ -60,6 +66,8 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
           useFactory: () => createHelpdeskService(),
         },
         { provide: HELPDESK_FAQ_SERVICE, useFactory: () => createFaqService() },
+        // v5 问题树：发布表接上之前没有快照（Portal 照旧读逐条发布的 FAQ）；发布流程换成它的实现
+        { provide: HELPDESK_FAQ_RELEASE_SOURCE, useValue: noFaqReleases },
         options.helpdeskTrace,
       ],
     };

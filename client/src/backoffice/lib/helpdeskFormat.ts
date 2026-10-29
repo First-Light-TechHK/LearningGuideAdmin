@@ -38,6 +38,11 @@ export function faqCategoryLabel(locale: Locale, category: string): string {
   return labelOr(locale, `helpDesk.faqCategory.${category}`, category)
 }
 
+/** v5 Part A：FAQ 的学员情境信号（payment_failed …）。 */
+export function faqSignalLabel(locale: Locale, signal: string): string {
+  return labelOr(locale, `helpDesk.faqSignal.${signal}`, signal)
+}
+
 /* ------------------------------ v4 Part A：订单 ------------------------------ */
 
 export function orderStatusLabel(locale: Locale, status: string): string {
