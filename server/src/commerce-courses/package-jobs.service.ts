@@ -231,13 +231,16 @@ export class PackageJobsService {
   ) {
     const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
     if (!job) throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    if (job.status !== 'AWAITING_CONFIRM') {
-      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 409, `Job not awaiting confirm (status=${job.status}).`);
-    }
-    await this.prisma.coursePackageJob.update({
-      where: { id: jobId },
+    // 条件认领：只有一次确认能把任务从 AWAITING_CONFIRM 拿到 IMPORTING，
+    // 双击或两人同时确认不会把同一个包导入两次
+    const claimed = await this.prisma.coursePackageJob.updateMany({
+      where: { id: jobId, status: 'AWAITING_CONFIRM' },
       data: { status: 'IMPORTING', progress: 0 },
     });
+    if (claimed.count === 0) {
+      const current = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId }, select: { status: true } });
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 409, `Job not awaiting confirm (status=${current?.status ?? job.status}).`);
+    }
     try {
       const manifestBytes = await this.storage.getStaging(this.storage.stagingKey(jobId, '__manifest.json'));
       const manifest = JSON.parse(manifestBytes.toString('utf8')) as PackageManifest;
@@ -292,13 +295,14 @@ export class PackageJobsService {
   async cancelJob(jobId: string) {
     const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
     if (!job) throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    if (job.status === 'READY' || job.status === 'IMPORTING') {
-      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 409, 'Job cannot be cancelled.');
-    }
-    await this.prisma.coursePackageJob.update({
-      where: { id: jobId },
+    // 条件取消：与"确认导入"同时发生时，已开始导入的任务不会被标成已取消、删掉暂存文件
+    const cancelled = await this.prisma.coursePackageJob.updateMany({
+      where: { id: jobId, status: { notIn: ['READY', 'IMPORTING'] } },
       data: { status: 'CANCELLED', cancelRequested: true },
     });
+    if (cancelled.count === 0) {
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 409, 'Job cannot be cancelled.');
+    }
     await this.storage.clearStagingPrefix(jobId);
     return { jobId, status: 'CANCELLED' };
   }

@@ -134,4 +134,26 @@ describe('Commerce course workflow (e2e)', () => {
       .send({})
       .expect(400);
   });
+
+  it('imports a confirmed package at most once and never cancels one that is importing', async () => {
+    const agent = await signInAs(app, 'ADMIN');
+    const job = await prisma.coursePackageJob.create({
+      data: { kind: 'IMPORT', status: 'AWAITING_CONFIRM', sourceFileName: 'e2e.zip' },
+    });
+    try {
+      const confirms = await Promise.all([
+        agent.post(`/api/backoffice/courses/import/${job.id}/confirm`).send({ onConflict: 'ABORT' }),
+        agent.post(`/api/backoffice/courses/import/${job.id}/confirm`).send({ onConflict: 'ABORT' }),
+      ]);
+      // 只有一次能认领任务；另一次 409。认领到的那次因为暂存文件不存在而失败，这里不关心
+      expect(confirms.filter((r) => r.status === 409)).toHaveLength(1);
+
+      await prisma.coursePackageJob.update({ where: { id: job.id }, data: { status: 'IMPORTING' } });
+      await agent.post(`/api/backoffice/courses/import/${job.id}/cancel`).expect(409);
+      const after = await prisma.coursePackageJob.findUniqueOrThrow({ where: { id: job.id } });
+      expect(after.status).toBe('IMPORTING');
+    } finally {
+      await prisma.coursePackageJob.delete({ where: { id: job.id } });
+    }
+  });
 });
