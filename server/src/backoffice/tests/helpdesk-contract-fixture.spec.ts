@@ -189,6 +189,16 @@ describe('Helpdesk contract fixture: Admin reads Portal', () => {
     expect(detail.aiAssist).toEqual(raw.aiAssist);
   });
 
+  it('v4: the learner rating of an AI answer comes through as the number Portal sends (null when none)', () => {
+    const raw = toPortal.detailResponse.aiAssist.map((item) => item.rating);
+    expect(raw).toEqual([4, null]);
+    expect(
+      normaliseDetail(toPortal.detailResponse).aiAssist.map(
+        (item) => item.rating,
+      ),
+    ).toEqual(raw);
+  });
+
   it('reads the flag on list rows', async () => {
     const service = createHelpdeskService({
       listTickets: jest.fn().mockResolvedValue({

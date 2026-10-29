@@ -24,7 +24,6 @@ import {
   isImeComposing,
   listTime,
   ratingValue,
-  showTicketRating,
   splitNotes,
   splitThread,
   visibleBusy,
@@ -336,14 +335,12 @@ export function EnquiryTimeline(props: Props) {
                         </p>
                         {/* 状态：Figma 卡片上没有，放在 meta 行右侧，不挤占主题与类型（待视觉验收） */}
                         <span className={`hdStatusPill hdStatus${ticket.status}`}>{statusLabel(locale, ticket.status)}</span>
-                        {/* v3 §2：学员给工单的评分「评分 n/5 / 未评分」，跟在状态胶囊后、同一套胶囊样式（无画板，待视觉验收） */}
-                        {showTicketRating(ticket) ? (
-                          <span className="hdStatusPill hdTicketRating">
-                            {ticketRating === null
-                              ? t(locale, 'helpDesk.rating.none')
-                              : t(locale, 'helpDesk.rating.value', { n: ticketRating })}
-                          </span>
-                        ) : null}
+                        {/* v3 §2：学员给工单的评分「评分 n/5」，没有评分时「未评分」（规格原文：每张工单都显示）；跟在状态胶囊后、同一套胶囊样式（无画板，待视觉验收） */}
+                        <span className="hdStatusPill hdTicketRating">
+                          {ticketRating === null
+                            ? t(locale, 'helpDesk.rating.none')
+                            : t(locale, 'helpDesk.rating.value', { n: ticketRating })}
+                        </span>
                       </div>
                     </header>
                     <div className="hdDivider" />

@@ -27,7 +27,6 @@ import {
   normalizeTag,
   ratingValue,
   readEnquiryFilters,
-  showTicketRating,
   shouldMarkRead,
   splitThread,
   subscriptionTone,
@@ -342,18 +341,6 @@ describe('student timeline (Figma 1324:2 middle column)', () => {
   test('v3 §2 rating: only an integer 1-5 counts, anything else is no rating', () => {
     for (const n of [1, 2, 3, 4, 5]) assert.equal(ratingValue(n), n)
     for (const bad of [0, 6, 3.5, -1, Number.NaN, '4', null, undefined, {}]) assert.equal(ratingValue(bad), null, String(bad))
-  })
-
-  test('v3 §2 ticket rating shows once a learner can rate (closed) or has rated, like Portal EnquiryDetail', () => {
-    assert.equal(showTicketRating({ status: 'CLOSED', rating: null }), true)
-    assert.equal(showTicketRating({ status: 'CLOSED' }), true)
-    assert.equal(showTicketRating({ status: 'CLOSED', rating: 4 }), true)
-    assert.equal(showTicketRating({ status: 'ASSIGNED', rating: 3 }), true)
-    for (const status of ['OPEN', 'ASSIGNED', 'WAITING_USER', 'PENDING_CONFIRM'] as const) {
-      assert.equal(showTicketRating({ status, rating: null }), false, status)
-      assert.equal(showTicketRating({ status }), false, status)
-      assert.equal(showTicketRating({ status, rating: 9 }), false, `${status} with an invalid rating`)
-    }
   })
 })
 

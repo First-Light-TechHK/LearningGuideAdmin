@@ -1158,10 +1158,10 @@ describe('v3 §2 ratings (ticket card and AI blocks; 待视觉验收)', () => {
     assert.equal(ratingOf(await card('Subject a')), '未评分')
   })
 
-  test('an open ticket the learner cannot rate yet shows no rating; one rated before reopening still shows it', async () => {
+  test('every ticket card shows its rating as the spec says: "Not rated" while there is none (open too), "Rating n/5" once rated, even after reopening', async () => {
     serve(sameLearner('a', { status: 'ASSIGNED', rating: null }), sameLearner('b', { status: 'WAITING_USER', rating: 5, createdAt: '2026-10-28T10:00:00Z' }))
     await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
-    assert.equal(ratingOf(await card('Subject a')), null)
+    assert.equal(ratingOf(await card('Subject a')), 'Not rated')
     await waitFor(() => assert.equal(ratingOf(within(conversation()).getByRole('article', { name: 'Subject b' })), 'Rating 5/5'))
   })
 
