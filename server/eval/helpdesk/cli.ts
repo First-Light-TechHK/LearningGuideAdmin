@@ -57,6 +57,7 @@ async function run(argv: string[], deps: CliDeps): Promise<number> {
       faqs: { type: 'string', default: join(__dirname, 'faqs.json') },
       pg: { type: 'string' },
       limit: { type: 'string' },
+      concurrency: { type: 'string', default: '1' },
       'retrieval-only': { type: 'boolean', default: false },
     },
   });
@@ -67,6 +68,9 @@ async function run(argv: string[], deps: CliDeps): Promise<number> {
   if (!Number.isInteger(limit) || limit <= 0)
     throw new Error('--limit must be a positive integer');
   const cases = all.slice(0, limit);
+  const concurrency = Number(values.concurrency);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16)
+    throw new Error('--concurrency must be an integer from 1 to 16');
   if (values['retrieval-only'])
     return retrievalOnly(values, faqs, cases, all.length, deps);
 
@@ -96,6 +100,7 @@ async function run(argv: string[], deps: CliDeps): Promise<number> {
       budgetUsd,
       paid: model.kind === 'real',
       callCeilingUsd: callCeiling,
+      concurrency,
       onCase: (result, index) => {
         const ok = result.gotFaqId === result.expectedFaqId ? 'ok  ' : 'FAIL';
         deps.log(

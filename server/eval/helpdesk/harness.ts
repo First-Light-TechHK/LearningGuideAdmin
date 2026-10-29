@@ -465,8 +465,10 @@ export type RunOptions = {
   paid?: boolean;
   /** 没有带价格回复的请求按这个记账（callCeilingUsd）；null（缺省）= 价格未知。 */
   callCeilingUsd?: number | null;
-  /** 每条用例跑完调一次（打印进度用）。 */
+  /** 每条用例跑完调一次（打印进度用）。并发时按完成顺序调。 */
   onCase?: (result: CaseResult, index: number) => void;
+  /** 同时跑几条（缺省 1）。每个 worker 开跑下一条前查预算，所以最多比串行多花 concurrency - 1 条。 */
+  concurrency?: number;
 };
 
 export type RunOutcome = {
@@ -496,11 +498,11 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
     events,
     env: () => options.env,
   });
-  const results: CaseResult[] = [];
+  const done: (CaseResult | undefined)[] = [];
   let spentUsd = 0;
-  for (const [index, item] of options.cases.entries()) {
-    if (spentUsd >= options.budgetUsd)
-      return { results, spentUsd, stopped: 'budget' };
+  let stopped: RunOutcome['stopped'] = null;
+  let next = 0;
+  const runOne = async (index: number, item: EvalCase): Promise<void> => {
     const runId = uuidv7();
     const started = performance.now();
     const submit = item.source === 'submit';
@@ -562,14 +564,28 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
         toolResults[0].data.error === undefined,
       unpricedCalls: Math.max(0, requests - priced),
     };
-    results.push(result);
+    done[index] = result;
     const ceiling = options.callCeilingUsd ?? null;
     spentUsd += result.costUsd + result.unpricedCalls * (ceiling ?? 0);
     options.onCase?.(result, index);
     if ((options.paid ?? true) && result.unpricedCalls > 0 && ceiling === null)
-      return { results, spentUsd, stopped: 'unknown_cost' };
-  }
-  return { results, spentUsd, stopped: null };
+      stopped = 'unknown_cost';
+  };
+  const worker = async (): Promise<void> => {
+    while (stopped === null && next < options.cases.length) {
+      if (spentUsd >= options.budgetUsd) {
+        stopped = 'budget';
+        return;
+      }
+      const index = next++;
+      await runOne(index, options.cases[index]);
+    }
+  };
+  const width = Math.max(1, Math.floor(options.concurrency ?? 1));
+  await Promise.all(Array.from({ length: width }, () => worker()));
+  // 并发时可能有空位（停下时别的 worker 还没跑到）：只留跑完的，按用例顺序
+  const results = done.filter((r): r is CaseResult => r !== undefined);
+  return { results, spentUsd, stopped };
 }
 
 /** 真模型：生产同款 PiStepRunner；假模型：同一个 runner 换成 faux provider。 */

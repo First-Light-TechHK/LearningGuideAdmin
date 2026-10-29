@@ -1207,6 +1207,54 @@ describe('running the cases', () => {
     expect(seen).toEqual([0, 1, 2, 3]);
   });
 
+  it('runs cases concurrently with --concurrency, keeping results in case order', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const base = payingRunner(0.001);
+    const slow: AgentStepRunner = {
+      run: async (spec, context) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((done) => setTimeout(done, 5));
+        inFlight -= 1;
+        return base.run(spec, context);
+      },
+    };
+    const seen: number[] = [];
+    const picked = answerable.slice(0, 7);
+    const outcome = await runCases({
+      cases: picked,
+      qa: memoryQaSource(faqs),
+      runner: slow,
+      env: ENV,
+      budgetUsd: 5,
+      concurrency: 3,
+      onCase: (_result, index) => seen.push(index),
+    });
+    expect(peak).toBe(3);
+    expect(outcome.stopped).toBeNull();
+    expect(outcome.results.map((r) => r.id)).toEqual(picked.map((c) => c.id));
+    expect([...seen].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it('with concurrency, stops at the budget (each worker checks before its next case)', async () => {
+    const outcome = await runCases({
+      cases: answerable.slice(0, 10),
+      qa: memoryQaSource(faqs),
+      runner: payingRunner(0.4),
+      env: ENV,
+      budgetUsd: 1,
+      concurrency: 2,
+    });
+    expect(outcome.stopped).toBe('budget');
+    // 并发 2：最多比串行多跑 1 条
+    expect(outcome.results.length).toBeGreaterThanOrEqual(3);
+    expect(outcome.results.length).toBeLessThanOrEqual(4);
+    expect(outcome.results.map((r) => r.id)).toEqual(
+      answerable.slice(0, outcome.results.length).map((c) => c.id),
+    );
+  });
+
   it('without a key the service answers nothing, like production', async () => {
     const outcome = await runCases({
       cases: answerable.slice(0, 2),
@@ -1325,6 +1373,8 @@ describe('npm run eval:helpdesk (cli)', () => {
   it.each([
     [['--limit', '0'], '--limit must be a positive integer'],
     [['--limit', 'abc'], '--limit must be a positive integer'],
+    [['--concurrency', '0'], '--concurrency must be an integer from 1 to 16'],
+    [['--concurrency', '17'], '--concurrency must be an integer from 1 to 16'],
   ])('exits 2 on %j', async (argv, message) => {
     const { dir, path } = files();
     const out = io();
