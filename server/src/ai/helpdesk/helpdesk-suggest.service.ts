@@ -46,7 +46,7 @@ import {
  *    两个独立的键），超出返回 null；
  * 2. retrieve：从已发布 FAQ 里取候选（全文 + 关键词 + 同类加权，前 8 个），没有候选不调模型；
  * 3. pick_faq：一个 pi Agent 步（pi-agent-core 原样），唯一的工具 pick_faq 的 faqId 只能是候选 id
- *    或 none；模型 HELPDESK_SUGGEST_MODEL（缺省取 AI_AVAILABLE_MODELS 里第一个便宜模型），
+ *    或 none；模型写在代码里（DEFAULT_MODEL），HELPDESK_SUGGEST_MODEL 只在要换模型时才设，
  *    key / 模型 / base URL 每次现读；3 秒 AbortSignal、不重试，且整次推荐不超过 3.5 秒
  *    （Portal 等 4 秒），过期的答案不返回、不记 faq_id；没有 API key、任何错误都返回 null
  *    （绝不阻塞学员提交工单）；
@@ -73,8 +73,6 @@ const PURGE_EVERY_MS = 3_600_000;
 const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 // OPENROUTER_BASE_URL 是 AI Tutor 已有的变量，这里同样每次现读
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
-/** 便宜模型的识别（名字里带这些词）；只用于没设 HELPDESK_SUGGEST_MODEL 时的缺省。 */
-const CHEAP_MODEL = /(flash|mini|haiku|lite|nano|small)/i;
 
 const LIMITS = {
   learnerIdMax: 128,
@@ -128,19 +126,12 @@ export type HelpdeskSuggestDeps = {
   now?: () => number;
 };
 
-/** HELPDESK_SUGGEST_MODEL → AI_AVAILABLE_MODELS 里第一个便宜模型 → 第一个 → 缺省。 */
+/**
+ * 模型由代码定（DEFAULT_MODEL，评测选出的那个），部署不用配；HELPDESK_SUGGEST_MODEL 只用来临时换模型。
+ * 不看 AI_AVAILABLE_MODELS：那是 AI Tutor 的列表，排第一的模型不一定适合推荐。
+ */
 export function suggestModel(env: NodeJS.ProcessEnv): string {
-  const explicit = env.HELPDESK_SUGGEST_MODEL?.trim();
-  if (explicit) return explicit;
-  const models = (env.AI_AVAILABLE_MODELS ?? '')
-    .split(',')
-    .map((model) => model.trim())
-    .filter(Boolean);
-  return (
-    models.find((model) => CHEAP_MODEL.test(model)) ??
-    models[0] ??
-    DEFAULT_MODEL
-  );
+  return env.HELPDESK_SUGGEST_MODEL?.trim() || DEFAULT_MODEL;
 }
 
 function invalid(detail: string) {

@@ -1040,13 +1040,13 @@ describe('model and budget settings', () => {
         HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
       }),
     ).toEqual({ kind: 'real', model: 'anthropic/claude-haiku' });
-    // 没配 HELPDESK_SUGGEST_MODEL 时和生产选同一个模型
+    // 没配 HELPDESK_SUGGEST_MODEL 时和生产选同一个模型（代码里定的那个）
     expect(
       chooseModel({
         OPENROUTER_API_KEY: 'k',
         AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
       }),
-    ).toEqual({ kind: 'real', model: 'google/gemini-3.5-flash' });
+    ).toEqual({ kind: 'real', model: 'google/gemini-2.5-flash' });
   });
 
   it('caps spend at HELPDESK_EVAL_BUDGET_USD, 5 USD by default', () => {
