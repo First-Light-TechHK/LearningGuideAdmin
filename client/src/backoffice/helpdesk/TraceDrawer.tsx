@@ -18,8 +18,24 @@ import { useModal } from './useModal'
 type Props = { locale: Locale; runId: string; onClose: () => void }
 type State = { kind: 'loading' } | { kind: 'ready'; run: AgentRun } | { kind: 'missing' } | { kind: 'failed' }
 
-const reasonLabel = (locale: Locale, reason: string) => t(locale, `helpDesk.trace.reasons.${reason}`)
-const cost = (usd: number) => `$${usd.toFixed(6)}`
+/** 新的结束原因还没有文案时原样显示。 */
+function reasonLabel(locale: Locale, reason: string): string {
+  const key = `helpDesk.trace.reasons.${reason}`
+  const label = t(locale, key)
+  return label === key ? reason : label
+}
+const cost = (locale: Locale, usd: number | null) => (usd === null ? t(locale, 'helpDesk.trace.unknown') : `$${usd.toFixed(6)}`)
+
+/** 距第一条事件：毫秒、秒、分钟、小时、天（反馈可能隔天才来）。 */
+function offsetLabel(locale: Locale, ms: number | null): string {
+  if (ms === null) return t(locale, 'helpDesk.trace.none')
+  const unit = (key: string, value: number | string) => t(locale, `helpDesk.trace.offset.${key}`, { value })
+  if (ms < 1_000) return unit('ms', Math.round(ms))
+  if (ms < 60_000) return unit('s', (Math.floor(ms / 100) / 10).toFixed(1))
+  if (ms < 3_600_000) return unit('min', Math.floor(ms / 60_000))
+  if (ms < 86_400_000) return unit('h', Math.floor(ms / 3_600_000))
+  return unit('d', Math.floor(ms / 86_400_000))
+}
 
 /** 每种明细在 helpDesk.trace.fields 下有同名文案。 */
 const detailLabel = (locale: Locale, detail: TraceDetail) => t(locale, `helpDesk.trace.fields.${detail.kind}`)
@@ -29,7 +45,9 @@ function detailValue(locale: Locale, detail: TraceDetail): string {
     case 'tokens':
       return t(locale, 'helpDesk.trace.tokensValue', { input: detail.input, output: detail.output })
     case 'cost':
-      return cost(detail.usd)
+      return cost(locale, detail.usd)
+    case 'rejectedArgs':
+      return t(locale, 'helpDesk.trace.rejectedArgsValue', { length: detail.length })
     case 'candidates':
       return detail.ids.join(', ')
     case 'chosen':
@@ -45,6 +63,7 @@ export function TraceDrawer({ locale, runId, onClose }: Props) {
   const uid = useId()
   const titleId = `${uid}-title`
   const [state, setState] = useState<State>({ kind: 'loading' })
+  const [attempt, setAttempt] = useState(0)
   const drawerRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
 
@@ -58,7 +77,12 @@ export function TraceDrawer({ locale, runId, onClose }: Props) {
     return () => {
       live = false
     }
-  }, [runId])
+  }, [runId, attempt])
+
+  const retry = () => {
+    setState({ kind: 'loading' })
+    setAttempt((n) => n + 1)
+  }
 
   // 打开时焦点进抽屉，关闭时还给打开它的「查看链路」
   useEffect(() => {
@@ -82,7 +106,7 @@ export function TraceDrawer({ locale, runId, onClose }: Props) {
             ? none
             : t(locale, 'helpDesk.trace.tokensValue', { input: summary.inputTokens ?? 0, output: summary.outputTokens ?? 0 }),
         ],
-        ['cost', summary.costUsd === null ? none : cost(summary.costUsd)],
+        ['cost', summary.costUnknown ? cost(locale, null) : summary.costUsd === null ? none : cost(locale, summary.costUsd)],
         ['latency', summary.latencyMs === null ? none : t(locale, 'helpDesk.trace.latencyValue', { ms: summary.latencyMs })],
         ['chosen', summary.chosenFaqId ?? none],
         ['candidates', summary.candidates.length > 0 ? summary.candidates.join(', ') : none],
@@ -116,9 +140,12 @@ export function TraceDrawer({ locale, runId, onClose }: Props) {
             </p>
           ) : null}
           {state.kind === 'failed' ? (
-            <p className="hdNotice hdDrawerNotice hdDrawerAlert" role="alert">
-              {t(locale, 'helpDesk.trace.failed')}
-            </p>
+            <div className="hdNotice hdDrawerNotice hdDrawerAlert" role="alert">
+              <p>{t(locale, 'helpDesk.trace.failed')}</p>
+              <button type="button" className="hdLinkButton" onClick={retry}>
+                {t(locale, 'helpDesk.trace.retry')}
+              </button>
+            </div>
           ) : null}
           {view ? (
             <>
@@ -140,7 +167,7 @@ export function TraceDrawer({ locale, runId, onClose }: Props) {
                 {view.rows.map((row) => (
                   <li key={row.seq} className="hdTraceEvent">
                     <div className="hdTraceEventHead">
-                      <span className="hdTraceOffset">{t(locale, 'helpDesk.trace.offsetValue', { ms: row.offsetMs })}</span>{' '}
+                      <span className="hdTraceOffset">{offsetLabel(locale, row.offsetMs)}</span>{' '}
                       <code className="hdTraceType">{row.type}</code>
                       {row.step !== null ? (
                         <span className="hdTraceStep">

@@ -22,7 +22,6 @@
     "previous": "上一页",
     "next": "下一页",
     "required": "必填",
-    "close": "关闭",
     "copy": "复制链接",
     "copied": "已复制",
     "language": "语言",
@@ -645,6 +644,7 @@
       "loading": "正在加载链路…",
       "notFound": "这条答案没有记录链路。",
       "failed": "链路加载失败，请稍后再试。",
+      "retry": "重试",
       "summaryTitle": "概要",
       "eventsTitle": "事件",
       "fields": {
@@ -660,14 +660,23 @@
         "feedback": "学生反馈",
         "toolArgs": "工具参数",
         "outcome": "结果",
-        "error": "错误"
+        "error": "错误",
+        "rejectedArgs": "被拒的参数"
       },
       "tokensValue": "输入 {input} / 输出 {output}",
+      "rejectedArgsValue": "已隐藏 {length} 个字符",
       "latencyValue": "{ms} 毫秒",
-      "offsetValue": "+{ms} 毫秒",
+      "offset": {
+        "ms": "+{value} 毫秒",
+        "s": "+{value} 秒",
+        "min": "+{value} 分钟",
+        "h": "+{value} 小时",
+        "d": "+{value} 天"
+      },
       "conversationValue": "本段对话共 {count} 次推荐",
       "stepValue": "第 {step} 步",
       "none": "—",
+      "unknown": "未知",
       "reasons": {
         "answered": "已答复",
         "no_match": "无匹配",

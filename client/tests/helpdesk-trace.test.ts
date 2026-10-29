@@ -87,6 +87,7 @@ describe('traceView', () => {
       inputTokens: 512,
       outputTokens: 9,
       costUsd: 0.0000822,
+      costUnknown: false,
       latencyMs: 910,
       chosenFaqId: FAQ_A,
       candidates: [FAQ_A, FAQ_B],
@@ -144,14 +145,14 @@ describe('traceView', () => {
       events: [
         event(1, 0, 'turn/start', { turn: 1, input: { redacted: true } }),
         event(2, 1, 'step/end', { turn: 1, step: 1, name: 'retrieve', kind: 'code', then: { end: 'error' }, error: { name: 'Error', code: 'step_failed' } }),
-        event(3, 2, 'assistant/message', { turn: 1, step: 2, model: 'm', stopReason: 'error', errorMessage: '429 Too Many Requests' }),
-        event(4, 3, 'tool/result', { turn: 1, step: 2, callId: 'c2', name: 'pick_faq', error: { name: 'ToolError', code: 'too_many_calls', message: 'blocked' } }),
+        event(3, 2, 'assistant/message', { turn: 1, step: 2, model: 'm', stopReason: 'error', error: { name: 'ProviderError', code: 'http_429' } }),
+        event(4, 3, 'tool/result', { turn: 1, step: 2, callId: 'c2', name: 'pick_faq', error: { name: 'ToolError', code: 'too_many_calls' } }),
         event(5, 4, 'turn/end', { turn: 1, reason: 'error', faqId: null, model: null, latencyMs: 4 }),
       ],
     }
     const { rows, summary } = traceView(run)
     assert.deepEqual(rows[1].details, [{ kind: 'error', value: 'step_failed' }])
-    assert.deepEqual(rows[2].details, [{ kind: 'model', value: 'm' }, { kind: 'error', value: '429 Too Many Requests' }])
+    assert.deepEqual(rows[2].details, [{ kind: 'model', value: 'm' }, { kind: 'error', value: 'http_429' }])
     assert.deepEqual(rows[3].details, [{ kind: 'error', value: 'too_many_calls' }])
     assert.deepEqual(rows[4].details, [{ kind: 'endReason', value: 'error' }])
     assert.equal(summary.endReason, 'error')
@@ -177,5 +178,52 @@ describe('traceView', () => {
     assert.equal(view.summary.latencyMs, 1)
     assert.deepEqual(view.rows[0].details, [])
     assert.ok(!JSON.stringify(view).includes('redacted'))
+  })
+
+  test('a rejected tool call shows only how long its hidden arguments were', () => {
+    const { rows } = traceView({
+      runId: RUN,
+      parentRunId: null,
+      chain: [RUN],
+      events: [event(1, 0, 'tool/call', { turn: 1, step: 2, callId: 'c', name: 'pick_faq', rejectedArguments: { length: 57 } })],
+    })
+    assert.deepEqual(rows[0].details, [{ kind: 'rejectedArgs', length: 57 }])
+  })
+
+  test('an unknown price (costUsd null) is shown as unknown, never as a partial sum', () => {
+    const { rows, summary } = traceView({
+      runId: RUN,
+      parentRunId: null,
+      chain: [RUN],
+      events: [
+        event(1, 0, 'assistant/message', { turn: 1, step: 2, model: 'm', usage: { inputTokens: 100, outputTokens: 10 }, costUsd: null }),
+        event(2, 5, 'assistant/message', { turn: 1, step: 3, model: 'm', usage: { inputTokens: 50, outputTokens: 5 }, costUsd: 0.001 }),
+      ],
+    })
+    assert.deepEqual(rows[0].details, [
+      { kind: 'model', value: 'm' },
+      { kind: 'tokens', input: 100, output: 10 },
+      { kind: 'cost', usd: null },
+    ])
+    assert.equal(summary.costUsd, null)
+    assert.equal(summary.costUnknown, true)
+    assert.equal(summary.inputTokens, 150)
+  })
+
+  test('an empty run and an unparsable time do not produce NaN', () => {
+    const empty = traceView({ runId: RUN, parentRunId: null, chain: [RUN], events: [] })
+    assert.deepEqual(empty.rows, [])
+    assert.equal(empty.summary.endReason, null)
+    assert.equal(empty.summary.costUnknown, false)
+    const { rows } = traceView({
+      runId: RUN,
+      parentRunId: null,
+      chain: [RUN],
+      events: [event(1, 0, 'turn/start', { turn: 1 }), { runId: RUN, seq: 2, type: 'turn/end', time: 'not a time', data: { reason: 'error' } }],
+    })
+    assert.deepEqual(
+      rows.map((row) => row.offsetMs),
+      [0, null],
+    )
   })
 })

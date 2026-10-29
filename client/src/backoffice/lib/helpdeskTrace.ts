@@ -8,10 +8,13 @@ import type { AgentRun, AgentRunEvent } from '../contracts/helpdesk'
 export type TraceDetail =
   | { kind: 'model'; value: string }
   | { kind: 'tokens'; input: number; output: number }
-  | { kind: 'cost'; usd: number }
+  /** usd null：模型不在价目里，费用未知（不是免费）。 */
+  | { kind: 'cost'; usd: number | null }
   | { kind: 'candidates'; ids: string[] }
   | { kind: 'chosen'; faqId: string }
   | { kind: 'toolArgs'; value: string }
+  /** 被拒的调用：参数可能复述学员原文，服务端只记长度。 */
+  | { kind: 'rejectedArgs'; length: number }
   | { kind: 'outcome'; value: string }
   | { kind: 'error'; value: string }
   | { kind: 'endReason'; value: string }
@@ -20,8 +23,8 @@ export type TraceDetail =
 export type TraceRow = {
   seq: number
   type: string
-  /** 距第一条事件的毫秒数。 */
-  offsetMs: number
+  /** 距第一条事件的毫秒数；时间读不出来时为 null。 */
+  offsetMs: number | null
   step: number | null
   name: string | null
   details: TraceDetail[]
@@ -35,7 +38,9 @@ export type TraceSummary = {
   model: string | null
   inputTokens: number | null
   outputTokens: number | null
+  /** 有回复的价格未知时为 null（costUnknown），不给部分之和。 */
   costUsd: number | null
+  costUnknown: boolean
   latencyMs: number | null
   chosenFaqId: string | null
   candidates: string[]
@@ -56,7 +61,7 @@ function candidatesOf(data: Record<string, unknown>): string[] {
 
 function errorOf(data: Record<string, unknown>): string | null {
   const error = record(data.error)
-  return text(error?.code) ?? text(error?.name) ?? text(data.errorMessage)
+  return text(error?.code) ?? text(error?.name)
 }
 
 function detailsOf(event: AgentRunEvent): TraceDetail[] {
@@ -93,15 +98,16 @@ function detailsOf(event: AgentRunEvent): TraceDetail[] {
       const input = count(usage?.inputTokens)
       const output = count(usage?.outputTokens)
       push(input !== null || output !== null ? { kind: 'tokens', input: input ?? 0, output: output ?? 0 } : null)
-      const usd = count(data.costUsd)
-      push(usd !== null ? { kind: 'cost', usd } : null)
-      const error = text(data.errorMessage)
+      if (data.costUsd !== undefined) push({ kind: 'cost', usd: count(data.costUsd) })
+      const error = errorOf(data)
       push(error ? { kind: 'error', value: error } : null)
       break
     }
     case 'tool/call': {
       const args = text(data.arguments)
       push(args ? { kind: 'toolArgs', value: args } : null)
+      const rejected = count(record(data.rejectedArguments)?.length)
+      push(rejected !== null ? { kind: 'rejectedArgs', length: rejected } : null)
       break
     }
     case 'tool/result': {
@@ -130,10 +136,14 @@ const NAMED = new Set(['step/start', 'step/end', 'tool/call', 'tool/result'])
 export function traceView(run: AgentRun): { summary: TraceSummary; rows: TraceRow[] } {
   const events = [...run.events].sort((a, b) => a.seq - b.seq)
   const start = events.length > 0 ? Date.parse(events[0].time) : 0
+  const offset = (time: string) => {
+    const ms = Date.parse(time) - start
+    return Number.isFinite(ms) ? Math.max(0, ms) : null
+  }
   const rows = events.map((event) => ({
     seq: event.seq,
     type: event.type,
-    offsetMs: Math.max(0, Date.parse(event.time) - start),
+    offsetMs: offset(event.time),
     step: count(event.data.step),
     name: NAMED.has(event.type) ? text(event.data.name) : null,
     details: detailsOf(event),
@@ -146,6 +156,7 @@ export function traceView(run: AgentRun): { summary: TraceSummary; rows: TraceRo
     const values = messages.map(pick).filter((value): value is number => value !== null)
     return values.length > 0 ? values.reduce((total, value) => total + value, 0) : null
   }
+  const costUnknown = messages.some((data) => data.costUsd !== undefined && count(data.costUsd) === null)
   const retrieve = events.find((event) => event.type === 'step/end' && candidatesOf(event.data).length > 0)
 
   return {
@@ -158,7 +169,8 @@ export function traceView(run: AgentRun): { summary: TraceSummary; rows: TraceRo
       model: text(end?.model) ?? text(first('request/context')?.model),
       inputTokens: sum((data) => count(record(data.usage)?.inputTokens)),
       outputTokens: sum((data) => count(record(data.usage)?.outputTokens)),
-      costUsd: sum((data) => count(data.costUsd)),
+      costUsd: costUnknown ? null : sum((data) => count(data.costUsd)),
+      costUnknown,
       latencyMs: count(end?.latencyMs),
       chosenFaqId: text(end?.faqId),
       candidates: retrieve ? candidatesOf(retrieve.data) : [],

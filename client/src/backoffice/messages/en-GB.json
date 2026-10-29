@@ -22,7 +22,6 @@
     "previous": "Previous",
     "next": "Next",
     "required": "Required",
-    "close": "Close",
     "copy": "Copy link",
     "copied": "Copied",
     "language": "Language",
@@ -645,6 +644,7 @@
       "loading": "Loading trace…",
       "notFound": "No trace was recorded for this answer.",
       "failed": "The trace could not be loaded. Try again later.",
+      "retry": "Try again",
       "summaryTitle": "Summary",
       "eventsTitle": "Events",
       "fields": {
@@ -660,14 +660,23 @@
         "feedback": "Student feedback",
         "toolArgs": "Tool arguments",
         "outcome": "Outcome",
-        "error": "Error"
+        "error": "Error",
+        "rejectedArgs": "Rejected arguments"
       },
       "tokensValue": "{input} in / {output} out",
+      "rejectedArgsValue": "{length} characters hidden",
       "latencyValue": "{ms} ms",
-      "offsetValue": "+{ms} ms",
+      "offset": {
+        "ms": "+{value} ms",
+        "s": "+{value} s",
+        "min": "+{value} min",
+        "h": "+{value} h",
+        "d": "+{value} d"
+      },
       "conversationValue": "{count} runs in this conversation",
       "stepValue": "Step {step}",
       "none": "—",
+      "unknown": "Unknown",
       "reasons": {
         "answered": "Answered",
         "no_match": "No match",

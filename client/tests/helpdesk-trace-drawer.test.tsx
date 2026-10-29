@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from 'node:test'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import type { AgentRun, EnquiryDetail } from '../src/backoffice/contracts/helpdesk'
-import { detail, installFakeServer, type FakeServer } from './support/helpdesk-fake'
+import { deferred, detail, installFakeServer, type FakeServer, type Reply } from './support/helpdesk-fake'
 import { renderHelpDesk } from './support/helpdesk-render'
 
 /**
@@ -60,11 +60,32 @@ function run(runId = RUN): AgentRun {
         text: { redacted: true },
       }),
       e(7, 901, 'tool/call', { turn: 1, step: 2, callId: 'c1', name: 'pick_faq', arguments: `{"faqId":"${FAQ_A}"}` }),
-      e(8, 902, 'tool/result', { turn: 1, step: 2, callId: 'c2', name: 'pick_faq', error: { name: 'ToolError', code: 'too_many_calls', message: 'blocked' } }),
+      e(8, 902, 'tool/result', { turn: 1, step: 2, callId: 'c2', name: 'pick_faq', error: { name: 'ToolError', code: 'too_many_calls' } }),
       e(9, 903, 'step/end', { turn: 1, step: 2, name: 'pick_faq', kind: 'agent', outcome: 'called', args: { faqId: FAQ_A }, then: { next: 'validate' } }),
       e(10, 910, 'turn/end', { turn: 1, reason: 'answered', faqId: FAQ_A, model: 'openai/gpt-4o-mini', latencyMs: 910 }),
+      e(11, 1_500, 'feedback', { outcome: 'helpful' }),
+      e(12, 90_000, 'feedback', { outcome: 'helpful' }),
+      e(13, 2 * 3_600_000, 'feedback', { outcome: 'helpful' }),
+      e(14, 86_400_000, 'feedback', { outcome: 'helpful' }),
     ],
   }
+}
+
+/** 一个 run 由给定事件组成（时间以 T0 起算）。 */
+function runOf(events: { ms: number; type: string; data: Record<string, unknown>; time?: string }[]): AgentRun {
+  return {
+    runId: RUN,
+    parentRunId: null,
+    chain: [RUN],
+    events: events.map((item, index) => ({ runId: RUN, seq: index + 1, type: item.type, time: item.time ?? at(item.ms), data: item.data })),
+  }
+}
+
+async function openDrawer(locale: 'en-GB' | 'zh-CN' = 'en-GB') {
+  await renderHelpDesk(server, { role: 'FINANCE', path: `/${locale}/help-desk/a` })
+  const [block] = await aiBlocks(locale === 'en-GB' ? 'AI Support Assistant' : 'AI 客服助手')
+  fireEvent.click(within(block).getByRole('button', { name: locale === 'en-GB' ? 'View trace' : '查看链路' }))
+  return screen.findByRole('dialog', { name: locale === 'en-GB' ? 'Agent trace' : '推荐链路' })
 }
 
 function assist(id: string): EnquiryDetail['aiAssist'][number] {
@@ -127,13 +148,18 @@ describe('View trace on AI blocks', () => {
     // events: offset, type, step and details
     const list = within(drawer).getByRole('list', { name: 'Events' })
     const items = within(list).getAllByRole('listitem')
-    assert.equal(items.length, 10)
+    assert.equal(items.length, 14)
     assert.match(items[0].textContent ?? '', /\+0 ms.*turn\/start/)
     assert.match(items[2].textContent ?? '', /\+40 ms.*step\/end.*Step 1 · retrieve.*Candidates.*0192f000-0000-7000-8000-000000000001/)
     assert.match(items[5].textContent ?? '', /\+900 ms.*assistant\/message.*openai\/gpt-4o-mini.*512 in \/ 9 out.*\$0\.000082/)
     assert.match(items[6].textContent ?? '', /tool\/call.*Tool arguments.*\{"faqId":"0192f000-0000-7000-8000-000000000001"\}/)
     assert.match(items[7].textContent ?? '', /tool\/result.*Error.*too_many_calls/)
     assert.match(items[9].textContent ?? '', /turn\/end.*End reason.*Answered/)
+    // offsets read as ms, s, min, h and d (feedback can come a day later)
+    assert.deepEqual(
+      items.slice(10).map((item) => item.querySelector('.hdTraceOffset')?.textContent),
+      ['+1.5 s', '+1 min', '+2 h', '+1 d'],
+    )
 
     // read-only: nothing to type into or save, and no learner text
     assert.equal(drawer.querySelectorAll('input, textarea, select').length, 0)
@@ -188,5 +214,80 @@ describe('View trace on AI blocks', () => {
     assert.equal(within(summary).getByText('结束原因', { selector: 'dt' }).nextElementSibling?.textContent, '已答复')
     assert.equal(within(summary).getByText('Token', { selector: 'dt' }).nextElementSibling?.textContent, '输入 512 / 输出 9')
     assert.ok(within(drawer).getByRole('button', { name: '关闭' }))
+  })
+
+  test('zh-CN event list: steps, offsets and details', async () => {
+    serve(detail('a', { aiAssist: [assist(RUN)] }))
+    server.on('GET', `/api/helpdesk/agent-runs/${RUN}`, { data: run() })
+    const drawer = await openDrawer('zh-CN')
+    const list = await waitFor(() => within(drawer).getByRole('list', { name: '事件' }))
+    const items = within(list).getAllByRole('listitem')
+    assert.match(items[2].textContent ?? '', /\+40 毫秒.*step\/end.*第 1 步 · retrieve.*候选/)
+    assert.match(items[5].textContent ?? '', /\+900 毫秒.*assistant\/message.*输入 512 \/ 输出 9.*费用/)
+    assert.match(items[7].textContent ?? '', /tool\/result.*错误.*too_many_calls/)
+    assert.deepEqual(
+      items.slice(10).map((item) => item.querySelector('.hdTraceOffset')?.textContent),
+      ['+1.5 秒', '+1 分钟', '+2 小时', '+1 天'],
+    )
+  })
+
+  test('shows the loading copy until the run arrives', async () => {
+    serve(detail('a', { aiAssist: [assist(RUN)] }))
+    const pending = deferred<Reply>()
+    server.on('GET', `/api/helpdesk/agent-runs/${RUN}`, () => pending.promise)
+    const drawer = await openDrawer()
+    assert.ok(within(drawer).getByText('Loading trace…'))
+    pending.resolve({ data: run() })
+    await waitFor(() => assert.ok(within(drawer).getByRole('group', { name: 'Summary' })))
+    assert.equal(within(drawer).queryByText('Loading trace…'), null)
+  })
+
+  test('a run with no events shows dashes, not NaN; an unknown end reason shows as is; an unknown price says so', async () => {
+    serve(detail('a', { aiAssist: [assist(RUN), assist(OTHER_RUN)] }))
+    server.on('GET', `/api/helpdesk/agent-runs/${RUN}`, { data: runOf([]) })
+    server.on('GET', `/api/helpdesk/agent-runs/${OTHER_RUN}`, {
+      data: {
+        ...runOf([
+          { ms: 0, type: 'turn/start', data: { turn: 1 } },
+          { ms: 5, type: 'assistant/message', data: { turn: 1, step: 2, model: 'acme/new', usage: { inputTokens: 100, outputTokens: 10 }, costUsd: null } },
+          { ms: 9, type: 'tool/call', data: { turn: 1, step: 2, callId: 'c', name: 'pick_faq', rejectedArguments: { length: 57 } } },
+          { ms: 0, type: 'turn/end', data: { turn: 1, reason: 'brand_new_reason' }, time: 'not a time' },
+        ]),
+        runId: OTHER_RUN,
+        chain: [OTHER_RUN],
+      },
+    })
+    await renderHelpDesk(server, { role: 'FINANCE', path: '/en-GB/help-desk/a' })
+    const blocks = await aiBlocks()
+    fireEvent.click(within(blocks[0]).getByRole('button', { name: 'View trace' }))
+    let drawer = await screen.findByRole('dialog', { name: 'Agent trace' })
+    let summary = await waitFor(() => within(drawer).getByRole('group', { name: 'Summary' }))
+    for (const dd of summary.querySelectorAll('dd')) assert.match(dd.textContent ?? '', /^(—|1 runs in this conversation)$/)
+    assert.equal(within(within(drawer).getByRole('list', { name: 'Events' })).queryAllByRole('listitem').length, 0)
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
+    await waitFor(() => assert.equal(screen.queryByRole('dialog', { name: 'Agent trace' }), null))
+
+    fireEvent.click(within(blocks[1]).getByRole('button', { name: 'View trace' }))
+    drawer = await screen.findByRole('dialog', { name: 'Agent trace' })
+    summary = await waitFor(() => within(drawer).getByRole('group', { name: 'Summary' }))
+    const value = (label: string) => within(summary).getByText(label, { selector: 'dt' }).nextElementSibling?.textContent
+    assert.equal(value('End reason'), 'brand_new_reason')
+    assert.equal(value('Cost'), 'Unknown')
+    const items = within(within(drawer).getByRole('list', { name: 'Events' })).getAllByRole('listitem')
+    assert.match(items[1].textContent ?? '', /Cost.*Unknown/)
+    assert.match(items[2].textContent ?? '', /Rejected arguments.*57 characters hidden/)
+    assert.equal(items[3].querySelector('.hdTraceOffset')?.textContent, '—')
+    assert.doesNotMatch(drawer.textContent ?? '', /NaN/)
+  })
+
+  test('a failed load can be retried', async () => {
+    serve(detail('a', { aiAssist: [assist(RUN)] }))
+    server.on('GET', `/api/helpdesk/agent-runs/${RUN}`, { status: 500, error: 'INTERNAL_ERROR' })
+    const drawer = await openDrawer()
+    await waitFor(() => assert.ok(within(drawer).getByText('The trace could not be loaded. Try again later.')))
+    server.on('GET', `/api/helpdesk/agent-runs/${RUN}`, { data: run() })
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => assert.ok(within(drawer).getByRole('group', { name: 'Summary' })))
+    assert.equal(server.callsTo('GET', `/api/helpdesk/agent-runs/${RUN}`).length, 2)
   })
 })

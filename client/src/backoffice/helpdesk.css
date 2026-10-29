@@ -2301,3 +2301,8 @@
 .hdTraceStep {
   color: #7b8ba2;
 }
+
+/* 加载失败：文案下一行放「重试」（待视觉验收） */
+.hdTraceBody .hdDrawerAlert p {
+  margin: 0 0 4px;
+}
