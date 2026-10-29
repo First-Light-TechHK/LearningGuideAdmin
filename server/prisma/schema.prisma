@@ -575,6 +575,150 @@ model HelpdeskFaqReleaseNode {
   @@map("helpdesk_faq_release_nodes")
 }
 
+/// v5 Part G 数据飞轮（迁移 20261031090000_helpdesk_flywheel）：Admin 的事实表。Admin 读不到 Portal 的库，
+/// 每一行都来自 Portal 的 insights 接口（学员文字已脱敏，其余是标签），按轮 id 幂等 upsert。
+/// 指标视图 helpdesk_insight_turn_facts、CHECK、外键与部分索引只在迁移里（服务层用 SQL 读写，不经 Prisma）。
+model HelpdeskInsightTurn {
+  id                    String   @id @db.Uuid
+  createdAt             DateTime @map("created_at") @db.Timestamptz(6)
+  source                String?
+  locale                String
+  text                  String
+  sessionId             String?  @map("session_id") @db.Uuid
+  turnIndex             Int?     @map("turn_index") @db.SmallInt
+  lastTurn              Boolean? @map("last_turn")
+  sessionEndReason      String?  @map("session_end_reason")
+  kind                  String?
+  intent                String?
+  guard                 String?
+  via                   String?
+  faqId                 String?  @map("faq_id") @db.Uuid
+  nodeId                String?  @map("node_id") @db.Uuid
+  parentNodeId          String?  @map("parent_node_id") @db.Uuid
+  releaseVersion        Int?     @map("release_version")
+  answered              Boolean  @default(false)
+  vote                  String?
+  rating                Int?     @db.SmallInt
+  covered               Boolean?
+  expanded              Boolean?
+  handover              Boolean  @default(false)
+  ticketAfterChat       Boolean  @default(false) @map("ticket_after_chat")
+  ticketLinked          Boolean? @map("ticket_linked")
+  ticketStatus          String?  @map("ticket_status")
+  ticketCloseReason     String?  @map("ticket_close_reason")
+  ticketResolvedByAgent Boolean? @map("ticket_resolved_by_agent")
+  ticketAgentReplied    Boolean? @map("ticket_agent_replied")
+  agentReply            String?  @map("agent_reply")
+  signals               String[] @default([])
+  ingestedAt            DateTime @default(now()) @map("ingested_at") @db.Timestamptz(6)
+  updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([createdAt, id], map: "helpdesk_insight_turns_created_idx")
+  @@index([nodeId, createdAt], map: "helpdesk_insight_turns_node_idx")
+  @@map("helpdesk_insight_turns")
+}
+
+/// FAQ 候选（v5 Part G3 / G4）：new | accepted | dismissed | merged。
+model HelpdeskFaqCandidate {
+  id               String    @id @db.Uuid
+  status           String    @default("new")
+  suggestion       String
+  origin           String
+  topic            String
+  proposedQuestion String    @map("proposed_question")
+  labelSource      String    @map("label_source")
+  category         String?
+  locale           String
+  turnCount        Int       @default(0) @map("turn_count")
+  examples         Json      @default("[]")
+  sourceMix        Json      @default("{}") @map("source_mix")
+  answerSources    Json      @default("[]") @map("answer_sources")
+  relatedNodeId    String?   @map("related_node_id") @db.Uuid
+  relatedScore     Float?    @map("related_score") @db.Real
+  parentNodeId     String?   @map("parent_node_id") @db.Uuid
+  shownNodeId      String?   @map("shown_node_id") @db.Uuid
+  ticketId         String?   @map("ticket_id")
+  firstSeenAt      DateTime  @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt       DateTime  @map("last_seen_at") @db.Timestamptz(6)
+  reason           String?
+  reasonNote       String?   @map("reason_note")
+  acceptedAs       String?   @map("accepted_as")
+  acceptedFaqId    String?   @map("accepted_faq_id") @db.Uuid
+  mergedInto       String?   @map("merged_into") @db.Uuid
+  decidedBy        String?   @map("decided_by") @db.Uuid
+  decidedAt        DateTime? @map("decided_at") @db.Timestamptz(6)
+  actionKey        String?   @map("action_key")
+  version          Int       @default(1)
+  createdBy        String?   @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, turnCount(sort: Desc), lastSeenAt(sort: Desc), id], map: "helpdesk_faq_candidates_queue_idx")
+  @@map("helpdesk_faq_candidates")
+}
+
+/// 一轮至多归一个候选。
+model HelpdeskFaqCandidateTurn {
+  turnId      String   @id @map("turn_id") @db.Uuid
+  candidateId String   @map("candidate_id") @db.Uuid
+  addedAt     DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  @@index([candidateId], map: "helpdesk_faq_candidate_turns_candidate_idx")
+  @@map("helpdesk_faq_candidate_turns")
+}
+
+/// 候选的审计（只追加）。
+model HelpdeskFaqCandidateRevision {
+  id          String   @id @db.Uuid
+  candidateId String   @map("candidate_id") @db.Uuid
+  action      String
+  before      Json?
+  after       Json?
+  employeeId  String?  @map("employee_id") @db.Uuid
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([candidateId, at], map: "helpdesk_faq_candidate_revisions_candidate_idx")
+  @@map("helpdesk_faq_candidate_revisions")
+}
+
+/// 发布评测门的回归用例（v5 Part G5）；(faq_id, locale, lower(text)) 唯一是表达式索引，只在迁移里。
+model HelpdeskFaqEvalCase {
+  id          String   @id @db.Uuid
+  faqId       String   @map("faq_id") @db.Uuid
+  candidateId String?  @map("candidate_id") @db.Uuid
+  locale      String
+  text        String
+  source      String   @default("flywheel")
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([faqId], map: "helpdesk_faq_eval_cases_faq_idx")
+  @@map("helpdesk_faq_eval_cases")
+}
+
+/// 后台任务的运行行（每个任务每个 UTC 日至多一行定时运行；手动运行按 Idempotency-Key 幂等，部分唯一索引只在迁移里）。
+model HelpdeskFlywheelRun {
+  id              String    @id @db.Uuid
+  job             String
+  runDay          DateTime  @map("run_day") @db.Date
+  trigger         String
+  status          String
+  attempts        Int       @default(1) @db.SmallInt
+  instance        String
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  heartbeatAt     DateTime  @default(now()) @map("heartbeat_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+  stats           Json      @default("{}")
+  moreDue         Boolean   @default(false) @map("more_due")
+  errorCode       String?   @map("error_code")
+  requestedBy     String?   @map("requested_by") @db.Uuid
+  requestedByName String?   @map("requested_by_name")
+  idempotencyKey  String?   @map("idempotency_key")
+
+  @@index([job, startedAt(sort: Desc)], map: "helpdesk_flywheel_runs_recent_idx")
+  @@map("helpdesk_flywheel_runs")
+}
+
 // ==========================================
 // Commerce Course（v2，2026-10-26 新增；见 docs/Course_Module_Import_Export_Design.md §14）
 // 商品课程：课程 → 课时 两层（无章节），多语言/展品/学习点/测试/试用/版本/导入导出。

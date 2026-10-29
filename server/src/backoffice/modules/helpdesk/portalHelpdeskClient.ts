@@ -26,7 +26,25 @@ import {
   type TicketStudent,
   type TicketSubscription,
   type TicketSummary,
+  ASSIST_SOURCES,
+  ASSIST_VIAS,
+  CHAT_END_REASONS,
+  CLOSE_REASONS,
+  INSIGHT_LIMITS,
+  PORTAL_JOB_STATUSES,
+  PORTAL_JOB_TRIGGERS,
+  PORTAL_JOBS,
+  TICKET_STATUSES,
+  TURN_GUARDS,
+  TURN_KINDS,
+  type InsightTicket,
+  type InsightTurn,
+  type InsightsPage,
+  type PortalJobRun,
+  type PortalJobRunResult,
+  type PortalJobRuns,
 } from './contracts';
+import { SITUATION_SIGNALS } from '../../../contracts/helpdesk-qa';
 
 /**
  * Portal HelpDesk 集成接口的唯一客户端（Tickets v1 §4 / §5 Integration）。
@@ -136,6 +154,25 @@ export type PortalHelpdeskClient = {
     idempotencyKey: string,
   ) => Promise<TicketDetail | null>;
   getAttachment: (attachmentId: string) => Promise<AttachmentFile>;
+  /**
+   * v7（Part G2）：一页脱敏的 insights（旧的在前）。第一页给 since（和可选的 until），之后带 cursor
+   * （窗口的结束时间在游标里）。只读、幂等；回包不是契约形状 → 502 HELPDESK_UNAVAILABLE。
+   */
+  insights: (query: InsightsQuery) => Promise<InsightsPage>;
+  /** v7：Portal 180 天原文清理任务最近的运行。 */
+  assistRetentionRuns: () => Promise<PortalJobRuns>;
+  /** v7：立即运行 Portal 的清理任务（执行人 = 当前员工；同一个 key 回同一次运行）。 */
+  runAssistRetention: (
+    agent: Agent,
+    idempotencyKey: string,
+  ) => Promise<PortalJobRunResult>;
+};
+
+export type InsightsQuery = {
+  since: string;
+  until?: string;
+  cursor?: string;
+  limit?: number;
 };
 
 export type PortalHelpdeskClientOptions = {
@@ -583,6 +620,159 @@ async function readProblem(response: Response): Promise<Problem> {
   }
 }
 
+// ------------------------------------------------------------- v7 insights
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function oneOf<T extends string>(
+  values: readonly T[],
+  value: unknown,
+): T | null {
+  return (values as readonly unknown[]).includes(value) ? (value as T) : null;
+}
+
+function uuidOrNull(value: unknown): string | null {
+  return typeof value === 'string' && UUID_PATTERN.test(value)
+    ? value.toLowerCase()
+    : null;
+}
+
+function intOrNull(value: unknown, min: number, max: number): number | null {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+    ? value
+    : null;
+}
+
+function clipText(value: unknown, max: number): string {
+  if (typeof value !== 'string') return '';
+  const points = [...value.replace(CONTROL_CHARS, ' ')];
+  return points.length <= max ? points.join('') : points.slice(0, max).join('');
+}
+
+function normaliseInsightTicket(raw: unknown): InsightTicket | null {
+  if (!isRecord(raw)) return null;
+  const resolvedByAgent = raw.resolvedByAgent === true;
+  return {
+    linked: raw.linked === true,
+    status: oneOf(TICKET_STATUSES, raw.status),
+    closeReason: oneOf(CLOSE_REASONS, raw.closeReason),
+    resolvedByAgent,
+    agentReplied: raw.agentReplied === true,
+    // 客服解决了才有（Portal 已脱敏）；人写的回复是新 FAQ 唯一的草稿来源
+    agentReply:
+      resolvedByAgent && typeof raw.agentReply === 'string' && raw.agentReply
+        ? clipText(raw.agentReply, INSIGHT_LIMITS.agentReplyMax)
+        : null,
+  };
+}
+
+/**
+ * 一轮 insights → 只留契约里的字段（Portal 多给的一律丢掉），枚举以外的值为 null；
+ * 没有合法 id 或时间的行不要（返回 null）。
+ */
+export function normaliseInsightTurn(raw: unknown): InsightTurn | null {
+  if (!isRecord(raw)) return null;
+  const id = uuidOrNull(raw.id);
+  const createdAt = isoTime(raw.createdAt);
+  if (!id || !createdAt) return null;
+  const ticket = normaliseInsightTicket(raw.ticket);
+  return {
+    id,
+    createdAt,
+    source: oneOf(ASSIST_SOURCES, raw.source),
+    locale: typeof raw.locale === 'string' ? raw.locale.slice(0, 16) : '',
+    text: clipText(raw.text, INSIGHT_LIMITS.textMax),
+    sessionId: uuidOrNull(raw.sessionId),
+    turnIndex: intOrNull(raw.turnIndex, 0, 32_767),
+    lastTurn: boolOrNull(raw.lastTurn),
+    sessionEndReason: oneOf(CHAT_END_REASONS, raw.sessionEndReason),
+    kind: oneOf(TURN_KINDS, raw.kind),
+    intent:
+      typeof raw.intent === 'string' && /^[a-z_]{1,32}$/.test(raw.intent)
+        ? raw.intent
+        : null,
+    guard: oneOf(TURN_GUARDS, raw.guard),
+    via: oneOf(ASSIST_VIAS, raw.via),
+    faqId: uuidOrNull(raw.faqId),
+    nodeId: uuidOrNull(raw.nodeId),
+    parentNodeId: uuidOrNull(raw.parentNodeId),
+    releaseVersion: intOrNull(raw.releaseVersion, 1, 2_147_483_647),
+    answered: raw.answered === true,
+    vote: assistFeedback(raw.vote),
+    rating: intOrNull(raw.rating, 1, 5),
+    covered: boolOrNull(raw.covered),
+    expanded: boolOrNull(raw.expanded),
+    handover: raw.handover === true,
+    ticketAfterChat: raw.ticketAfterChat === true,
+    ticket,
+    signals: Array.isArray(raw.signals)
+      ? [
+          ...new Set(
+            raw.signals.filter((signal): signal is string =>
+              (SITUATION_SIGNALS as readonly unknown[]).includes(signal),
+            ),
+          ),
+        ]
+      : [],
+  };
+}
+
+/** 一页 insights；不是契约形状（没有 turns 列表或 until）→ null。 */
+export function normaliseInsightsPage(raw: unknown): InsightsPage {
+  if (!isRecord(raw) || !Array.isArray(raw.turns)) throw unavailable();
+  const until = isoTime(raw.until);
+  if (!until) throw unavailable();
+  return {
+    turns: raw.turns
+      .map((turn) => normaliseInsightTurn(turn))
+      .filter((turn): turn is InsightTurn => turn !== null),
+    nextCursor:
+      typeof raw.nextCursor === 'string' &&
+      /^[A-Za-z0-9_-]{1,4096}$/.test(raw.nextCursor)
+        ? raw.nextCursor
+        : null,
+    until,
+  };
+}
+
+function normaliseRequestedBy(raw: unknown): Agent | null {
+  if (!isRecord(raw) || typeof raw.id !== 'string') return null;
+  return { id: raw.id, name: str(raw.name) };
+}
+
+/** Portal 一次后台任务运行；不是契约形状 → null。 */
+export function normaliseJobRun(raw: unknown): PortalJobRun | null {
+  if (!isRecord(raw)) return null;
+  const job = oneOf(PORTAL_JOBS, raw.job);
+  const trigger = oneOf(PORTAL_JOB_TRIGGERS, raw.trigger);
+  const status = oneOf(PORTAL_JOB_STATUSES, raw.status);
+  const startedAt = isoTime(raw.startedAt);
+  if (typeof raw.id !== 'string' || !job || !trigger || !status || !startedAt)
+    return null;
+  return {
+    id: raw.id,
+    job,
+    day: typeof raw.day === 'string' ? raw.day.slice(0, 10) : '',
+    trigger,
+    status,
+    attempts: num(raw.attempts),
+    startedAt,
+    finishedAt: isoTime(raw.finishedAt),
+    cutoff: isoTime(raw.cutoff),
+    rowsScrubbed: num(raw.rowsScrubbed),
+    moreDue: raw.moreDue === true,
+    requestedBy: normaliseRequestedBy(raw.requestedBy),
+    errorCode:
+      typeof raw.errorCode === 'string' && PROBLEM_CODE.test(raw.errorCode)
+        ? raw.errorCode
+        : null,
+  };
+}
+
 // ------------------------------------------------------------------ 客户端
 
 export function createPortalHelpdeskClient(
@@ -745,6 +935,56 @@ export function createPortalHelpdeskClient(
         body,
         idempotencyKey,
       );
+    },
+
+    async insights(query) {
+      const params = new URLSearchParams();
+      params.set('since', query.since);
+      if (query.until) params.set('until', query.until);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.cursor) params.set('cursor', query.cursor);
+      const response = await send('GET', `/insights?${params.toString()}`, {
+        // 一页最多 500 轮，比工单读得慢
+        timeout: timeoutMs * 3,
+        notFoundCode: 'HELPDESK_NOT_CONNECTED',
+      });
+      return normaliseInsightsPage(await readJson(response));
+    },
+
+    async assistRetentionRuns() {
+      const response = await send('GET', '/jobs/assist-retention', {
+        timeout: timeoutMs,
+        notFoundCode: 'HELPDESK_NOT_CONNECTED',
+      });
+      const parsed = await readJson(response);
+      if (!isRecord(parsed) || !Array.isArray(parsed.runs)) throw unavailable();
+      const job = oneOf(PORTAL_JOBS, parsed.job);
+      if (!job) throw unavailable();
+      return {
+        job,
+        retentionDays: num(parsed.retentionDays),
+        runs: parsed.runs
+          .map((run) => normaliseJobRun(run))
+          .filter((run): run is PortalJobRun => run !== null),
+      };
+    },
+
+    async runAssistRetention(agent, idempotencyKey) {
+      const response = await send('POST', '/jobs/assist-retention/run', {
+        body: { agent: { id: agent.id, name: agent.name } },
+        idempotencyKey,
+        // 清理任务在 Portal 同步跑（每次至多 50 批）
+        timeout: timeoutMs * 6,
+        notFoundCode: 'HELPDESK_NOT_CONNECTED',
+      });
+      const parsed = await readJson(response);
+      if (!isRecord(parsed)) throw unavailable();
+      const outcome =
+        parsed.outcome === 'completed' || parsed.outcome === 'already_running'
+          ? parsed.outcome
+          : null;
+      if (!outcome) throw unavailable();
+      return { outcome, run: normaliseJobRun(parsed.run) };
     },
 
     async getAttachment(attachmentId) {

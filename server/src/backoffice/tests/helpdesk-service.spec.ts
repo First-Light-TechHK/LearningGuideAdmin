@@ -90,6 +90,9 @@ function fakeClient(): jest.Mocked<PortalHelpdeskClient> {
       data: Buffer.from('x'),
       fileName: null,
     }),
+    insights: jest.fn(),
+    assistRetentionRuns: jest.fn(),
+    runAssistRetention: jest.fn(),
   };
 }
 
