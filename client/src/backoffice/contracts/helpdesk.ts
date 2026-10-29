@@ -142,6 +142,26 @@ export type TicketAiAssist = {
   createdAt: string;
 };
 
+/**
+ * 「查看链路」：GET /api/helpdesk/agent-runs/:runId（helpdesk-agent-v2-pi-dsh §2）。
+ * 一次 AI 推荐 = 一个 run（id 就是 AI 块的 id）；事件是 dsh SessionEvent 的导出副本，学员原文已脱敏。
+ */
+export type AgentRunEvent = {
+  runId: string;
+  seq: number;
+  type: string;
+  time: string;
+  data: Record<string, unknown>;
+};
+
+export type AgentRun = {
+  runId: string;
+  /** 同一段对话的第一个 run；自己就是第一个时为 null。 */
+  parentRunId: string | null;
+  chain: string[];
+  events: AgentRunEvent[];
+};
+
 export type EnquiryDetail = EnquiryRow & {
   student: TicketStudent | null;
   subscription: TicketSubscription | null;

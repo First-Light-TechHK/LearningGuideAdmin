@@ -1,6 +1,7 @@
 import {
   TIMELINE_LIMIT,
   type AgentActionInput,
+  type AgentRun,
   type EnquiryDetail,
   type EnquiryList,
   type FaqBody,
@@ -72,6 +73,11 @@ export function sendMessage(
 /** claim / propose_resolution（Mark as reviewed）/ add_tag / remove_tag / mark_read / flag / unflag。 */
 export function sendAction(ticketId: string, input: AgentActionInput, idempotencyKey: string) {
   return sendJson<EnquiryDetail>('POST', `${ticketPath(ticketId)}/actions`, input, idempotencyKey)
+}
+
+/** 「查看链路」：一次 AI 推荐的 run（导出副本，学员原文已脱敏）；没有记录时 AGENT_RUN_NOT_FOUND。 */
+export function getAgentRun(runId: string) {
+  return request<AgentRun>(`/api/helpdesk/agent-runs/${encodeURIComponent(runId)}`)
 }
 
 /** 附件走 BackOffice Server 代理（图片内联、其它下载）。 */

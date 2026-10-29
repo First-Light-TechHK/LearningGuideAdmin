@@ -637,6 +637,48 @@
       "notHelpful": "学生反馈：仍提交给客服",
       "noAnswer": "没有匹配的常见问题，助手没有给出答案。"
     },
+    "trace": {
+      "view": "查看链路",
+      "title": "推荐链路",
+      "subtitle": "助手如何选出这条答案。只读，学员原文已隐藏。",
+      "close": "关闭",
+      "loading": "正在加载链路…",
+      "notFound": "这条答案没有记录链路。",
+      "failed": "链路加载失败，请稍后再试。",
+      "summaryTitle": "概要",
+      "eventsTitle": "事件",
+      "fields": {
+        "endReason": "结束原因",
+        "model": "模型",
+        "tokens": "Token",
+        "cost": "费用",
+        "latency": "耗时",
+        "chosen": "选中的常见问题",
+        "candidates": "候选",
+        "traceId": "Trace ID",
+        "conversation": "对话",
+        "feedback": "学生反馈",
+        "toolArgs": "工具参数",
+        "outcome": "结果",
+        "error": "错误"
+      },
+      "tokensValue": "输入 {input} / 输出 {output}",
+      "latencyValue": "{ms} 毫秒",
+      "offsetValue": "+{ms} 毫秒",
+      "conversationValue": "本段对话共 {count} 次推荐",
+      "stepValue": "第 {step} 步",
+      "none": "—",
+      "reasons": {
+        "answered": "已答复",
+        "no_match": "无匹配",
+        "no_candidates": "无候选",
+        "rate_limited": "已限流",
+        "timeout": "超时",
+        "error": "出错",
+        "aborted": "已中止",
+        "no_key": "未配置 API key"
+      }
+    },
     "faqCategory": {
       "account_technical": "账户与技术支持",
       "courses_learning": "课程与学习",

@@ -37,7 +37,7 @@ import { HdBotIcon } from './icons'
 /**
  * 中栏：选中工单的学员时间线（Tickets v2 §3d，Figma 1324:2）。
  * 日期分隔 + 每条工单一张卡片（头像在卡片外；主题、类型、「联系邮箱 · HH:mm」、正文、附件、4 个按钮的操作栏），
- * 卡片后是它的 AI 块（aiAssist），选中的那条再往下是之后的对话。
+ * 卡片后是它的 AI 块（aiAssist，每块一个只读的「查看链路」），选中的那条再往下是之后的对话。
  * 操作栏：Mark as reviewed（OPEN 时是 Claim / 接单）、Email student（展开回复框）、Internal notes
  * （展开内部备注与备注框）、Flag follow-up（开关）。VIEW 整个操作栏不显示，内部备注直接只读显示在对话里。
  * 回复框、备注面板、状态胶囊、按下态等没有画板的部分沿用同一套样式（待视觉验收）。
@@ -64,6 +64,8 @@ type Props = {
   onClaim: (id: string) => void
   onMarkReviewed: (id: string) => void
   onFlag: (id: string) => void
+  /** 打开 AI 块的「查看链路」抽屉（run id = AI 块 id）。 */
+  onTrace: (runId: string) => void
   /** idempotencyKey：同一份草稿重试沿用同一个，内容变了或发送成功后换新。 */
   onSend: (id: string, body: string, internal: boolean, idempotencyKey: string) => Promise<boolean>
   /** 回复 / 备注草稿与它们的 Idempotency-Key（按「工单 id:reply|note」），由父组件保存：中栏卸载也不丢。 */
@@ -124,7 +126,7 @@ function MessageCard({ message, ticket, locale }: { message: TicketMessage; tick
   )
 }
 
-function AiBlock({ assist, locale }: { assist: TicketAiAssist; locale: Locale }) {
+function AiBlock({ assist, locale, onTrace }: { assist: TicketAiAssist; locale: Locale; onTrace: (runId: string) => void }) {
   const tone = assistFeedbackTone(assist.feedback)
   return (
     <div className="hdAiRow">
@@ -132,6 +134,10 @@ function AiBlock({ assist, locale }: { assist: TicketAiAssist; locale: Locale })
         <header className="hdAiHead">
           <h3 className="hdAiTitle">{t(locale, 'helpDesk.ai.title')}</h3>
           <span className="hdAiTag">{t(locale, 'helpDesk.ai.tag')}</span>
+          {/* 查看链路：只读，VIEW 角色也有（无画板，待视觉验收）；AI 块的 id 就是这次推荐的 run id */}
+          <button type="button" className="hdLinkButton hdAiTrace" onClick={() => onTrace(assist.id)}>
+            {t(locale, 'helpDesk.trace.view')}
+          </button>
         </header>
         {assist.answer ? (
           <MarkdownView className="hdAiAnswer" text={assist.answer} />
@@ -413,7 +419,7 @@ export function EnquiryTimeline(props: Props) {
                 ) : null}
 
                 {(detail?.aiAssist ?? []).map((assist) => (
-                  <AiBlock key={assist.id} assist={assist} locale={locale} />
+                  <AiBlock key={assist.id} assist={assist} locale={locale} onTrace={props.onTrace} />
                 ))}
 
                 {selected

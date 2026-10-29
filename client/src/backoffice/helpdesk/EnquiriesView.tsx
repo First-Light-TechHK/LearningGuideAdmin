@@ -45,7 +45,13 @@ import { StudentPanel } from './StudentPanel'
  * 时间线上每张卡片都有自己的操作栏：写操作按卡片的工单 id 与 sequence 发出，结果只提示在那张卡片下。
  */
 
-type Props = { locale: Locale; ticketId: string | null; canWrite: boolean }
+type Props = {
+  locale: Locale
+  ticketId: string | null
+  canWrite: boolean
+  /** AI 块的「查看链路」：抽屉由 HelpDeskPage 打开（与 FAQ 抽屉同一层，后面的页面 inert）。 */
+  onTrace: (runId: string) => void
+}
 
 export function NotConnected({ locale }: { locale: Locale }) {
   return (
@@ -56,7 +62,7 @@ export function NotConnected({ locale }: { locale: Locale }) {
   )
 }
 
-export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
+export function EnquiriesView({ locale, ticketId, canWrite, onTrace }: Props) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const filterKey = searchParams.toString()
@@ -372,6 +378,7 @@ export function EnquiriesView({ locale, ticketId, canWrite }: Props) {
           <div className="hdConversation">
             <EnquiryTimeline
               locale={locale}
+              onTrace={onTrace}
               learnerName={ticket.learner.name || ticket.learner.email}
               selectedId={ticket.id}
               entries={entries}

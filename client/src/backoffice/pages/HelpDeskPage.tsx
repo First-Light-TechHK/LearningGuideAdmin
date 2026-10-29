@@ -8,6 +8,7 @@ import { EnquiriesView } from '../helpdesk/EnquiriesView'
 import { FaqDrawer } from '../helpdesk/FaqDrawer'
 import { FaqPreview } from '../helpdesk/FaqPreview'
 import { FaqsView } from '../helpdesk/FaqsView'
+import { TraceDrawer } from '../helpdesk/TraceDrawer'
 import { afterFaqSave } from '../lib/helpdeskFaqs'
 import { errorMessage } from '../lib/helpdeskFormat'
 import { helpDeskPageControls } from '../lib/helpdeskView'
@@ -21,7 +22,7 @@ import { useWorkspaceAccess } from '../lib/workspaceAccess'
  * - FAQs（?tab=faqs；旧链接 ?tab=questions 也到这里）：FAQ 表格，抽屉新增 / 编辑，Preview
  * 抽屉盖在 Tab 下方的内容区上（.hdContent）。抽屉或 Preview 打开时，页头、Tab 和后面的列表都 inert
  *（点不到、Tab 不进去），「+ Add FAQ」与切 Tab 也不会替换掉正在编辑的草稿。写操作只给 helpDesk = FULL；VIEW 能看能预览，
- * 没有任何写控件（服务端同样拒绝）。
+ * 没有任何写控件（服务端同样拒绝）。Enquiries 里 AI 块的「查看链路」抽屉（只读）也在这一层打开。
  */
 
 type TabKey = 'enquiries' | 'faqs'
@@ -41,8 +42,10 @@ export default function HelpDeskPage() {
   const [editing, setEditing] = useState<Editing>(null)
   const [previewing, setPreviewing] = useState<HelpdeskFaq | null>(null)
   const [faqsVersion, setFaqsVersion] = useState(0)
+  /** 「查看链路」打开的 run（AI 块 id）；只读，VIEW 也能开。 */
+  const [tracing, setTracing] = useState<string | null>(null)
   const drawerOpen = Boolean(editing && controls.faqDrawer)
-  const modal = drawerOpen || previewing !== null
+  const modal = drawerOpen || previewing !== null || tracing !== null
 
   // v1 的 Common Questions 链接（?tab=questions）换成 ?tab=faqs，其它参数保留
   useEffect(() => {
@@ -110,7 +113,12 @@ export default function HelpDeskPage() {
       <div className="hdContent">
         <div className="hdContentBody" inert={modal}>
           {tab === 'enquiries' ? (
-            <EnquiriesView locale={locale} ticketId={ticketId ?? null} canWrite={canWrite} />
+            <EnquiriesView
+              locale={locale}
+              ticketId={ticketId ?? null}
+              canWrite={canWrite}
+              onTrace={(runId) => !modal && setTracing(runId)}
+            />
           ) : (
             <FaqsView
               locale={locale}
@@ -131,6 +139,8 @@ export default function HelpDeskPage() {
             onDone={onDrawerDone}
           />
         ) : null}
+
+        {tracing ? <TraceDrawer key={tracing} locale={locale} runId={tracing} onClose={() => setTracing(null)} /> : null}
       </div>
 
       {previewing ? <FaqPreview locale={locale} faq={previewing} onClose={() => setPreviewing(null)} /> : null}

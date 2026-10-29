@@ -637,6 +637,48 @@
       "notHelpful": "Student feedback: No, I still submit to support team",
       "noAnswer": "No FAQ matched, so the assistant showed no answer."
     },
+    "trace": {
+      "view": "View trace",
+      "title": "Agent trace",
+      "subtitle": "How the assistant picked this answer. Read-only; the student's words are hidden.",
+      "close": "Close",
+      "loading": "Loading trace…",
+      "notFound": "No trace was recorded for this answer.",
+      "failed": "The trace could not be loaded. Try again later.",
+      "summaryTitle": "Summary",
+      "eventsTitle": "Events",
+      "fields": {
+        "endReason": "End reason",
+        "model": "Model",
+        "tokens": "Tokens",
+        "cost": "Cost",
+        "latency": "Latency",
+        "chosen": "Chosen FAQ",
+        "candidates": "Candidates",
+        "traceId": "Trace ID",
+        "conversation": "Conversation",
+        "feedback": "Student feedback",
+        "toolArgs": "Tool arguments",
+        "outcome": "Outcome",
+        "error": "Error"
+      },
+      "tokensValue": "{input} in / {output} out",
+      "latencyValue": "{ms} ms",
+      "offsetValue": "+{ms} ms",
+      "conversationValue": "{count} runs in this conversation",
+      "stepValue": "Step {step}",
+      "none": "—",
+      "reasons": {
+        "answered": "Answered",
+        "no_match": "No match",
+        "no_candidates": "No candidates",
+        "rate_limited": "Rate limited",
+        "timeout": "Timed out",
+        "error": "Error",
+        "aborted": "Aborted",
+        "no_key": "No API key"
+      }
+    },
     "faqCategory": {
       "account_technical": "Account & Technical Support",
       "courses_learning": "Courses & Learning",
