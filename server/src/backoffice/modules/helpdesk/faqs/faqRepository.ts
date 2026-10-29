@@ -12,6 +12,7 @@ import {
   type FaqStatus,
   type HelpdeskFaq,
 } from './faqContracts';
+import { chineseSearchForms, typoKeys } from './faqSearchText';
 import { uuidv7 } from '../../../../common/uuidv7';
 
 /**
@@ -188,14 +189,18 @@ const HAN = /\p{Script=Han}/u;
 
 /**
  * 学员原文 / 搜索词 → 英文全文检索词（只含字母数字，前缀匹配，OR 连接）、关键词前缀用的词
- * （≥3 字）与中文双字片段。只含字母数字，所以永远不会构成 tsquery 语法。
+ * （≥3 字）、中文双字片段（取自简体与普通话改写，见 faqSearchText.ts）与关键词包含用的
+ * 小写全文（原文 + 简体 + 普通话改写，繁体关键词和简体关键词都认），以及英文拼写容错的
+ * 查询键（typoKeys：键与它来自第几个词）。只含字母数字，所以永远不会构成 tsquery 语法。
  */
 export function searchTerms(text: string): {
   tsquery: string;
   words: string[];
   bigrams: string[];
+  body: string;
+  typo: { keys: string[]; word: number[] };
 } {
-  const lower = text.toLowerCase();
+  const lower = text.normalize('NFKC').toLowerCase();
   const words = [
     ...new Set(
       (lower.match(/[\p{L}\p{N}]+/gu) ?? []).filter(
@@ -203,70 +208,107 @@ export function searchTerms(text: string): {
       ),
     ),
   ].slice(0, 32);
+  const forms = chineseSearchForms(lower);
   const bigrams = new Set<string>();
-  for (const run of lower.match(/\p{Script=Han}+/gu) ?? []) {
-    const chars = [...run];
-    for (let i = 0; i + 1 < chars.length; i++) {
-      bigrams.add(chars[i] + chars[i + 1]);
+  for (const form of forms) {
+    for (const run of form.match(/\p{Script=Han}+/gu) ?? []) {
+      const chars = [...run];
+      for (let i = 0; i + 1 < chars.length; i++) {
+        bigrams.add(chars[i] + chars[i + 1]);
+      }
     }
   }
   return {
     tsquery: words.map((word) => `${word}:*`).join(' | '),
     words: words.filter((word) => word.length >= 3),
     bigrams: [...bigrams].slice(0, 40),
+    body: [...new Set([lower, ...forms])].join('\n'),
+    typo: typoKeys(words),
   };
 }
 
 /**
  * 候选检索。to_tsvector('english', question_en || ' ' || answer_en) 必须与迁移里的
  * helpdesk_faqs_search_en_idx 表达式一字不差（helpdesk-faqs-search-index.spec.ts 锁定）。
- * 先按两路取命中的行再打分：全文一路的 WHERE 就是索引表达式 @@ to_tsquery($3)（直接写在 WHERE 里，
- * 规划器按实参估算才会选 GIN 索引；helpdesk-faqs-repository.pg.spec.ts 对本条 SQL 做 EXPLAIN 锁定）；
- * 关键词 / 中文双字是「片段出现在原文里」，索引帮不上，只扫已发布的行。只有命中的少数行才算 ts_rank。
- * 参数：$1 locale、$2 加权分类（'' = 不加权）、$3 tsquery、$4 小写原文、$5 双字、$6 条数、
- * $7 只要此分类（NULL = 不限）、$8 只要热门 / 非热门（NULL = 不限）、$9 关键词前缀用的词。
+ * 先按四路取命中的行再打分：
+ * - 英文全文：WHERE 就是索引表达式 @@ to_tsquery($3)（直接写在 WHERE 里，规划器按实参估算才会选
+ *   GIN 索引；helpdesk-faqs-repository.pg.spec.ts 对本条 SQL 做 EXPLAIN 锁定）；不看界面语言
+ *   （中文句子里的英文词也算）。只有这一路命中的行才算 ts_rank；
+ * - 拼写容错：生成列 typo_keys 与查询键有交集（GIN 索引，迁移 20261029150000）；
+ * - 关键词：整句包含关键词，或词是关键词的前缀（扫已发布的行）；
+ * - 中文双字：问题或答案里出现（扫已发布的行，一遍同时得到每个双字的文档频率与每行的命中）。
+ *   双字按 IDF 加权：w = ln((N + 1) / df) / ln(N + 1)，只在 1 篇里出现 = 1，篇篇都有 → 接近 0；
+ *   只靠 w < 0.1 的双字（「怎么」「可以」这种几乎篇篇都有的）不算命中，所以 FAQ 多了以后
+ *   不会把整个库都拉进来打分。
+ * 参数：$1 locale、$2 加权分类（'' = 不加权）、$3 tsquery、$4 小写原文（含简体 / 普通话改写）、
+ * $5 双字、$6 条数、$7 只要此分类（NULL = 不限）、$8 只要热门 / 非热门（NULL = 不限）、
+ * $9 关键词前缀用的词、$10 拼写容错键、$11 每个键来自第几个词。
  */
 export const FAQ_CANDIDATES_SQL = `
 WITH input AS (
   SELECT CASE WHEN $3 = '' THEN NULL ELSE to_tsquery('english', $3) END AS tsq,
          $4::text AS body,
-         $5::text[] AS bigrams,
-         COALESCE($9::text[], ARRAY[]::text[]) AS words
-), matched AS (
+         -- 词是关键词里某个词的前缀：一个正则（每条查询只编译一次），词只含字母数字
+         CASE WHEN cardinality($9::text[]) > 0
+              THEN '(^|[[:space:]])(' || array_to_string($9::text[], '|') || ')' END AS word_prefix
+), published AS (
+  SELECT count(*)::float8 AS total FROM helpdesk_faqs WHERE status = 'published'
+), bigram_hits AS (
+  SELECT f.id, b.bigram,
+         position(b.bigram IN f.question_zh) > 0 AS in_question,
+         position(b.bigram IN f.answer_zh) > 0 AS in_answer
+    FROM unnest($5::text[]) AS b(bigram)
+    JOIN helpdesk_faqs f
+      ON f.status = 'published'
+     AND (position(b.bigram IN f.question_zh) > 0 OR position(b.bigram IN f.answer_zh) > 0)
+), bigram_weights AS (
+  SELECT h.bigram, ln((p.total + 1) / count(*)) / ln(p.total + 1) AS idf
+    FROM bigram_hits h CROSS JOIN published p
+   GROUP BY h.bigram, p.total
+), bigram_scores AS (
+  SELECT h.id,
+         COALESCE(sum(w.idf) FILTER (WHERE h.in_question), 0) AS question_bigrams,
+         COALESCE(sum(w.idf) FILTER (WHERE h.in_answer), 0) AS answer_bigrams,
+         max(w.idf) AS best_idf
+    FROM bigram_hits h JOIN bigram_weights w ON w.bigram = h.bigram
+   GROUP BY h.id
+), text_matched AS (
   SELECT f.id
     FROM helpdesk_faqs f
-   WHERE f.status = 'published' AND $1 = 'en-GB' AND $3 <> ''
+   WHERE f.status = 'published' AND $3 <> ''
      AND to_tsvector('english', f.question_en || ' ' || f.answer_en) @@ to_tsquery('english', $3)
+), matched AS (
+  SELECT id FROM text_matched
+  UNION
+  SELECT f.id
+    FROM helpdesk_faqs f
+   WHERE f.status = 'published' AND f.typo_keys && $10::text[]
   UNION
   SELECT f.id
     FROM helpdesk_faqs f CROSS JOIN input i
    WHERE f.status = 'published'
-     AND (EXISTS (SELECT 1 FROM unnest(f.keywords) AS k
-                   WHERE k <> ''
-                     AND (position(lower(k) IN i.body) > 0
-                          OR EXISTS (SELECT 1 FROM unnest(i.words) AS w
-                                      WHERE position(' ' || w IN ' ' || lower(k)) > 0)))
-          OR ($1 = 'zh-CN' AND EXISTS (SELECT 1 FROM unnest(i.bigrams) AS b
-                   WHERE position(b IN f.question_zh) > 0 OR position(b IN f.answer_zh) > 0)))
+     AND EXISTS (SELECT 1 FROM unnest(f.keywords) AS k
+                  WHERE k <> ''
+                    AND (position(lower(k) IN i.body) > 0 OR lower(k) ~ i.word_prefix))
+  UNION
+  SELECT id FROM bigram_scores WHERE best_idf >= 0.1
 ), scored AS (
   SELECT f.*,
-         CASE WHEN $1 = 'en-GB'
-              THEN COALESCE(ts_rank(to_tsvector('english', f.question_en || ' ' || f.answer_en), i.tsq), 0)
-              ELSE 0 END AS text_rank,
+         CASE WHEN t.id IS NULL THEN 0
+              ELSE ts_rank(to_tsvector('english', f.question_en || ' ' || f.answer_en), i.tsq) END AS text_rank,
          (SELECT count(*) FROM unnest(f.keywords) AS k
            WHERE k <> '' AND position(lower(k) IN i.body) > 0) AS keyword_hits,
          (SELECT count(*) FROM unnest(f.keywords) AS k
-           WHERE k <> '' AND EXISTS (SELECT 1 FROM unnest(i.words) AS w
-                                      WHERE position(' ' || w IN ' ' || lower(k)) > 0)) AS keyword_prefix_hits,
-         CASE WHEN $1 = 'zh-CN'
-              THEN (SELECT count(*) FROM unnest(i.bigrams) AS b WHERE position(b IN f.question_zh) > 0)
-              ELSE 0 END AS question_bigrams,
-         CASE WHEN $1 = 'zh-CN'
-              THEN (SELECT count(*) FROM unnest(i.bigrams) AS b WHERE position(b IN f.answer_zh) > 0)
-              ELSE 0 END AS answer_bigrams
+           WHERE k <> '' AND lower(k) ~ i.word_prefix) AS keyword_prefix_hits,
+         COALESCE(s.question_bigrams, 0) AS question_bigrams,
+         COALESCE(s.answer_bigrams, 0) AS answer_bigrams,
+         (SELECT count(DISTINCT q.word) FROM unnest($10::text[], $11::int[]) AS q(key, word)
+           WHERE q.key = ANY (f.typo_keys)) AS typo_hits
     FROM helpdesk_faqs f
     JOIN matched m ON m.id = f.id
     CROSS JOIN input i
+    LEFT JOIN text_matched t ON t.id = f.id
+    LEFT JOIN bigram_scores s ON s.id = f.id
    WHERE ($7::text IS NULL OR f.category = $7::text)
      AND ($8::boolean IS NULL OR f.popular = $8::boolean)
 )
@@ -274,7 +316,7 @@ SELECT id, category, popular, question_en, answer_en, question_zh, answer_zh, ke
        status, version, created_by, updated_by, created_at, updated_at,
        CASE WHEN $1 = 'zh-CN' THEN question_zh ELSE question_en END AS question,
        ((text_rank + 0.3 * keyword_hits + 0.15 * keyword_prefix_hits
-         + 0.1 * question_bigrams + 0.03 * answer_bigrams)
+         + 0.25 * question_bigrams + 0.08 * answer_bigrams + 0.2 * typo_hits)
          * CASE WHEN category = $2 THEN 1.25 ELSE 1 END)::float8 AS score
   FROM scored
  ORDER BY score DESC, popular DESC, updated_at DESC, id ASC
@@ -436,7 +478,7 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
     async searchPublished(search) {
       const text = search.text.trim();
       if (text === '') return [];
-      const { tsquery, words, bigrams } = searchTerms(text);
+      const { tsquery, words, bigrams, body, typo } = searchTerms(text);
       const limit = Math.min(
         Math.max(1, Math.floor(search.limit)),
         FAQ_LIMITS.publicLimitMax,
@@ -445,12 +487,14 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
         search.locale,
         search.boost ?? '',
         tsquery,
-        text.toLowerCase(),
+        body,
         bigrams,
         limit,
         search.category ?? null,
         search.popular ?? null,
         words,
+        typo.keys,
+        typo.word,
       ]);
       return rows.map((row) => ({ ...toFaq(row), score: Number(row.score) }));
     },

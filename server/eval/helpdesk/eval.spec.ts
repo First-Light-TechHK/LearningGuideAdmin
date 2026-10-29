@@ -123,7 +123,7 @@ describe('eval dataset', () => {
     ).toBeGreaterThanOrEqual(4);
   });
 
-  it('documents the Traditional-script cases that retrieval cannot reach', () => {
+  it('documents the Traditional-script cases that retrieval used to miss', () => {
     const noted = cases.filter((c) => c.note);
     expect(noted.map((c) => c.id)).toEqual([
       'tw-01',
@@ -1539,7 +1539,10 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
     'runs the qa10k library through the production retrieval in --retrieval-only mode',
     async () => {
       const library = loadFaqs(join(DIR, 'qa10k', 'faqs.json'));
-      const some = loadCases(join(DIR, 'qa10k', 'dev.jsonl')).slice(0, 200);
+      // 每 10 条取 1 条：各语言 / 类型都有（文件按语言与类型分块写入）
+      const some = loadCases(join(DIR, 'qa10k', 'dev.jsonl')).filter(
+        (_, i) => i % 10 === 0,
+      );
       const { qa, close } = await pgQaSource(
         PG_URL as string,
         library,
@@ -1553,7 +1556,11 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
           retrieval: 'postgresql',
           faqs: library.length,
         });
-        expect(report.overall.recallAt8).toBeGreaterThan(0.6);
+        expect(report.cases.run).toBe(500);
+        // 检索改进（繁体 / 粤语归一、跨语言、IDF、拼写容错）的下限；改进前约 0.91 / 0.72 / 0.80
+        expect(report.overall.recallAt8).toBeGreaterThan(0.93);
+        expect(report.byLanguage['zh-TW'].recallAt8).toBeGreaterThan(0.88);
+        expect(report.byPersona.typo.recallAt8).toBeGreaterThan(0.85);
         expect(report.latencyMs.p95).toBeLessThan(300);
       } finally {
         await close();

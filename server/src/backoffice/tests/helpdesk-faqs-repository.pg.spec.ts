@@ -7,6 +7,7 @@ import {
   FAQ_CANDIDATES_SQL,
   createPgFaqRepository,
   createPgHelpdeskQaSource,
+  searchTerms,
   type FaqRepository,
   type SqlDb,
 } from '../modules/helpdesk/faqs/faqRepository';
@@ -351,9 +352,10 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       );
       await client.query('ANALYZE helpdesk_faqs');
       await client.query(
-        `PREPARE hd_candidates(text, text, text, text, text[], int, text, boolean, text[]) AS ${FAQ_CANDIDATES_SQL}`,
+        `PREPARE hd_candidates(text, text, text, text, text[], int, text, boolean, text[], text[], int[]) AS ${FAQ_CANDIDATES_SQL}`,
       );
-      const args = `'en-GB', 'account_technical', 'password:* | reset:*', 'how do i reset my password?', ARRAY[]::text[], 8, NULL, NULL, ARRAY['password', 'reset']`;
+      const terms = searchTerms('how do i reset my password?');
+      const args = `'en-GB', 'account_technical', 'password:* | reset:*', 'how do i reset my password?', ARRAY[]::text[], 8, NULL, NULL, ARRAY['password', 'reset'], ARRAY[${terms.typo.keys.map((k) => `'${k}'`).join(', ')}]::text[], ARRAY[${terms.typo.word.join(', ')}]::int[]`;
       const { rows } = await client.query(
         `EXPLAIN EXECUTE hd_candidates(${args})`,
       );
@@ -367,6 +369,27 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       expect(found.rows.map((r) => r.question)).toEqual([
         'How do I reset my password?',
       ]);
+      // 拼写容错一路：结果对，且谓词（typo_keys && 查询键）是 GIN 索引用得上的写法。
+      // 选不选索引看代价（这么小的表、8 个键，规划器常宁可扫描），所以单独用同一谓词看索引可用
+      const typo = searchTerms('pasword');
+      const typoArgs = `'en-GB', '', '', 'pasword', ARRAY[]::text[], 8, NULL, NULL, ARRAY[]::text[], ARRAY[${typo.typo.keys.map((k) => `'${k}'`).join(', ')}]::text[], ARRAY[${typo.typo.word.join(', ')}]::int[]`;
+      const typoFound = await client.query<{ question: string }>(
+        `EXECUTE hd_candidates(${typoArgs})`,
+      );
+      expect(typoFound.rows.map((r) => r.question)).toEqual([
+        'How do I reset my password?',
+      ]);
+      expect(FAQ_CANDIDATES_SQL).toContain('f.typo_keys && $10::text[]');
+      await client.query('SET LOCAL enable_seqscan = off');
+      const typoPlan = (
+        await client.query(
+          `EXPLAIN SELECT id FROM helpdesk_faqs WHERE typo_keys && $1::text[]`,
+          [['pasword', 'psword']],
+        )
+      ).rows
+        .map((r: Record<string, string>) => r['QUERY PLAN'])
+        .join('\n');
+      expect(typoPlan).toContain('helpdesk_faqs_typo_keys_idx');
       await client.query('DEALLOCATE hd_candidates');
       await client.query('ROLLBACK');
     } finally {
@@ -521,6 +544,77 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       expect((await find('zh-CN', null, '怎么重置'))[0].id).toBe(reset.id);
       expect((await find('zh-CN', null, '订单在哪'))[0].id).toBe(invoice.id);
       expect(await find('zh-CN', null, '课程视频')).toEqual([]);
+    });
+
+    it('matches Traditional Chinese and Cantonese against the Simplified FAQ text', async () => {
+      expect((await find('zh-CN', null, '密碼點樣重設'))[0].id).toBe(reset.id);
+      expect((await find('zh-CN', null, '我忘記咗密碼'))[0].id).toBe(reset.id);
+      expect((await find('zh-CN', null, '發票喺邊度搵'))[0].id).toBe(
+        invoice.id,
+      );
+      expect((await find('zh-CN', null, '訂單在哪'))[0].id).toBe(invoice.id);
+      expect(await find('zh-CN', null, '課程影片')).toEqual([]);
+    });
+
+    it('matches Chinese and English whatever the interface language', async () => {
+      expect((await find('en-GB', null, '忘记密码'))[0].id).toBe(reset.id);
+      expect((await find('zh-CN', null, '我的 invoice 在哪'))[0].id).toBe(
+        invoice.id,
+      );
+      const [candidate] = await createPgHelpdeskQaSource(repo).findCandidates({
+        locale: 'zh-CN',
+        category: null,
+        text: 'reset password',
+        limit: 8,
+      });
+      expect(candidate).toMatchObject({
+        id: reset.id,
+        question: '如何重置密码？',
+      });
+    });
+
+    it('tolerates one-letter English typos in question and keyword words', async () => {
+      expect(
+        (await find('en-GB', null, 'how do i resset my pasword'))[0].id,
+      ).toBe(reset.id);
+      expect((await find('en-GB', null, 'invoce for june'))[0].id).toBe(
+        invoice.id,
+      );
+      expect((await find('en-GB', null, 'reciept'))[0].id).toBe(invoice.id);
+      expect(await find('en-GB', null, 'refund')).toEqual([]);
+      const { rows } = await pool.query<{ typo_keys: string[] }>(
+        'SELECT typo_keys FROM helpdesk_faqs WHERE id = $1',
+        [reset.id],
+      );
+      expect(rows[0].typo_keys).toEqual(
+        expect.arrayContaining(['password', 'pasword', 'reset', 'rese']),
+      );
+      // 生成列随修改更新
+      await repo.update(reset.id, 1, { keywords: ['passcode'] }, 'update', EMP);
+      const after = await pool.query<{ typo_keys: string[] }>(
+        'SELECT typo_keys FROM helpdesk_faqs WHERE id = $1',
+        [reset.id],
+      );
+      expect(after.rows[0].typo_keys).toEqual(
+        expect.arrayContaining(['passcode', 'pascode']),
+      );
+    });
+
+    it('weights Chinese bigrams by how rare they are, and ignores bigrams almost every FAQ has', async () => {
+      for (let i = 0; i < 20; i++) {
+        await repo.insert(
+          faq({
+            questionZh: `其他问题 ${i}`,
+            answerZh: '不知道怎么办就联系客服。',
+          }),
+          EMP,
+          null,
+        );
+      }
+      // 「怎么」在 20 / 24 条已发布 FAQ 里：单靠它不算命中
+      expect(await find('zh-CN', null, '怎么')).toEqual([]);
+      // 稀有的「重置」压过常见的「怎么」
+      expect((await find('zh-CN', null, '怎么重置'))[0].id).toBe(reset.id);
     });
 
     it('returns nothing when nothing matches, and at most the limit', async () => {
