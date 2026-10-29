@@ -214,6 +214,38 @@ describe('FAQs: edit with an optimistic version', () => {
     expect(repository.revisionRows).toHaveLength(0);
   });
 
+  it('is idempotent (RFC 9110 PUT): a retry of a save whose response was lost returns the FAQ, not a conflict', async () => {
+    const existing = faq();
+    const { repository, service } = setup([existing]);
+    const first = await service.update(employee, existing.id, {
+      ...validInput,
+      version: 1,
+    });
+    expect(first.version).toBe(2);
+    // 同一份内容、同一个旧 version 再发一次：状态已经是这样了
+    const retry = await service.update(employee, existing.id, {
+      ...validInput,
+      version: 1,
+    });
+    expect(retry).toEqual(first);
+    // 什么都没改的保存也不升版本、不写修订（不改变 Portal 读到的 ETag）
+    const same = await service.update(employee, existing.id, {
+      ...validInput,
+      version: 2,
+    });
+    expect(same).toEqual(first);
+    expect(repository.revisionRows.map((r) => r.action)).toEqual(['update']);
+    // 内容不同的旧 version 仍是冲突
+    const error = await rejection(
+      service.update(employee, existing.id, {
+        ...validInput,
+        questionEn: 'Something else',
+        version: 1,
+      }),
+    );
+    expect(error).toMatchObject({ status: 409, code: 'VERSION_CONFLICT' });
+  });
+
   it('requires a whole-number version and a UUID id', async () => {
     const existing = faq();
     const { service } = setup([existing]);

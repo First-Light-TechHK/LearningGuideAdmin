@@ -363,6 +363,9 @@ export function createFaqService(options: { repository?: FaqRepository } = {}) {
       const expected = version(body);
       const fields = editable(body);
       const current = await live(id);
+      // PUT 是幂等的（RFC 9110 §9.2.2）：内容已经是这样（丢了响应后的重试、什么都没改的保存）
+      // 就原样返回，不升版本、不写修订；内容不同而 version 过期才是冲突
+      if (sameFields(fields, current)) return current;
       if (current.version !== expected) throw conflict(current.version);
       return written(
         await repository.update(
