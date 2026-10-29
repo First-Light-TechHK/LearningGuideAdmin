@@ -376,6 +376,21 @@ model HelpdeskSuggestion {
   @@map("helpdesk_suggestions")
 }
 
+// HelpDesk Agent 链路追踪（迁移 20261029120000_helpdesk_agent_events；helpdesk-agent-v2-pi-dsh §2）：
+// dsh SessionEvent 日志，归 Agent（src/ai/helpdesk/trace）。只追加：seq 由应用在 run 级锁内分配，
+// 触发器拒绝 DELETE 与除 90 天清学员原文以外的 UPDATE；parentRunId 表达式索引只在迁移里。
+model HelpdeskAgentEvent {
+  runId String   @map("run_id") @db.Uuid
+  seq   Int
+  type  String
+  time  DateTime @db.Timestamptz(6)
+  data  Json     @default("{}")
+
+  @@id([runId, seq])
+  @@index([time])
+  @@map("helpdesk_agent_events")
+}
+
 // HelpDesk FAQ（Tickets v2 Figma addendum §1；迁移 20261029090000_helpdesk_faqs）：一条中英双语记录，
 // 归 BackOffice（唯一写入方，原生 SQL 读写，见 modules/helpdesk/faqs/faqRepository.ts）。
 // 英文全文 GIN 索引（helpdesk_faqs_search_en_idx）是表达式索引，Prisma 表达不了，只在迁移里。
