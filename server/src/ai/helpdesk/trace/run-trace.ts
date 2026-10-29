@@ -2,11 +2,15 @@ import type {
   AgentEventType,
   JsonObject,
 } from '../../../contracts/helpdesk-trace';
-import type { AgentEventLog, NewAgentEvent } from './agent-event.store';
+import {
+  RunAlreadyExistsError,
+  type AgentEventLog,
+  type NewAgentEvent,
+} from './agent-event.store';
 
 /**
  * 一次推荐（一个 run，一轮 turn）的事件缓冲：事件按发生时刻打时间，整轮结束时一次写入（一个事务），
- * 不拖慢推荐；写失败只记日志。run 关闭后再来的事件（超时后迟到的回调）直接丢弃。
+ * 不拖慢推荐；写失败重试一次，再失败只记日志。run 关闭后再来的事件（超时后迟到的回调）直接丢弃。
  * data 先过一遍 JSON（去掉 undefined 等），日志里存的就是读出来的样子。
  */
 export class RunTrace {
@@ -38,12 +42,20 @@ export class RunTrace {
     return this.stepNo;
   }
 
-  /** 写出缓冲的事件；第一次写入要求 run 是新的（不接到别的 run 后面）。 */
+  /**
+   * 写出缓冲的事件；第一次写入要求 run 是新的（不接到别的 run 后面）。失败重试一次（整批在一个事务里，
+   * 要么全写要么全没写；若其实已提交，重试被 fresh 拒绝，也不会重复）。
+   */
   async flush(): Promise<void> {
     const batch = this.buffer.splice(0);
     if (batch.length === 0) return;
     const fresh = !this.written;
     this.written = true;
-    await this.log.append(this.runId, batch, { fresh });
+    try {
+      await this.log.append(this.runId, batch, { fresh });
+    } catch (error) {
+      if (error instanceof RunAlreadyExistsError) throw error;
+      await this.log.append(this.runId, batch, { fresh });
+    }
   }
 }

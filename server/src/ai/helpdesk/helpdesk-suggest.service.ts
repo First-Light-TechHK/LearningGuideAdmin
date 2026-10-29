@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { Logger, type OnModuleDestroy } from '@nestjs/common';
 
 import { problem } from '../../common/problem';
 import { isUuid, uuidv7 } from '../../common/uuidv7';
@@ -224,7 +224,7 @@ type Decided = {
   model: string | null;
 };
 
-export class HelpdeskSuggestService {
+export class HelpdeskSuggestService implements OnModuleDestroy {
   readonly timeoutMs: number;
   private readonly logger = new Logger('HelpdeskSuggest');
   private lastPurge = Number.NEGATIVE_INFINITY;
@@ -261,6 +261,11 @@ export class HelpdeskSuggestService {
   /** 等后台的事件写完（测试、评测与停机用）。 */
   async flushTraces(): Promise<void> {
     while (this.writing.size > 0) await Promise.all([...this.writing]);
+  }
+
+  /** 停机（main.ts 开了 enableShutdownHooks，SIGTERM 时 Nest 调这里）：先写完缓冲的事件。 */
+  onModuleDestroy(): Promise<void> {
+    return this.flushTraces();
   }
 
   /** 输入不合法抛 400；其余任何问题都返回 { suggestion: null }。 */
@@ -451,7 +456,7 @@ export class HelpdeskSuggestService {
   /**
    * 学员反馈：首个为准，同值重复 OK，不同值不覆盖（changed=false）。
    * submit 收 solved / declined / edited，chat / chip 收 helpful / not_helpful，别的 400。
-   * 记下的那一个同时追加到 run 的事件日志（feedback）。
+   * 记下的那一个同时追加到 run 的事件日志（feedback）；只接在已有的 run 后面，从不单独起一个 run。
    */
   async recordOutcome(
     rawId: string,
@@ -474,9 +479,11 @@ export class HelpdeskSuggestService {
     if (result.changed)
       this.background(
         'Agent event log write failed',
-        this.deps.events.append(id, [
-          { type: 'feedback', time: new Date(this.now()), data: { outcome } },
-        ]),
+        this.deps.events.append(
+          id,
+          [{ type: 'feedback', time: new Date(this.now()), data: { outcome } }],
+          { existing: true },
+        ),
       );
     return { id, outcome: result.outcome, changed: result.changed };
   }

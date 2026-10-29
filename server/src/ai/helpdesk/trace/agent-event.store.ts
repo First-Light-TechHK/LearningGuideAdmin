@@ -28,6 +28,8 @@ export const LEARNER_TEXT_FIELDS: Partial<Record<AgentEventType, string>> = {
 export type AppendOptions = {
   /** 新 run：该 run_id 已有事件时整批拒绝（调用方给的 runId 不能接到别人的 run 后面）。 */
   fresh?: boolean;
+  /** 只接在已有的 run 后面（feedback）：该 run_id 还没有事件时整批拒绝。 */
+  existing?: boolean;
 };
 
 export interface AgentEventLog {
@@ -47,6 +49,13 @@ export class RunAlreadyExistsError extends Error {
   constructor(runId: string) {
     super(`Run ${runId} already has events`);
     this.name = 'RunAlreadyExistsError';
+  }
+}
+
+export class RunNotFoundError extends Error {
+  constructor(runId: string) {
+    super(`Run ${runId} has no events`);
+    this.name = 'RunNotFoundError';
   }
 }
 
@@ -74,6 +83,8 @@ export function createMemoryAgentEventLog(): AgentEventLog & {
       const existing = runs.get(runId) ?? [];
       if (options.fresh && existing.length > 0)
         return Promise.reject(new RunAlreadyExistsError(runId));
+      if (options.existing && existing.length === 0)
+        return Promise.reject(new RunNotFoundError(runId));
       for (const event of events) {
         existing.push({
           type: event.type,
@@ -147,6 +158,7 @@ export class PrismaAgentEventLog implements AgentEventLog {
       const [{ last }] = await tx.$queryRaw<{ last: number }[]>`
         SELECT COALESCE(MAX(seq), 0)::int AS last FROM helpdesk_agent_events WHERE run_id = ${runId}::uuid`;
       if (options.fresh && last > 0) throw new RunAlreadyExistsError(runId);
+      if (options.existing && last === 0) throw new RunNotFoundError(runId);
       await tx.helpdeskAgentEvent.createMany({
         data: events.map((event, index) => ({
           runId,

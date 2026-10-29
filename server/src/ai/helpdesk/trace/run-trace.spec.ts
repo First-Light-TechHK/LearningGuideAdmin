@@ -44,4 +44,33 @@ describe('RunTrace', () => {
     await expect(second.flush()).rejects.toThrow(/already/);
     expect(await log.read(RUN)).toHaveLength(1);
   });
+
+  it('retries the first write once, still as a fresh run', async () => {
+    const log = createMemoryAgentEventLog();
+    const append = jest
+      .spyOn(log, 'append')
+      .mockRejectedValueOnce(new Error('db blip'));
+    const trace = new RunTrace(RUN, log);
+    trace.emit('turn/start', { turn: 1 });
+    trace.emit('turn/end', { turn: 1, reason: 'no_key' });
+    await trace.flush();
+    expect(append).toHaveBeenCalledTimes(2);
+    for (const call of append.mock.calls)
+      expect(call[2]).toEqual({ fresh: true });
+    expect((await log.read(RUN)).map((e) => e.type)).toEqual([
+      'turn/start',
+      'turn/end',
+    ]);
+  });
+
+  it('gives up after the retry fails too', async () => {
+    const log = createMemoryAgentEventLog();
+    const append = jest
+      .spyOn(log, 'append')
+      .mockRejectedValue(new Error('db down'));
+    const trace = new RunTrace(RUN, log);
+    trace.emit('turn/end', { turn: 1, reason: 'no_key' });
+    await expect(trace.flush()).rejects.toThrow('db down');
+    expect(append).toHaveBeenCalledTimes(2);
+  });
 });

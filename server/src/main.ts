@@ -58,6 +58,8 @@ async function bootstrap() {
     createAppModule(roles),
   );
   Logger.log(`启动角色：${roles.join(', ')}`, 'Bootstrap');
+  // 发布时的 SIGTERM：先跑各模块的停机钩子（写完 Helpdesk 推荐的事件日志、关连接池）再退出
+  app.enableShutdownHooks();
   // 不改行为、不阻止启动：只把漏配醒目地写进日志，便于上线检查发现
   const openLearnerApi = learnerApiOpenWarning(process.env, roles);
   if (openLearnerApi) Logger.error(openLearnerApi, 'Bootstrap');

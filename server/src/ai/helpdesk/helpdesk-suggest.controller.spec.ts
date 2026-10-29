@@ -2,7 +2,9 @@ import { INestApplication, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
+import { join } from 'node:path';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 
@@ -302,6 +304,19 @@ describe('AiModule.register wiring (agent role owns suggest)', () => {
       HelpdeskSuggestService,
     );
     await moduleRef.close();
+  });
+
+  it('writes pending traces when the app shuts down (SIGTERM via enableShutdownHooks)', async () => {
+    const moduleRef = await compile(true);
+    const flush = jest.spyOn(
+      moduleRef.get(HelpdeskSuggestService),
+      'flushTraces',
+    );
+    await moduleRef.close();
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(
+      readFileSync(join(__dirname, '..', '..', 'main.ts'), 'utf8'),
+    ).toMatch(/app\.enableShutdownHooks\(\)/);
   });
 
   it('does not mount them without the agent role', async () => {

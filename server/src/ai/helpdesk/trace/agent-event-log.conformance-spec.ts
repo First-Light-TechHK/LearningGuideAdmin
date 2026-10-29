@@ -99,6 +99,26 @@ export function describeAgentEventLog(
       expect(await log.read(runId)).toHaveLength(1);
     });
 
+    it('appends to an existing run only, when asked (feedback never starts a run)', async () => {
+      const runId = uuidv7();
+      await expect(
+        log.append(runId, [event('feedback', { outcome: 'helpful' })], {
+          existing: true,
+        }),
+      ).rejects.toThrow(/no events/);
+      expect(await log.read(runId)).toEqual([]);
+      await log.append(runId, [event('turn/start', { turn: 1 })], {
+        fresh: true,
+      });
+      await log.append(runId, [event('feedback', { outcome: 'helpful' })], {
+        existing: true,
+      });
+      expect((await log.read(runId)).map((e) => [e.seq, e.type])).toEqual([
+        [1, 'turn/start'],
+        [2, 'feedback'],
+      ]);
+    });
+
     it('lists the runs of one conversation by their parent, oldest first', async () => {
       const root = uuidv7();
       const second = uuidv7();
