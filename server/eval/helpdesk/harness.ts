@@ -502,8 +502,8 @@ function promptShape(prompt: string): PromptShape {
 }
 
 /**
- * 假模型：pi 自带的 faux provider，每一步都调用 pick_faq 选第一个候选（检索排第一的那条）；
- * v5 的提示（请求带 context）同样选第一个、confidence sure、tone none（于是用默认的开头结尾），explain 一律 covered false。
+ * 假模型：pi 自带的 faux provider，每一步都调用 pick_faq 选第一个候选（检索排第一的那条），confidence sure；
+ * v5 的提示（请求带 context）同样选第一个、tone none（于是用默认的开头结尾），explain 一律 covered false。
  * 走的是同一个 PiStepRunner（同样的工具、枚举、闸），只是不连网、不花钱。
  */
 export async function fakeTopCandidateSource(): Promise<ModelSource> {
@@ -528,9 +528,8 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
             : pi.ai.fauxToolCall('pick_faq', {
                 intent: 'question',
                 faqId: first ?? 'none',
-                ...(shape.kind === 'pick_v5'
-                  ? { confidence: 'sure', tone: 'none' }
-                  : {}),
+                confidence: 'sure',
+                ...(shape.kind === 'pick_v5' ? { tone: 'none' } : {}),
               });
         return pi.ai.fauxAssistantMessage([call], { stopReason: 'toolUse' });
       },

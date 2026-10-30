@@ -274,7 +274,11 @@ describe('v5 is opt-in: requests without context get exactly the v5 answer', () 
     });
     expect(Object.keys(result).sort()).toEqual(['alternatives', 'suggestion']);
     const [spec] = run.mock.calls[0];
-    expect(Object.keys(spec.tool.enumArgs)).toEqual(['intent', 'faqId']);
+    expect(Object.keys(spec.tool.enumArgs)).toEqual([
+      'intent',
+      'faqId',
+      'confidence',
+    ]);
     expect(spec.tool.textArgs).toBeUndefined();
     expect(spec.tool.listArgs).toBeUndefined();
   });

@@ -719,7 +719,14 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       }),
       { ...steps, runner: this.deps.runner, model: modelTarget },
     );
-    retrieved.candidates = state.candidates;
+    // 不确定没出卡：模型选中的那张排在「你可能想问」第一个
+    const unsure =
+      state.confidence === 'unsure'
+        ? state.candidates.find((c) => c.id === state.picked)
+        : undefined;
+    retrieved.candidates = unsure
+      ? [unsure, ...state.candidates.filter((c) => c !== unsure)]
+      : state.candidates;
     // 走到了 pick_faq 才算问过模型
     const asked = trail.includes('pick_faq');
     return this.logAndDecide(input, runId, {

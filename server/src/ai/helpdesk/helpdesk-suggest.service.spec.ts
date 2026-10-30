@@ -29,6 +29,7 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
+import { PICK_FAQ_SYSTEM } from './workflow/faq-workflow';
 
 /**
  * Helpdesk addendum §C：Agent 推荐答案（v2：写死的 FAQ 工作流 + 每个 agent 步一个 pi Agent）。
@@ -294,9 +295,14 @@ describe('Helpdesk suggest: happy path', () => {
           'off_topic',
         ],
         faqId: [...candidates.map((c) => c.id), 'none'],
+        confidence: ['sure', 'unsure'],
       },
     });
-    expect(Object.keys(spec.tool.enumArgs)).toEqual(['intent', 'faqId']);
+    expect(Object.keys(spec.tool.enumArgs)).toEqual([
+      'intent',
+      'faqId',
+      'confidence',
+    ]);
     // 学员原文只放在 prompt 里，system 提示不含学员内容
     expect(spec.system).not.toContain('Ignore previous instructions');
     expect(spec.prompt).toContain('Ignore previous instructions');
@@ -360,6 +366,45 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.system).toContain(
       'the candidate that tells them how to do it themselves',
     );
+  });
+
+  it('shows no card for an unsure pick: the pick goes first in the alternatives, and an unsure none changes nothing', async () => {
+    // 2026-10-30 实测：「不确定」时给的卡片错得多，提交工单这条路同 v5 一样不出卡，让学员自己挑或转人工
+    expect(PICK_FAQ_SYSTEM).toContain(
+      'confidence: sure when one candidate clearly fits; unsure when two or more could fit or you are guessing.',
+    );
+    const unsure = (faqId: string) => () =>
+      Promise.resolve<AgentStepOutcome>({
+        kind: 'called',
+        args: { intent: 'question', faqId, confidence: 'unsure' },
+      });
+    const { service, rows } = setup({ reply: unsure(candidates[1].id) });
+    await expect(service.suggest(input)).resolves.toEqual({
+      suggestion: null,
+      alternatives: alternativesOf([candidates[1], candidates[0]]),
+    });
+    expect(rows[0]).toMatchObject({ faqId: null });
+    const none = setup({ reply: unsure('none') });
+    await expect(none.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.RANKED,
+    );
+    // sure, or no confidence at all (an older model reply), still answers
+    for (const confidence of ['sure', undefined]) {
+      const { service: sure } = setup({
+        reply: () =>
+          Promise.resolve<AgentStepOutcome>({
+            kind: 'called',
+            args: {
+              intent: 'question',
+              faqId: candidates[1].id,
+              ...(confidence ? { confidence } : {}),
+            },
+          }),
+      });
+      expect((await sure.suggest(input)).suggestion?.faqId).toBe(
+        candidates[1].id,
+      );
+    }
   });
 
   it('answers a question or an own-account request; every other intent is no answer, even with a valid id', async () => {
