@@ -25,6 +25,7 @@ import {
 import { CourseManagementPage } from './backoffice/pages/CourseManagementPage'
 import { CourseEditorPage } from './backoffice/pages/CourseEditorPage'
 import { CoursePreviewPage } from './backoffice/pages/CoursePreviewPage'
+import { OperationsPage } from './backoffice/pages/OperationsPage'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
@@ -129,6 +130,7 @@ function App() {
               <Route path="course" element={<CourseManagementPage />} />
               <Route path="course/:courseId" element={<CourseEditorPage />} />
               <Route path="course/:courseId/preview" element={<CoursePreviewPage />} />
+              <Route path="operations" element={<OperationsPage />} />
               <Route
                 path="knowledge"
                 element={

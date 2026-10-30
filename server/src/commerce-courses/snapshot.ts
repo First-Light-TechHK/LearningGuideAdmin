@@ -82,6 +82,13 @@ export type CourseAggregate = CommerceCourse & {
     status: string;
   }[];
   cover?: { storageKey: string } | null;
+  plans?: Array<{
+    name: string;
+    termMonths: number;
+    amountMinor: number;
+    currency: string;
+    stripeLookupKey: string | null;
+  }>;
 };
 
 /** 媒体在包内的相对路径约定。 */
@@ -269,6 +276,15 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
     localized: courseLocalized,
     lessons,
     trial,
+    pricing: (agg.plans ?? [])
+      .filter((plan) => Boolean(plan.stripeLookupKey))
+      .map((plan) => ({
+        name: plan.name,
+        termMonths: plan.termMonths,
+        amountMinor: plan.amountMinor,
+        currency: plan.currency,
+        lookupKey: plan.stripeLookupKey as string,
+      })),
   };
 
   return { course, media };

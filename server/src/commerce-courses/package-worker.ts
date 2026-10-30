@@ -8,7 +8,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
-import { buildCoursePackage } from './exporter';
+import { buildCoursePackageFromSnapshot } from './exporter';
+import { PublishingService } from './publishing.service';
 
 /**
  * 导出作业 worker（DB 队列 + FOR UPDATE SKIP LOCKED，见设计文档 §20）。
@@ -25,6 +26,7 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: CourseStorageService,
+    private readonly publishing: PublishingService,
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
 
@@ -72,7 +74,12 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
 
   private async claimExport() {
     const rows = await this.prisma.$queryRaw<
-      Array<{ id: string; courseId: string | null }>
+      Array<{
+        id: string;
+        courseId: string | null;
+        sourceVersionId: string | null;
+        actorEmployeeId: string | null;
+      }>
     >`
       UPDATE "CoursePackageJob"
       SET "lockedBy" = ${this.instanceId}, "lockedAt" = now(), "heartbeatAt" = now(),
@@ -85,7 +92,7 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       )
-      RETURNING "id", "courseId";
+      RETURNING "id", "courseId", "sourceVersionId", "actorEmployeeId";
     `;
     return rows[0] ?? null;
   }
@@ -93,11 +100,16 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
   private async runExport(job: {
     id: string;
     courseId: string | null;
+    sourceVersionId: string | null;
+    actorEmployeeId: string | null;
   }): Promise<void> {
-    if (!job.courseId) {
+    if (!job.courseId || !job.sourceVersionId) {
       await this.prisma.coursePackageJob.update({
         where: { id: job.id },
-        data: { status: 'FAILED', error: 'Missing courseId for export' },
+        data: {
+          status: 'FAILED',
+          error: 'Missing courseId or sourceVersionId for export',
+        },
       });
       return;
     }
@@ -106,14 +118,17 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
         where: { id: job.id },
         data: { progress: 30, stage: 'PACKING' },
       });
-      const zip = await buildCoursePackage(
+      const built = await buildCoursePackageFromSnapshot(
         this.prisma,
         this.storage,
         job.courseId,
-        'working',
+        {
+          versionId: job.sourceVersionId,
+          environment: this.config.environmentLabel,
+        },
       );
       const storageKey = this.storage.stagingKey(job.id, 'export.zip');
-      await this.storage.putStaging(storageKey, zip);
+      await this.storage.putStaging(storageKey, built.bytes);
       await this.prisma.coursePackageJob.update({
         where: { id: job.id },
         data: {
@@ -121,11 +136,21 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
           progress: 100,
           stage: 'READY',
           storageKey,
-          bytesTotal: zip.length,
+          bytesTotal: built.bytes.length,
+          fileLabel: built.fileName,
         },
       });
+      // 导出后该版本标记 Exported；下一次 Sandbox 发布进入下一整数系列
+      await this.publishing.markExported(
+        job.sourceVersionId,
+        job.actorEmployeeId,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Export failed';
+      this.logger.error(
+        `Export job ${job.id} failed: ${message}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       await this.prisma.coursePackageJob.update({
         where: { id: job.id },
         data: { status: 'FAILED', error: message },

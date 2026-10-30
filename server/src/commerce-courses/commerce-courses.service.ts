@@ -6,6 +6,9 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
+import { computeCompleteness } from './completeness';
+import { detailToCompletenessInput } from './version-snapshot';
+import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
 
 /** 课程列表/详情/工作流（v2）。 */
 @Injectable()
@@ -13,6 +16,7 @@ export class CommerceCoursesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: CourseStorageService,
+    private readonly publishing: PublishingService,
   ) {}
 
   /** 读取课程封面字节（Admin 预览用）。 */
@@ -52,7 +56,7 @@ export class CommerceCoursesService {
   }) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 10));
-    const where: Prisma.CommerceCourseWhereInput = {};
+    const where: Prisma.CommerceCourseWhereInput = { archivedAt: null };
     if (query.lifecycleStatus)
       where.lifecycleStatus = query.lifecycleStatus as never;
     if (query.liveStatus) where.liveStatus = query.liveStatus as never;
@@ -79,7 +83,7 @@ export class CommerceCoursesService {
           category: true,
           localizations: true,
           cover: true,
-          _count: { select: { lessons: true } },
+          _count: { select: { lessons: { where: { archivedAt: null } } } },
         },
       }),
       this.prisma.commerceCourse.count({ where }),
@@ -95,19 +99,40 @@ export class CommerceCoursesService {
   }
 
   private async countsByStatus() {
-    const grouped = await this.prisma.commerceCourse.groupBy({
-      by: ['lifecycleStatus'],
-      _count: { _all: true },
-    });
-    const counts = { total: 0, working: 0, inUat: 0, approved: 0, live: 0 };
-    for (const g of grouped) {
-      const n = g._count._all;
-      counts.total += n;
-      if (g.lifecycleStatus === 'WORKING') counts.working = n;
-      if (g.lifecycleStatus === 'IN_UAT') counts.inUat = n;
-      if (g.lifecycleStatus === 'APPROVED') counts.approved = n;
-      if (g.lifecycleStatus === 'LIVE') counts.live = n;
-    }
+    const [grouped, draft, published, online, hidden, offline] =
+      await Promise.all([
+        this.prisma.commerceCourse.groupBy({
+          by: ['lifecycleStatus'],
+          where: { archivedAt: null },
+          _count: { _all: true },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, hasDraft: true },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveVersionId: { not: null } },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveStatus: 'ONLINE' },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveStatus: 'HIDDEN' },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveStatus: 'OFFLINE' },
+        }),
+      ]);
+    const counts = {
+      total: 0,
+      draft,
+      published,
+      online,
+      hidden,
+      offline,
+      notPublished: 0,
+    };
+    for (const g of grouped) counts.total += g._count._all;
+    counts.notPublished = counts.total - counts.published;
     return counts;
   }
 
@@ -119,7 +144,9 @@ export class CommerceCoursesService {
         cover: true,
         localizations: true,
         trialRows: true,
+        plans: { where: { active: true }, orderBy: { sortOrder: 'asc' } },
         lessons: {
+          where: { archivedAt: null },
           orderBy: { sortOrder: 'asc' },
           include: {
             localizations: { include: { video: true } },
@@ -138,7 +165,10 @@ export class CommerceCoursesService {
         code: 'COURSE_NOT_FOUND',
         message: 'Course not found',
       });
-    return course;
+    return {
+      ...course,
+      completeness: computeCompleteness(detailToCompletenessInput(course)),
+    };
   }
 
   async assertExists(id: string) {
@@ -153,146 +183,12 @@ export class CommerceCoursesService {
       });
   }
 
-  async changeStatus(
-    id: string,
-    body: { status: 'ONLINE' | 'HIDDEN' | 'OFFLINE'; reason?: string },
-  ) {
-    await this.assertExists(id);
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: {
-        liveStatus: body.status,
-        ...(body.status === 'OFFLINE' ? { lifecycleStatus: 'WORKING' } : {}),
-      },
-    });
-    return this.detail(id);
-  }
-
-  // ===== 工作流 =====
-  async publishUat(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({
-      where: { id },
-    });
-    if (!course)
-      throw new NotFoundException({
-        code: 'COURSE_NOT_FOUND',
-        message: 'Course not found',
-      });
-    if (course.archivedAt)
-      throw new ConflictException({
-        code: 'COURSE_ARCHIVED',
-        message: 'Archived course cannot be published',
-      });
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: {
-        lifecycleStatus: 'IN_UAT',
-        lastUatPublishedAt: new Date(),
-        approvedAt: null,
-        approvedBy: null,
-      },
-    });
-    return this.detail(id);
-  }
-
-  async approve(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({
-      where: { id },
-    });
-    if (!course)
-      throw new NotFoundException({
-        code: 'COURSE_NOT_FOUND',
-        message: 'Course not found',
-      });
-    if (course.lifecycleStatus !== 'IN_UAT') {
-      throw new ConflictException({
-        code: 'COURSE_INVALID_TRANSITION',
-        message: 'Course must be in UAT before approval',
-      });
-    }
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: { lifecycleStatus: 'APPROVED', approvedAt: new Date() },
-    });
-    return this.detail(id);
-  }
-
-  async goLive(id: string, actorEmployeeId: string | null) {
-    const course = await this.prisma.commerceCourse.findUnique({
-      where: { id },
-    });
-    if (!course)
-      throw new NotFoundException({
-        code: 'COURSE_NOT_FOUND',
-        message: 'Course not found',
-      });
-    if (course.lifecycleStatus !== 'APPROVED') {
-      throw new ConflictException({
-        code: 'COURSE_INVALID_TRANSITION',
-        message: 'Course must be approved before going live',
-      });
-    }
-    const snapshot = await this.buildSnapshotData(id);
-    const last = await this.prisma.courseVersion.findFirst({
-      where: { courseId: id },
-      orderBy: { versionNo: 'desc' },
-      select: { versionNo: true },
-    });
-    const version = await this.prisma.courseVersion.create({
-      data: {
-        courseId: id,
-        versionNo: (last?.versionNo ?? 0) + 1,
-        snapshotData: snapshot,
-        wentLiveAt: new Date(),
-        createdBy: actorEmployeeId ?? null,
-      },
-    });
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: {
-        lifecycleStatus: 'LIVE',
-        liveStatus: 'ONLINE',
-        liveVersionId: version.id,
-      },
-    });
-    return this.detail(id);
-  }
-
-  async restore(id: string, versionId: string) {
-    const version = await this.prisma.courseVersion.findUnique({
-      where: { id: versionId },
-    });
-    if (!version || version.courseId !== id) {
-      throw new NotFoundException({
-        code: 'COURSE_NOT_FOUND',
-        message: 'Version not found',
-      });
-    }
-    // 简化：仅返回快照供后续编辑器导入；实际重写工作副本在 P1b 编辑器实现时接入。
-    return { restoredFrom: version.versionNo, snapshot: version.snapshotData };
-  }
-
-  async listVersions(id: string) {
-    return this.prisma.courseVersion.findMany({
-      where: { courseId: id },
-      orderBy: { versionNo: 'desc' },
-      select: {
-        id: true,
-        versionNo: true,
-        wentLiveAt: true,
-        sourceVersionId: true,
-        createdAt: true,
-      },
-    });
-  }
-
-  // ===== 编辑工作区（第一版） =====
+  // ===== 编辑工作区（草稿） =====
   private static readonly LEARNING_MODES = [
     'VIDEO_ONLY',
     'TEXT_ONLY',
     'VIDEO_AND_TEXT',
   ];
-
   private normaliseMode(
     mode?: string,
   ): 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT' {
@@ -342,6 +238,8 @@ export class CommerceCoursesService {
           learningLanguages: learningLanguages,
           categoryId: body.categoryId || null,
           subtitle: body.subtitle ?? null,
+          hasDraft: true,
+          lifecycleStatus: 'WORKING',
           localizations: {
             create: {
               language,
@@ -355,6 +253,12 @@ export class CommerceCoursesService {
         },
         select: { id: true },
       });
+      await this.publishing.recordHistory(
+        course.id,
+        HISTORY_ACTIONS.CREATE_COURSE,
+        { code },
+        actorEmployeeId,
+      );
       return this.detail(course.id);
     } catch (error) {
       if (
@@ -382,26 +286,76 @@ export class CommerceCoursesService {
       level?: string | null;
     },
   ) {
-    await this.assertExists(id);
+    const current = await this.prisma.commerceCourse.findUnique({
+      where: { id },
+      select: { code: true, learningMode: true, learningLanguages: true },
+    });
+    if (!current)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
+    // Course ID 与 Learning mode 创建后不可修改（PRD §22）
+    if (
+      body.code !== undefined &&
+      body.code.trim() &&
+      body.code.trim().toUpperCase() !== current.code
+    ) {
+      throw new ConflictException({
+        code: 'COURSE_ID_IMMUTABLE',
+        message: 'Course ID cannot be changed.',
+      });
+    }
+    if (
+      body.learningMode !== undefined &&
+      this.normaliseMode(body.learningMode) !== current.learningMode
+    ) {
+      throw new ConflictException({
+        code: 'LEARNING_MODE_LOCKED',
+        message: 'Learning mode cannot be changed after the course is created.',
+      });
+    }
+    // 学习语言只能追加（PRD §22）
+    const existingLanguages = (current.learningLanguages as string[]) ?? [];
+    const requestedLanguages = body.learningLanguages;
+    if (
+      requestedLanguages &&
+      existingLanguages.some(
+        (language) => !requestedLanguages.includes(language),
+      )
+    ) {
+      throw new ConflictException({
+        code: 'LEARNING_LANGUAGE_REMOVE_FORBIDDEN',
+        message: 'Learning languages can only be added, not removed.',
+      });
+    }
+    if (
+      requestedLanguages &&
+      requestedLanguages.length < existingLanguages.length
+    ) {
+      throw new ConflictException({
+        code: 'LEARNING_LANGUAGE_REMOVE_FORBIDDEN',
+        message: 'Learning languages can only be added, not removed.',
+      });
+    }
     try {
       await this.prisma.commerceCourse.update({
         where: { id },
         data: {
-          ...(body.code !== undefined ? { code: body.code.trim() } : {}),
           ...(body.slug !== undefined ? { slug: body.slug.trim() } : {}),
-          ...(body.learningMode !== undefined
-            ? { learningMode: this.normaliseMode(body.learningMode) }
-            : {}),
           ...(body.defaultContentLanguage !== undefined
             ? { defaultContentLanguage: body.defaultContentLanguage }
             : {}),
-          ...(body.learningLanguages !== undefined
-            ? {
-                learningLanguages: body.learningLanguages,
-              }
+          ...(requestedLanguages !== undefined
+            ? { learningLanguages: requestedLanguages }
             : {}),
           ...(body.subtitle !== undefined ? { subtitle: body.subtitle } : {}),
           ...(body.level !== undefined ? { level: body.level } : {}),
+          hasDraft: true,
+          lifecycleStatus: 'WORKING',
+          draftSourceType: null,
+          draftSourceEnvironment: null,
+          draftSourceVersionLabel: null,
         },
       });
       return this.detail(id);
@@ -438,11 +392,17 @@ export class CommerceCoursesService {
       whatYouLearn: (body.whatYouLearn ?? null) as Prisma.InputJsonValue,
       provides: (body.provides ?? null) as Prisma.InputJsonValue,
     };
-    await this.prisma.courseLocalization.upsert({
-      where: { courseId_language: { courseId: id, language } },
-      create: { courseId: id, language, ...data },
-      update: data,
-    });
+    await this.prisma.$transaction([
+      this.prisma.courseLocalization.upsert({
+        where: { courseId_language: { courseId: id, language } },
+        create: { courseId: id, language, ...data },
+        update: data,
+      }),
+      this.prisma.commerceCourse.update({
+        where: { id },
+        data: { hasDraft: true, lifecycleStatus: 'WORKING' },
+      }),
+    ]);
     return this.detail(id);
   }
 
@@ -478,6 +438,7 @@ export class CommerceCoursesService {
           },
         },
       });
+      await this.touchDraft(id);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -507,9 +468,9 @@ export class CommerceCoursesService {
   ) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { id: true, courseId: true },
+      select: { id: true, courseId: true, archivedAt: true },
     });
-    if (!lesson || lesson.courseId !== id) {
+    if (!lesson || lesson.courseId !== id || lesson.archivedAt) {
       throw new NotFoundException({
         code: 'LESSON_NOT_FOUND',
         message: 'Lesson not found',
@@ -557,21 +518,30 @@ export class CommerceCoursesService {
         update: payload,
       });
     }
+    await this.touchDraft(id);
     return this.detail(id);
   }
 
   async deleteLesson(id: string, lessonId: string) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { id: true, courseId: true },
+      select: { id: true, courseId: true, archivedAt: true },
     });
-    if (!lesson || lesson.courseId !== id) {
+    if (!lesson || lesson.courseId !== id || lesson.archivedAt) {
       throw new NotFoundException({
         code: 'LESSON_NOT_FOUND',
         message: 'Lesson not found',
       });
     }
-    await this.prisma.lesson.delete({ where: { id: lessonId } });
+    // 软删除：ID 不复用，Publish 后才从线上消失，学员历史保留（PRD §22）
+    await this.prisma.lesson.update({
+      where: { id: lessonId },
+      data: { archivedAt: new Date() },
+    });
+    await this.prisma.trialSetting.deleteMany({
+      where: { courseId: id, lessonId },
+    });
+    await this.touchDraft(id);
     return this.detail(id);
   }
 
@@ -585,39 +555,22 @@ export class CommerceCoursesService {
         }),
       ),
     );
+    await this.touchDraft(id);
     return this.detail(id);
   }
 
-  private async buildSnapshotData(id: string) {
-    const detail = await this.detail(id);
-    return {
-      course: {
-        id: detail.id,
-        code: detail.code,
-        slug: detail.slug,
-        learningMode: detail.learningMode,
-        defaultContentLanguage: detail.defaultContentLanguage,
-        learningLanguages: detail.learningLanguages,
-        localizations: detail.localizations,
-        lessons: detail.lessons.map((lesson) => ({
-          code: lesson.code,
-          order: lesson.sortOrder,
-          localizations: lesson.localizations,
-          exhibits: lesson.exhibits.map((ex) => ({
-            code: ex.code,
-            type: ex.type,
-            localized: ex.localized,
-          })),
-          readings: lesson.readings,
-          questions: lesson.questions,
-          applicationTest: lesson.applicationTest,
-          learningPoints: lesson.learningPoints,
-          triggers: lesson.triggers,
-        })),
-        trialRows: detail.trialRows,
+  /** 任何内容编辑都只改草稿，并清空导入/恢复来源。 */
+  private async touchDraft(id: string): Promise<void> {
+    await this.prisma.commerceCourse.update({
+      where: { id },
+      data: {
+        hasDraft: true,
+        lifecycleStatus: 'WORKING',
+        draftSourceType: null,
+        draftSourceEnvironment: null,
+        draftSourceVersionLabel: null,
       },
-      versionedAt: new Date().toISOString(),
-    };
+    });
   }
 
   private toSummary(row: {
@@ -629,6 +582,8 @@ export class CommerceCoursesService {
     lifecycleStatus: string;
     liveStatus: string;
     liveVersionId: string | null;
+    hasDraft: boolean;
+    trialEnabled: boolean;
     updatedAt: Date;
     category: { id: string; name: string } | null;
     localizations: {
@@ -653,7 +608,10 @@ export class CommerceCoursesService {
       lessonCount: row._count.lessons,
       lifecycleStatus: row.lifecycleStatus,
       liveStatus: row.liveStatus,
-      liveVersionNo: undefined,
+      liveVersionId: row.liveVersionId,
+      hasDraft: row.hasDraft,
+      trialEnabled: row.trialEnabled,
+      published: Boolean(row.liveVersionId),
       updatedAt: row.updatedAt,
     };
   }

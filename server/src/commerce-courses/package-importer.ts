@@ -6,6 +6,8 @@ import type { PackageManifest, PackageExhibit } from './contracts/manifest';
 import { CourseStorageService } from './storage.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 import { validateMediaFile } from './media-validate';
+import { applyVersionSnapshot, type VersionSnapshot } from './version-snapshot';
+import { HISTORY_ACTIONS } from './publishing.service';
 
 export interface ImportOptions {
   onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
@@ -106,6 +108,251 @@ export class PackageImporter {
     }
 
     return { courseId };
+  }
+
+  /**
+   * 导入到已有课程（PRD §16，CM16）：只替换草稿，线上版本不变。
+   * Course ID 必须一致；试看与价格按包更新；价格稍后由调用方在本环境 Stripe 重新创建。
+   */
+  async importIntoExistingCourse(
+    courseId: string,
+    manifest: PackageManifest,
+    files: Map<string, Buffer>,
+    actorEmployeeId: string | null,
+  ): Promise<{ courseId: string }> {
+    const existing = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { id: true, code: true },
+    });
+    if (!existing)
+      throw new ImportError('COURSE_NOT_FOUND', 404, 'Course not found.');
+    if (existing.code !== manifest.course.code) {
+      throw new ImportError(
+        'PACKAGE_COURSE_ID_MISMATCH',
+        422,
+        'The Course ID in the package must match this course, or the import is refused.',
+      );
+    }
+
+    const categoryId = await this.resolveCategory(manifest.course.category);
+    const mediaKeyMap = new Map<
+      string,
+      { assetId: string; kind: string; extension: string; storageKey: string }
+    >();
+    try {
+      await this.transferMedia(courseId, manifest, files, mediaKeyMap);
+    } catch (error) {
+      await this.rollbackMedia(courseId, mediaKeyMap);
+      throw error;
+    }
+
+    try {
+      const snapshot = this.snapshotFromPackage(
+        manifest,
+        categoryId,
+        mediaKeyMap,
+      );
+      await applyVersionSnapshot(this.prisma, courseId, snapshot);
+      await this.prisma.$transaction(async (tx) => {
+        await tx.commerceCourse.update({
+          where: { id: courseId },
+          data: {
+            hasDraft: true,
+            lifecycleStatus: 'WORKING',
+            draftSourceType: 'IMPORT',
+            draftSourceEnvironment: manifest.source.environment ?? null,
+            draftSourceVersionLabel: manifest.source.sourceVersion ?? null,
+          },
+        });
+
+        await tx.trialSetting.deleteMany({ where: { courseId } });
+        if (manifest.course.trial?.enabled) {
+          const lessonByCode = new Map(
+            snapshot.course.lessons.map((lesson) => [lesson.code, lesson.id]),
+          );
+          for (const row of manifest.course.trial.lessons ?? []) {
+            const lessonId = lessonByCode.get(row.lessonRef);
+            if (!lessonId) continue;
+            await tx.trialSetting.create({
+              data: {
+                courseId,
+                lessonId,
+                videoCutoffSeconds: row.videoCutoffSeconds ?? null,
+                textCutoffLearningPointId: row.textCutoffLearningPoint ?? null,
+                status: (row.status ?? 'READY') as never,
+              },
+            });
+          }
+        }
+
+        await tx.coursePlan.updateMany({
+          where: { courseId, active: true },
+          data: { active: false },
+        });
+        for (const [index, plan] of (manifest.course.pricing ?? []).entries()) {
+          await tx.coursePlan.create({
+            data: {
+              id: randomUUID(),
+              courseId,
+              name: plan.name,
+              scope: 'COURSE',
+              scopeId: courseId,
+              termMonths: plan.termMonths,
+              device: 'WEB',
+              amountMinor: plan.amountMinor,
+              currency: (plan.currency || 'usd').toLowerCase(),
+              stripeLookupKey: plan.lookupKey,
+              sortOrder: index,
+              active: true,
+            },
+          });
+        }
+
+        await tx.courseAuthoringActivity.create({
+          data: {
+            courseId,
+            actorEmployeeId,
+            action: HISTORY_ACTIONS.IMPORT_PACKAGE,
+            detail: {
+              packageId: manifest.packageId,
+              sourceEnvironment: manifest.source.environment ?? null,
+              sourceVersionLabel: manifest.source.sourceVersion ?? null,
+            },
+          },
+        });
+      });
+      return { courseId };
+    } catch (error) {
+      await this.rollbackMedia(courseId, mediaKeyMap);
+      throw error;
+    }
+  }
+
+  private snapshotFromPackage(
+    manifest: PackageManifest,
+    categoryId: string | null,
+    mediaKeyMap: Map<string, { assetId: string }>,
+  ): VersionSnapshot {
+    const { course } = manifest;
+    const capturedAt = new Date().toISOString();
+    return {
+      formatVersion: 2,
+      capturedAt,
+      course: {
+        code: course.code,
+        slug: course.slug,
+        categoryId,
+        coverAssetId: course.cover
+          ? (mediaKeyMap.get(course.cover)?.assetId ?? null)
+          : null,
+        learningMode: course.learningMode,
+        defaultContentLanguage: course.defaultContentLanguage,
+        learningLanguages: course.learningLanguages,
+        localizations: Object.entries(course.localized).map(
+          ([language, loc]) => ({
+            language,
+            title: loc.title,
+            shortDescription: loc.shortDescription ?? null,
+            overview: loc.overview ?? null,
+            whatYouLearn: loc.whatYouLearn ?? [],
+            provides: loc.provides ?? [],
+          }),
+        ),
+        lessons: [...(course.lessons ?? [])]
+          .sort((a, b) => a.order - b.order)
+          .map((lesson) => {
+            const exhibits = (lesson.exhibits ?? []).map((exhibit) => ({
+              code: exhibit.code,
+              type: exhibit.type,
+              mediaAssetId: exhibit.file
+                ? (mediaKeyMap.get(exhibit.file)?.assetId ?? null)
+                : null,
+              thumbnailAssetId: exhibit.thumbnail
+                ? (mediaKeyMap.get(exhibit.thumbnail)?.assetId ?? null)
+                : null,
+              sourceText: exhibit.source ?? null,
+              localized: exhibit.localized,
+            }));
+            return {
+              id: randomUUID(),
+              code: lesson.code,
+              sortOrder: lesson.order,
+              localizations: Object.entries(lesson.localized).map(
+                ([language, loc]) => ({
+                  language,
+                  title: loc.title,
+                  description: loc.description ?? null,
+                  videoAssetId: loc.video?.file
+                    ? (mediaKeyMap.get(loc.video.file)?.assetId ?? null)
+                    : null,
+                  videoDurationSeconds: loc.video?.durationSeconds ?? null,
+                  textHtml: loc.text?.html ?? null,
+                  textLearningPoints: loc.text?.learningPoints ?? [],
+                }),
+              ),
+              exhibits,
+              learningPoints: Object.entries(lesson.localized).flatMap(
+                ([language, loc]) => [
+                  ...(loc.video?.learningPoints ?? []).map((lp, index) => ({
+                    language,
+                    code: lp.code,
+                    title: lp.title,
+                    source: 'VIDEO',
+                    timeSeconds: lp.timeSeconds,
+                    anchorHeading: null,
+                    sortOrder: index,
+                  })),
+                  ...(loc.text?.learningPoints ?? []).map((lp, index) => ({
+                    language,
+                    code: lp.code,
+                    title: lp.heading,
+                    source: 'TEXT',
+                    timeSeconds: null,
+                    anchorHeading: lp.heading,
+                    sortOrder: (loc.video?.learningPoints?.length ?? 0) + index,
+                  })),
+                ],
+              ),
+              triggers: Object.entries(lesson.localized).flatMap(
+                ([language, loc]) =>
+                  (loc.video?.exhibitTriggers ?? []).map((trigger) => ({
+                    exhibitCode: trigger.exhibitRef,
+                    language,
+                    timeSeconds: trigger.timeSeconds,
+                  })),
+              ),
+              readings: Object.entries(lesson.recommendedReading ?? {}).flatMap(
+                ([language, rows]) =>
+                  (rows ?? []).map((row, index) => ({
+                    language,
+                    type: row.type,
+                    title: row.title,
+                    author: row.author ?? null,
+                    whyRecommended: row.why ?? null,
+                    sortOrder: index,
+                  })),
+              ),
+              questions: (lesson.knowledgeTest?.questions ?? []).map(
+                (question, index) => ({
+                  code: question.code,
+                  question: question.question,
+                  referenceAnswer: question.referenceAnswer ?? null,
+                  sortOrder: index,
+                  enabled: true,
+                }),
+              ),
+              applicationTest: lesson.applicationTest?.enabled
+                ? {
+                    scenario: lesson.applicationTest.scenario,
+                    referenceAnswer:
+                      lesson.applicationTest.referenceAnswer ?? null,
+                    enabled: true,
+                  }
+                : null,
+            };
+          }),
+      },
+    };
   }
 
   private async resolveCategory(name: string): Promise<string | null> {
@@ -243,6 +490,7 @@ export class PackageImporter {
         coverAssetId: null,
         lifecycleStatus: 'WORKING',
         liveStatus: 'HIDDEN',
+        hasDraft: true,
         localizations: {
           create: Object.entries(course.localized).map(([language, loc]) => ({
             language,
@@ -430,6 +678,26 @@ export class PackageImporter {
           },
         });
       }
+    }
+
+    // 价格随包带入；Stripe 由导入完成后在同一环境重新创建
+    for (const [index, plan] of (course.pricing ?? []).entries()) {
+      await tx.coursePlan.create({
+        data: {
+          id: randomUUID(),
+          courseId,
+          name: plan.name,
+          scope: 'COURSE',
+          scopeId: courseId,
+          termMonths: plan.termMonths,
+          device: 'WEB',
+          amountMinor: plan.amountMinor,
+          currency: (plan.currency || 'usd').toLowerCase(),
+          stripeLookupKey: plan.lookupKey,
+          sortOrder: index,
+          active: true,
+        },
+      });
     }
 
     // 审计

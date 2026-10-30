@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 /**
  * Commerce Course 模块配置（带安全默认值）。环境变量见 docs/Course_Module_Import_Export_Design.md §19。
  */
+export type VersionNumberingMode = 'sandbox' | 'production';
+
 export interface CommerceCourseConfig {
+  environmentLabel: string;
+  publicSiteUrl: string;
+  versionNumberingMode: VersionNumberingMode;
+  stripeSecretKey?: string;
   mediaRoot: string;
   packageStagingRoot: string;
   // 对象存储（生产用 S3 私有桶；未配置时回退到本地文件系统）
@@ -37,7 +43,19 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
     const value = Number(raw);
     return Number.isFinite(value) && value > 0 ? value : fallback;
   };
+  const numberingRaw = (config.get<string>('VERSION_NUMBERING_MODE') ?? '')
+    .trim()
+    .toLowerCase();
+  const environmentRaw = (config.get<string>('ENVIRONMENT_LABEL') ?? '').trim();
   return {
+    environmentLabel:
+      environmentRaw ||
+      (numberingRaw === 'production' ? 'Production' : 'Sandbox'),
+    publicSiteUrl: config.get<string>('PUBLIC_SITE_URL')?.trim() || '',
+    versionNumberingMode:
+      numberingRaw === 'production' ? 'production' : 'sandbox',
+    stripeSecretKey:
+      config.get<string>('STRIPE_SECRET_KEY')?.trim() || undefined,
     mediaRoot:
       config.get<string>('COURSE_MEDIA_ROOT')?.trim() || 'storage/course-media',
     packageStagingRoot:

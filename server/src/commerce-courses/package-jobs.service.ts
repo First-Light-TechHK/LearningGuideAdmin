@@ -15,6 +15,8 @@ import type {
   PackageValidationReport,
 } from './contracts/manifest';
 import { runImportWorker } from './heavy-tasks';
+import { PricingService } from './pricing.service';
+import { PublishingService } from './publishing.service';
 
 export interface JobReport {
   errors: PackageValidationReport['errors'];
@@ -29,6 +31,8 @@ export interface JobView {
   progress: number;
   error: string | null;
   courseId: string | null;
+  sourceVersionId: string | null;
+  fileLabel: string | null;
   package: {
     packageId: string;
     courseCode: string;
@@ -54,6 +58,8 @@ export class PackageJobsService {
     private readonly storage: CourseStorageService,
     private readonly inspector: PackageInspector,
     private readonly importer: PackageImporter,
+    private readonly pricing: PricingService,
+    private readonly publishing: PublishingService,
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
 
@@ -62,6 +68,7 @@ export class PackageJobsService {
     file: { name: string; bytes: Buffer },
     actorEmployeeId: string | null,
     idempotencyKey?: string,
+    targetCourseId?: string,
   ) {
     if (idempotencyKey) {
       const existing = await this.prisma.coursePackageJob.findUnique({
@@ -85,6 +92,7 @@ export class PackageJobsService {
         kind: 'IMPORT',
         status: 'VALIDATING',
         actorEmployeeId,
+        courseId: targetCourseId ?? null,
         idempotencyKey: idempotencyKey ?? null,
         sourceFileName: file.name,
         bytesTotal: file.bytes.length,
@@ -304,16 +312,33 @@ export class PackageJobsService {
         manifestBytes.toString('utf8'),
       ) as PackageManifest;
       const files = await this.loadStagingFiles(jobId, manifest);
-      const { courseId } = await this.importer.importPackage(manifest, files, {
-        onConflict: body.onConflict,
-        reassignCodes: body.reassignCodes ?? false,
-        actorEmployeeId,
-      });
+      const { courseId } = job.courseId
+        ? await this.importer.importIntoExistingCourse(
+            job.courseId,
+            manifest,
+            files,
+            actorEmployeeId,
+          )
+        : await this.importer.importPackage(manifest, files, {
+            onConflict: body.onConflict,
+            reassignCodes: body.reassignCodes ?? false,
+            actorEmployeeId,
+          });
       await this.prisma.coursePackageJob.update({
         where: { id: jobId },
         data: { status: 'READY', progress: 100, courseId, stage: 'COMMITTED' },
       });
       await this.storage.clearStagingPrefix(jobId);
+      // 导入完成后在目标环境重新创建 Stripe 产品/价格（失败不阻断导入）
+      const plans = await this.prisma.coursePlan.findMany({
+        where: { courseId, active: true },
+        select: { id: true },
+      });
+      await Promise.all(
+        plans.map((plan) =>
+          this.pricing.syncPlan(courseId, plan.id).catch(() => undefined),
+        ),
+      );
       return { jobId, status: 'READY', courseId };
     } catch (error) {
       const code = error instanceof ImportError ? error.code : 'INTERNAL_ERROR';
@@ -394,6 +419,8 @@ export class PackageJobsService {
       progress: job.progress ?? 0,
       error: job.error,
       courseId: job.courseId,
+      sourceVersionId: job.sourceVersionId,
+      fileLabel: job.fileLabel,
       package: manifest
         ? {
             packageId: manifest.packageId,
@@ -438,13 +465,36 @@ export class PackageJobsService {
     });
   }
 
-  // ===== 导出 =====
+  // ===== 导出（默认导出线上版本；也可指定 versionLabel 导出历史快照）=====
   async startExport(
     courseId: string,
-    version: string,
     actorEmployeeId: string | null,
+    versionLabel?: string,
   ) {
-    // P1a：以 working 为导出源（live/version 需快照重建，后续迭代）
+    let exportable: { versionId: string; versionLabel: string };
+    if (versionLabel && versionLabel !== 'working') {
+      // 指定了版本号：直接查找对应快照
+      const v = await this.prisma.courseVersion.findFirst({
+        where: { courseId, versionLabel },
+        select: { id: true, versionLabel: true },
+      });
+      if (!v) {
+        throw new PackageError(
+          'PACKAGE_VERSION_NOT_FOUND',
+          404,
+          `Version ${versionLabel} not found for this course.`,
+        );
+      }
+      exportable = { versionId: v.id, versionLabel: v.versionLabel };
+    } else {
+      // 默认：导出线上发布版本
+      exportable = await this.publishing.assertExportable(courseId);
+    }
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { code: true },
+    });
+    const fileLabel = `${course?.code ?? 'course'}_${exportable.versionLabel}.zip`;
     const jobId = randomUUID();
     await this.prisma.coursePackageJob.create({
       data: {
@@ -453,9 +503,17 @@ export class PackageJobsService {
         status: 'EXPORTING',
         courseId,
         actorEmployeeId,
+        sourceVersionId: exportable.versionId,
+        fileLabel,
         progress: 0,
       },
     });
-    return { jobId, status: 'EXPORTING', version };
+    return {
+      jobId,
+      status: 'EXPORTING',
+      versionId: exportable.versionId,
+      versionLabel: exportable.versionLabel,
+      fileName: fileLabel,
+    };
   }
 }
