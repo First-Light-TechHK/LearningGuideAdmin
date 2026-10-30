@@ -7,6 +7,7 @@ import { RunTrace } from '../trace/run-trace';
 import type { AgentStepContext, AgentStepSpec, ModelTarget } from './engine';
 import {
   loadPi,
+  OPENROUTER_ROUTING,
   openRouterSource,
   PiStepRunner,
   THINKING_TOKENS,
@@ -620,6 +621,21 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
       }
     },
   );
+
+  it('asks OpenRouter for its fastest providers that take every parameter we send, also for a model missing from the catalog', async () => {
+    // 2026-10-30 录下的 256 次 DeepSeek 思考调用：超过 6.3 秒的约六成是慢的 provider（Alibaba 每秒 15 个 token）
+    for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
+      const { fetch } = await call(picked, { ...TARGET, model, thinking: 'high' });
+      const body = JSON.parse(
+        (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
+      ) as { provider?: unknown };
+      expect(body.provider).toEqual(OPENROUTER_ROUTING);
+      expect(OPENROUTER_ROUTING).toEqual({
+        sort: 'throughput',
+        require_parameters: true,
+      });
+    }
+  });
 
   it('without a thinking setting turns thinking off for a catalog model and sends nothing for any other', async () => {
     // pi 的价目里 DeepSeek v4.1 flash 能思考：2026-10-30 之前的评测都是 effort none（思考关）
