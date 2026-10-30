@@ -19,7 +19,7 @@ type JobView = {
   report: { errors: Array<{ code: string; message: string }>; warnings: Array<{ code: string; message: string }> }
 }
 
-type UploadResult<T> = { success: true; data: T } | { success: false; error: string }
+type UploadResult<T> = { success: true; data: T } | { success: false; error: string; errorMessage?: string }
 
 /**
  * 带上传进度的文件上传（fetch 无法获取上传进度，改用 XHR 的 upload.onprogress）。
@@ -35,9 +35,9 @@ function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: nu
     }
     xhr.onload = () => {
       try {
-        const body = JSON.parse(xhr.responseText) as { success?: boolean; data?: T; error?: { code?: string } | null }
+        const body = JSON.parse(xhr.responseText) as { success?: boolean; data?: T; error?: { code?: string; message?: string } | null }
         if (body?.success === true) resolve({ success: true, data: body.data as T })
-        else resolve({ success: false, error: body?.error?.code ?? 'INTERNAL_ERROR' })
+        else resolve({ success: false, error: body?.error?.code ?? 'INTERNAL_ERROR', errorMessage: body?.error?.message })
       } catch {
         resolve({ success: false, error: 'INTERNAL_ERROR' })
       }
@@ -50,10 +50,11 @@ function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: nu
   })
 }
 
-function uploadErrorText(code: string): string {
+function uploadErrorText(code: string, detail?: string): string {
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
     return '上传中断（文件较大或服务被重启/网络中断）。请确认本地服务稳定后重试。'
   }
+  if (detail && detail.trim()) return `导入失败：${detail}`
   return `导入失败：${code}`
 }
 
@@ -73,6 +74,7 @@ export function CourseManagementPage() {
 function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale> }) {
   const employee = useEmployee()
   const navigate = useNavigate()
+  const L = (zh: string, en: string) => (locale.startsWith('zh') ? zh : en)
   const canPublish = employee.role === 'ADMIN' || employee.role === 'OPERATION_ADMIN'
   const [list, setList] = useState<CourseList | null>(null)
   const [loading, setLoading] = useState(false)
@@ -127,7 +129,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       setShowCreate(false)
       await load()
       openCourse(result.data.id)
-    } else setMessage(`Create failed: ${result.error}`)
+    } else setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
   }
 
   async function onPickRawFile(file: File) {
@@ -144,12 +146,16 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (result.success) {
       setImportJob(result.data)
       const rawWarnings = result.data.rawWarnings ?? []
-      setMessage(rawWarnings.length ? `Raw materials converted with ${rawWarnings.length} warning(s). Review validation before confirming.` : 'Raw materials converted. Review validation before confirming.')
-    } else setMessage(uploadErrorText(result.error))
+      setMessage(
+        rawWarnings.length
+          ? L(`原始素材已转换，有 ${rawWarnings.length} 条警告。确认前请先查看校验结果。`, `Raw materials converted with ${rawWarnings.length} warning(s). Review validation before confirming.`)
+          : L('原始素材已转换。确认前请先查看校验结果。', 'Raw materials converted. Review validation before confirming.'),
+      )
+    } else setMessage(uploadErrorText(result.error, result.errorMessage))
   }
 
   async function importFromServerFolder() {
-    const dir = window.prompt('仓库内素材目录（相对仓库根）', 'docs/modeling-life')
+    const dir = window.prompt(L('仓库内素材目录（相对仓库根）', 'Server material folder (relative to repo root)'), 'docs/modeling-life')
     if (dir === null) return
     setBusy(true)
     setMessage(null)
@@ -161,14 +167,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setBusy(false)
     if (result.success) {
       setImportJob(result.data)
-      setMessage('已从本地目录解析素材，请在校验信息中确认后导入。')
-    } else setMessage(uploadErrorText(result.error))
+      setMessage(L('已从本地目录解析素材，请在校验信息中确认后导入。', 'Parsed materials from the server folder. Review validation before confirming.'))
+    } else setMessage(uploadErrorText(result.error, result.message))
   }
 
   async function onPickFile(file: File) {
     const lower = file.name.toLowerCase()
     if (!lower.endsWith('.zip') && !lower.endsWith('.lgcourse.zip')) {
-      setMessage('Only .lgcourse.zip course packages can be imported.')
+      setMessage(L('只能导入 .lgcourse.zip 课程包。', 'Only .lgcourse.zip course packages can be imported.'))
       if (fileRef.current) fileRef.current.value = ''
       return
     }
@@ -180,8 +186,8 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setBusy(false)
     if (result.success) {
       setImportJob(result.data)
-      if (result.data.status === 'FAILED') setMessage(result.data.error ?? 'Import validation failed.')
-    } else setMessage(uploadErrorText(result.error))
+      if (result.data.status === 'FAILED') setMessage(result.data.error ?? L('导入校验失败。', 'Import validation failed.'))
+    } else setMessage(uploadErrorText(result.error, result.errorMessage))
   }
 
   async function confirmImport(onConflict: string) {
@@ -199,7 +205,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       await load()
       openCourse(result.data.courseId)
     } else {
-      setMessage(`Confirm failed: ${result.error}`)
+      setMessage(L(`确认导入失败：${result.error}`, `Confirm failed: ${result.error}`))
     }
   }
 
@@ -209,23 +215,30 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         <div>
           <h1 className="cardTitle">{t(locale, 'course.title')}</h1>
           <p className="cardBody">
-            {list ? `${list.counts.total} courses · ${list.counts.draft} with draft · ${list.counts.online} online · ${list.counts.notPublished} not published` : t(locale, 'course.description')}
+            {list
+              ? L(
+                  `${list.counts.total} 门课程 · ${list.counts.draft} 草稿 · ${list.counts.online} 在线 · ${list.counts.notPublished} 未发布`,
+                  `${list.counts.total} courses · ${list.counts.draft} with draft · ${list.counts.online} online · ${list.counts.notPublished} not published`,
+                )
+              : t(locale, 'course.description')}
           </p>
         </div>
         {canPublish && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="button buttonGhost" disabled={busy} onClick={() => navigate(`/${locale}/operations`)}>
-              Operations
+              {L('运营位', 'Operations')}
             </button>
-            <button type="button" className="button buttonGhost" disabled={busy} onClick={() => setShowCreate(true)}>Create course</button>
+            <button type="button" className="button buttonGhost" disabled={busy} onClick={() => setShowCreate(true)}>
+              {L('新建课程', 'Create course')}
+            </button>
             <button type="button" className="button buttonGhost" disabled={busy} onClick={() => rawFileRef.current?.click()}>
-              Import raw materials (.zip)
+              {L('导入原始素材（.zip）', 'Import raw materials (.zip)')}
             </button>
             <button type="button" className="button buttonGhost" disabled={busy} onClick={() => void importFromServerFolder()}>
-              本地目录导入
+              {L('本地目录导入', 'Import from server folder')}
             </button>
             <button type="button" className="button" disabled={busy} onClick={() => fileRef.current?.click()}>
-              Import course package
+              {L('导入课程包', 'Import course package')}
             </button>
           </div>
         )}
@@ -253,13 +266,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <label style={{ fontSize: 13 }}>
-          Category{' '}
+          {L('分类', 'Category')}{' '}
           <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} style={{ padding: 7, borderRadius: 8 }}>
-            <option value="">All categories</option>
+            <option value="">{L('全部分类', 'All categories')}</option>
             {categories.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
         </label>
-        <button type="button" className="button buttonGhost" disabled={loading} onClick={() => void load()}>Refresh</button>
+        <button type="button" className="button buttonGhost" disabled={loading} onClick={() => void load()}>{L('刷新', 'Refresh')}</button>
       </div>
 
       {message && (() => {
@@ -274,23 +287,23 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       {uploadPct !== null && (
         <div className="cardBody" role="status" style={{ marginTop: 4, marginBottom: 4 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-            <span>正在上传文件…</span>
+            <span>{L('正在上传文件…', 'Uploading…')}</span>
             <span>{uploadPct}%</span>
           </div>
           <div style={{ height: 8, background: '#E8EDF5', borderRadius: 4, overflow: 'hidden' }}>
             <div style={{ width: `${uploadPct}%`, height: '100%', background: '#1D6BFF', transition: 'width 0.2s ease' }} />
           </div>
-          {uploadPct >= 100 && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.7 }}>上传完成，正在解析与校验，请稍候…</div>}
+          {uploadPct >= 100 && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.7 }}>{L('上传完成，正在解析与校验，请稍候…', 'Upload complete. Parsing and validating…')}</div>}
         </div>
       )}
 
       {showCreate && (
         <form action={(form) => void createCourse(form)} style={{ marginTop: 12, padding: 16, border: '1px solid #E8EDF5', borderRadius: 12, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-          <label>Course title<input name="title" required style={{ display: 'block', padding: 8 }} /></label>
-          <label>Course ID<input name="code" required style={{ display: 'block', padding: 8 }} /></label>
-          <label>Slug<input name="slug" style={{ display: 'block', padding: 8 }} /></label>
-          <button className="button" disabled={busy}>Create and edit</button>
-          <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>Cancel</button>
+          <label>{L('课程标题', 'Course title')}<input name="title" required style={{ display: 'block', padding: 8 }} /></label>
+          <label>{L('课程 ID', 'Course ID')}<input name="code" required style={{ display: 'block', padding: 8 }} /></label>
+          <label>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', padding: 8 }} /></label>
+          <button className="button" disabled={busy}>{L('创建并编辑', 'Create and edit')}</button>
+          <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
         </form>
       )}
 
@@ -310,13 +323,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         <table className="table" style={{ width: '100%', marginTop: 16 }}>
           <thead>
             <tr>
-              <th>Course ID</th>
-              <th>Course</th>
-              <th>Category</th>
-              <th>Lessons</th>
-              <th>Draft</th>
-              <th>Live</th>
-              <th>Actions</th>
+              <th>{L('课程 ID', 'Course ID')}</th>
+              <th>{L('课程', 'Course')}</th>
+              <th>{L('分类', 'Category')}</th>
+              <th>{L('课时', 'Lessons')}</th>
+              <th>{L('草稿', 'Draft')}</th>
+              <th>{L('在线', 'Live')}</th>
+              <th>{L('操作', 'Actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -331,21 +344,21 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                 </td>
                 <td>{course.category?.name ?? '—'}</td>
                 <td>{course.lessonCount}</td>
-                <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>Draft</span> : '—'}</td>
+                <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
                 <td>
                   {course.published
                     ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
-                    : <span style={{ opacity: 0.7 }}>Not published</span>}
+                    : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
                 </td>
                 <td>
-                  <button className="button buttonGhost" onClick={() => openCourse(course.id)}>Open</button>
+                  <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
                 </td>
               </tr>
             ))}
             {list.courses.length === 0 && (
               <tr>
                 <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
-                  No courses yet. Create a course or import a course package.
+                  {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
                 </td>
               </tr>
             )}

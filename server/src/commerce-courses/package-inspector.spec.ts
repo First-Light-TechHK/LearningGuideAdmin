@@ -5,6 +5,9 @@ import type { CommerceCourseConfig } from './commerce.config';
 
 function testConfig(): CommerceCourseConfig {
   return {
+    environmentLabel: 'test',
+    publicSiteUrl: 'http://localhost',
+    versionNumberingMode: 'sandbox',
     mediaRoot: '/tmp/lg-media',
     packageStagingRoot: '/tmp/lg-staging',
     maxImageBytes: 20 * 1024 * 1024,

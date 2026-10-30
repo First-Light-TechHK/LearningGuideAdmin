@@ -120,6 +120,12 @@ export class CommerceCoursesController {
     return this.courses.createCourse(body, actor(request));
   }
 
+  // 只读诊断：确认媒体存储驱动（S3 桶/前缀 或 本地路径），便于核对 S3 是否生效。需声明在 :id 之前。
+  @Get('storage-info')
+  storageInfo() {
+    return this.jobs.storageInfo();
+  }
+
   @Get(':id')
   detail(@Param('id') id: string) {
     return this.courses.detail(id);
