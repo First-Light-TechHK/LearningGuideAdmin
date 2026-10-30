@@ -108,62 +108,105 @@ export class PackageJobsService {
       },
     });
     // 同步校验（P1a：包通常较小；大包改由 worker 处理）
-    await this.runValidation(jobId);
+    await this.runValidation(jobId, file.bytes);
     return this.getJob(jobId);
   }
 
   /**
    * 原始素材导入：上传含 xlsx + 媒体（docx/mp4/png）的 ZIP，
    * 先转换成标准课程包，再走常规「导入作业 → 校验 → 确认导入」流程。
+   *
+   * 转换 + 校验是耗时的 CPU/内存重活：这里只把原始包落盘、建作业就立即返回，
+   * 真正的处理放到后台线程执行，前端轮询 import/:jobId。避免 ~150MB 素材包
+   * 在网关（CloudFront / App Runner）上因请求超时直接 5xx。
    */
   async createRawImportJob(
     file: { name: string; bytes: Buffer },
     actorEmployeeId: string | null,
     idempotencyKey?: string,
   ) {
+    if (idempotencyKey) {
+      const existing = await this.prisma.coursePackageJob.findUnique({
+        where: { idempotencyKey },
+      });
+      if (existing) return this.getJob(existing.id);
+    }
+    if (file.bytes.length > this.config.packageMaxBytes) {
+      throw new PackageError(
+        'PACKAGE_TOO_LARGE',
+        413,
+        'Raw materials archive exceeds size limit.',
+      );
+    }
+    const jobId = randomUUID();
+    const rawKey = this.storage.stagingKey(jobId, 'raw.zip');
+    await this.storage.putStaging(rawKey, file.bytes);
+    await this.prisma.coursePackageJob.create({
+      data: {
+        id: jobId,
+        kind: 'IMPORT',
+        status: 'VALIDATING',
+        stage: 'RAW_QUEUED',
+        actorEmployeeId,
+        idempotencyKey: idempotencyKey ?? null,
+        sourceFileName: file.name,
+        bytesTotal: file.bytes.length,
+        bytesReceived: file.bytes.length,
+        progress: 5,
+      },
+    });
+    // 后台转换 + 校验（不阻塞上传请求）；结果写回同一个 jobId，由前端轮询。
+    void this.processRawImport(jobId, rawKey).catch(() => undefined);
+    return this.getJob(jobId);
+  }
+
+  /** 后台把原始素材包转成课程包并校验，复用同一个 jobId，供前端轮询。 */
+  private async processRawImport(jobId: string, rawKey: string): Promise<void> {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-raw-'));
     try {
+      const rawBytes = await this.storage.getStaging(rawKey);
       const rawPath = path.join(tmp, 'raw.zip');
       const outPath = path.join(tmp, 'package.zip');
-      await fs.writeFile(rawPath, file.bytes);
-      let built: {
+      await fs.writeFile(rawPath, rawBytes);
+      const built = await runImportWorker<{
         warnings: string[];
         courseCode: string;
         slug: string;
         title: string;
         lessonCount: number;
         mediaCount: number;
-      };
-      try {
-        // 原始素材转换是 CPU 重活，放到 worker 线程，避免阻塞事件循环
-        built = await runImportWorker<typeof built>('raw', {
-          rawPath,
-          outPath,
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : '原始素材解析失败';
-        throw new PackageError('RAW_MATERIALS_INVALID', 422, message);
-      }
+      }>('raw', { rawPath, outPath });
       const pkgBytes = await fs.readFile(outPath);
-      const job = await this.createImportJob(
-        { name: `${built.courseCode}.lgcourse.zip`, bytes: pkgBytes },
-        actorEmployeeId,
-        idempotencyKey,
-      );
-      return {
-        ...job,
-        sourceFileName: file.name,
-        rawWarnings: built.warnings,
-        raw: {
-          courseCode: built.courseCode,
-          slug: built.slug,
-          title: built.title,
-          lessonCount: built.lessonCount,
-          mediaCount: built.mediaCount,
+      const pkgKey = this.storage.stagingKey(jobId, 'package.zip');
+      await this.storage.putStaging(pkgKey, pkgBytes);
+      await this.prisma.coursePackageJob.update({
+        where: { id: jobId },
+        data: {
+          storageKey: pkgKey,
+          bytesTotal: pkgBytes.length,
+          packageHash: CourseStorageService.sha256(pkgBytes),
+          sourceFileName: `${built.courseCode}.lgcourse.zip`,
+          progress: 40,
+          stage: 'VALIDATING',
         },
-      };
+      });
+      await this.runValidation(jobId, pkgBytes);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : '原始素材解析失败';
+      await this.prisma.coursePackageJob
+        .update({
+          where: { id: jobId },
+          data: {
+            status: 'FAILED',
+            error: message,
+            progress: 100,
+            stage: 'FAILED',
+          },
+        })
+        .catch(() => undefined);
     } finally {
+      await this.storage.removeStaging(rawKey).catch(() => undefined);
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
   }
@@ -229,14 +272,19 @@ export class PackageJobsService {
     );
   }
 
-  private async runValidation(jobId: string): Promise<void> {
+  private async runValidation(
+    jobId: string,
+    providedBytes?: Buffer,
+  ): Promise<void> {
     const job = await this.prisma.coursePackageJob.findUnique({
       where: { id: jobId },
     });
     if (!job || !job.storageKey) return;
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-ins-'));
     try {
-      const zipBytes = await this.storage.getStaging(job.storageKey);
+      // 调用方手里已有同一份字节时直接复用，避免再从 staging 读回整包（少一份大缓冲）
+      const zipBytes =
+        providedBytes ?? (await this.storage.getStaging(job.storageKey));
       const packagePath = path.join(tmp, 'package.zip');
       const outDir = path.join(tmp, 'files');
       await fs.mkdir(outDir, { recursive: true });
