@@ -768,6 +768,30 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     ).toMatchObject({ kind: 'answer', nodeId: FAILED.id });
   });
 
+  it("tells the model which candidates are the shown card's follow-ups, and to prefer one over clarify", async () => {
+    // real-model eval 2026-10-30: 「宽限期是啥」 on the payment-failed card went to clarify (not covered) while its
+    // follow-up 「What is the grace period?」 was a candidate; the model could not tell follow-ups apart
+    const { service, run } = setup({
+      found: [
+        { ...FAILED, relation: 'child' },
+        { ...RESET, relation: 'sibling' },
+      ],
+      pick: () => pick('question', FAILED.id),
+    });
+    await ask(service, chat('and if my card is declined?', shown));
+    const spec = specOf(run, 'pick_faq') as AgentStepSpec;
+    const prompt = JSON.parse(spec.prompt) as {
+      candidates: { id: string; followUp?: boolean }[];
+    };
+    expect(prompt.candidates.map((c) => [c.id, c.followUp ?? false])).toEqual([
+      [FAILED.id, true],
+      [RESET.id, false],
+    ]);
+    expect(spec.system).toContain(
+      'When a candidate marked followUp answers what they ask about the shown card, pick it (intent question); use clarify only when no candidate answers it.',
+    );
+  });
+
   it('without a card on screen, clarify is handled like a question', async () => {
     const { service, run } = setup({ pick: () => pick('clarify', PAID.id) });
     expect(await ask(service, chat('what does that mean?'))).toMatchObject({
