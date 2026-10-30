@@ -697,7 +697,7 @@ export function CourseEditorPage() {
           <div style={card}>
             <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'History', 'History')}</h2>
             <table className="table" style={{ width: '100%', marginTop: 12 }}>
-              <thead><tr><th>{L(locale, '时间', 'Time')}</th><th>{L(locale, '操作人', 'Operator')}</th><th>{L(locale, '操作', 'Action')}</th><th>{L(locale, '详情', 'Detail')}</th></tr></thead>
+              <thead><tr><th>{L(locale, '时间', 'Time')}</th><th>{L(locale, '操作人', 'Operator')}</th><th>{L(locale, '操作', 'Action')}</th><th style={{ textAlign: 'left' }}>{L(locale, '详情', 'Detail')}</th></tr></thead>
               <tbody>
                 {(history?.items ?? []).map((item) => (
                   <tr key={item.id}>
