@@ -198,7 +198,7 @@ describe('eval dataset', () => {
     writeFileSync(
       path,
       [
-        { ...cases[0], role: 'parent' },
+        { ...cases[0], role: 'pays_for_another_account' },
         { ...cases[0], id: 't1', conversationId: 'conv-1', turn: 1 },
         { ...cases[0], id: 't2', conversationId: 'conv-1', turn: 2 },
         { ...cases[0], id: 'o1', origin: 'batch-01.jsonl#b1-001' },
@@ -209,7 +209,7 @@ describe('eval dataset', () => {
     expect(
       loadCases(path).map((c) => [c.role, c.conversationId, c.turn]),
     ).toEqual([
-      ['parent', undefined, undefined],
+      ['pays_for_another_account', undefined, undefined],
       [undefined, 'conv-1', 1],
       [undefined, 'conv-1', 2],
       [undefined, undefined, undefined],
@@ -547,8 +547,18 @@ describe('report', () => {
 
   it('breaks results down by role, by language (mixed-language cases on their own) and by turn', () => {
     const rs = [
-      result({ id: 'p1', expectedFaqId: A, gotFaqId: A, role: 'parent' }),
-      result({ id: 'p2', expectedFaqId: A, gotFaqId: B, role: 'parent' }),
+      result({
+        id: 'p1',
+        expectedFaqId: A,
+        gotFaqId: A,
+        role: 'pays_for_another_account',
+      }),
+      result({
+        id: 'p2',
+        expectedFaqId: A,
+        gotFaqId: B,
+        role: 'pays_for_another_account',
+      }),
       result({
         id: 'm1',
         expectedFaqId: A,
@@ -576,7 +586,11 @@ describe('report', () => {
     });
     expect(report.byRole).toEqual({
       '(none)': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0 },
-      parent: { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
+      pays_for_another_account: {
+        cases: 2,
+        accuracy: 0.5,
+        wrongAnswerRate: 0.5,
+      },
     });
     expect(report.byLanguage).toEqual({
       'en-GB': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
@@ -590,7 +604,7 @@ describe('report', () => {
     });
     const md = markdownReport(report);
     expect(md).toContain('## By role');
-    expect(md).toContain('| parent | 2 | 50.0% | 50.0% |');
+    expect(md).toContain('| pays_for_another_account | 2 | 50.0% | 50.0% |');
     expect(md).toContain('## By language');
     expect(md).toContain('| mixed | 1 | 100.0% | 0.0% |');
     expect(md).toContain('## By turn');
@@ -914,7 +928,12 @@ describe('retrieval only (--retrieval-only)', () => {
     const progress: number[] = [];
     const results = await runRetrieval({
       cases: [
-        { ...base, role: 'parent', conversationId: 'c', turn: 2 },
+        {
+          ...base,
+          role: 'pays_for_another_account',
+          conversationId: 'c',
+          turn: 2,
+        },
         { ...base, id: 'n', expectedFaqId: null },
       ],
       qa,
@@ -924,7 +943,7 @@ describe('retrieval only (--retrieval-only)', () => {
     expect(progress).toEqual([0, 1]);
     expect(results[0]).toMatchObject({
       id: 'q',
-      role: 'parent',
+      role: 'pays_for_another_account',
       conversationId: 'c',
       turn: 2,
       expectedFaqId: A,
@@ -961,7 +980,7 @@ describe('retrieval only (--retrieval-only)', () => {
       acceptableFaqIds: [C],
       persona: 'mixed_language',
       locale: 'zh-CN',
-      role: 'parent',
+      role: 'pays_for_another_account',
     }),
     hit({
       id: 'r4',
@@ -1032,7 +1051,10 @@ describe('retrieval only (--retrieval-only)', () => {
       recallAt8: null,
       noneEmpty: 1,
     });
-    expect(report.byRole.parent).toMatchObject({ answerable: 1, recallAt8: 1 });
+    expect(report.byRole.pays_for_another_account).toMatchObject({
+      answerable: 1,
+      recallAt8: 1,
+    });
     expect(report.byTurn.follow_up).toMatchObject({
       recallAt3: 0,
       recallAt8: 1,

@@ -92,7 +92,7 @@ export type EvalCase = {
   acceptableFaqIds?: string[];
   /** 数据集说明（例如为什么检索够不着）。 */
   note?: string;
-  /** 学员角色（parent、teacher、attacker …），只用于按角色拆分。 */
+  /** 用户画像（new_user、low_tech、attacker …；不按学生 / 家长分，产品面向全年龄段），只用于按角色拆分。 */
   role?: string;
   /** 多轮对话：同一个 conversationId 的用例按 turn（1 起）排列；评测仍逐条单独打分，不带上文。 */
   conversationId?: string;

@@ -54,7 +54,7 @@ import {
  *
  * 文件格式（JSONL，一行一段对话；--conversations 给一个文件或一个目录，目录里的 *.jsonl 全读）：
  *   {"id":"mt-0001","set":"multi_turn"|"casual","locale":"zh-CN"|"zh-TW"|"en-GB","language":"mixed"?,
- *    "persona":"student","flow":"clarify_clause"?,"note":"…"?,
+ *    "persona":"user","flow":"clarify_clause"?,"note":"…"?,
  *    "turns":[{"message":"…","expect":{"kind":"answer","faqId":"<uuid>"}},
  *             {"message":"没看懂","expect":{"kind":"clarify","faqId":"<uuid>","covered":true}},
  *             {"click":"<uuid>"},

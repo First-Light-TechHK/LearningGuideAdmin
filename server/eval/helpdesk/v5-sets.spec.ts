@@ -53,7 +53,7 @@ describe('generator-format v5 sets', () => {
         id: 'long-1-001',
         set: 'long',
         locale: 'mixed',
-        persona: 'student',
+        persona: 'user',
         signals: ['trial_ending'],
         turns: [
           { learner: 'refund?', expect: { kind: 'answer', faq: 'refund' } },
@@ -94,7 +94,7 @@ describe('generator-format v5 sets', () => {
       set: 'multi_turn',
       locale: 'zh-CN',
       language: 'mixed',
-      persona: 'student',
+      persona: 'user',
       turns: [
         { message: 'refund?', expect: { kind: 'answer', faqId: FAQ(13) } },
         {
@@ -212,7 +212,7 @@ describe('scoring follow-ups and running in parallel', () => {
       id: `c${n}`,
       set: 'multi_turn' as const,
       locale: 'en-GB' as const,
-      persona: 'student',
+      persona: 'user',
       turns: [
         {
           message: 'refund after two lessons',

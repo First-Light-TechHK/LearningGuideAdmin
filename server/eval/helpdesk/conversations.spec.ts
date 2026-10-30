@@ -96,7 +96,7 @@ describe('v5 conversation files', () => {
         id,
         set: 'casual',
         locale: 'en-GB',
-        persona: 'student',
+        persona: 'user',
         turns: [
           { message: 'hi', expect: { kind: 'smalltalk', intent: 'greeting' } },
         ],
@@ -113,7 +113,7 @@ describe('v5 conversation files', () => {
     id: 'x',
     set: 'multi_turn',
     locale: 'zh-CN',
-    persona: 'parent',
+    persona: 'pays for another account',
     turns: [
       { message: '怎么取消', expect: { kind: 'answer', faqId: FAQ(12) } },
     ],
@@ -243,7 +243,7 @@ describe('running conversations like the Portal chat', () => {
     id: 'c1',
     set: 'multi_turn',
     locale: 'en-GB',
-    persona: 'student',
+    persona: 'user',
     flow: 'clarify_clause',
     turns: [
       { message: 'hello', expect: { kind: 'smalltalk', intent: 'greeting' } },
@@ -422,7 +422,7 @@ describe('v5 conversation report and gate', () => {
       set: 'casual',
       locale: 'en-GB',
       language: 'en-GB',
-      persona: 'student',
+      persona: 'user',
       flow: null,
       turn: 1,
       message: 'hi',
