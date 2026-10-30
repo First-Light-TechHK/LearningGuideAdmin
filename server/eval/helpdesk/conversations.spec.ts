@@ -415,7 +415,7 @@ describe('running conversations like the Portal chat', () => {
       conversations: [
         {
           ...conversation,
-          flow: null,
+          flow: undefined,
           turns: [
             {
               message: 'thanks for the refund help, bye',
@@ -426,7 +426,7 @@ describe('running conversations like the Portal chat', () => {
         {
           ...conversation,
           id: 'c2',
-          flow: null,
+          flow: undefined,
           turns: [
             {
               message: 'still lost with my refund',
