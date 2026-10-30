@@ -495,15 +495,24 @@ describe('v5 choice cards: unsure → the learner picks (graph design §4)', () 
     });
   });
 
-  it('answers an unsure pick that belongs to no choice card', async () => {
+  it('does not show an unsure pick that belongs to no choice card: no_match, with that pick first among the alternatives', async () => {
+    // real-model eval 2026-10-30 (blind labels): DeepSeek's unsure cards outside a choice card were wrong 42 of 52
+    // times (Gemini 7 of 9); the learner still sees the pick, as the first "you might want to ask"
     const { service } = setup({
       pick: () => pick('question', RESET.id, { confidence: 'unsure' }),
     });
-    expect(await ask(service, chat('password?'))).toMatchObject({
-      kind: 'answer',
-      nodeId: RESET.id,
+    const result = await ask(service, chat('password?'));
+    expect(result).toMatchObject({
+      suggestion: null,
+      kind: 'no_match',
+      nodeId: null,
       confidence: 'unsure',
     });
+    expect(result.alternatives.map((a) => a.faqId)).toEqual([
+      RESET.id,
+      PAID.id,
+      FAILED.id,
+    ]);
   });
 
   it('shows a choice card the model picked itself', async () => {

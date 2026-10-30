@@ -672,7 +672,13 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         }),
         { ...steps, runner: this.deps.runner, model: modelTarget },
       );
-      retrieved.candidates = state.candidates;
+      // 没给卡片时模型（不确定地）选中的那张排在「你可能想问」第一个
+      const picked = state.turn
+        ? null
+        : state.candidates.find((c) => c.id === state.picked);
+      retrieved.candidates = picked
+        ? [picked, ...state.candidates.filter((c) => c !== picked)]
+        : state.candidates;
       // explain 步没走完（超时、出错）：clarify 照样回，covered:false（Portal 给转人工卡）
       const turn =
         state.turn ??

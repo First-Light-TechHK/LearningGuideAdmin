@@ -472,7 +472,9 @@ export function assistWorkflow(deps: {
           const vague = state.intent === 'vague';
           let node: HelpdeskQaCandidate | null = null;
           // 选中 choice 卡片 → 它；vague → 话题对得上的 choice 卡片；unsure → 所选（或前排候选）同属的
-          // choice 卡片；sure → 所选答案或 no_match（模型确定没有合适的就不硬给）
+          // choice 卡片，没有就 no_match（所选排在「你可能想问」第一个：真模型评测 2026-10-30 盲评，
+          // DeepSeek 没有 choice 卡片可给的 unsure 卡片 52 张错了 42 张）；sure → 所选答案或 no_match
+          // （模型确定没有合适的就不硬给）
           if (picked?.type === 'choice') node = picked;
           else if (vague || state.confidence === 'unsure') {
             const choiceId = sharedChoice(
@@ -483,7 +485,8 @@ export function assistWorkflow(deps: {
             const choice = choiceId ? await findNode(state, choiceId) : null;
             if (choice?.type === 'choice') node = choice;
           }
-          if (!node && picked && !vague) node = picked;
+          if (!node && picked && !vague && state.confidence !== 'unsure')
+            node = picked;
           if (!node) {
             const turn = vague
               ? smalltalkTurn('vague', state.learner, state.texts.reply)
