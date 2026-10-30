@@ -413,7 +413,7 @@ function score(
           got.kind === 'smalltalk' &&
           (expect.intent === undefined ||
             sameSmalltalk(got.intent, expect.intent)),
-        wrongFaq: false,
+        wrongFaq: shownCard !== null,
       };
     case 'no_match':
       return {
@@ -428,7 +428,7 @@ function score(
           got.kind === 'handover' ||
           (got.kind === 'clarify' && got.covered === false) ||
           (got.kind === 'no_match' && streak >= UNSOLVED_HANDOVER_STREAK),
-        wrongFaq: false,
+        wrongFaq: shownCard !== null,
       };
   }
 }

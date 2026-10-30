@@ -397,6 +397,58 @@ describe('running conversations like the Portal chat', () => {
     ]);
   });
 
+  it('counts a card shown where small talk or a handover was expected as a wrong card', async () => {
+    // any card answers some other question here: the learner wanted to say thanks, or a person
+    const { runner } = scriptedRunner({
+      pick: {
+        'thanks for the refund help, bye': {
+          intent: 'question',
+          faqId: `not:${FAQ(0)}`,
+        },
+        'still lost with my refund': {
+          intent: 'question',
+          faqId: `not:${FAQ(0)}`,
+        },
+      },
+    });
+    const outcome = await runConversations({
+      conversations: [
+        {
+          ...conversation,
+          flow: null,
+          turns: [
+            {
+              message: 'thanks for the refund help, bye',
+              expect: { kind: 'smalltalk', intent: 'farewell' },
+            },
+          ],
+        },
+        {
+          ...conversation,
+          id: 'c2',
+          flow: null,
+          turns: [
+            {
+              message: 'still lost with my refund',
+              expect: { kind: 'handover' },
+            },
+          ],
+        },
+      ],
+      qa: memoryQaSource(faqs),
+      runner,
+      env: ENV,
+      budgetUsd: 1,
+      paid: false,
+    });
+    expect(
+      outcome.results.map((r) => [r.got.kind, r.right, r.wrongFaq]),
+    ).toEqual([
+      ['answer', false, true],
+      ['answer', false, true],
+    ]);
+  });
+
   it('stops at the budget before the next conversation', async () => {
     const { runner } = scriptedRunner(script);
     const outcome = await runConversations({
