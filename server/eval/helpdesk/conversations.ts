@@ -281,7 +281,9 @@ export type GotTurn = {
   candidateIds?: string[];
   confidence?: string | null;
   /** 复核用：学员看到的模型短句（诚恳度复核要读原话）；没有的字段不写。 */
-  said?: Partial<Record<'opening' | 'closing' | 'reply' | 'explanation', string>>;
+  said?: Partial<
+    Record<'opening' | 'closing' | 'reply' | 'explanation', string>
+  >;
 };
 
 export type TurnResult = {
