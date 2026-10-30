@@ -25,9 +25,12 @@ import {
   markdownConversationReport,
   runConversations,
   summarizeConversations,
+  score,
   stepDetails,
   type ConversationOutcome,
   type EvalConversation,
+  type GotTurn,
+  type TurnExpectation,
   type TurnResult,
 } from './conversations';
 import {
@@ -244,6 +247,51 @@ const ENV = {
   HELPDESK_SUGGEST_MODEL: 'fake/scripted',
 };
 
+describe('scoring a turn', () => {
+  const got = (kind: GotTurn['kind'], nodeId: string | null = null) => ({
+    kind,
+    intent: null,
+    nodeId,
+    covered: null,
+    guard: null,
+    blocks: [],
+  });
+
+  it.each([
+    [{ kind: 'smalltalk', intent: 'greeting' }],
+    [{ kind: 'smalltalk', intent: 'off_topic' }],
+    [{ kind: 'handover' }],
+  ] as TurnExpectation[][])(
+    'R3: a card where %j was expected is not a wrong FAQ but an extra card, and not right either',
+    (wanted) => {
+      // 用户 2026-10-30 16:52：期望寒暄或转人工时给卡片不算错（转人工也先尽量用卡片解决），单独记「多给卡片」
+      expect(score(wanted, got('answer', FAQ(13)), 0)).toEqual({
+        right: false,
+        wrongFaq: false,
+        extraCard: true,
+      });
+      expect(score(wanted, got('no_match'), 0)).toMatchObject({
+        wrongFaq: false,
+        extraCard: false,
+      });
+    },
+  );
+
+  it('still counts a card where no_match or clarify was expected as a wrong FAQ', () => {
+    expect(score({ kind: 'no_match' }, got('answer', FAQ(13)), 0)).toEqual({
+      right: false,
+      wrongFaq: true,
+    });
+    expect(
+      score(
+        { kind: 'clarify', faqId: FAQ(13), covered: true },
+        got('answer', FAQ(12)),
+        0,
+      ),
+    ).toMatchObject({ wrongFaq: true });
+  });
+});
+
 describe('which branch answered', () => {
   // 开思考的聊天同时跑两路：复核要看给出回答的那一路的候选与 confidence
   const step = (name: string, data: Record<string, unknown>) => ({
@@ -440,8 +488,8 @@ describe('running conversations like the Portal chat', () => {
     ]);
   });
 
-  it('counts a card shown where small talk or a handover was expected as a wrong card', async () => {
-    // any card answers some other question here: the learner wanted to say thanks, or a person
+  it('R3: counts a card shown where small talk or a handover was expected as an extra card, not a wrong one', async () => {
+    // 用户 2026-10-30 16:52：想道谢或要人工时出了卡片，不算答错卡（转人工也先尽量用卡片解决），单独数
     const { runner } = scriptedRunner({
       pick: {
         'thanks for the refund help, bye': {
@@ -485,11 +533,28 @@ describe('running conversations like the Portal chat', () => {
       paid: false,
     });
     expect(
-      outcome.results.map((r) => [r.got.kind, r.right, r.wrongFaq]),
+      outcome.results.map((r) => [
+        r.got.kind,
+        r.right,
+        r.wrongFaq,
+        r.extraCard,
+      ]),
     ).toEqual([
-      ['answer', false, true],
-      ['answer', false, true],
+      ['answer', false, false, true],
+      ['answer', false, false, true],
     ]);
+    const report = summarizeConversations({
+      outcome,
+      totalConversations: 2,
+      model: { kind: 'fake', model: 'fake/x' },
+      retrieval: 'memory',
+      budgetUsd: 1,
+    });
+    expect(report.metrics).toMatchObject({
+      wrongFaqRate: 0,
+      extraCards: 2,
+      extraCardRate: 1,
+    });
   });
 
   it('stops at the budget before the next conversation', async () => {
@@ -533,6 +598,7 @@ describe('v5 conversation report and gate', () => {
       right: true,
       wrongFaq: false,
       viaEntry: false,
+      extraCard: false,
       grounded: null,
       escapes: [],
       unsolvedStreak: 0,

@@ -310,6 +310,8 @@ export type TurnResult = {
   wrongFaq: boolean;
   /** 期望的是追问，出的是通向它的入口卡片（算对，单独数）。 */
   viaEntry: boolean;
+  /** R3（用户 2026-10-30）：期望寒暄或转人工却出了卡片：不算答错卡，单独数「多给卡片」（也不算答对）。 */
+  extraCard: boolean;
   /** 出了解释（covered）时它是否接地；没有解释为 null。 */
   grounded: boolean | null;
   /** 展示出去却没过守卫的字段（应当永远为空）。 */
@@ -384,11 +386,16 @@ function sameSmalltalk(
   );
 }
 
-function score(
+export function score(
   expect: TurnExpectation,
   got: GotTurn,
   streak: number,
-): { right: boolean; wrongFaq: boolean; viaEntry?: boolean } {
+): {
+  right: boolean;
+  wrongFaq: boolean;
+  viaEntry?: boolean;
+  extraCard?: boolean;
+} {
   const shownCard = got.kind === 'answer' ? got.nodeId : null;
   const wrong = (allowed: string[]) =>
     shownCard !== null && !allowed.includes(shownCard);
@@ -419,7 +426,8 @@ function score(
           got.kind === 'smalltalk' &&
           (expect.intent === undefined ||
             sameSmalltalk(got.intent, expect.intent)),
-        wrongFaq: shownCard !== null,
+        wrongFaq: false,
+        extraCard: shownCard !== null,
       };
     case 'no_match':
       return {
@@ -434,7 +442,8 @@ function score(
           got.kind === 'handover' ||
           (got.kind === 'clarify' && got.covered === false) ||
           (got.kind === 'no_match' && streak >= UNSOLVED_HANDOVER_STREAK),
-        wrongFaq: shownCard !== null,
+        wrongFaq: false,
+        extraCard: shownCard !== null,
       };
   }
 }
@@ -555,6 +564,7 @@ export async function runConversations(
           right: null,
           wrongFaq: false,
           viaEntry: false,
+          extraCard: false,
           grounded: null,
           escapes: [],
           unsolvedStreak: streak,
@@ -576,6 +586,7 @@ export async function runConversations(
           right: expect ? score(expect, got, streak).right : null,
           wrongFaq: false,
           viaEntry: false,
+          extraCard: false,
           grounded: null,
           escapes: [],
           unsolvedStreak: streak,
@@ -661,6 +672,7 @@ export async function runConversations(
         right: scored ? scored.right : null,
         wrongFaq: scored ? scored.wrongFaq : false,
         viaEntry: scored?.viaEntry ?? false,
+        extraCard: scored?.extraCard ?? false,
         grounded,
         escapes: escapesOf(reply, turn.message, locale, shownAnswer),
         unsolvedStreak: streak,
@@ -794,6 +806,9 @@ export type ConversationReport = {
     guardEscapes: number;
     /** 期望追问、出的是通向它的入口卡片的轮次（算对）。 */
     answeredViaEntry: number;
+    /** R3：期望寒暄或转人工却出了卡片的轮次（不计入 wrongFaqRate）与占问 Admin 的打分轮次之比。 */
+    extraCards: number;
+    extraCardRate: number | null;
     guardFallbackRate: number | null;
     latencyMs: { p50: number; p95: number };
     costUsd: number;
@@ -899,6 +914,11 @@ export function summarizeConversations(input: {
     clarifyExplanations: explanations.length,
     guardEscapes: results.reduce((sum, r) => sum + r.escapes.length, 0),
     answeredViaEntry: results.filter((r) => r.right && r.viaEntry).length,
+    extraCards: adminScored.filter((r) => r.extraCard).length,
+    extraCardRate: share(
+      adminScored.filter((r) => r.extraCard).length,
+      adminScored.length,
+    ),
     guardFallbackRate: share(
       guarded.filter((r) => r.got.guard?.result === 'fallback').length,
       guarded.length,
@@ -1011,6 +1031,7 @@ export function markdownConversationReport(report: ConversationReport): string {
     `| Clarify grounded | ${pct(m.clarifyGrounded)} (${m.clarifyExplanations} explanations) |`,
     `| Guard escapes | ${m.guardEscapes} |`,
     `| Follow-up expected, its entry card shown (counted right) | ${m.answeredViaEntry} |`,
+    `| Small talk or handover expected, a card shown (R3: not a wrong FAQ) | ${m.extraCards} (${pct(m.extraCardRate)}) |`,
     `| Guard fallback rate | ${pct(m.guardFallbackRate)} |`,
     `| Latency p50 / p95 | ${m.latencyMs.p50} / ${m.latencyMs.p95} ms |`,
     `| Cost | $${m.costUsd} |`,
