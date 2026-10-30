@@ -325,6 +325,9 @@ describe('running conversations like the Portal chat', () => {
     // two unsolved in a row (the uncovered clarify, then a no_match) → the handover card is offered
     expect(results[5].unsolvedStreak).toBe(2);
     expect(results[2].grounded).toBe(true);
+    // for review: the candidates the model saw and its confidence
+    expect(results[1].got.candidateIds).toContain(FAQ(13));
+    expect(results[1].got.confidence).toBe('sure');
     expect(results.every((r) => r.escapes.length === 0)).toBe(true);
     expect(outcome).toMatchObject({ conversationsRun: 1, stopped: null });
   });
@@ -332,7 +335,8 @@ describe('running conversations like the Portal chat', () => {
   it('scores a wrong card, an ungrounded explanation and a wrong small-talk intent', async () => {
     const { runner } = scriptedRunner({
       pick: {
-        hello: { intent: 'vague', faqId: 'none' },
+        // greeting ≡ vague for the learner (sameSmalltalk); off_topic is a real miss
+        hello: { intent: 'off_topic', faqId: 'none' },
         'can I get a refund': { intent: 'question', faqId: `not:${FAQ(13)}` },
         'what does fewer than two lessons mean?': {
           intent: 'clarify',
@@ -359,7 +363,7 @@ describe('running conversations like the Portal chat', () => {
     const [hello, answer, clarify] = outcome.results;
     expect(hello).toMatchObject({
       right: false,
-      got: { kind: 'smalltalk', intent: 'vague' },
+      got: { kind: 'smalltalk', intent: 'off_topic' },
     });
     expect(answer).toMatchObject({ right: false, wrongFaq: true });
     // the guard refused the ungrounded number: the learner saw no explanation
@@ -430,6 +434,7 @@ describe('v5 conversation report and gate', () => {
       },
       right: true,
       wrongFaq: false,
+      viaEntry: false,
       grounded: null,
       escapes: [],
       unsolvedStreak: 0,
@@ -539,13 +544,33 @@ describe('the whole sample through the pi workflow with the fake model', () => {
     expect(outcome.results.every((r) => r.escapes.length === 0)).toBe(true);
 
     const out = join(tmp, 'v5.md');
+    const turnsOut = join(tmp, 'turns', 'v5.turns.jsonl');
     const lines: string[] = [];
-    const code = await runCli(['--conversations', SAMPLE, '--out', out], {
-      env: {},
-      cwd: tmp,
-      log: (line) => lines.push(line),
-    });
+    const code = await runCli(
+      [
+        '--conversations',
+        SAMPLE,
+        '--out',
+        out,
+        '--turns',
+        turnsOut,
+        '--concurrency',
+        '2',
+      ],
+      {
+        env: {},
+        cwd: tmp,
+        log: (line) => lines.push(line),
+      },
+    );
     expect(code).toBe(0);
+    // every turn, not just the first 200 failures
+    const dumped = readFileSync(turnsOut, 'utf8').trim().split('\n');
+    expect(dumped).toHaveLength(outcome.results.length);
+    expect(JSON.parse(dumped[0])).toMatchObject({
+      conversationId: conversations[0].id,
+      turn: 1,
+    });
     const md = readFileSync(out, 'utf8');
     expect(md).toContain('# Helpdesk v5 conversation eval');
     expect(md).toContain('Not a model score.');

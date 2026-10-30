@@ -8,7 +8,10 @@ import {
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 
-import { HelpdeskSuggestService } from '../../src/ai/helpdesk/helpdesk-suggest.service';
+import {
+  HelpdeskSuggestService,
+  SUGGEST_CANDIDATES,
+} from '../../src/ai/helpdesk/helpdesk-suggest.service';
 import type { HelpdeskSuggestionLog } from '../../src/ai/helpdesk/helpdesk-suggestion.store';
 import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-event.store';
 import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
@@ -34,7 +37,13 @@ import {
   serviceLocale,
   type EvalLocale,
   type EvalModel,
+  type RetrievalResult,
 } from './harness';
+import {
+  fromGeneratorFormat,
+  isGeneratorFormat,
+  type ReleasedLibrary,
+} from './v5-sets';
 
 /**
  * v5 对话评测（helpdesk-v5-context-chips-and-smalltalk Part F）：每条用例是一段对话（3–8 轮），每一轮标着
@@ -80,7 +89,16 @@ const SMALLTALK_INTENTS = [
 type SmalltalkIntent = (typeof SMALLTALK_INTENTS)[number];
 
 export type TurnExpectation =
-  | { kind: 'answer'; faqId: string; acceptableFaqIds?: string[] }
+  | {
+      kind: 'answer';
+      faqId: string;
+      acceptableFaqIds?: string[];
+      /**
+       * faqId 是追问（不是入口）时，通向它的入口卡片：新打的问题只在入口里检索（graph design §4），
+       * 出这张入口卡片、学员再点一下追问也算对；报告里单独数（answeredViaEntry）。
+       */
+      entryIds?: string[];
+    }
   | { kind: 'clarify'; faqId: string; covered: boolean }
   | { kind: 'smalltalk'; intent?: SmalltalkIntent }
   | { kind: 'no_match' }
@@ -114,11 +132,12 @@ function validExpectation(raw: unknown): raw is TurnExpectation {
       return (
         typeof e.faqId === 'string' &&
         UUID.test(e.faqId) &&
-        (e.acceptableFaqIds === undefined ||
-          (Array.isArray(e.acceptableFaqIds) &&
-            e.acceptableFaqIds.every(
-              (id) => typeof id === 'string' && UUID.test(id),
-            )))
+        [e.acceptableFaqIds, e.entryIds].every(
+          (ids) =>
+            ids === undefined ||
+            (Array.isArray(ids) &&
+              ids.every((id) => typeof id === 'string' && UUID.test(id))),
+        )
       );
     case 'clarify':
       return (
@@ -151,7 +170,10 @@ function validTurn(raw: unknown): raw is ConversationTurn {
   );
 }
 
-function parseConversations(path: string): EvalConversation[] {
+function parseConversations(
+  path: string,
+  library?: ReleasedLibrary,
+): EvalConversation[] {
   return readFileSync(path, 'utf8')
     .split('\n')
     .map((line, index) => ({ line: line.trim(), at: index + 1 }))
@@ -162,6 +184,19 @@ function parseConversations(path: string): EvalConversation[] {
         value = JSON.parse(line) as EvalConversation;
       } catch {
         throw new Error(`${path}:${at}: not JSON`);
+      }
+      if (isGeneratorFormat(value)) {
+        if (!library)
+          throw new Error(
+            `${path}:${at}: FAQ keys need a released library (--pg <url> --release)`,
+          );
+        try {
+          value = fromGeneratorFormat(value, library);
+        } catch (error) {
+          throw new Error(
+            `${path}:${at}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
       const ok =
         filled(value.id) &&
@@ -180,15 +215,21 @@ function parseConversations(path: string): EvalConversation[] {
     });
 }
 
-/** 读一个 .jsonl 文件，或一个目录里所有的 .jsonl（按文件名）；id 必须唯一。 */
-export function loadConversations(path: string): EvalConversation[] {
+/**
+ * 读一个 .jsonl 文件，或一个目录里所有的 .jsonl（按文件名）；id 必须唯一。生成器格式（按 FAQ key 标注，
+ * v5-sets.ts）要给 key → id 的对照。
+ */
+export function loadConversations(
+  path: string,
+  library?: ReleasedLibrary,
+): EvalConversation[] {
   const files = statSync(path).isDirectory()
     ? readdirSync(path)
         .filter((name) => name.endsWith('.jsonl'))
         .sort()
         .map((name) => join(path, name))
     : [path];
-  const all = files.flatMap(parseConversations);
+  const all = files.flatMap((file) => parseConversations(file, library));
   if (all.length === 0) throw new Error(`${path}: no conversations`);
   const seen = new Set<string>();
   for (const c of all) {
@@ -234,6 +275,11 @@ export type GotTurn = {
   covered: boolean | null;
   guard: SuggestGuard | null;
   blocks: string[];
+  /** 这一轮的结束原因（agent 事件 turn/end：answered、no_match、timeout、error …）；没问 Admin 为 null。 */
+  reason?: string | null;
+  /** 复核用（agent 事件里取）：检索给模型的候选 id（按顺序）与 pick_faq 的 confidence。 */
+  candidateIds?: string[];
+  confidence?: string | null;
 };
 
 export type TurnResult = {
@@ -252,6 +298,8 @@ export type TurnResult = {
   right: boolean | null;
   /** 出了一张不该出的 FAQ / choice 卡片（答错）。 */
   wrongFaq: boolean;
+  /** 期望的是追问，出的是通向它的入口卡片（算对，单独数）。 */
+  viaEntry: boolean;
   /** 出了解释（covered）时它是否接地；没有解释为 null。 */
   grounded: boolean | null;
   /** 展示出去却没过守卫的字段（应当永远为空）。 */
@@ -272,6 +320,8 @@ export type ConversationRunOptions = {
   budgetUsd: number;
   paid?: boolean;
   callCeilingUsd?: number | null;
+  /** 同时跑几段对话（缺省 1）。 */
+  concurrency?: number;
   onConversation?: (results: TurnResult[], index: number) => void;
 };
 
@@ -306,20 +356,43 @@ type V5Reply = {
   explanation?: string | null;
 };
 
+/**
+ * 学员看到的结果一样的寒暄意图算同一个：greeting 与 vague 都是一句问候、问要帮什么，再接情境 chips
+ *（Part B §3；vague 只有在对上 choice 卡片时才不同，那时出的是卡片，kind 不是 smalltalk）。
+ */
+function sameSmalltalk(
+  got: SuggestIntent | null,
+  expected: SmalltalkIntent | undefined,
+): boolean {
+  if (got === expected) return true;
+  const opener = ['greeting', 'vague'];
+  return (
+    got !== null &&
+    expected !== undefined &&
+    opener.includes(got) &&
+    opener.includes(expected)
+  );
+}
+
 function score(
   expect: TurnExpectation,
   got: GotTurn,
   streak: number,
-): { right: boolean; wrongFaq: boolean } {
+): { right: boolean; wrongFaq: boolean; viaEntry?: boolean } {
   const shownCard = got.kind === 'answer' ? got.nodeId : null;
   const wrong = (allowed: string[]) =>
     shownCard !== null && !allowed.includes(shownCard);
   switch (expect.kind) {
     case 'answer': {
-      const allowed = [expect.faqId, ...(expect.acceptableFaqIds ?? [])];
+      const exact = [expect.faqId, ...(expect.acceptableFaqIds ?? [])];
+      const allowed = [...exact, ...(expect.entryIds ?? [])];
       return {
         right: shownCard !== null && allowed.includes(shownCard),
         wrongFaq: wrong(allowed),
+        viaEntry:
+          shownCard !== null &&
+          !exact.includes(shownCard) &&
+          allowed.includes(shownCard),
       };
     }
     case 'clarify':
@@ -334,7 +407,8 @@ function score(
       return {
         right:
           got.kind === 'smalltalk' &&
-          (expect.intent === undefined || got.intent === expect.intent),
+          (expect.intent === undefined ||
+            sameSmalltalk(got.intent, expect.intent)),
         wrongFaq: false,
       };
     case 'no_match':
@@ -379,6 +453,24 @@ function escapesOf(
   return out;
 }
 
+/** 从这一轮的 agent 事件里取检索候选与 pick_faq 的 confidence（只用于复核）。 */
+function stepDetails(log: { type: string; data: Record<string, unknown> }[]): {
+  candidateIds: string[];
+  confidence: string | null;
+} {
+  const ends = log.filter((e) => e.type === 'step/end');
+  const retrieve = ends.find((e) => e.data.name === 'retrieve')?.data.output as
+    { candidates?: { id?: unknown }[] } | undefined;
+  const pick = ends.find((e) => e.data.name === 'pick_faq')?.data.args as
+    { confidence?: unknown } | undefined;
+  return {
+    candidateIds: (retrieve?.candidates ?? [])
+      .map((c) => c.id)
+      .filter((id): id is string => typeof id === 'string'),
+    confidence: typeof pick?.confidence === 'string' ? pick.confidence : null,
+  };
+}
+
 export async function runConversations(
   options: ConversationRunOptions,
 ): Promise<ConversationOutcome> {
@@ -395,11 +487,12 @@ export async function runConversations(
   let spentUsd = 0;
   let stopped: ConversationOutcome['stopped'] = null;
   let conversationsRun = 0;
-  for (const [index, conversation] of options.conversations.entries()) {
-    if (spentUsd >= options.budgetUsd) {
-      stopped = 'budget';
-      break;
-    }
+  const done: TurnResult[][] = [];
+  let next = 0;
+  const runOne = async (
+    index: number,
+    conversation: EvalConversation,
+  ): Promise<void> => {
     const locale = serviceLocale(conversation.locale);
     const sessionId = uuidv7();
     const said: string[] = [];
@@ -437,6 +530,7 @@ export async function runConversations(
           got: { ...none, nodeId: turn.click },
           right: null,
           wrongFaq: false,
+          viaEntry: false,
           grounded: null,
           escapes: [],
           unsolvedStreak: streak,
@@ -457,6 +551,7 @@ export async function runConversations(
           got,
           right: expect ? score(expect, got, streak).right : null,
           wrongFaq: false,
+          viaEntry: false,
           grounded: null,
           escapes: [],
           unsolvedStreak: streak,
@@ -506,6 +601,11 @@ export async function runConversations(
         covered: reply.covered ?? null,
         guard: reply.guard ?? null,
         blocks: reply.blocks ?? [],
+        reason: ((): string | null => {
+          const end = log.find((e) => e.type === 'turn/end')?.data.reason;
+          return typeof end === 'string' ? end : null;
+        })(),
+        ...stepDetails(log),
       };
       const unsolved =
         got.kind === 'no_match' ||
@@ -530,6 +630,7 @@ export async function runConversations(
         got,
         right: scored ? scored.right : null,
         wrongFaq: scored ? scored.wrongFaq : false,
+        viaEntry: scored?.viaEntry ?? false,
         grounded,
         escapes: escapesOf(reply, turn.message, locale, shownAnswer),
         unsolvedStreak: streak,
@@ -548,12 +649,82 @@ export async function runConversations(
       if ((options.paid ?? true) && unpricedCalls > 0 && ceiling === null)
         stopped = 'unknown_cost';
     }
-    results.push(...turns);
+    done[index] = turns;
     conversationsRun += 1;
     options.onConversation?.(turns, index);
-    if (stopped) break;
-  }
+  };
+  // 对话之间互不相干：--concurrency 条同时跑；每个 worker 开跑下一条前查预算
+  const worker = async (): Promise<void> => {
+    while (stopped === null && next < options.conversations.length) {
+      if (spentUsd >= options.budgetUsd) {
+        stopped = 'budget';
+        return;
+      }
+      const index = next++;
+      await runOne(index, options.conversations[index]);
+    }
+  };
+  const width = Math.max(1, Math.floor(options.concurrency ?? 1));
+  await Promise.all(Array.from({ length: width }, () => worker()));
+  for (const turns of done) if (turns) results.push(...turns);
   return { results, conversationsRun, spentUsd, stopped };
+}
+
+/**
+ * 只跑检索（--conversations --retrieval-only --release）：每个期望出卡片（answer）的轮次发一次和
+ * assist 工作流 retrieve 步相同的检索；屏幕上的卡片按理想走法取这段对话里上一张期望的卡片（answer 或
+ * clarify 的那张；点击就是点的那张）。不问模型。
+ */
+export async function conversationRetrieval(options: {
+  conversations: EvalConversation[];
+  qa: HelpdeskQaSource;
+}): Promise<RetrievalResult[]> {
+  const results: RetrievalResult[] = [];
+  for (const conversation of options.conversations) {
+    const locale = serviceLocale(conversation.locale);
+    let shown: string | null = null;
+    for (const [i, turn] of conversation.turns.entries()) {
+      if ('click' in turn) {
+        shown = turn.click;
+        continue;
+      }
+      const expect = turn.expect;
+      if (expect?.kind === 'answer') {
+        const started = performance.now();
+        const found = await options.qa.findCandidates({
+          locale,
+          category: null,
+          text: turn.message,
+          limit: SUGGEST_CANDIDATES,
+          ...(shown ? { nodeId: shown } : {}),
+          entryOnly: true,
+          types: ['answer', 'choice'],
+        });
+        results.push({
+          id: `${conversation.id}#${i + 1}`,
+          locale: conversation.locale,
+          persona: conversation.persona as RetrievalResult['persona'],
+          role: conversation.set,
+          conversationId: conversation.id,
+          turn: i + 1,
+          message: turn.message,
+          expectedFaqId: expect.faqId,
+          acceptableFaqIds: [
+            ...(expect.acceptableFaqIds ?? []),
+            ...(expect.entryIds ?? []),
+          ],
+          candidateIds: found
+            .filter((c) => c.id !== shown)
+            .slice(0, SUGGEST_CANDIDATES)
+            .map((c) => c.id),
+          latencyMs: performance.now() - started,
+        });
+      }
+      if (expect?.kind === 'answer' || expect?.kind === 'clarify')
+        shown = expect.faqId;
+    }
+  }
+  return results;
 }
 
 /* ---------------------------------- 报告 ---------------------------------- */
@@ -592,6 +763,8 @@ export type ConversationReport = {
     clarifyGrounded: number | null;
     clarifyExplanations: number;
     guardEscapes: number;
+    /** 期望追问、出的是通向它的入口卡片的轮次（算对）。 */
+    answeredViaEntry: number;
     guardFallbackRate: number | null;
     latencyMs: { p50: number; p95: number };
     costUsd: number;
@@ -686,7 +859,7 @@ export function summarizeConversations(input: {
         (r) =>
           r.got.kind === 'smalltalk' &&
           r.expect?.kind === 'smalltalk' &&
-          r.got.intent === r.expect.intent,
+          sameSmalltalk(r.got.intent, r.expect.intent),
       ).length,
       smalltalk.length,
     ),
@@ -696,6 +869,7 @@ export function summarizeConversations(input: {
     ),
     clarifyExplanations: explanations.length,
     guardEscapes: results.reduce((sum, r) => sum + r.escapes.length, 0),
+    answeredViaEntry: results.filter((r) => r.right && r.viaEntry).length,
     guardFallbackRate: share(
       guarded.filter((r) => r.got.guard?.result === 'fallback').length,
       guarded.length,
@@ -807,6 +981,7 @@ export function markdownConversationReport(report: ConversationReport): string {
     `| Small-talk intent | ${pct(m.smalltalkIntentAccuracy)} |`,
     `| Clarify grounded | ${pct(m.clarifyGrounded)} (${m.clarifyExplanations} explanations) |`,
     `| Guard escapes | ${m.guardEscapes} |`,
+    `| Follow-up expected, its entry card shown (counted right) | ${m.answeredViaEntry} |`,
     `| Guard fallback rate | ${pct(m.guardFallbackRate)} |`,
     `| Latency p50 / p95 | ${m.latencyMs.p50} / ${m.latencyMs.p95} ms |`,
     `| Cost | $${m.costUsd} |`,

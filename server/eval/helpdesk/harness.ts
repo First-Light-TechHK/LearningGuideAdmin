@@ -4,6 +4,8 @@ import { performance } from 'node:perf_hooks';
 
 import { Pool } from 'pg';
 
+import { entryAncestorsOf } from './v5-sets';
+
 import {
   HelpdeskSuggestService,
   SUGGEST_CANDIDATES,
@@ -362,6 +364,58 @@ export async function pgQaSource(
     return { qa: createPgHelpdeskQaSource(repository, db), close };
   } catch (error) {
     await close();
+    throw error;
+  }
+}
+
+/**
+ * --release：直接用 --pg 那个库里已经导入并发布的 FAQ（seed-faq-library.ts 建的发布版本），和生产同一个
+ * 来源（发布快照里的节点与边：追问、兄弟节点都在候选里）。只读，不建 schema、不写 FAQ。
+ * idOfKey：FAQ key → id，给按 key 标注的评测集用。
+ */
+export async function pgReleaseQaSource(url: string): Promise<{
+  qa: HelpdeskQaSource;
+  release: number;
+  idOfKey: Map<string, string>;
+  entryAncestors: Map<string, string[]>;
+  close: () => Promise<void>;
+}> {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const db: SqlDb = {
+      query: async (sql, params = []) =>
+        (await pool.query<Record<string, unknown>>(sql, params as unknown[]))
+          .rows,
+      withTransaction: () =>
+        Promise.reject(new Error('the released library is read-only here')),
+    };
+    const published = await pool.query<{
+      version: number;
+      snapshot: {
+        nodes: { id: string; entry: boolean }[];
+        edges: { parentId: string; childId: string }[];
+      };
+    }>(
+      "SELECT version, snapshot FROM helpdesk_faq_releases WHERE status = 'published'",
+    );
+    const release = published.rows[0]?.version;
+    if (release === undefined)
+      throw new Error('--release: the database has no published FAQ release');
+    const keys = await pool.query<{ key: string; id: string }>(
+      'SELECT key, id FROM helpdesk_faqs',
+    );
+    return {
+      qa: createPgHelpdeskQaSource(undefined, db),
+      release,
+      idOfKey: new Map(keys.rows.map((row) => [row.key, row.id])),
+      entryAncestors: entryAncestorsOf(
+        published.rows[0].snapshot.nodes,
+        published.rows[0].snapshot.edges,
+      ),
+      close: () => pool.end(),
+    };
+  } catch (error) {
+    await pool.end();
     throw error;
   }
 }

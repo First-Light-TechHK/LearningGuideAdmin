@@ -931,3 +931,7 @@ Left as they were after review: injections asking for a fake approval or a crede
 - zh-TW cases (many in Cantonese) are matched against Simplified-Chinese FAQ text. Production retrieval now converts Traditional to Simplified and rewrites Cantonese and regional words (2026-10-29). Dev retrieval-only recall@8 for zh-TW went from 72.2% to 95.0% (`lg-helpdesk/qa10k/retrieval-dev-before.md` / `retrieval-dev-after.md`). Retrieval was tuned on dev only; test was measured once afterwards.
 - Pinyin-only messages (zh-CN typo cases such as `wangji mima`) and Chinese homophone typos (密吗, 视屏) still have no lexical match.
 - Batch 37 was not in the generation report list but its file is in raw/ and passed validation, so it is included.
+
+## Label review 2026-10-30 (real-model eval)
+
+The test split's 134 wrong-card results from a real-model run were reviewed by a second model with the product owner's rule (a request to act on an account gets the self-service card that tells the learner how, not "none"), then spot-checked by hand. In 52 cases the shown card answers the learner, so the label was corrected: 12 got the shown card as an `acceptableFaqIds` entry (both cards answer it), 40 got a new `expectedFaqId` (mostly `over_reach` / `injection` cases labelled `null` whose real need has a self-service card). Every changed case says so in `note`, with the old label. The other 82 stay model errors.
