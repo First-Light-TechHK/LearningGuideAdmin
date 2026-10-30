@@ -44,11 +44,14 @@ import { createNgramSimilarity, type TextSimilarity } from './textSimilarity';
  *   问法；答案留空由员工写；有已解决工单里人写的回复时附「草稿 待核实」），员工经 FAQ 的新建接口建好
  *   节点，再带 faqId 接受；追问另外建 parentId → faqId 的边（经问题树服务：成环、上限、归档照样检查）。
  * - 接受成问法：选中的例句（缺省：所有不含占位符的）经问题树服务加成 source = flywheel 的问法。
- * - 每次接受都把这一组脱敏过的例句加成回归用例（标上选定的节点；发布评测门会用它们）。
- * - 副作用（问法、边、用例）都幂等，先做；最后写决定。中途失败重试是安全的。
+ * - 每次接受都把员工勾选的例句（缺省：所有不含占位符的）加成回归用例（标上选定的节点；发布评测门
+ *   会用它们）；没勾的、带占位符的不加。
+ * - 副作用（问法、边、用例）都幂等，先做；最后写决定。中途失败重试是安全的。整个接受在这个候选的
+ *   advisory lock 里做：两个员工同时接受，后到的等前一个做完、重新读到已接受 → 409，不留副作用。
  * - 「转成 FAQ 候选」：只接受已解决（CLOSED，不是学员撤回）的工单；学员第一条消息与客服最后一条
  *   公开回复在 Admin 这里用同一个脱敏器（piiScrubber.ts，与 Portal 的语料 hash 锁定一致）加上这位
- *   学员自己的姓名与邮箱脱敏后才落库；客服回复只当答案的可选草稿来源（草稿 待核实）。按工单幂等。
+ *   学员自己的姓名与邮箱脱敏后才落库；客服回复只当答案的可选草稿来源（草稿 待核实），而且只在
+ *   客服解决了的工单（学员确认 / 自动确认）上取；学员自己关掉的不取。按工单幂等。
  */
 
 export const CANDIDATE_LIST_LIMITS = { pageSizeDefault: 20, pageSizeMax: 100 };
@@ -224,6 +227,112 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
       : null;
   }
 
+  async function acceptLocked(
+    actor: FaqActor,
+    id: string,
+    as: FaqCandidate['suggestion'],
+    faqId: string,
+    expected: number,
+    body: Record<string, unknown>,
+    key: string | null,
+  ): Promise<AcceptResult> {
+    const candidate = await load(id);
+    const same = (c: FaqCandidate) =>
+      c.status === 'accepted' &&
+      c.acceptedAs === as &&
+      c.acceptedFaqId === faqId;
+    const nothing = {
+      phrasingsAdded: 0,
+      phrasingsSkipped: 0,
+      evalCasesAdded: 0,
+      edgeId: null,
+    };
+    if (candidate.status !== 'new' || candidate.version !== expected)
+      return {
+        candidate: replayOrConflict(candidate, actor, key, same),
+        replayed: true,
+        ...nothing,
+      };
+    const node = await liveNode(faqId);
+    if (node.type !== 'answer')
+      throw invalid('A candidate can only be accepted onto an answer');
+    const picks = examplePicks(candidate, body.phrasings);
+    let parentId: string | null = null;
+    let edgeId: string | null = null;
+    if (as === 'follow_up') {
+      parentId =
+        body.parentId === undefined || body.parentId === null
+          ? candidate.parentNodeId
+          : uuid(body.parentId, 'parentId');
+      if (!parentId) throw invalid('parentId is required for a follow-up');
+      if (parentId === faqId) throw invalid('A question cannot follow itself');
+      edgeId = (
+        await deps.graphService.createEdge(actor, parentId, {
+          childId: faqId,
+        })
+      ).edge.id;
+    }
+    let phrasingsAdded = 0;
+    let phrasingsSkipped = 0;
+    for (const example of picks) {
+      try {
+        const { created } = await deps.graphService.addPhrasing(
+          actor,
+          faqId,
+          { locale: example.locale, text: example.text },
+          'flywheel',
+        );
+        if (created) phrasingsAdded += 1;
+      } catch (error) {
+        // 问法满了（30 种）或例句不合问法的格式：跳过这一句，其余照做
+        if (
+          error instanceof HelpdeskError &&
+          (error.code === 'FAQ_TOO_MANY_PHRASINGS' ||
+            error.code === 'INVALID_INPUT')
+        )
+          phrasingsSkipped += 1;
+        else throw error;
+      }
+    }
+    // 只有员工勾选的例句当回归用例（没勾的可能说的是别的事，或者还留着个人信息；带占位符的不能勾）
+    const evalCasesAdded = await deps.candidates.insertEvalCases(
+      picks.map((e) => ({
+        faqId,
+        candidateId: candidate.id,
+        locale: e.locale,
+        text: e.text,
+        createdBy: actor.employeeId,
+      })),
+    );
+    const decided = await deps.candidates.decide(
+      candidate.id,
+      expected,
+      {
+        status: 'accepted',
+        acceptedAs: as,
+        acceptedFaqId: faqId,
+        parentNodeId: parentId,
+      },
+      actor.employeeId ?? '',
+      key,
+    );
+    if (decided.kind === 'not_found') throw candidateNotFound();
+    if (decided.kind === 'conflict')
+      return {
+        candidate: replayOrConflict(decided.candidate, actor, key, same),
+        replayed: true,
+        ...nothing,
+      };
+    return {
+      candidate: decided.candidate,
+      replayed: false,
+      phrasingsAdded,
+      phrasingsSkipped,
+      evalCasesAdded,
+      edgeId,
+    };
+  }
+
   return {
     async list(raw: Record<string, unknown>) {
       const pageSize =
@@ -325,101 +434,11 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
       if (!as) throw invalid('as is required');
       const faqId = uuid(body.faqId, 'faqId');
       const expected = version(body.version);
-      const candidate = await load(rawId);
-      const same = (c: FaqCandidate) =>
-        c.status === 'accepted' &&
-        c.acceptedAs === as &&
-        c.acceptedFaqId === faqId;
-      const nothing = {
-        phrasingsAdded: 0,
-        phrasingsSkipped: 0,
-        evalCasesAdded: 0,
-        edgeId: null,
-      };
-      if (candidate.status !== 'new' || candidate.version !== expected)
-        return {
-          candidate: replayOrConflict(candidate, actor, key, same),
-          replayed: true,
-          ...nothing,
-        };
-      const node = await liveNode(faqId);
-      if (node.type !== 'answer')
-        throw invalid('A candidate can only be accepted onto an answer');
-      const picks = examplePicks(candidate, body.phrasings);
-      let parentId: string | null = null;
-      let edgeId: string | null = null;
-      if (as === 'follow_up') {
-        parentId =
-          body.parentId === undefined || body.parentId === null
-            ? candidate.parentNodeId
-            : uuid(body.parentId, 'parentId');
-        if (!parentId) throw invalid('parentId is required for a follow-up');
-        if (parentId === faqId)
-          throw invalid('A question cannot follow itself');
-        edgeId = (
-          await deps.graphService.createEdge(actor, parentId, {
-            childId: faqId,
-          })
-        ).edge.id;
-      }
-      let phrasingsAdded = 0;
-      let phrasingsSkipped = 0;
-      for (const example of picks) {
-        try {
-          const { created } = await deps.graphService.addPhrasing(
-            actor,
-            faqId,
-            { locale: example.locale, text: example.text },
-            'flywheel',
-          );
-          if (created) phrasingsAdded += 1;
-        } catch (error) {
-          // 问法满了（30 种）或例句不合问法的格式：跳过这一句，其余照做
-          if (
-            error instanceof HelpdeskError &&
-            (error.code === 'FAQ_TOO_MANY_PHRASINGS' ||
-              error.code === 'INVALID_INPUT')
-          )
-            phrasingsSkipped += 1;
-          else throw error;
-        }
-      }
-      const evalCasesAdded = await deps.candidates.insertEvalCases(
-        candidate.examples.map((e) => ({
-          faqId,
-          candidateId: candidate.id,
-          locale: e.locale,
-          text: e.text,
-          createdBy: actor.employeeId,
-        })),
+      const id = uuid(rawId, 'candidate id');
+      // 同一个候选的接受一次一个：锁里重新读，别的员工刚接受了 → 这里是 409，什么副作用也不做
+      return deps.candidates.withCandidateLock(id, () =>
+        acceptLocked(actor, id, as, faqId, expected, body, key),
       );
-      const decided = await deps.candidates.decide(
-        candidate.id,
-        expected,
-        {
-          status: 'accepted',
-          acceptedAs: as,
-          acceptedFaqId: faqId,
-          parentNodeId: parentId,
-        },
-        actor.employeeId ?? '',
-        key,
-      );
-      if (decided.kind === 'not_found') throw candidateNotFound();
-      if (decided.kind === 'conflict')
-        return {
-          candidate: replayOrConflict(decided.candidate, actor, key, same),
-          replayed: true,
-          ...nothing,
-        };
-      return {
-        candidate: decided.candidate,
-        replayed: false,
-        phrasingsAdded,
-        phrasingsSkipped,
-        evalCasesAdded,
-        edgeId,
-      };
     },
 
     async dismiss(
@@ -562,10 +581,16 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
           'TICKET_NO_QUESTION',
           'This ticket has no question from the learner',
         );
-      const reply = [...publicMessages]
-        .reverse()
-        .find((m) => m.authorKind === 'agent')
-        ?.body.trim();
+      // 草稿来源只取客服解决了的工单（学员确认或到期自动确认）；学员自己关掉的，客服最后一句可能只是在追问
+      const resolvedByAgent =
+        ticket.closeReason === 'user_confirmed' ||
+        ticket.closeReason === 'auto_confirmed';
+      const reply = resolvedByAgent
+        ? [...publicMessages]
+            .reverse()
+            .find((m) => m.authorKind === 'agent')
+            ?.body.trim()
+        : undefined;
       // 这位学员自己的姓名与邮箱（账号与联系邮箱）一并脱敏；只落脱敏后的文字
       const context = {
         names: [ticket.learner.name, ticket.student?.name ?? ''].filter(

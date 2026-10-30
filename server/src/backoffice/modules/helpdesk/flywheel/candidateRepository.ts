@@ -18,7 +18,8 @@ import {
  * - 夜间挖掘建候选与给候选加轮（成员表 helpdesk_faq_candidate_turns 的主键是轮 id：一轮至多归一个
  *   候选，ON CONFLICT DO NOTHING，只按真正加进去的轮计数，重跑不会重复计）；
  * - 员工的动作（接受、驳回、合并）：WHERE id AND version 的条件更新（不一致 → conflict），与审计行
- *   （helpdesk_faq_candidate_revisions，只追加）同一事务；
+ *   （helpdesk_faq_candidate_revisions，只追加）同一事务；接受另外在每个候选的 advisory lock 里做
+ *   （withCandidateLock），并发的第二个接受不会先写下副作用；
  * - 回归用例（helpdesk_faq_eval_cases）：按 (节点, 语言, 小写文字) 幂等。
  */
 
@@ -271,8 +272,26 @@ async function addMembers(
   return new Set(result.rows.map((row) => row.turn_id as string));
 }
 
+/** 每个候选一把事务级 advisory lock 的第一个键（第二个键是候选 id 的 hashtext）。 */
+export const CANDIDATE_LOCK_KEY = 719321;
+
 export function createPgCandidateRepository(db: SqlDb = defaultDb) {
   return {
+    /**
+     * 同一个候选的接受一次只做一个：事务级 advisory lock 持有到 fn 做完（fn 的副作用走别的连接），
+     * 第二个员工等第一个做完，再读到的已经不是 new → 409，不会留下问法、边或回归用例。
+     * 连接断了锁自动放。
+     */
+    async withCandidateLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+      return db.withTransaction(async (client) => {
+        await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))', [
+          CANDIDATE_LOCK_KEY,
+          id,
+        ]);
+        return fn();
+      });
+    },
+
     /** 并进已有候选时比较用：待处理的与驳回过的（驳回的吸收相似的轮、不回到队列），since 之后动过的。 */
     async openCandidates(since: string): Promise<OpenCandidate[]> {
       const rows = await db.query(

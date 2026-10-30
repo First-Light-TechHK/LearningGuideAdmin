@@ -711,7 +711,7 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
       return created!;
     }
 
-    it('accepts as phrasings: placeholder-free examples become flywheel phrasings, all examples become regression cases', async () => {
+    it('accepts as phrasings: placeholder-free examples become flywheel phrasings and regression cases', async () => {
       const node = await faq({ questionZh: '付款后课程没有开通怎么办？' });
       const candidate = await mined();
       const service = candidateService();
@@ -724,7 +724,7 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
       expect(result).toMatchObject({
         replayed: false,
         phrasingsAdded: 4,
-        evalCasesAdded: 5,
+        evalCasesAdded: 4,
         candidate: {
           status: 'accepted',
           acceptedAs: 'add_phrasing',
@@ -737,10 +737,12 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
       expect(phrasings.map((p) => p.source)).toEqual(Array(4).fill('flywheel'));
       expect(phrasings.some((p) => p.text.includes('<'))).toBe(false);
       const cases = await candidates().evalCases();
-      expect(cases).toHaveLength(5);
+      expect(cases).toHaveLength(4);
       expect(
         cases.every((c) => c.faqId === node.id && c.faqKey === node.key),
       ).toBe(true);
+      // 带占位符的例句不当问法，也不当回归用例
+      expect(cases.some((c) => c.text.includes('<'))).toBe(false);
       // 同一个 key 重试 → 原样返回；同一个 key 换决定 → 422；旧版本 → 409
       const again = await service.accept(
         staff,
@@ -792,6 +794,83 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
       );
     });
 
+    it('only the examples staff ticked become regression cases (an unticked one may be about something else or still hold a detail)', async () => {
+      const node = await faq({ questionZh: '付款后课程没有开通怎么办？' });
+      const candidate = await mined();
+      const result = await candidateService().accept(
+        staff,
+        candidate.id,
+        {
+          as: 'add_phrasing',
+          faqId: node.id,
+          version: candidate.version,
+          phrasings: [0, 2],
+        },
+        KEY(3),
+      );
+      expect(result).toMatchObject({ phrasingsAdded: 2, evalCasesAdded: 2 });
+      expect((await candidates().evalCases()).map((c) => c.text)).toEqual([
+        PAID[0],
+        PAID[2],
+      ]);
+      const none = await mined(['课程开通以后打不开视频', '视频一直打不开']);
+      const nothing = await candidateService().accept(staff, none.id, {
+        as: 'add_phrasing',
+        faqId: node.id,
+        version: none.version,
+        phrasings: [],
+      });
+      expect(nothing).toMatchObject({ phrasingsAdded: 0, evalCasesAdded: 0 });
+      expect(await candidates().evalCases()).toHaveLength(2);
+    });
+
+    it('two staff accepting the same candidate at once: one wins, the other gets 409 and leaves nothing behind', async () => {
+      const x = await faq({ questionZh: '付款后课程没有开通怎么办？' });
+      const y = await faq({ questionZh: '付款后多久能开通课程？' });
+      const parent = await faq({ questionZh: '付款问题' });
+      const candidate = await mined();
+      const service = candidateService();
+      const results = await Promise.allSettled([
+        service.accept(
+          staff,
+          candidate.id,
+          { as: 'add_phrasing', faqId: x.id, version: candidate.version },
+          KEY(4),
+        ),
+        service.accept(
+          { employeeId: OTHER_EMP },
+          candidate.id,
+          {
+            as: 'follow_up',
+            faqId: y.id,
+            parentId: parent.id,
+            version: candidate.version,
+          },
+          KEY(5),
+        ),
+      ]);
+      const won = results.filter((r) => r.status === 'fulfilled');
+      const lost = results.filter((r) => r.status === 'rejected');
+      expect([won.length, lost.length]).toEqual([1, 1]);
+      expect(lost[0].reason).toMatchObject({
+        status: 409,
+        code: 'CANDIDATE_CHANGED',
+      });
+      const winner = (await candidates().get(candidate.id))!;
+      const loserNode = winner.acceptedFaqId === x.id ? y : x;
+      expect(await graph().phrasingsOf(loserNode.id)).toEqual([]);
+      expect(
+        (await candidates().evalCases()).every(
+          (c) => c.faqId === winner.acceptedFaqId,
+        ),
+      ).toBe(true);
+      const edges = await pool.query(
+        'SELECT 1 FROM helpdesk_faq_edges WHERE child_id = $1',
+        [y.id],
+      );
+      expect(edges.rowCount).toBe(winner.acceptedFaqId === y.id ? 1 : 0);
+    });
+
     it('the release gate evaluates the accepted examples against the node they were labelled with', async () => {
       const node = await faq({
         questionEn: 'I paid but the course is not open',
@@ -806,7 +885,7 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
         as: 'add_phrasing',
         faqId: node.id,
         version: candidate.version,
-        phrasings: [],
+        phrasings: [0, 1, 2, 4],
       });
       const { release } = await createFaqReleaseService({
         graph: graph(),
@@ -818,8 +897,9 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
         kind: 'retrieval',
         passed: true,
         metrics: {
-          cases: 9,
-          regressionCases: 5,
+          // 4 道题的中英文 + 4 个问法 + 4 条勾选的回归用例
+          cases: 12,
+          regressionCases: 4,
           regressionSkipped: 0,
           recallAt8: 1,
         },
@@ -860,7 +940,7 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
       );
       expect(result).toMatchObject({
         phrasingsAdded: 2,
-        evalCasesAdded: 5,
+        evalCasesAdded: 2,
         candidate: { acceptedAs: 'new_faq', acceptedFaqId: node.id },
       });
       await rejects(
@@ -1145,6 +1225,23 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
         409,
         'TICKET_NOT_RESOLVED',
       );
+      // 学员自己关掉的工单（不是确认解决）：客服最后一句可能只是在追问，不当草稿来源
+      tickets.set(KEY(903), {
+        ...base,
+        id: KEY(903),
+        closeReason: 'user_closed',
+      });
+      const closed = await service.fromTicket(staff, KEY(903));
+      expect(closed.created).toBe(true);
+      expect(closed.candidate.answerSources).toEqual([]);
+      tickets.set(KEY(904), {
+        ...base,
+        id: KEY(904),
+        closeReason: 'auto_confirmed',
+      });
+      expect(
+        (await service.fromTicket(staff, KEY(904))).candidate.answerSources,
+      ).toHaveLength(1);
     });
 
     it('lists with filters and per-status counts', async () => {
