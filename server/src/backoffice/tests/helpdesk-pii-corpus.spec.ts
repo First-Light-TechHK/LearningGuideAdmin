@@ -62,4 +62,17 @@ describe('shared PII scrubber corpus', () => {
     expect(report.found).toEqual({ phone: 1, email: 1 });
     expect(JSON.stringify(report)).not.toContain('13800138000');
   });
+
+  it('scrubs a long list of short numbers split by spaces in bounded time', () => {
+    for (const long of [
+      '1  '.repeat(2000),
+      '12 34 '.repeat(1500),
+      '第 3 课 4 题 '.repeat(800),
+    ]) {
+      const started = Date.now();
+      const output = scrubPii(long);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(scrubPii(long)).toBe(output);
+    }
+  });
 });
