@@ -12,6 +12,7 @@ import { MenuGuard } from './ModulePages'
 type JobView = {
   jobId: string
   status: string
+  stage?: string | null
   progress: number
   error: string | null
   courseId: string | null
@@ -132,26 +133,46 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     } else setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
   }
 
+  // 轮询后台导入作业，直到校验完成 / 失败 / 取消（异步导入：上传即返回，处理在后台）
+  async function pollImportJob(initial: JobView): Promise<JobView> {
+    const terminal = new Set(['AWAITING_CONFIRM', 'FAILED', 'CANCELLED'])
+    let job = initial
+    for (let i = 0; i < 600 && !terminal.has(job.status); i++) {
+      await new Promise((r) => setTimeout(r, 1500))
+      const poll = await boRequest<JobView>(`/api/backoffice/courses/import/${job.jobId}`)
+      if (!poll.success) {
+        setMessage(uploadErrorText(poll.error, poll.message))
+        return job
+      }
+      job = poll.data
+      if (job.status === 'VALIDATING') {
+        setMessage(L(`正在后台解析并校验素材…（${job.progress ?? 0}%）`, `Parsing and validating materials… (${job.progress ?? 0}%)`))
+      }
+    }
+    return job
+  }
+
   async function onPickRawFile(file: File) {
     setBusy(true)
     setMessage(null)
     setUploadPct(0)
-    const result = await uploadFileWithProgress<JobView & { rawWarnings?: string[] }>(
+    const result = await uploadFileWithProgress<JobView>(
       `/api/backoffice/courses/import/raw`,
       file,
       setUploadPct,
     )
     setUploadPct(null)
+    if (!result.success) {
+      setBusy(false)
+      setMessage(uploadErrorText(result.error, result.errorMessage))
+      return
+    }
+    setMessage(L('素材已上传，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
+    const job = await pollImportJob(result.data)
     setBusy(false)
-    if (result.success) {
-      setImportJob(result.data)
-      const rawWarnings = result.data.rawWarnings ?? []
-      setMessage(
-        rawWarnings.length
-          ? L(`原始素材已转换，有 ${rawWarnings.length} 条警告。确认前请先查看校验结果。`, `Raw materials converted with ${rawWarnings.length} warning(s). Review validation before confirming.`)
-          : L('原始素材已转换。确认前请先查看校验结果。', 'Raw materials converted. Review validation before confirming.'),
-      )
-    } else setMessage(uploadErrorText(result.error, result.errorMessage))
+    setImportJob(job)
+    if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
+    else if (job.status === 'AWAITING_CONFIRM') setMessage(L('原始素材已转换。确认前请先查看校验结果。', 'Raw materials converted. Review validation before confirming.'))
   }
 
   async function importFromServerFolder() {
@@ -159,16 +180,22 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (dir === null) return
     setBusy(true)
     setMessage(null)
-    const result = await boRequest<JobView & { rawWarnings?: string[] }>(`/api/backoffice/courses/import/local`, {
+    const result = await boRequest<JobView>(`/api/backoffice/courses/import/local`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ dir }),
     })
+    if (!result.success) {
+      setBusy(false)
+      setMessage(uploadErrorText(result.error, result.message))
+      return
+    }
+    setMessage(L('已提交，正在后台解析素材…', 'Submitted. Parsing materials in the background…'))
+    const job = await pollImportJob(result.data)
     setBusy(false)
-    if (result.success) {
-      setImportJob(result.data)
-      setMessage(L('已从本地目录解析素材，请在校验信息中确认后导入。', 'Parsed materials from the server folder. Review validation before confirming.'))
-    } else setMessage(uploadErrorText(result.error, result.message))
+    setImportJob(job)
+    if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
+    else setMessage(L('已从本地目录解析素材，请在校验信息中确认后导入。', 'Parsed materials from the server folder. Review validation before confirming.'))
   }
 
   async function onPickFile(file: File) {
