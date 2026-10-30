@@ -28,7 +28,7 @@ describeDb('rate limiting (PostgreSQL store)', () => {
       readFileSync(
         join(
           __dirname,
-          '../../../prisma/migrations/20261030090000_backoffice_rate_limits/migration.sql',
+          '../../../prisma/migrations/20261030130000_backoffice_rate_limits/migration.sql',
         ),
         'utf8',
       ),
