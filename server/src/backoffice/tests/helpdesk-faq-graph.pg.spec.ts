@@ -1243,6 +1243,49 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       expect(found.map((c) => c.id)).not.toContain(children[4].id);
     });
 
+    it('with a card on screen, the best match is never pushed out by follow-ups without a hit, even when it is a sibling', async () => {
+      // real-model eval 2026-10-30: shown "refund" (its parent also leads to "cancel subscription"), the learner
+      // types "how do I cancel the subscription": the best hit was a sibling, queued behind the zero-score
+      // children and the 4 reserved search hits, so it never reached the model
+      const { qa } = wire();
+      const billing = await create({ questionEn: 'Billing help' });
+      const shown = await create({ questionEn: 'Can I get a refund?' });
+      const best = await create({
+        questionEn: 'How do I cancel my subscription?',
+        keywords: ['cancel subscription'],
+      });
+      await link(billing, shown);
+      await link(billing, best);
+      for (let i = 1; i <= 4; i++)
+        await link(
+          shown,
+          await create({ entry: false, questionEn: `Refund detail ${i}?` }),
+        );
+      for (const what of [
+        'a live session',
+        'a study group',
+        'my plan to attend',
+        'my free trial',
+      ])
+        await create({ questionEn: `Can I cancel ${what}?` });
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+
+      const found = await qa.findCandidates({
+        locale: 'en-GB',
+        category: null,
+        text: 'how do I cancel the subscription',
+        limit: 8,
+        nodeId: shown.id,
+      });
+      expect(found).toHaveLength(8);
+      const notChildren = found.filter((c) => c.relation !== 'child');
+      expect(notChildren[0]).toMatchObject({
+        id: best.id,
+        relation: 'sibling',
+      });
+    });
+
     it('the real retrieval gate searches the snapshot with each entry question and phrasing', async () => {
       wire();
       const node = await create({

@@ -167,15 +167,17 @@ export function createHelpdeskQaSource(
         searched.map((faq) => [faq.id, faq]),
       );
 
-      // 先排好「附近」（子节点、兄弟节点）与普通检索两队，再合并：
+      // 先排好子节点与检索两队，再合并：
       // - 子节点：有检索命中的按分数在前（不管第几个）；没命中的只取学员看得到的前 4 个（Portal 至多 4 个
       //   追问 chip / 选项），免得 6 个零分的追问挤掉换了话题的新问题；
-      // - 兄弟节点：只要有命中的；
-      // - 普通检索至少留 4 个位置（不够 4 个时附近的补满）。
+      // - 检索队：有命中的兄弟节点与普通检索按分数排在一起（同分兄弟在前）。兄弟节点本来就是检索命中，
+      //   单独排队会被零分的子节点和留给检索的 4 个位置挤掉，最好的那条反而到不了模型（真模型评测
+      //   2026-10-30：看着「退款」问「怎么取消订阅」）；
+      // - 检索队至少留 4 个位置（不够 4 个时子节点补满）。
       const nearList: {
         faq: HelpdeskFaq;
         score: number;
-        relation: 'child' | 'sibling';
+        relation: 'child';
       }[] = [];
       if (children.length > 0) {
         const rows = await Promise.all(
@@ -208,21 +210,37 @@ export function createHelpdeskQaSource(
             }),
           );
       }
-      for (const id of siblingIds) {
-        const hit = scored.get(id);
-        if (hit)
-          nearList.push({ faq: hit, score: hit.score, relation: 'sibling' });
-      }
       const entryOnly = search.entryOnly ?? true;
       const types = search.types ?? ['answer'];
       const nearIds = new Set(nearList.map((item) => item.faq.id));
-      const searchList = searched.filter(
-        (faq) =>
-          !nearIds.has(faq.id) &&
-          !(
-            near.size > 0 &&
-            ((entryOnly && !faq.entry) || !types.includes(faq.type))
-          ),
+      const siblings = new Set(siblingIds);
+      type Queued = {
+        faq: HelpdeskFaq;
+        score: number;
+        relation: 'sibling' | 'search';
+        index: number;
+      };
+      const searchList: Queued[] = [];
+      searched.forEach((faq, index) => {
+        if (nearIds.has(faq.id)) return;
+        if (siblings.has(faq.id))
+          searchList.push({
+            faq,
+            score: faq.score,
+            relation: 'sibling',
+            index,
+          });
+        else if (!(
+          near.size > 0 &&
+          ((entryOnly && !faq.entry) || !types.includes(faq.type))
+        ))
+          searchList.push({ faq, score: faq.score, relation: 'search', index });
+      });
+      searchList.sort(
+        (a, b) =>
+          b.score - a.score ||
+          Number(b.relation === 'sibling') - Number(a.relation === 'sibling') ||
+          a.index - b.index,
       );
 
       const out: HelpdeskQaCandidate[] = [];
@@ -244,7 +262,7 @@ export function createHelpdeskQaSource(
       nearList
         .slice(0, nearRoom)
         .forEach((item) => push(item.faq, item.score, item.relation));
-      for (const faq of searchList) push(faq, faq.score, 'search');
+      for (const item of searchList) push(item.faq, item.score, item.relation);
       nearList
         .slice(nearRoom)
         .forEach((item) => push(item.faq, item.score, item.relation));
