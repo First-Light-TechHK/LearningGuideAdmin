@@ -84,6 +84,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [showCreate, setShowCreate] = useState(false)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState('')
+  const [exportingId, setExportingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
@@ -169,6 +170,45 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       setImportJob(result.data)
       setMessage(L('已从本地目录解析素材，请在校验信息中确认后导入。', 'Parsed materials from the server folder. Review validation before confirming.'))
     } else setMessage(uploadErrorText(result.error, result.message))
+  }
+
+  async function exportCourse(course: CourseList['courses'][number]) {
+    setExportingId(course.id)
+    setMessage(null)
+    const startExport = (version?: string) =>
+      boRequest<{ jobId: string; fileName?: string }>(`/api/backoffice/courses/${course.id}/export`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(version ? { version } : {}),
+      })
+    // 有线上版本 → 先导出线上版本；未发布或线上版本导出被拒（如不完整）→ 回退导出当前草稿
+    let start = await startExport(course.liveVersionId ? undefined : 'working')
+    if (!start.success && course.liveVersionId) start = await startExport('working')
+    if (!start.success) {
+      setExportingId(null)
+      setMessage(uploadErrorText(start.error, start.message))
+      return
+    }
+    for (let attempt = 0; attempt < 120; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const status = await boRequest<{ status: string; progress: number; fileLabel?: string; error?: string }>(
+        `/api/backoffice/courses/export/${start.data.jobId}`,
+      )
+      if (!status.success) continue
+      if (status.data.status === 'READY') {
+        window.location.href = `/api/backoffice/courses/export/${start.data.jobId}/download`
+        setExportingId(null)
+        setMessage(L(`已导出 ${course.code}，正在下载课程包。`, `Exported ${course.code}. Downloading the package.`))
+        return
+      }
+      if (status.data.status === 'FAILED') {
+        setExportingId(null)
+        setMessage(L(`导出失败：${status.data.error ?? '未知错误'}`, `Export failed: ${status.data.error ?? 'unknown error'}`))
+        return
+      }
+    }
+    setExportingId(null)
+    setMessage(L('导出超时，请稍后在课程详情页重试。', 'Export timed out. Retry from the course detail page.'))
   }
 
   async function onPickFile(file: File) {
@@ -351,7 +391,16 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                     : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
                 </td>
                 <td>
-                  <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
+                    <button
+                      className="button buttonGhost"
+                      disabled={busy || exportingId !== null}
+                      onClick={() => void exportCourse(course)}
+                    >
+                      {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

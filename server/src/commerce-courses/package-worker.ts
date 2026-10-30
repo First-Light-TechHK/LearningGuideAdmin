@@ -8,7 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
-import { buildCoursePackageFromSnapshot } from './exporter';
+import { buildCoursePackage, buildCoursePackageFromSnapshot } from './exporter';
 import { PublishingService } from './publishing.service';
 
 /**
@@ -103,13 +103,10 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
     sourceVersionId: string | null;
     actorEmployeeId: string | null;
   }): Promise<void> {
-    if (!job.courseId || !job.sourceVersionId) {
+    if (!job.courseId) {
       await this.prisma.coursePackageJob.update({
         where: { id: job.id },
-        data: {
-          status: 'FAILED',
-          error: 'Missing courseId or sourceVersionId for export',
-        },
+        data: { status: 'FAILED', error: 'Missing courseId for export' },
       });
       return;
     }
@@ -118,15 +115,13 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
         where: { id: job.id },
         data: { progress: 30, stage: 'PACKING' },
       });
-      const built = await buildCoursePackageFromSnapshot(
-        this.prisma,
-        this.storage,
-        job.courseId,
-        {
-          versionId: job.sourceVersionId,
-          environment: this.config.environmentLabel,
-        },
-      );
+      // sourceVersionId 为空 = 导出当前草稿（不产生版本、不标记 Exported）
+      const built = job.sourceVersionId
+        ? await buildCoursePackageFromSnapshot(this.prisma, this.storage, job.courseId, {
+            versionId: job.sourceVersionId,
+            environment: this.config.environmentLabel,
+          })
+        : await this.buildDraftPackage(job.courseId);
       const storageKey = this.storage.stagingKey(job.id, 'export.zip');
       await this.storage.putStaging(storageKey, built.bytes);
       await this.prisma.coursePackageJob.update({
@@ -140,11 +135,14 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
           fileLabel: built.fileName,
         },
       });
-      // 导出后该版本标记 Exported；下一次 Sandbox 发布进入下一整数系列
-      await this.publishing.markExported(
-        job.sourceVersionId,
-        job.actorEmployeeId,
-      );
+      // 导出后该版本标记 Exported；下一次 Sandbox 发布进入下一整数系列。
+      // 草稿导出没有版本，跳过标记。
+      if (job.sourceVersionId) {
+        await this.publishing.markExported(
+          job.sourceVersionId,
+          job.actorEmployeeId,
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Export failed';
       this.logger.error(
@@ -156,6 +154,28 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
         data: { status: 'FAILED', error: message },
       });
     }
+  }
+
+  /** 草稿导出：从当前工作区聚合直接打包（未发布的课程也能导出）。 */
+  private async buildDraftPackage(
+    courseId: string,
+  ): Promise<{ bytes: Buffer; fileName: string; versionLabel: string }> {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { code: true },
+    });
+    if (!course) throw new Error('Course not found');
+    const bytes = await buildCoursePackage(
+      this.prisma,
+      this.storage,
+      courseId,
+      'draft',
+    );
+    return {
+      bytes,
+      fileName: `${course.code}_draft.zip`,
+      versionLabel: 'draft',
+    };
   }
 
   /** 导出下载：读 staging 的 export.zip。 */

@@ -72,6 +72,7 @@ export function CourseEditorPage() {
   const [statusReason, setStatusReason] = useState('');
   const [statusTarget, setStatusTarget] = useState<'ONLINE' | 'HIDDEN' | 'OFFLINE'>('ONLINE');
   const [exportJob, setExportJob] = useState<{ status: string; progress: number; fileName?: string; error?: string } | null>(null);
+  const [exportVersion, setExportVersion] = useState('live');
   const nextTab = useRef<Tab | null>(null);
 
   const load = useCallback(async () => {
@@ -315,11 +316,17 @@ export function CourseEditorPage() {
     }
   }
 
-  async function exportLive() {
+  async function exportPackage(target: string) {
     if (!course) return;
     setBusy(true);
     setExportJob({ status: 'EXPORTING', progress: 0 });
-    const start = await boRequest<{ jobId: string; fileName?: string }>(`/api/backoffice/courses/${course.id}/export`, { method: 'POST' });
+    // 'live' = 导出线上版本；'draft' = 导出当前草稿；其他值 = 导出该历史版本快照
+    const body = target === 'live' ? {} : { version: target };
+    const start = await boRequest<{ jobId: string; fileName?: string }>(`/api/backoffice/courses/${course.id}/export`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     if (!start.success) {
       setBusy(false);
       setExportJob(null);
@@ -613,8 +620,6 @@ export function CourseEditorPage() {
             {liveVersion ? (
               <div style={{ marginTop: 12, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, opacity: 0.75 }}>{L(locale, '发布于', 'Live since')} {formatTime(liveVersion.wentLiveAt ?? liveVersion.createdAt)}</span>
-                <button type="button" style={buttonStyle} disabled={busy} onClick={() => void exportLive()}>{L(locale, '导出课程包', 'Export package')}</button>
-                {exportJob && <span style={{ fontSize: 12, opacity: 0.75 }}>{exportJob.status} {exportJob.progress}% {exportJob.fileName ?? ''}</span>}
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                   <select value={statusTarget} onChange={(event) => setStatusTarget(event.target.value as 'ONLINE' | 'HIDDEN' | 'OFFLINE')} style={{ padding: 7, borderRadius: 8 }}>
                     {['ONLINE', 'HIDDEN', 'OFFLINE'].map((status) => <option key={status} value={status}>{status === course.liveStatus ? `${status} (current)` : status}</option>)}
@@ -626,6 +631,32 @@ export function CourseEditorPage() {
             ) : (
               <p style={{ margin: '10px 0 0', opacity: 0.7 }}>{L(locale, '尚未发布。首次发布后会变为 Offline，再手动改为 Online 才上线。', 'Not published yet. The first publish becomes Offline; change it to Online to go live.')}</p>
             )}
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#25314C' }}>{L(locale, '导出课程包', 'Export package')}</span>
+              <select
+                value={liveVersion ? exportVersion : exportVersion === 'live' ? 'draft' : exportVersion}
+                onChange={(event) => setExportVersion(event.target.value)}
+                style={{ padding: 7, borderRadius: 8 }}
+              >
+                <option value="live" disabled={!liveVersion}>{L(locale, '线上版本', 'Live version')}</option>
+                <option value="draft">{L(locale, '当前草稿', 'Current draft')}</option>
+                {versions.filter((version) => !version.isLive).map((version) => (
+                  <option key={version.id} value={version.versionLabel}>{version.versionLabel}{version.exportedAt ? L(locale, '（已导出）', ' (exported)') : ''}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                style={buttonStyle}
+                disabled={busy}
+                onClick={() => void exportPackage(!liveVersion && exportVersion === 'live' ? 'draft' : exportVersion)}
+              >
+                {L(locale, '开始导出', 'Start export')}
+              </button>
+              {exportJob && <span style={{ fontSize: 12, opacity: 0.75 }}>{exportJob.status} {exportJob.progress}% {exportJob.fileName ?? ''}</span>}
+              <span style={{ fontSize: 12, opacity: 0.6 }}>
+                {L(locale, '导出草稿不会产生版本；导出线上/历史版本会标记为已导出。', 'Exporting the draft creates no version; exporting a live/historical version marks it as exported.')}
+              </span>
+            </div>
           </div>
 
           <div style={card}>
@@ -673,7 +704,7 @@ export function CourseEditorPage() {
                     <td>{formatTime(item.time)}</td>
                     <td>{item.operator}</td>
                     <td>{item.action}</td>
-                    <td style={{ fontSize: 12, opacity: 0.8 }}>{describeHistory(item.detail, item.versionNo)}</td>
+                    <td className="cellWrap" style={{ fontSize: 12, opacity: 0.8 }} title={describeHistory(item.detail, item.versionNo)}>{describeHistory(item.detail, item.versionNo)}</td>
                   </tr>
                 ))}
                 {(history?.items.length ?? 0) === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', padding: 18, opacity: 0.7 }}>{L(locale, '暂无记录。', 'No history yet.')}</td></tr>}
