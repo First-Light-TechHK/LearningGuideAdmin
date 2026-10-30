@@ -868,6 +868,16 @@ body {
   overflow: visible;
 }
 
+/* 长文本单元格（如 History 的「详情」）：允许换行，避免 nowrap 文本溢出表格右边界 */
+.table td.cellWrap {
+  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: left;
+  line-height: 1.5;
+}
+
 .table tbody tr:hover {
   background: #fafcff;
 }
