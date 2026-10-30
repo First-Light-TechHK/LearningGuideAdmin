@@ -1732,9 +1732,12 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
       } finally {
         await close();
         const pool = new Pool({ connectionString: url });
+        // only this process's scratch schemas: '_' is a LIKE wildcard, so 'hdeval_%' also matched the
+        // hdevalgate_* schema of the release gate suite running in another worker (flaky in the full run)
         schemas = (
           await pool.query<{ nspname: string }>(
-            "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'hdeval_%'",
+            'SELECT nspname FROM pg_namespace WHERE starts_with(nspname, $1)',
+            [`hdeval_${process.pid}_`],
           )
         ).rows.map((row) => row.nspname);
         await pool.end();
