@@ -160,19 +160,6 @@ function parseApplications(rows: unknown[][]): Map<number, { scenario: string; r
   return map;
 }
 
-async function readMedia(mediaZip: Buffer | null): Promise<Map<string, Buffer>> {
-  const map = new Map<string, Buffer>();
-  if (!mediaZip) return map;
-  const z = await JSZip.loadAsync(mediaZip);
-  for (const [name, file] of Object.entries(z.files)) {
-    if (file.dir || name.startsWith("__MACOSX/") || name.includes("/.DS_Store") || name.endsWith(".DS_Store")) continue;
-    const base = name.split("/").pop() ?? name;
-    const buf = await file.async("nodebuffer");
-    map.set(base.toLowerCase(), buf);
-  }
-  return map;
-}
-
 function findMedia(map: Map<string, Buffer>, predicate: (name: string) => boolean): { name: string; bytes: Buffer } | null {
   for (const [name, bytes] of map) if (predicate(name)) return { name, bytes };
   return null;
@@ -248,18 +235,21 @@ export async function buildPackageFromRawZip(
 ): Promise<ExcelPackageResult> {
   const raw = await JSZip.loadAsync(source);
 
-  // 1) 收集媒体（除 xlsx 外的全部文件）与所有 xlsx 候选
-  const mediaZip = new JSZip();
+  // 1) 收集媒体（除 xlsx 外的全部文件）与所有 xlsx 候选。
+  // 直接把媒体读进 Map，不再先重打包成 mediaZip 再读回：省掉一次
+  // ~150MB 的 zip 生成/解析（约 1 份全量内存与大半转换耗时），降低
+  // 小内存实例上大素材包导入 OOM/超时的概率。
+  const media = new Map<string, Buffer>();
   const xlsxFiles: { base: string; entry: JSZip.JSZipObject }[] = [];
   for (const [name, file] of Object.entries(raw.files)) {
-    if (file.dir || name.startsWith("__MACOSX/") || name.endsWith(".DS_Store")) continue;
+    if (file.dir || name.startsWith("__MACOSX/") || name.includes("/__MACOSX/") || name.endsWith(".DS_Store")) continue;
     const base = name.split("/").pop() ?? name;
     if (!base || base.startsWith(".")) continue;
+    if (base.startsWith("~$")) continue; // Excel 临时锁文件（如 ~$xxx.xlsx），跳过
     if (/\.xlsx$/i.test(base)) { xlsxFiles.push({ base, entry: file }); continue; }
-    mediaZip.file(base, await file.async("nodebuffer"));
+    media.set(base.toLowerCase(), await file.async("nodebuffer"));
   }
   if (!xlsxFiles.length) throw new Error("原始素材 ZIP 中找不到 Excel（.xlsx）模板文件");
-  const media = await readMedia(await mediaZip.generateAsync({ type: "nodebuffer" }));
 
   // 2) 识别模板格式：含 Checklist/Exhibits 为新双语模板，否则回退旧模板
   let chosen: { wb: XLSX.WorkBook; isNew: boolean; base: string } | null = null;
