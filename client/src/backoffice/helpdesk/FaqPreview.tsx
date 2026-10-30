@@ -12,6 +12,7 @@ import { useModal } from './useModal'
  * FAQ Preview（Tickets v2 §3a）：按 Help Centre 的样子显示一条 FAQ，可在 EN / 中文 之间切换
  * （缺省跟随界面语言）。答案经同一个安全渲染器（Markdown.tsx）。Figma 没有画板（待视觉验收）。
  * 模态层（useModal）：Tab 不出 Preview，Escape 在哪儿按都关。
+ * v5 问题树的入口放在这里（所有角色都能看 Preview），不占 Figma 1379:2 表格的操作列（Edit / Preview 两个）。
  */
 
 type PreviewLocale = 'en-GB' | 'zh-CN'
@@ -20,7 +21,7 @@ const LANGUAGES: { value: PreviewLocale; key: string }[] = [
   { value: 'zh-CN', key: 'helpDesk.preview.zh' },
 ]
 
-export function FaqPreview({ locale, faq, onClose }: { locale: Locale; faq: HelpdeskFaq; onClose: () => void }) {
+export function FaqPreview({ locale, faq, onClose, onTree }: { locale: Locale; faq: HelpdeskFaq; onClose: () => void; onTree?: () => void }) {
   const uid = useId()
   const [language, setLanguage] = useState<PreviewLocale>(locale === 'zh-CN' ? 'zh-CN' : 'en-GB')
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -92,6 +93,18 @@ export function FaqPreview({ locale, faq, onClose }: { locale: Locale; faq: Help
           <h3 className="hdPreviewQuestion">{zh ? faq.questionZh : faq.questionEn}</h3>
           <MarkdownView className="hdPreviewAnswer" text={zh ? faq.answerZh : faq.answerEn} />
         </article>
+        {onTree ? (
+          <footer className="hdPreviewFoot">
+            <button
+              type="button"
+              className="hdFaqPreview"
+              aria-label={t(locale, 'helpDesk.faqs.treeLabel', { question: locale === 'zh-CN' ? faq.questionZh : faq.questionEn })}
+              onClick={onTree}
+            >
+              {t(locale, 'helpDesk.preview.tree')}
+            </button>
+          </footer>
+        ) : null}
       </div>
     </div>
   )

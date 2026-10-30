@@ -208,7 +208,6 @@ export default function HelpDeskPage() {
               refreshKey={faqsVersion}
               onEdit={(faq) => setEditing({ faq })}
               onPreview={setPreviewing}
-              onTree={setTreeOf}
             />
           )}
         </div>
@@ -255,7 +254,17 @@ export default function HelpDeskPage() {
         ) : null}
       </div>
 
-      {previewing ? <FaqPreview locale={locale} faq={previewing} onClose={() => setPreviewing(null)} /> : null}
+      {previewing ? (
+        <FaqPreview
+          locale={locale}
+          faq={previewing}
+          onClose={() => setPreviewing(null)}
+          onTree={() => {
+            setPreviewing(null)
+            setTreeOf(previewing)
+          }}
+        />
+      ) : null}
     </section>
   )
 }

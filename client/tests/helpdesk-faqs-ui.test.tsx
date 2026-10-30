@@ -761,11 +761,16 @@ describe('the drawer, preview and confirmations are modal', () => {
     assert.ok(screen.getByRole('tablist').closest('[inert]'), 'the page behind the preview is inert')
     const close = within(dialog).getByRole('button', { name: 'Close' })
     assert.ok(document.activeElement === close, 'focus on ' + close.textContent)
+    // v5: the question tree's way in sits at the foot of the preview (the table keeps Figma's Edit / Preview), so it
+    // is the last control; the browser moves Tab from Close to it, the layer wraps from it
+    const tree = within(dialog).getByRole('button', { name: 'Question tree for Preview me' })
+    assert.ok(close.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING, 'after Close')
+    tree.focus()
     tab()
     const english = within(dialog).getByRole('radio', { name: 'EN' })
-    assert.ok(document.activeElement === english, 'Tab from Close (the last control) wraps to the language switch')
+    assert.ok(document.activeElement === english, 'Tab from the last control wraps to the language switch')
     tab({ shiftKey: true })
-    assert.ok(document.activeElement === close, 'Shift+Tab from the first control wraps to Close')
+    assert.ok(document.activeElement === tree, 'Shift+Tab from the first control wraps to the last')
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await waitFor(() => absent(screen.queryByRole('dialog')))
   })

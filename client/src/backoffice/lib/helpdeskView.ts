@@ -73,8 +73,9 @@ export function avatarColor(seed: string): Swatch {
   return AVATAR_PALETTE[hash(seed) % AVATAR_PALETTE.length]
 }
 
-export function tagColor(tag: string): Swatch {
-  return TAG_PALETTE[hash(tag.trim().toLowerCase()) % TAG_PALETTE.length]
+/** Figma 1324:2 按位置轮换：第 1 个蓝、第 2 个橙、第 3 个绿、第 4 个又是蓝（login issue / account access / payment / material access）。 */
+export function tagColor(index: number): Swatch {
+  return TAG_PALETTE[((index % TAG_PALETTE.length) + TAG_PALETTE.length) % TAG_PALETTE.length]
 }
 
 const CJK = /[぀-ヿ㐀-鿿가-힯]/

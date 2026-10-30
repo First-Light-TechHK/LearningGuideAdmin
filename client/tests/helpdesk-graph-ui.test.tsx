@@ -470,7 +470,13 @@ async function openTree(role: 'ADMIN' | 'COURSE_CREATOR' = 'ADMIN') {
   serveFaqs(PAY)
   server.on('GET', /\/tree$/, { data: TREE })
   await renderHelpDesk(server, { role, path: '/en-GB/help-desk?tab=faqs' })
-  fireEvent.click(await screen.findByRole('button', { name: 'Question tree for A problem with paying?' }))
+  // Figma 1379:2 的操作列只有 Edit / Preview：问题树从 Preview 进入
+  const row = (await screen.findByText('A problem with paying?')).closest('tr') as HTMLElement
+  assert.equal(within(row).queryByRole('button', { name: 'Question tree for A problem with paying?' }), null, 'no Tree button in the table')
+  fireEvent.click(within(row).getByRole('button', { name: 'Preview A problem with paying?' }))
+  const preview = await screen.findByRole('dialog', { name: 'Preview FAQ' })
+  fireEvent.click(within(preview).getByRole('button', { name: 'Question tree for A problem with paying?' }))
+  await waitFor(() => absent(screen.queryByRole('dialog', { name: 'Preview FAQ' })))
   return screen.findByRole('dialog', { name: 'Question tree' })
 }
 
