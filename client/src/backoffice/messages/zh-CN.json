@@ -481,7 +481,9 @@
     "notConnectedBody": "当前环境还没有接通 Portal 工单接口，请联系管理员配置。",
     "tabs": {
       "enquiries": "工单",
-      "faqs": "常见问题"
+      "faqs": "常见问题",
+      "candidates": "FAQ 候选",
+      "data": "HelpDesk 数据"
     },
     "searchPlaceholder": "搜索学员或工单...",
     "filter": "筛选工单",
@@ -652,7 +654,15 @@
       "FAQ_RELEASE_NOT_READY": "这个版本没有通过检查和评测，不能发布。",
       "FAQ_RELEASE_LOCKED": "这个版本不能重新检查。",
       "FAQ_RELEASE_NOT_PUBLISHED": "只能回滚到曾经上线过的版本。",
-      "FAQ_RELEASE_CHECKS_FAILED": "那个版本已经不能通过图检查了。"
+      "FAQ_RELEASE_CHECKS_FAILED": "那个版本已经不能通过图检查了。",
+      "CANDIDATE_NOT_FOUND": "这个候选已不存在。",
+      "CANDIDATE_CHANGED": "别人改过这个候选，已重新载入；请核对后再试。",
+      "CANDIDATE_CLOSED": "只能合并到仍待处理的候选。",
+      "TICKET_NOT_RESOLVED": "只有已解决的工单能转成 FAQ 候选。",
+      "TICKET_NO_QUESTION": "这张工单没有学员的问题。",
+      "JOB_ALREADY_RUNNING": "任务正在运行，结束后再试。",
+      "JOB_NOT_FOUND": "没有这个任务。",
+      "JOB_RUN_NOT_FOUND": "这次运行已不存在。"
     },
     "addFaq": "新增常见问题",
     "actions": {
@@ -664,7 +674,13 @@
       "flag": "标记跟进",
       "flagHint": "标记这条工单，稍后跟进。",
       "unflagHint": "已标记跟进，点击取消标记。",
-      "unavailable": "这条工单当前不能执行这个操作。"
+      "unavailable": "这条工单当前不能执行这个操作。",
+      "toCandidate": "转成 FAQ 候选",
+      "toCandidateHint": "把这张已解决的工单转成 FAQ 候选。学员的问题与最后一条回复会先脱敏。",
+      "toCandidateBusy": "正在转成候选…",
+      "toCandidateCreated": "已转成 FAQ 候选，文字已先脱敏。",
+      "toCandidateExisting": "这张工单已经转成过 FAQ 候选。",
+      "toCandidateOpen": "在 FAQ 候选里打开"
     },
     "flaggedNotice": "已标记跟进。",
     "unflaggedNotice": "已取消跟进标记。",
@@ -845,6 +861,17 @@
         "keywordTooLong": "每个关键词最多 40 个字符",
         "unsafeLink": "链接需是完整的 https://、http:// 或 mailto: 地址，且不含空格或引号",
         "choicePrompt": "选择题的提问不能包含数字、链接或邮箱"
+      },
+      "fromCandidate": "来自 FAQ 候选：{topic}。答案请自己写；保存后勾选的例句会加成问法。",
+      "draft": {
+        "title": "草稿 待核实",
+        "hint": "客服解决这个话题的工单时写的回复，已脱敏，可能已经过时。",
+        "reply": "回复 {n}",
+        "use": "起草",
+        "useLabel": "用回复 {n} 起草{language}答案",
+        "english": "英文",
+        "chinese": "中文",
+        "drafted": "草稿 待核实：保存前请核实每一个事实。保存即发布。"
       }
     },
     "preview": {
@@ -1087,6 +1114,243 @@
       "loading": "加载中…",
       "createdOn": "创建于 {date}",
       "checksValue": "图检查：{result}"
+    },
+    "candidates": {
+      "search": "搜索话题、问题或例句...",
+      "statusLabel": "状态",
+      "suggestionLabel": "建议",
+      "originLabel": "来源",
+      "allStatuses": "全部状态",
+      "allSuggestions": "全部建议",
+      "allOrigins": "全部来源",
+      "status": {
+        "new": "待处理",
+        "accepted": "已接受",
+        "dismissed": "已驳回",
+        "merged": "已合并"
+      },
+      "suggestion": {
+        "new_faq": "新 FAQ",
+        "add_phrasing": "加问法",
+        "follow_up": "追问"
+      },
+      "origin": {
+        "mining": "夜间挖掘",
+        "ticket": "来自工单"
+      },
+      "reasons": {
+        "duplicate": "重复",
+        "not_a_gap": "不是缺口",
+        "out_of_scope": "不在范围内",
+        "personal_data": "个人信息",
+        "spam": "垃圾内容",
+        "other": "其他"
+      },
+      "mix": {
+        "no_match": "没有匹配",
+        "not_helpful": "没帮助",
+        "clarify_not_covered": "澄清没覆盖",
+        "handover": "要求转人工",
+        "ticket_after_chat": "聊完建了工单",
+        "low_rating": "评分 2 及以下",
+        "ticket": "已解决的工单"
+      },
+      "mixItem": "{label} {count}",
+      "counts": "待处理 {new} · 已接受 {accepted} · 已驳回 {dismissed} · 已合并 {merged}",
+      "columns": {
+        "topic": "话题 / 提议的问题",
+        "suggestion": "建议",
+        "mix": "AI 没解决的原因",
+        "count": "条数",
+        "lastSeen": "最近出现",
+        "action": "操作"
+      },
+      "review": "查看",
+      "reviewLabel": "查看 {topic}",
+      "empty": "没有待处理的候选。夜间挖掘会加新的。",
+      "emptyAll": "还没有候选。夜间挖掘会加新的。",
+      "emptyFiltered": "没有符合筛选的候选。",
+      "loading": "加载中…",
+      "showing": "第 {from}–{to} 条，共 {total} 条",
+      "pagination": "候选分页",
+      "previous": "上一页",
+      "next": "下一页",
+      "title": "FAQ 候选",
+      "subtitle": "AI 没解决的学员问题（Portal 已脱敏）。答案都由员工写。",
+      "proposed": "提议的问题",
+      "labelSource": {
+        "model": "话题与问题由 AI 提议（AI 从不写答案）。",
+        "code": "话题与问题取自例句。"
+      },
+      "turns": "{count} 个学员问题",
+      "turnsOne": "1 个学员问题",
+      "seen": "首次出现 {first} · 最近 {last}",
+      "examples": "例句（已脱敏）",
+      "examplesHint": "勾选的例句会加成问法与评测用例。含隐藏个人信息的例句不能加成问法。",
+      "hiddenDetail": "已隐藏的个人信息",
+      "mixTitle": "AI 没解决的原因",
+      "nodes": "相关问题",
+      "related": "最接近的 FAQ",
+      "relatedScore": "相似度 {score}",
+      "parent": "上一级问题",
+      "shown": "屏幕上的卡片",
+      "accepted": "接受到的 FAQ",
+      "none": "无",
+      "fromTicket": "来自已解决的工单",
+      "openTicket": "打开工单",
+      "draftSources": "有 {count} 条已解决工单里的回复（已脱敏）可作草稿（草稿 待核实）。",
+      "decided": {
+        "accepted": "已接受为{as} · {when}",
+        "dismissed": "已驳回：{reason} · {when}",
+        "merged": "已合并到另一个候选 · {when}"
+      },
+      "openMerged": "打开合并到的候选",
+      "history": "记录",
+      "revision": {
+        "create": "创建",
+        "grow": "加进了更多问题",
+        "accept": "接受",
+        "dismiss": "驳回",
+        "merge": "合并"
+      },
+      "byJob": "夜间任务",
+      "byStaff": "员工 {id}",
+      "historyItem": "{action} {who} · {when}",
+      "newFaq": "新 FAQ",
+      "addPhrasing": "加问法",
+      "followUp": "加成追问",
+      "dismiss": "驳回",
+      "drafting": "正在载入预填…",
+      "target": "把勾选的例句加到",
+      "parentPick": "加在哪个问题下面？",
+      "searchFaqs": "搜索 FAQ",
+      "noResults": "没有匹配的 FAQ。",
+      "addPhrasingsOne": "加 1 条问法",
+      "addPhrasingsMany": "加 {count} 条问法",
+      "needTarget": "请选一个 FAQ。",
+      "needExamples": "至少勾选一条例句。",
+      "writeFollowUp": "写追问",
+      "reason": "原因",
+      "reasonPlaceholder": "选择原因",
+      "needReason": "请选择原因。",
+      "note": "备注",
+      "noteHint": "选「其他」时必填。不要贴个人信息：备注会脱敏。",
+      "needNote": "请在备注里说明原因。",
+      "noteTooLong": "备注最多 {max} 个字。",
+      "confirmDismiss": "驳回候选",
+      "cancel": "取消",
+      "saving": "保存中…",
+      "addedOne": "加了 1 条问法（跳过 {skipped} 条）。这些例句已成为这个 FAQ 的评测用例。",
+      "addedMany": "加了 {added} 条问法（跳过 {skipped} 条）。这些例句已成为这个 FAQ 的评测用例。",
+      "dismissed": "已驳回候选。",
+      "faqAccepted": "FAQ 已保存，候选已接受。",
+      "faqNotAccepted": "FAQ 已保存，但候选没有接受：{error}",
+      "jobs": {
+        "title": "后台任务",
+        "columns": {
+          "job": "任务",
+          "lastRun": "最近一次",
+          "result": "结果",
+          "action": "操作"
+        },
+        "gap_mining": "夜间缺口挖掘",
+        "assist_retention": "学员原文保留（Portal，{days} 天）",
+        "never": "还没运行过",
+        "status": {
+          "running": "运行中",
+          "succeeded": "成功",
+          "failed": "失败"
+        },
+        "failedCode": "失败（{code}）",
+        "schedule": "定时",
+        "manual": "{name} 手动运行",
+        "manualNoName": "员工手动运行",
+        "miningResult": "拉取 {received} 轮，新建 {created}，并入 {grown}",
+        "pullNotConnected": "Portal 未连接：只挖了已存的轮",
+        "retentionResult": "脱敏 {rows} 行",
+        "moreDue": "还有剩余，下次继续",
+        "runNow": "立即运行",
+        "running": "运行中…",
+        "runNowLabel": "立即运行{job}",
+        "started": "缺口挖掘已开始，可能要几分钟。",
+        "finished": "缺口挖掘完成：新建 {created} 个候选，并入 {grown} 个。",
+        "failed": "缺口挖掘失败（{code}）。",
+        "stillRunning": "缺口挖掘还在运行，稍后看最近一次的结果。",
+        "retentionDone": "保留任务完成：脱敏 {rows} 行。",
+        "retentionBusy": "另一个 Portal 实例正在运行保留任务。"
+      }
+    },
+    "data": {
+      "title": "HelpDesk 数据",
+      "granularity": "周期",
+      "day": "按日",
+      "week": "按周",
+      "range": "时间范围",
+      "rangeDays": "最近 {n} 天",
+      "rangeWeeks": "最近 {n} 周",
+      "split": "切分",
+      "splits": {
+        "none": "不切分",
+        "locale": "语言",
+        "entry": "入口",
+        "signal": "信号"
+      },
+      "metrics": {
+        "aiSolvedRate": "AI 解决率",
+        "noMatchRate": "没有匹配率",
+        "helpfulRate": "有帮助率",
+        "avgRating": "平均评分",
+        "handoverRate": "转人工率",
+        "clarifyCoveredRate": "澄清覆盖率",
+        "guardFallbackRate": "守卫回退率"
+      },
+      "hints": {
+        "aiSolvedRate": "答案之后 24 小时内没有工单",
+        "noMatchRate": "没有匹配到 FAQ 的轮",
+        "helpfulRate": "投了「有帮助」或「已解决」的票",
+        "avgRating": "学员评分，1 到 5",
+        "handoverRate": "转给人工的轮",
+        "clarifyCoveredRate": "覆盖到的澄清问题",
+        "guardFallbackRate": "被守卫换掉的回复"
+      },
+      "parts": "{whole} 中的 {part}",
+      "ratingParts": "{count} 个评分",
+      "trend": "趋势",
+      "columns": {
+        "period": "时间",
+        "segment": "切分值",
+        "turns": "轮数",
+        "topic": "话题 / 提议的问题",
+        "suggestion": "建议",
+        "status": "状态",
+        "action": "操作",
+        "faq": "FAQ",
+        "answers": "回答次数",
+        "ticketsAfter": "24 小时内的工单",
+        "ticketRate": "工单率"
+      },
+      "weekOf": "{date} 那一周",
+      "topGaps": "最大的缺口组",
+      "ticketFaqs": "最常导致工单的 FAQ",
+      "open": "打开",
+      "openLabel": "打开候选 {topic}",
+      "lastIngested": "数据来自 Portal，最近拉取 {when}",
+      "neverIngested": "还没有从 Portal 拉取过数据。",
+      "empty": "这段时间还没有对话。数据随每晚从 Portal 拉取进来。",
+      "emptyTable": "这段时间没有。",
+      "loading": "加载中…",
+      "entry": {
+        "submit": "工单表单",
+        "chat": "聊天",
+        "chip": "推荐问题"
+      },
+      "noSignal": "没有信号",
+      "unknownFaq": "已删除的 FAQ",
+      "bySplitName": {
+        "locale": "按语言",
+        "entry": "按入口",
+        "signal": "按信号"
+      }
     }
   }
 }

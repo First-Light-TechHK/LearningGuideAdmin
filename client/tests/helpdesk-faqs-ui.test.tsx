@@ -99,6 +99,9 @@ describe('FAQs tab (Figma 1379:2)', () => {
       [
         ['Enquiries', 'false'],
         ['FAQs', 'true'],
+        // v5 Part G4 / G6（待视觉验收）
+        ['FAQ candidates', 'false'],
+        ['HelpDesk data', 'false'],
       ],
     )
     assert.ok(screen.getByRole('button', { name: '+ Add FAQ' }))
@@ -143,7 +146,7 @@ describe('FAQs tab (Figma 1379:2)', () => {
     await openFaqs({ locale: 'zh-CN' })
     assert.deepEqual(
       screen.getAllByRole('tab').map((tab) => tab.textContent),
-      ['工单', '常见问题'],
+      ['工单', '常见问题', 'FAQ 候选', 'HelpDesk 数据'],
     )
     assert.ok(screen.getByRole('button', { name: '+ 新增常见问题' }))
     const first = await waitFor(() => tableRow('没有收到重置密码邮件'))

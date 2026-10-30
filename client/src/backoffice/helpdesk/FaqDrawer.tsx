@@ -34,6 +34,9 @@ import { useModal } from './useModal'
  * 版本冲突时载入最新版本、保留草稿。Delete（归档）与「未保存的修改」确认在 Figma 里没有画板，
  * 沿用同一套样式（待视觉验收）。抽屉是模态层（useModal）：Tab 不出抽屉（确认框打开时不出确认框），
  * Escape 在哪儿按都算、输入法组字时不算；保存失败或版本冲突的提示会拿到焦点，滚到哪儿都看得见。
+ * v5 Part G4（待视觉验收）：从 FAQ 候选新建时带预填（问题、分类、是否入口；答案留空由员工写），抽屉顶上
+ * 写明来自哪个候选；有已解决工单里人写的回复时多一块「草稿 待核实」，「起草」把那条回复放进对应语言的
+ * 答案框，并在框下一直提示核实（保存即发布）。保存成功把新 FAQ 交给 onDone，页面再接受候选。
  */
 
 type AnswerField = 'answerEn' | 'answerZh'
@@ -45,8 +48,17 @@ type Props = {
   /** null = 新增。 */
   faq: HelpdeskFaq | null
   onClose: () => void
-  onDone: (result: FaqDrawerResult) => void
+  /** saved：保存成功时服务端返回的 FAQ（从候选新建时页面用它的 id 接受候选）。 */
+  onDone: (result: FaqDrawerResult, saved?: HelpdeskFaq) => void
+  /** 新增时的预填（FAQ 候选）；不带 = 空白。 */
+  initial?: FaqDraft
+  /** 预填来自哪个候选（话题），显示在抽屉顶上。 */
+  fromCandidate?: string | null
+  /** 「草稿 待核实」：已解决工单里人写的回复（已脱敏）。 */
+  draftSources?: readonly string[]
 }
+
+const HAN = /\p{Script=Han}/u
 
 function fieldErrorText(locale: Locale, field: FaqField, error: FaqFieldError): string {
   if (error === 'tooLong') {
@@ -57,7 +69,7 @@ function fieldErrorText(locale: Locale, field: FaqField, error: FaqFieldError): 
   return t(locale, `helpDesk.drawer.errors.${error}`)
 }
 
-export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
+export function FaqDrawer({ locale, faq, onClose, onDone, initial, fromCandidate = null, draftSources = [] }: Props) {
   const uid = useId()
   const ids = {
     title: `${uid}-title`,
@@ -71,9 +83,12 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     link: `${uid}-link`,
     confirm: `${uid}-confirm`,
     graph: `${uid}-graph`,
+    draft: `${uid}-draft`,
   }
   const [base, setBase] = useState<HelpdeskFaq | null>(faq)
-  const [original, setOriginal] = useState<FaqDraft>(() => (faq ? draftFromFaq(faq) : emptyFaqDraft()))
+  const [original, setOriginal] = useState<FaqDraft>(() => (faq ? draftFromFaq(faq) : (initial ?? emptyFaqDraft())))
+  // 用「草稿 待核实」起草过的答案框：框下一直提示核实
+  const [drafted, setDrafted] = useState<AnswerField[]>([])
   const [draft, setDraft] = useState<FaqDraft>(original)
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -204,7 +219,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
       result = await createFaq(body, keyRef.current.key)
     }
     const outcome = faqSaveOutcome(result)
-    if (outcome === 'saved') return onDone('saved')
+    if (outcome === 'saved') return onDone('saved', result.ok ? result.data : undefined)
     if (outcome === 'gone') return onDone('gone')
     if (outcome === 'conflict' && base) {
       const latest = await getFaq(base.id)
@@ -254,6 +269,14 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     }
     setNoticeShown((value) => value + 1)
     setSaving(false)
+  }
+
+  /** 「起草」：把一条人写的回复放进它那种语言的答案框（框里已有文字时接在后面）。 */
+  function draftFrom(source: string) {
+    const field: AnswerField = HAN.test(source) ? 'answerZh' : 'answerEn'
+    setDraft((current) => ({ ...current, [field]: current[field].trim() ? `${current[field]}\n\n${source}` : source }))
+    setDrafted((current) => (current.includes(field) ? current : [...current, field]))
+    answers[field].current?.focus()
   }
 
   function errorFor(field: FaqField): ReactNode {
@@ -355,6 +378,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
           />
         </div>
         {errorFor(field)}
+        {drafted.includes(field) ? <p className="hdDraftWarning">{t(locale, 'helpDesk.drawer.draft.drafted')}</p> : null}
       </div>
     )
   }
@@ -376,6 +400,9 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
         </header>
 
         <div className="hdDrawerBody">
+          {fromCandidate !== null && !editing ? (
+            <p className="hdNotice hdDrawerNotice hdDrawerOrigin">{t(locale, 'helpDesk.drawer.fromCandidate', { topic: fromCandidate })}</p>
+          ) : null}
           {conflict ? (
             <div ref={statusRef} className="hdNotice hdDrawerNotice" role="status" tabIndex={-1}>
               {t(locale, 'helpDesk.drawer.conflict')}
@@ -392,6 +419,35 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
                 </ul>
               ) : null}
             </div>
+          ) : null}
+
+          {!editing && draftSources.length > 0 ? (
+            <section className="hdGraphSection hdDraftPanel" aria-labelledby={ids.draft}>
+              <h3 className="hdGraphTitle" id={ids.draft}>
+                {t(locale, 'helpDesk.drawer.draft.title')}
+              </h3>
+              <p className="hdGraphHint">{t(locale, 'helpDesk.drawer.draft.hint')}</p>
+              <ol className="hdDraftSources">
+                {draftSources.map((source, index) => (
+                  <li key={`${index}-${source.slice(0, 16)}`} className="hdDraftSource">
+                    <blockquote className="hdDraftQuote" aria-label={t(locale, 'helpDesk.drawer.draft.reply', { n: index + 1 })}>
+                      {source}
+                    </blockquote>
+                    <button
+                      type="button"
+                      className="hdDrawerButton"
+                      aria-label={t(locale, 'helpDesk.drawer.draft.useLabel', {
+                        n: index + 1,
+                        language: t(locale, HAN.test(source) ? 'helpDesk.drawer.draft.chinese' : 'helpDesk.drawer.draft.english'),
+                      })}
+                      onClick={() => draftFrom(source)}
+                    >
+                      {t(locale, 'helpDesk.drawer.draft.use')}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </section>
           ) : null}
 
           <div className="hdDrawerRow">

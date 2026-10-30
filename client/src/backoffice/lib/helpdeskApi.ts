@@ -1,10 +1,17 @@
 import {
   TIMELINE_LIMIT,
+  type AcceptCandidateBody,
+  type AcceptCandidateResult,
   type AgentActionInput,
   type AgentRun,
+  type CandidateDetail,
+  type CandidateList,
+  type DismissCandidateBody,
   type EnquiryDetail,
   type EnquiryList,
   type FaqBody,
+  type FaqCandidate,
+  type FaqCandidateDraft,
   type FaqEdgeRow,
   type FaqEdges,
   type FaqEdgeView,
@@ -16,11 +23,20 @@ import {
   type FaqReleaseList,
   type FaqTree,
   type FaqWorkingCopy,
+  type FlywheelJob,
+  type FlywheelJobRun,
+  type FlywheelMetrics,
+  type FromTicketResult,
   type HelpdeskFaq,
   type HelpdeskLocale,
+  type MetricsGranularity,
+  type MetricsSplit,
   type PhrasingLocale,
+  type PortalJobRunResult,
+  type PortalJobRuns,
 } from '../contracts/helpdesk'
 import { faqQuery, type FaqFilters } from './helpdeskFaqs'
+import { candidateQuery, metricsQuery, type CandidateFilters } from './helpdeskFlywheel'
 import { enquiryQuery, type EnquiryFilters } from './helpdeskView'
 import { notifySessionChanged } from './navigation'
 
@@ -213,4 +229,64 @@ export function getGraphPreview(locale: HelpdeskLocale, version?: number) {
   const query = new URLSearchParams({ locale })
   if (version !== undefined) query.set('version', String(version))
   return request<FaqGraphPreview>(`/api/helpdesk/faq-releases/preview?${query.toString()}`)
+}
+
+/* ------------------------ v5 Part G 数据飞轮（G3 / G4 / G6，待视觉验收） ------------------------ */
+
+const candidatePath = (candidateId: string) => `/api/helpdesk/faq-candidates/${encodeURIComponent(candidateId)}`
+const jobPath = (job: FlywheelJob) => `/api/helpdesk/flywheel/jobs/${encodeURIComponent(job)}`
+
+/** 候选队列：条数多的在前；带各状态的条数与相关节点的摘要。 */
+export function listCandidates(filters: CandidateFilters) {
+  return request<CandidateList>(`/api/helpdesk/faq-candidates?${candidateQuery(filters)}`)
+}
+
+/** 一个候选、它的修订（审计）与相关节点。 */
+export function getCandidate(candidateId: string) {
+  return request<CandidateDetail>(candidatePath(candidateId))
+}
+
+/** 新 FAQ / 追问的预填（不写任何东西；答案留空）。 */
+export function getCandidateDraft(candidateId: string) {
+  return request<FaqCandidateDraft>(`${candidatePath(candidateId)}/draft`)
+}
+
+/** 接受：加问法 / 新 FAQ / 追问（新 FAQ 与追问先经 POST faqs 建好节点再带 faqId）。同一个决定重试沿用 key。 */
+export function acceptCandidate(candidateId: string, body: AcceptCandidateBody, idempotencyKey: string) {
+  return sendJson<AcceptCandidateResult>('POST', `${candidatePath(candidateId)}/accept`, body, idempotencyKey)
+}
+
+export function dismissCandidate(candidateId: string, body: DismissCandidateBody, idempotencyKey: string) {
+  return sendJson<{ candidate: FaqCandidate; replayed: boolean }>('POST', `${candidatePath(candidateId)}/dismiss`, body, idempotencyKey)
+}
+
+/** 「转成 FAQ 候选」：201 新建，200 这张工单已经转过（那一个）。 */
+export function ticketToCandidate(ticketId: string) {
+  return sendJson<FromTicketResult>('POST', `${ticketPath(ticketId)}/faq-candidate`, {})
+}
+
+export function listJobRuns(job: FlywheelJob) {
+  return request<{ runs: FlywheelJobRun[] }>(`${jobPath(job)}/runs`)
+}
+
+export function getJobRun(job: FlywheelJob, runId: string) {
+  return request<FlywheelJobRun>(`${jobPath(job)}/runs/${encodeURIComponent(runId)}`)
+}
+
+/** 立即运行（Idempotency-Key 必带）：201 新开一次（后台跑，轮询 getJobRun），200 同一个 key 的那一次。 */
+export function runJobNow(job: FlywheelJob, idempotencyKey: string) {
+  return sendJson<FlywheelJobRun>('POST', `${jobPath(job)}/run`, {}, idempotencyKey)
+}
+
+/** Portal 的学员原文保留任务（180 天后只留脱敏文字与标签）。 */
+export function listRetentionRuns() {
+  return request<PortalJobRuns>('/api/helpdesk/jobs/assist-retention')
+}
+
+export function runRetentionNow(idempotencyKey: string) {
+  return sendJson<PortalJobRunResult>('POST', '/api/helpdesk/jobs/assist-retention/run', {}, idempotencyKey)
+}
+
+export function getFlywheelMetrics(input: { granularity: MetricsGranularity; from: string; to: string; split: MetricsSplit }) {
+  return request<FlywheelMetrics>(`/api/helpdesk/flywheel/metrics?${metricsQuery(input)}`)
 }

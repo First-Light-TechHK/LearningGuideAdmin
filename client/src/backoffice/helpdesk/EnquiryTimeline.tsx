@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 
 import {
   CONFIRM_WINDOW_HOURS,
@@ -10,6 +11,7 @@ import {
   type TicketMessage,
 } from '../contracts/helpdesk'
 import { attachmentUrl, newIdempotencyKey } from '../lib/helpdeskApi'
+import { canTurnIntoCandidate } from '../lib/helpdeskFlywheel'
 import { categoryLabel, statusLabel } from '../lib/helpdeskFormat'
 import {
   TIMELINE_AVATAR,
@@ -42,9 +44,11 @@ import { HdBotIcon } from './icons'
  * 操作栏：Mark as reviewed（OPEN 时是 Claim / 接单）、Email student（展开回复框）、Internal notes
  * （展开内部备注与备注框）、Flag follow-up（开关）。VIEW 整个操作栏不显示，内部备注直接只读显示在对话里。
  * 回复框、备注面板、状态胶囊、按下态等没有画板的部分沿用同一套样式（待视觉验收）。
+ * v5 Part G4：已解决的工单（CLOSED，不是学员撤回的）在操作栏下多一个「转成 FAQ 候选」（只给 FULL，
+ * 没有画板，待视觉验收）；结果提示带一个到 FAQ 候选的链接。
  */
 
-export type Notice = { id: string; kind: 'error' | 'info'; text: string } | null
+export type Notice = { id: string; kind: 'error' | 'info'; text: string; link?: { to: string; label: string } } | null
 export type Panel = { id: string; kind: 'reply' | 'notes' } | null
 
 /** 时间线上的一张卡片：列表行一定有；详情只有打开过的那些才有（选中的那张一定有）。 */
@@ -65,6 +69,8 @@ type Props = {
   onClaim: (id: string) => void
   onMarkReviewed: (id: string) => void
   onFlag: (id: string) => void
+  /** 「转成 FAQ 候选」（v5 Part G4）。 */
+  onToCandidate: (id: string) => void
   /** 打开 AI 块的「查看链路」抽屉（run id = AI 块 id）。 */
   onTrace: (runId: string) => void
   /** idempotencyKey：同一份草稿重试沿用同一个，内容变了或发送成功后换新。 */
@@ -420,12 +426,31 @@ export function EnquiryTimeline(props: Props) {
                         </div>
                       </>
                     ) : null}
+                    {canTurnIntoCandidate(ticket, canWrite) ? (
+                      <div className="hdCardExtra">
+                        <button
+                          type="button"
+                          className="hdLinkButton hdToCandidate"
+                          title={t(locale, 'helpDesk.actions.toCandidateHint')}
+                          disabled={cardBusy !== null}
+                          onClick={() => props.onToCandidate(row.id)}
+                        >
+                          {cardBusy === 'candidate' ? t(locale, 'helpDesk.actions.toCandidateBusy') : t(locale, 'helpDesk.actions.toCandidate')}
+                        </button>
+                      </div>
+                    ) : null}
                   </article>
                 </div>
 
                 {notice && notice.id === row.id ? (
                   <div className={`alert ${notice.kind === 'error' ? 'alertError' : 'alertInfo'} hdNotice`} role="status">
-                    {notice.text}
+                    <span>{notice.text}</span>
+                    {notice.link ? (
+                      <>
+                        {' '}
+                        <Link to={notice.link.to}>{notice.link.label}</Link>
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
 

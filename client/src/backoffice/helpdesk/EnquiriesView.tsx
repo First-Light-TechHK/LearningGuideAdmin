@@ -9,6 +9,7 @@ import {
   newIdempotencyKey,
   sendAction,
   sendMessage,
+  ticketToCandidate,
   type HelpdeskResult,
 } from '../lib/helpdeskApi'
 import { errorMessage } from '../lib/helpdeskFormat'
@@ -326,6 +327,29 @@ export function EnquiriesView({ locale, ticketId, canWrite, onTrace }: Props) {
     }
   }
 
+  /** 「转成 FAQ 候选」（v5 Part G4）：201 新建、200 已经转过；提示带一个到 FAQ 候选的链接。 */
+  async function toCandidate(id: string) {
+    if (visibleBusy(busy, id)) return
+    const mine: BusyToken = { label: 'candidate' }
+    setBusy((current) => startBusy(current, id, mine))
+    const result = await ticketToCandidate(id)
+    setBusy((current) => clearBusy(current, id, mine))
+    if (!visibleIds.current.has(id)) return
+    if (!result.ok) {
+      setNotice({ id, kind: 'error', text: errorMessage(locale, result.code) })
+      return
+    }
+    setNotice({
+      id,
+      kind: 'info',
+      text: t(locale, result.data.created ? 'helpDesk.actions.toCandidateCreated' : 'helpDesk.actions.toCandidateExisting'),
+      link: {
+        to: `/${locale}/help-desk?tab=candidates&status=all&candidate=${encodeURIComponent(result.data.candidate.id)}`,
+        label: t(locale, 'helpDesk.actions.toCandidateOpen'),
+      },
+    })
+  }
+
   function send(id: string, body: string, internal: boolean, key: string): Promise<boolean> {
     const target = findTicket(id)
     if (!target) return Promise.resolve(false)
@@ -391,6 +415,7 @@ export function EnquiriesView({ locale, ticketId, canWrite, onTrace }: Props) {
               onClaim={(id) => void claim(id)}
               onMarkReviewed={(id) => void markReviewed(id)}
               onFlag={(id) => void toggleFlag(id)}
+              onToCandidate={(id) => void toCandidate(id)}
               onSend={send}
               drafts={drafts}
               onDraft={(key, value) => setDrafts((current) => ({ ...current, [key]: value }))}

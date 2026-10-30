@@ -1,6 +1,6 @@
 # Helpdesk data flywheel (v5 Part G3 to G6, Admin server)
 
-Specs: `helpdesk-v5-context-chips-and-smalltalk.md` Part G, and `helpdesk-v5-faq-graph-design.md` §3 and §5 item 5. The staff screens are not built yet; they will reuse antd and need visual sign-off (待视觉验收).
+Specs: `helpdesk-v5-context-chips-and-smalltalk.md` Part G, and `helpdesk-v5-faq-graph-design.md` §3 and §5 item 5. The staff screens are in the BackOffice client (see [Staff screens](#staff-screens-g4-and-g6-backoffice-client)). There is no Figma for them, so they reuse the existing HelpDesk styles and need visual sign-off (待视觉验收).
 
 ## Where the data comes from
 
@@ -92,3 +92,38 @@ All metrics come from SQL over the view `helpdesk_insight_turn_facts`, with no s
 - **Also returned:** the top 10 gap groups, the 10 FAQs that most often lead to a ticket within 24 hours, and `lastIngestedAt`.
 
 **"Entry" is the turn's `source`** (submit, chat or chip). Portal's feed has no entry page, so a page-level split needs a new Portal field first.
+
+## Staff screens (G4 and G6, BackOffice client)
+
+The screens have no Figma boards. They reuse the HelpDesk filter row, table, chip, drawer and notice styles, and they need visual sign-off (待视觉验收). The copy is in both `en-GB` and `zh-CN`. Every control is a native button, select, checkbox or radio, so it works with the keyboard. Drawers trap focus, close on Escape and give focus back. Results are announced in a status or alert region.
+
+The code is in `client/src/backoffice/helpdesk/`. The pure logic is in `client/src/backoffice/lib/helpdeskFlywheel.ts`.
+
+**"FAQ 候选" tab** (`/help-desk?tab=candidates`, `CandidatesView.tsx`):
+- **Jobs.** The last nightly gap-mining run and the last Portal `assist_retention` run show when they ran, who started them and their counts.
+  - **Run now** (FULL only) sends an Idempotency-Key. A key is reused only when a network failure leaves no response.
+  - Gap mining then polls its run every second and reloads the queue when it ends. Retention reports the rows it scrubbed.
+- **Queue.** The server sorts it by count. Staff filter by status (default `new`), suggestion, origin and text. The filters live in the address bar.
+- **Each row** shows the topic, the proposed question, the suggestion, the source mix, the count and when it was last seen.
+
+**Candidate detail** (`?candidate=<id>`, `CandidateDrawer.tsx`) is open to every role. It shows:
+- the scrubbed examples, with placeholders marked as hidden personal details;
+- the source mix and the related nodes (closest FAQ and its similarity, parent, card on screen, accepted FAQ);
+- the source ticket, and the audit history (who and when).
+
+**Decisions** are for FULL staff, and only while the candidate is `new`. Each sends the candidate's `version` and an Idempotency-Key, and a retry of the same decision reuses the key. When someone else changed the candidate first (409 `CANDIDATE_CHANGED`), the drawer reloads it and explains.
+- **New FAQ** fetches `GET …/draft` and opens the FAQ editor prefilled: questions, category and entry come from the draft, and the answers are empty. When the group has human replies from resolved tickets, the editor shows a **草稿 待核实 / Draft, to be verified** panel. "起草" copies a reply into the answer box for its language and keeps a "check every fact" warning under that box. After the FAQ is saved, the page accepts the candidate with the new `faqId` and the ticked examples.
+- **Add as follow-up** first asks for the parent question; the default is the parent the learners were on. It then opens the same editor with entry off, and accepting creates the edge.
+- **Add phrasing** adds the ticked examples to the closest FAQ, or to another answer card found by search.
+- **Dismiss** needs a reason; `other` needs a note.
+- Examples with a placeholder can never be ticked.
+
+**"转成 FAQ 候选"** appears under the action bar of a resolved ticket (CLOSED, not cancelled), for FULL staff only. The result notice links to the candidate.
+
+**"HelpDesk 数据" tab** (`/help-desk?tab=data`, `FlywheelDataView.tsx`):
+- **Controls:** daily (7, 28 or 92 days) or weekly (12, 26 or 52 weeks), ending today (UTC), and a split.
+- **Seven stat cards** cover the whole period. Each shows the value, its numerator and denominator, and a one-line definition; a null rate shows as —.
+- **Tables:** a trend table (AI-solved rate with a decorative bar), a per-segment table when a split is chosen (the cards stay overall), the top gap groups (with "Open" to the candidate), and the FAQs that most often lead to a ticket.
+- **States:** loading, empty ("no conversations in this period yet") and error. The page also shows when data was last pulled from Portal.
+- The client has no chart library, so the page uses tables and cards.
+

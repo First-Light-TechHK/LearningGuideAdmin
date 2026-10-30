@@ -481,7 +481,9 @@
     "notConnectedBody": "The Portal HelpDesk integration is not configured for this environment yet. Please ask an administrator to connect it.",
     "tabs": {
       "enquiries": "Enquiries",
-      "faqs": "FAQs"
+      "faqs": "FAQs",
+      "candidates": "FAQ candidates",
+      "data": "HelpDesk data"
     },
     "searchPlaceholder": "Search students or enquiries...",
     "filter": "Filter enquiries",
@@ -652,7 +654,15 @@
       "FAQ_RELEASE_NOT_READY": "This version has not passed the checks and the eval, so it cannot be published.",
       "FAQ_RELEASE_LOCKED": "This version cannot be checked again.",
       "FAQ_RELEASE_NOT_PUBLISHED": "You can only roll back to a version that was live before.",
-      "FAQ_RELEASE_CHECKS_FAILED": "That version no longer passes the graph checks."
+      "FAQ_RELEASE_CHECKS_FAILED": "That version no longer passes the graph checks.",
+      "CANDIDATE_NOT_FOUND": "This candidate no longer exists.",
+      "CANDIDATE_CHANGED": "Someone else changed this candidate. It has been reloaded; check it and try again.",
+      "CANDIDATE_CLOSED": "You can only merge into a candidate that is still open.",
+      "TICKET_NOT_RESOLVED": "Only a resolved ticket can become an FAQ candidate.",
+      "TICKET_NO_QUESTION": "This ticket has no question from the learner.",
+      "JOB_ALREADY_RUNNING": "This job is already running. Try again when it has finished.",
+      "JOB_NOT_FOUND": "This job does not exist.",
+      "JOB_RUN_NOT_FOUND": "This run no longer exists."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -664,7 +674,13 @@
       "flag": "Flag follow-up",
       "flagHint": "Flag this enquiry to follow up later.",
       "unflagHint": "Flagged for follow-up. Click to remove the flag.",
-      "unavailable": "Not available for this enquiry right now."
+      "unavailable": "Not available for this enquiry right now.",
+      "toCandidate": "Turn into FAQ candidate",
+      "toCandidateHint": "Make this resolved ticket an FAQ candidate. The learner's question and the last reply are scrubbed first.",
+      "toCandidateBusy": "Turning into a candidate…",
+      "toCandidateCreated": "Turned into an FAQ candidate. The text was scrubbed first.",
+      "toCandidateExisting": "This ticket is already an FAQ candidate.",
+      "toCandidateOpen": "Open it in FAQ candidates"
     },
     "flaggedNotice": "Flagged for follow-up.",
     "unflaggedNotice": "Flag removed.",
@@ -845,6 +861,17 @@
         "keywordTooLong": "Each keyword can be up to 40 characters",
         "unsafeLink": "Links must be a full https://, http:// or mailto: address, without spaces or quotes",
         "choicePrompt": "The question of a choice card cannot contain digits, links or emails"
+      },
+      "fromCandidate": "From FAQ candidate: {topic}. Write the answer yourself; the ticked examples become phrasings when you save.",
+      "draft": {
+        "title": "Draft, to be verified",
+        "hint": "Replies staff wrote when they resolved tickets on this topic. They are scrubbed and may be out of date.",
+        "reply": "Reply {n}",
+        "use": "Draft from this reply",
+        "useLabel": "Draft the {language} answer from reply {n}",
+        "english": "English",
+        "chinese": "Chinese",
+        "drafted": "Draft, to be verified: check every fact before you save. Saving publishes the FAQ."
       }
     },
     "preview": {
@@ -1087,6 +1114,243 @@
       "loading": "Loading…",
       "createdOn": "Created {date}",
       "checksValue": "Graph checks: {result}"
+    },
+    "candidates": {
+      "search": "Search topics, questions or examples...",
+      "statusLabel": "Status",
+      "suggestionLabel": "Suggestion",
+      "originLabel": "Source",
+      "allStatuses": "All statuses",
+      "allSuggestions": "All suggestions",
+      "allOrigins": "All sources",
+      "status": {
+        "new": "New",
+        "accepted": "Accepted",
+        "dismissed": "Dismissed",
+        "merged": "Merged"
+      },
+      "suggestion": {
+        "new_faq": "New FAQ",
+        "add_phrasing": "Add phrasing",
+        "follow_up": "Follow-up"
+      },
+      "origin": {
+        "mining": "Nightly mining",
+        "ticket": "From a ticket"
+      },
+      "reasons": {
+        "duplicate": "Duplicate",
+        "not_a_gap": "Not a gap",
+        "out_of_scope": "Out of scope",
+        "personal_data": "Personal data",
+        "spam": "Spam",
+        "other": "Other"
+      },
+      "mix": {
+        "no_match": "No match",
+        "not_helpful": "Not helpful",
+        "clarify_not_covered": "Clarify not covered",
+        "handover": "Asked for a person",
+        "ticket_after_chat": "Ticket after chat",
+        "low_rating": "Rating 2 or less",
+        "ticket": "Resolved ticket"
+      },
+      "mixItem": "{label} {count}",
+      "counts": "{new} new · {accepted} accepted · {dismissed} dismissed · {merged} merged",
+      "columns": {
+        "topic": "Topic / proposed question",
+        "suggestion": "Suggestion",
+        "mix": "Why the AI missed",
+        "count": "Count",
+        "lastSeen": "Last seen",
+        "action": "Action"
+      },
+      "review": "Review",
+      "reviewLabel": "Review {topic}",
+      "empty": "No open candidates. The nightly mining adds new ones.",
+      "emptyAll": "No candidates yet. The nightly mining adds new ones.",
+      "emptyFiltered": "No candidates match these filters.",
+      "loading": "Loading…",
+      "showing": "Showing {from}–{to} of {total}",
+      "pagination": "Candidate pages",
+      "previous": "Previous page",
+      "next": "Next page",
+      "title": "FAQ candidate",
+      "subtitle": "Learner questions the AI did not solve, scrubbed by Portal. Staff write every answer.",
+      "proposed": "Proposed question",
+      "labelSource": {
+        "model": "Topic and question suggested by the AI (it never writes answers).",
+        "code": "Topic and question taken from the examples."
+      },
+      "turns": "{count} learner questions",
+      "turnsOne": "1 learner question",
+      "seen": "First seen {first} · last seen {last}",
+      "examples": "Examples (scrubbed)",
+      "examplesHint": "Ticked examples become phrasings and eval cases. Examples with a hidden personal detail cannot become phrasings.",
+      "hiddenDetail": "hidden personal detail",
+      "mixTitle": "Why the AI missed",
+      "nodes": "Related questions",
+      "related": "Closest FAQ",
+      "relatedScore": "similarity {score}",
+      "parent": "Parent question",
+      "shown": "Card on screen",
+      "accepted": "Accepted FAQ",
+      "none": "None",
+      "fromTicket": "From a resolved ticket",
+      "openTicket": "Open the ticket",
+      "draftSources": "{count} scrubbed replies from resolved tickets can be used as a draft (草稿 待核实).",
+      "decided": {
+        "accepted": "Accepted as {as} · {when}",
+        "dismissed": "Dismissed: {reason} · {when}",
+        "merged": "Merged into another candidate · {when}"
+      },
+      "openMerged": "Open the candidate it was merged into",
+      "history": "History",
+      "revision": {
+        "create": "Created",
+        "grow": "More questions added",
+        "accept": "Accepted",
+        "dismiss": "Dismissed",
+        "merge": "Merged"
+      },
+      "byJob": "by the nightly job",
+      "byStaff": "by staff {id}",
+      "historyItem": "{action} {who} · {when}",
+      "newFaq": "New FAQ",
+      "addPhrasing": "Add phrasing",
+      "followUp": "Add as follow-up",
+      "dismiss": "Dismiss",
+      "drafting": "Loading the draft…",
+      "target": "Add the ticked examples to",
+      "parentPick": "Under which question?",
+      "searchFaqs": "Search FAQs",
+      "noResults": "No FAQs match.",
+      "addPhrasingsOne": "Add 1 phrasing",
+      "addPhrasingsMany": "Add {count} phrasings",
+      "needTarget": "Choose an FAQ.",
+      "needExamples": "Tick at least one example.",
+      "writeFollowUp": "Write the follow-up",
+      "reason": "Reason",
+      "reasonPlaceholder": "Choose a reason",
+      "needReason": "Choose a reason.",
+      "note": "Note",
+      "noteHint": "Required for Other. Do not paste personal details: the note is scrubbed.",
+      "needNote": "Say why in the note.",
+      "noteTooLong": "The note can be up to {max} characters.",
+      "confirmDismiss": "Dismiss candidate",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "addedOne": "Added 1 phrasing ({skipped} skipped). The examples are now eval cases for this FAQ.",
+      "addedMany": "Added {added} phrasings ({skipped} skipped). The examples are now eval cases for this FAQ.",
+      "dismissed": "Candidate dismissed.",
+      "faqAccepted": "FAQ saved and the candidate accepted.",
+      "faqNotAccepted": "FAQ saved, but the candidate was not accepted: {error}",
+      "jobs": {
+        "title": "Jobs",
+        "columns": {
+          "job": "Job",
+          "lastRun": "Last run",
+          "result": "Result",
+          "action": "Action"
+        },
+        "gap_mining": "Nightly gap mining",
+        "assist_retention": "Raw text retention (Portal, {days} days)",
+        "never": "Not run yet",
+        "status": {
+          "running": "Running",
+          "succeeded": "Succeeded",
+          "failed": "Failed"
+        },
+        "failedCode": "Failed ({code})",
+        "schedule": "Scheduled",
+        "manual": "Run by {name}",
+        "manualNoName": "Run by staff",
+        "miningResult": "{received} turns pulled, {created} new, {grown} grown",
+        "pullNotConnected": "Portal not connected: mined stored turns only",
+        "retentionResult": "{rows} rows scrubbed",
+        "moreDue": "More left for the next run",
+        "runNow": "Run now",
+        "running": "Running…",
+        "runNowLabel": "Run {job} now",
+        "started": "Gap mining started. This can take a few minutes.",
+        "finished": "Gap mining finished: {created} new candidates, {grown} grown.",
+        "failed": "Gap mining failed ({code}).",
+        "stillRunning": "Gap mining is still running. Check the last run later.",
+        "retentionDone": "Retention finished: {rows} rows scrubbed.",
+        "retentionBusy": "Retention is already running on another Portal instance."
+      }
+    },
+    "data": {
+      "title": "HelpDesk data",
+      "granularity": "Period",
+      "day": "Daily",
+      "week": "Weekly",
+      "range": "Range",
+      "rangeDays": "Last {n} days",
+      "rangeWeeks": "Last {n} weeks",
+      "split": "Split by",
+      "splits": {
+        "none": "No split",
+        "locale": "Locale",
+        "entry": "Entry",
+        "signal": "Signal"
+      },
+      "metrics": {
+        "aiSolvedRate": "AI-solved rate",
+        "noMatchRate": "No match rate",
+        "helpfulRate": "Helpful rate",
+        "avgRating": "Average rating",
+        "handoverRate": "Handover rate",
+        "clarifyCoveredRate": "Clarify covered rate",
+        "guardFallbackRate": "Guard fallback rate"
+      },
+      "hints": {
+        "aiSolvedRate": "Answers with no ticket within 24 hours",
+        "noMatchRate": "Turns with no matching FAQ",
+        "helpfulRate": "Helpful or solved votes",
+        "avgRating": "Learner ratings, 1 to 5",
+        "handoverRate": "Turns handed to a person",
+        "clarifyCoveredRate": "Clarifying questions that were covered",
+        "guardFallbackRate": "Replies the guard replaced"
+      },
+      "parts": "{part} of {whole}",
+      "ratingParts": "{count} ratings",
+      "trend": "Trend",
+      "columns": {
+        "period": "Period",
+        "segment": "Segment",
+        "turns": "Turns",
+        "topic": "Topic / proposed question",
+        "suggestion": "Suggestion",
+        "status": "Status",
+        "action": "Action",
+        "faq": "FAQ",
+        "answers": "Answers",
+        "ticketsAfter": "Tickets within 24 h",
+        "ticketRate": "Ticket rate"
+      },
+      "weekOf": "Week of {date}",
+      "topGaps": "Top gap groups",
+      "ticketFaqs": "FAQs that most often lead to a ticket",
+      "open": "Open",
+      "openLabel": "Open candidate {topic}",
+      "lastIngested": "Data from Portal, last pulled {when}",
+      "neverIngested": "No data has been pulled from Portal yet.",
+      "empty": "No conversations in this period yet. Data arrives with the nightly pull from Portal.",
+      "emptyTable": "None in this period.",
+      "loading": "Loading…",
+      "entry": {
+        "submit": "Ticket form",
+        "chat": "Chat",
+        "chip": "Suggested question"
+      },
+      "noSignal": "No signal",
+      "unknownFaq": "Removed FAQ",
+      "bySplitName": {
+        "locale": "By locale",
+        "entry": "By entry",
+        "signal": "By signal"
+      }
     }
   }
 }
