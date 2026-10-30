@@ -1007,10 +1007,10 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
         KEY(3),
       );
       expect(result).toMatchObject({ phrasingsAdded: 2, evalCasesAdded: 2 });
-      expect((await candidates().evalCases()).map((c) => c.text)).toEqual([
-        PAID[0],
-        PAID[2],
-      ]);
+      // 同一事务写入的两条 created_at 相同，顺序只靠 id，不固定：只比内容
+      expect(
+        (await candidates().evalCases()).map((c) => c.text).sort(),
+      ).toEqual([PAID[0], PAID[2]].sort());
       const none = await mined(['课程开通以后打不开视频', '视频一直打不开']);
       const nothing = await candidateService().accept(staff, none.id, {
         as: 'add_phrasing',
