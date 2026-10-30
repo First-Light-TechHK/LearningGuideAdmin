@@ -223,10 +223,22 @@ interface RawMedia {
   out: JSZip;
 }
 
+// 已经压缩过的媒体（视频/图片/模型/Office/PDF）再 DEFLATE 一次几乎不缩小，
+// 却会在 1 vCPU 的实例上耗掉大量 CPU 与内存，使 ~150MB 素材包的转换/校验
+// 超时（表现为 App Runner/CloudFront 5xx，前端显示 INTERNAL_ERROR）。
+// 这些文件用 STORE 直接存储，只有 manifest/checksums 等文本仍走 DEFLATE。
+const ALREADY_COMPRESSED = /\.(mp4|mov|webm|m4v|png|jpe?g|gif|webp|mp3|m4a|aac|glb|gltf|obj|pdf|zip|docx|xlsx|pptx)$/i;
+function fileCompression(name: string): "STORE" | "DEFLATE" {
+  return ALREADY_COMPRESSED.test(name) ? "STORE" : "DEFLATE";
+}
+
 function createPackager(): RawMedia {
   const out = new JSZip();
   const checksums: string[] = [];
-  const add = (name: string, bytes: Buffer) => { out.file(name, bytes); checksums.push(`${sha(bytes)}  ${name}`); };
+  const add = (name: string, bytes: Buffer) => {
+    out.file(name, bytes, { compression: fileCompression(name) });
+    checksums.push(`${sha(bytes)}  ${name}`);
+  };
   return { media: new Map(), add, checksums, out };
 }
 
