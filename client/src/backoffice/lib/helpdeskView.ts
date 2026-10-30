@@ -296,6 +296,11 @@ export function assistFeedbackTone(feedback: AssistFeedback | null): 'positive' 
   return null
 }
 
+/** v3 §2：学员评分只认 1–5 的整数，其它（没评、跳过、旧数据、越界）都当没有评分。 */
+export function ratingValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5 ? value : null
+}
+
 /** 中栏：第一条公开的学员消息是 Enquiry 卡片，其余按原顺序排在下面。 */
 export function splitThread(messages: TicketMessage[]): { enquiry: TicketMessage | null; rest: TicketMessage[] } {
   const index = messages.findIndex((m) => m.authorKind === 'learner' && !m.internal)

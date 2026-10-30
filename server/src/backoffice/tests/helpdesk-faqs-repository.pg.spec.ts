@@ -330,6 +330,82 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
     expect(await repo.listPublished({ limit: 1 })).toHaveLength(1);
   });
 
+  it('offers the popular published FAQs in the locale, the enquiry category first, never the excluded ones (v3 §1)', async () => {
+    const pay = (
+      await repo.insert(
+        faq({
+          popular: true,
+          category: 'payments_subscriptions',
+          questionEn: 'Where is my invoice?',
+          questionZh: '发票在哪里？',
+        }),
+        EMP,
+        null,
+      )
+    ).faq;
+    const tech = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    const tech2 = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    const shown = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    const plain = (await repo.insert(faq(), EMP, null)).faq;
+    const gone = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    await repo.update(gone.id, 1, { status: 'archived' }, 'archive', EMP);
+    void plain;
+    await touch(pay.id, '2026-10-03T00:00:00Z');
+    await touch(tech.id, '2026-10-01T00:00:00Z');
+    await touch(tech2.id, '2026-10-02T00:00:00Z');
+    await touch(shown.id, '2026-10-04T00:00:00Z');
+    const source = createPgHelpdeskQaSource(repo);
+    const zh = await source.findPopular({
+      locale: 'zh-CN',
+      category: 'payments_subscriptions',
+      excludeIds: [shown.id],
+      limit: 3,
+    });
+    expect(zh.map((c) => c.id)).toEqual([pay.id, tech2.id, tech.id]);
+    expect(zh[0]).toMatchObject({
+      category: 'payments_subscriptions',
+      question: '发票在哪里？',
+      answer: '答案',
+      score: 0,
+    });
+    // no category: newest first; the limit holds
+    expect(
+      (
+        await source.findPopular({
+          locale: 'en-GB',
+          category: null,
+          excludeIds: [],
+          limit: 2,
+        })
+      ).map((c) => [c.id, c.question]),
+    ).toEqual([
+      [shown.id, shown.questionEn],
+      [pay.id, 'Where is my invoice?'],
+    ]);
+    expect(
+      (
+        await source.findPopular({
+          locale: 'en-GB',
+          category: 'account_technical',
+          excludeIds: [shown.id, tech2.id],
+          limit: 3,
+        })
+      ).map((c) => c.id),
+    ).toEqual([tech.id, pay.id]);
+    await expect(
+      source.findPopular({
+        locale: 'fr-FR',
+        category: null,
+        excludeIds: [],
+        limit: 3,
+      }),
+    ).resolves.toEqual([]);
+    // the Portal list keeps its order when no category is given
+    expect(
+      (await repo.listPublished({ popular: true, limit: 50 })).map((f) => f.id),
+    ).toEqual([shown.id, pay.id, tech2.id, tech.id]);
+  });
+
   it('the real candidate query (FAQ_CANDIDATES_SQL) is served by the English full-text GIN index', async () => {
     const client = await pool.connect();
     try {

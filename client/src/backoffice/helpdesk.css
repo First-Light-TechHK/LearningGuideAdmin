@@ -660,6 +660,12 @@
   color: #16a34a;
 }
 
+/* v3 §2 工单评分：沿用状态胶囊（中性色），紧跟在状态后面（待视觉验收） */
+.hdStatusPill.hdTicketRating {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
 .hdTypeTag[data-category='technical_support'] {
   min-width: 119px;
 }
@@ -886,6 +892,20 @@
 .hdAiFeedbackNegative {
   background: #f8e8e7;
   color: #811315;
+}
+
+/* v3 §2 AI 块的学员评分：与反馈行同样的尺寸，中性色（无画板，待视觉验收） */
+.hdAiRating {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  margin: 0;
+  padding: 2px 10px 0;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--hd-line-soft);
+  color: var(--hd-muted);
 }
 
 /* Figma 的「❌」：纯红、粗 */
