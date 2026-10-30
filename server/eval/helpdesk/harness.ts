@@ -436,6 +436,8 @@ export type EvalModel =
       thinking?: ThinkingSetting;
       /** 评测放宽的总期限（HELPDESK_EVAL_DEADLINE_MS）；没有 = 线上的期限。 */
       deadlineMs?: number;
+      /** 评测改的思考截断（HELPDESK_EVAL_CUTOFF_MS，0 = 不发后备）；没有 = 线上的截断。只有聊天。 */
+      cutoffMs?: number;
     }
   | { kind: 'fake'; model: string };
 
@@ -446,10 +448,17 @@ export function thinkingLabel(model: {
   kind: string;
   thinking?: ThinkingSetting;
   deadlineMs?: number;
+  cutoffMs?: number;
 }): string {
   if (model.kind !== 'real') return '';
   const deadline = model.deadlineMs ? `, deadline ${model.deadlineMs} ms` : '';
-  return `, thinking ${model.thinking ?? 'off'}${deadline}`;
+  const cutoff =
+    model.cutoffMs === undefined
+      ? ''
+      : model.cutoffMs === 0
+        ? ', no backup'
+        : `, cut-off ${model.cutoffMs} ms`;
+  return `, thinking ${model.thinking ?? 'off'}${deadline}${cutoff}`;
 }
 
 /**
@@ -467,12 +476,33 @@ export function evalDeadline(env: NodeJS.ProcessEnv): number | undefined {
   return value;
 }
 
-/** 放宽期限时，模型那一步的时限也一起放宽。 */
-export function deadlineDeps(
-  env: NodeJS.ProcessEnv,
-): { deadlineMs: number; timeoutMs: number } | Record<string, never> {
+/**
+ * 评测才有的思考截断（HELPDESK_EVAL_CUTOFF_MS，毫秒）：线上思考截在 6.3 秒、同时发不思考的后备；
+ * 0 = 只跑思考那一路、不发后备（配合 HELPDESK_EVAL_DEADLINE_MS 看不截断的质量）。不给就是线上的截断。
+ */
+export function evalCutoff(env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env.HELPDESK_EVAL_CUTOFF_MS?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 600_000)
+    throw new Error(
+      'HELPDESK_EVAL_CUTOFF_MS must be a whole number of milliseconds, 0 to 600000',
+    );
+  return value;
+}
+
+/** 放宽期限时，模型那一步的时限也一起放宽；思考截断照给。 */
+export function deadlineDeps(env: NodeJS.ProcessEnv): {
+  deadlineMs?: number;
+  timeoutMs?: number;
+  cutoffMs?: number;
+} {
   const deadlineMs = evalDeadline(env);
-  return deadlineMs ? { deadlineMs, timeoutMs: deadlineMs } : {};
+  const cutoffMs = evalCutoff(env);
+  return {
+    ...(deadlineMs ? { deadlineMs, timeoutMs: deadlineMs } : {}),
+    ...(cutoffMs !== undefined ? { cutoffMs } : {}),
+  };
 }
 
 /**
@@ -511,11 +541,13 @@ export function chooseModel(
 ): EvalModel {
   if (env.OPENROUTER_API_KEY?.trim()) {
     const deadlineMs = evalDeadline(env);
+    const cutoffMs = evalCutoff(env);
     return {
       kind: 'real',
       model: suggestModel(env),
       ...(surface === 'chat' ? { thinking: suggestThinking(env) } : {}),
       ...(deadlineMs ? { deadlineMs } : {}),
+      ...(surface === 'chat' && cutoffMs !== undefined ? { cutoffMs } : {}),
     };
   }
   return { kind: 'fake', model: FAKE_MODEL_ID };
@@ -570,7 +602,6 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
                 intent: 'question',
                 faqId: first ?? 'none',
                 confidence: 'sure',
-                ...(shape.kind === 'pick_v5' ? { tone: 'none' } : {}),
               });
         return pi.ai.fauxAssistantMessage([call], { stopReason: 'toolUse' });
       },

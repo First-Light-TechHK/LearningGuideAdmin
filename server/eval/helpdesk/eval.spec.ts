@@ -14,6 +14,8 @@ import {
   caseLanguage,
   chooseModel,
   DEFAULT_BUDGET_USD,
+  deadlineDeps,
+  evalCutoff,
   evalDeadline,
   EVAL_LANGUAGES,
   EVAL_LOCALES,
@@ -1189,6 +1191,37 @@ describe('model and budget settings', () => {
       kind: 'fake',
       model: FAKE_MODEL_ID,
     });
+  });
+
+  it('takes the thinking cut-off from HELPDESK_EVAL_CUTOFF_MS (0 = thinking only, no backup) and names it in the label', () => {
+    // 线上思考截在 6.3 秒、同时发不思考的后备；评测要比截断前后
+    expect(evalCutoff({})).toBeUndefined();
+    expect(evalCutoff({ HELPDESK_EVAL_CUTOFF_MS: ' 0 ' })).toBe(0);
+    expect(evalCutoff({ HELPDESK_EVAL_CUTOFF_MS: '6300' })).toBe(6_300);
+    for (const bad of ['-5', '1.5', 'abc', '600001'])
+      expect(() => evalCutoff({ HELPDESK_EVAL_CUTOFF_MS: bad })).toThrow(
+        'HELPDESK_EVAL_CUTOFF_MS must be a whole number of milliseconds, 0 to 600000',
+      );
+    const env = {
+      OPENROUTER_API_KEY: 'k',
+      HELPDESK_EVAL_DEADLINE_MS: '60000',
+      HELPDESK_EVAL_CUTOFF_MS: '0',
+    };
+    expect(deadlineDeps(env)).toEqual({
+      deadlineMs: 60_000,
+      timeoutMs: 60_000,
+      cutoffMs: 0,
+    });
+    expect(deadlineDeps({})).toEqual({});
+    const model = chooseModel(env);
+    expect(model).toMatchObject({ deadlineMs: 60_000, cutoffMs: 0 });
+    expect(thinkingLabel(model)).toBe(
+      ', thinking high, deadline 60000 ms, no backup',
+    );
+    expect(
+      thinkingLabel(chooseModel({ ...env, HELPDESK_EVAL_CUTOFF_MS: '9000' })),
+    ).toBe(', thinking high, deadline 60000 ms, cut-off 9000 ms');
+    expect(chooseModel(env, 'ticket')).not.toHaveProperty('cutoffMs');
   });
 
   it('caps spend at HELPDESK_EVAL_BUDGET_USD, 5 USD by default', () => {

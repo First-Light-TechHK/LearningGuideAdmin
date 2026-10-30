@@ -8,6 +8,7 @@ import type {
   AgentStepSpec,
 } from '../../src/ai/helpdesk/workflow/engine';
 import {
+  CONVERSATION_SETS,
   loadConversations,
   runConversations,
   summarizeConversations,
@@ -121,6 +122,41 @@ describe('generator-format v5 sets', () => {
         { message: '天气', expect: { kind: 'no_match' } },
       ],
     });
+  });
+
+  it('reads the single-question set (S650: one first message per line, labels by card key)', () => {
+    // 2026-10-30：650 张卡每张 4 条单句 + 800 条反例；style / source / state / group 只是标注
+    const c = fromGeneratorFormat(
+      {
+        id: 's650-b1-0002',
+        set: 'single',
+        locale: 'zh-TW',
+        persona: 'worried',
+        style: 'paraphrase',
+        source: 'refund--after-lessons',
+        state: ['paid_active'],
+        turns: [
+          {
+            learner: '上過兩堂課還能退費嗎',
+            expect: { kind: 'answer', faq: 'refund--after-lessons' },
+          },
+        ],
+      },
+      library,
+    );
+    expect(c).toEqual({
+      id: 's650-b1-0002',
+      set: 'single',
+      locale: 'zh-TW',
+      persona: 'worried',
+      turns: [
+        {
+          message: '上過兩堂課還能退費嗎',
+          expect: { kind: 'answer', faqId: FAQ(12), entryIds: [FAQ(13)] },
+        },
+      ],
+    });
+    expect(CONVERSATION_SETS).toContain('single');
   });
 
   it('refuses an unknown key, an unknown intent, and keys without a released library', () => {

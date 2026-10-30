@@ -34,7 +34,9 @@ import {
   runWorkflow,
   THINKING_LEVELS,
   type AgentStepRunner,
+  type ModelTarget,
   type ThinkingSetting,
+  type WorkflowDeps,
   type WorkflowTemplate,
 } from './workflow/engine';
 import {
@@ -65,7 +67,8 @@ import { learnerOf } from './workflow/guard';
  *    或 none；模型写在代码里（DEFAULT_MODEL），HELPDESK_SUGGEST_MODEL 只在要换模型时才设，
  *    key / 模型 / base URL 每次现读；3 秒 AbortSignal、不重试，且整次推荐不超过 3.5 秒
  *    （Portal 等 4 秒），过期的答案不返回、不记 faq_id；没有 API key、任何错误都返回 null
- *    （绝不阻塞学员提交工单）；v5 聊天缺省开思考（high），期限放到 15 秒（suggestLimits）；
+ *    （绝不阻塞学员提交工单）；v5 聊天缺省开思考（high），思考最多 6.3 秒，同时发一个不思考的后备，
+ *    整次最多 8 秒（suggestLimits）；
  * 4. validate → answer：再核一遍是候选之一，返回库里的原答案，模型从不写给学员看的文字；
  * 5. 每次检索写一行 helpdesk_suggestions；query_text 90 天后清空（本实例每小时最多清一次）；
  * 6. 链路：每次推荐一个 run（id = Portal 给的 runId，否则新的 uuidv7；答中时也是 suggestion id），
@@ -91,10 +94,16 @@ export const SUGGEST_TIMEOUT_MS = 3_000;
  */
 export const SUGGEST_DEADLINE_MS = 3_500;
 /**
- * 聊天开思考时的总期限（也是那一步的时限）：2026-10-30 盲评 DeepSeek high 档 p95 6.3 秒、p99 12.6 秒。
- * Portal 聊天要等得比这更久（Portal 显示「思考中」）；提交工单不思考，仍是 3.5 秒。
+ * 聊天开思考时，思考那一路最多等多久（用户 2026-10-30：截在 6.3 秒，指标不能降）。同时发一个不思考的
+ * 请求做后备：思考那一路到点没走完或出错，就用后备的回答。录下的 256 次思考按此模拟：long 错卡 0.72%、
+ * 答对 92.8%（不截断 0.45% / 93.0%）。
  */
-export const SUGGEST_THINKING_DEADLINE_MS = 15_000;
+export const SUGGEST_THINKING_CUTOFF_MS = 6_300;
+/**
+ * 聊天开思考时的总期限：后备那一路（不思考，一般 1–2 秒）最晚到这里。Portal 聊天要等得比这更久
+ * （Portal 显示「思考中」）；提交工单不思考，仍是 3.5 秒。
+ */
+export const SUGGEST_THINKING_DEADLINE_MS = 8_000;
 /** 聊天的缺省思考档位（用户 2026-10-30：DeepSeek 开 thinking；盲评 high 档错卡最少）。 */
 export const DEFAULT_CHAT_THINKING: ThinkingSetting = 'high';
 export const SUGGEST_CANDIDATES = 8;
@@ -202,6 +211,8 @@ export type HelpdeskSuggestDeps = {
   timeoutMs?: number;
   /** 整次推荐的总期限（默认见 suggestLimits）；只有评测放宽（思考档位要看不截时限的质量与延迟）。 */
   deadlineMs?: number;
+  /** 思考那一路的截断（默认见 suggestLimits）；只有评测改。 */
+  cutoffMs?: number;
   now?: () => number;
 };
 
@@ -225,13 +236,19 @@ export function suggestThinking(env: NodeJS.ProcessEnv): ThinkingSetting {
 }
 
 /**
- * 这一次的思考档位、总期限与模型那一步的时限。只有 v5 聊天思考：提交工单（Portal 最多等 5 秒、
- * 绝不挡提交）与没有 context 的旧聊天不思考（不带 thinking，runner 发 effort none）。
+ * 这一次的思考档位、总期限、模型那一步的时限，以及思考那一路的截断（有它就同时发不思考的后备）。
+ * 只有 v5 聊天思考：提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天不思考
+ * （不带 thinking，runner 发 effort none）。
  */
 export function suggestLimits(
   v5: boolean,
   env: NodeJS.ProcessEnv,
-): { thinking?: ThinkingSetting; deadlineMs: number; stepMs: number } {
+): {
+  thinking?: ThinkingSetting;
+  deadlineMs: number;
+  stepMs: number;
+  cutoffMs?: number;
+} {
   const quick = { deadlineMs: SUGGEST_DEADLINE_MS, stepMs: SUGGEST_TIMEOUT_MS };
   if (!v5) return quick;
   const thinking = suggestThinking(env);
@@ -241,8 +258,30 @@ export function suggestLimits(
         thinking,
         deadlineMs: SUGGEST_THINKING_DEADLINE_MS,
         stepMs: SUGGEST_THINKING_DEADLINE_MS,
+        cutoffMs: SUGGEST_THINKING_CUTOFF_MS,
       };
 }
+
+/** 同一次推荐的两路（思考、后备）查的是同样的东西：每样只查一次。 */
+function sharedLookups(qa: HelpdeskQaSource): HelpdeskQaSource {
+  const seen = new Map<string, Promise<unknown>>();
+  const once = <T>(key: string, load: () => Promise<T>): Promise<T> => {
+    if (!seen.has(key)) seen.set(key, load());
+    return seen.get(key) as Promise<T>;
+  };
+  return {
+    findCandidates: (search) =>
+      once(`candidates:${JSON.stringify(search)}`, () =>
+        qa.findCandidates(search),
+      ),
+    findPublished: (id, locale) =>
+      once(`published:${id}:${locale}`, () => qa.findPublished(id, locale)),
+    findPopular: (search) => qa.findPopular(search),
+  };
+}
+
+/** 思考那一路正常走完（答了或确定没有）才用它；超时、出错、放弃都换后备。 */
+const SETTLED: readonly TurnEndReason[] = ['answered', 'no_match'];
 
 function invalid(detail: string) {
   return problem(400, 'invalid_request', detail);
@@ -362,6 +401,8 @@ type Decided = {
   reason: TurnEndReason;
   model: string | null;
   assisted?: Assisted;
+  /** 开思考的聊天用了哪一路（thinking 或不思考的后备 quick）；没有后备时不给。 */
+  branch?: 'thinking' | 'quick';
 };
 
 /** v5 回包：context 只对聊天面板（chat / chip）有意义；提交工单的回包不变。 */
@@ -516,6 +557,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       model: decided.model,
       latencyMs: this.now() - started,
       alternatives: alternatives.map((a) => a.faqId),
+      ...(decided.branch ? { branch: decided.branch } : {}),
       ...(fields
         ? {
             kind: fields.kind,
@@ -628,6 +670,10 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     const limits = suggestLimits(isV5(input), env);
     const deadline = this.now() + (this.deps.deadlineMs ?? limits.deadlineMs);
     const left = () => deadline - this.now();
+    const cutoffMs = limits.cutoffMs && (this.deps.cutoffMs ?? limits.cutoffMs);
+    const cutoff = cutoffMs ? this.now() + cutoffMs : deadline;
+    // 思考那一路：到截断或总期限，先到哪个算哪个
+    const thinkLeft = () => Math.min(cutoff, deadline) - this.now();
     const limit =
       input.source === 'submit' ? SUGGEST_RATE_LIMIT : ASSIST_RATE_LIMIT;
     const allowed = await this.deps.rateLimit.tryHit(
@@ -692,16 +738,51 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       ...(thinking ? { thinking } : {}),
     };
     if (isV5(input)) {
-      const { state, reason, trail } = await runWorkflow(
-        assistWorkflow({ qa: this.deps.qa, limit: ASSIST_CANDIDATES, left }),
-        initialAssistState({
-          locale: input.locale,
-          category: input.faqCategory,
-          message: input.message,
-          context: input.context as SuggestRequestContext,
-        }),
-        { ...steps, runner: this.deps.runner, model: modelTarget },
-      );
+      // 开思考：同时发一个不思考的后备（不报步骤给「思考中」面板，步骤记 branch quick）
+      const hedged = cutoffMs !== undefined && cutoffMs > 0;
+      const qa = hedged ? sharedLookups(this.deps.qa) : this.deps.qa;
+      const assist = (
+        target: ModelTarget,
+        until: () => number,
+        extra: Partial<WorkflowDeps> = {},
+      ) =>
+        runWorkflow(
+          assistWorkflow({ qa, limit: ASSIST_CANDIDATES, left: until }),
+          initialAssistState({
+            locale: input.locale,
+            category: input.faqCategory,
+            message: input.message,
+            context: input.context as SuggestRequestContext,
+          }),
+          {
+            ...steps,
+            stepTimeoutMs: () =>
+              Math.min(this.deps.timeoutMs ?? limits.stepMs, until()),
+            runner: this.deps.runner,
+            model: target,
+            ...extra,
+          },
+        );
+      const stopBackup = new AbortController();
+      const backup = hedged
+        ? assist({ ...modelTarget, thinking: 'off' }, left, {
+            signal: callerSignal
+              ? AbortSignal.any([callerSignal, stopBackup.signal])
+              : stopBackup.signal,
+            onStep: undefined,
+            branch: 'quick',
+          })
+        : null;
+      let { state, reason, trail } = await assist(modelTarget, thinkLeft);
+      let branch: Decided['branch'];
+      if (backup) {
+        branch = 'thinking';
+        if (SETTLED.includes(reason) && thinkLeft() > 0) stopBackup.abort();
+        else {
+          ({ state, reason, trail } = await backup);
+          branch = 'quick';
+        }
+      }
       // 没给卡片时模型（不确定地）选中的那张排在「你可能想问」第一个
       const picked = state.turn
         ? null
@@ -734,6 +815,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
           confidence: state.confidence,
         },
         release: retrieved.release,
+        branch,
       });
     }
 
@@ -783,6 +865,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       left: () => number;
       assisted?: Assisted;
       release?: Promise<number | null>;
+      branch?: Decided['branch'];
     },
   ): Promise<Decided> {
     let { chosen, reason, assisted } = result;
@@ -825,7 +908,13 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         : {}),
     });
     this.purgeLater();
-    return { chosen, reason, model: result.model, assisted };
+    return {
+      chosen,
+      reason,
+      model: result.model,
+      assisted,
+      ...(result.branch ? { branch: result.branch } : {}),
+    };
   }
 
   /** 没有定时任务：每个实例每小时最多顺手清一次 90 天前的学员原文（失败不影响推荐）。 */

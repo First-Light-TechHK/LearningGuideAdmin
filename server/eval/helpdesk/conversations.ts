@@ -56,7 +56,7 @@ import {
  * 不调 Admin（graph design §4：点击只由代码处理）；学员明说要人工（v4 的关键词，Portal 代码判）也不调 Admin。
  *
  * 文件格式（JSONL，一行一段对话；--conversations 给一个文件或一个目录，目录里的 *.jsonl 全读）：
- *   {"id":"mt-0001","set":"multi_turn"|"casual","locale":"zh-CN"|"zh-TW"|"en-GB","language":"mixed"?,
+ *   {"id":"mt-0001","set":"multi_turn"|"casual"|"single","locale":"zh-CN"|"zh-TW"|"en-GB","language":"mixed"?,
  *    "persona":"user","flow":"clarify_clause"?,"note":"…"?,
  *    "turns":[{"message":"…","expect":{"kind":"answer","faqId":"<uuid>"}},
  *             {"message":"没看懂","expect":{"kind":"clarify","faqId":"<uuid>","covered":true}},
@@ -71,7 +71,8 @@ import {
  * LLM 评审单独打分（不在这里）。假模型（没有 key）的数字只说明评测能跑。
  */
 
-export const CONVERSATION_SETS = ['multi_turn', 'casual'] as const;
+/** single：S650 单句集（每张卡 4 条首句 + 反例，2026-10-30）。 */
+export const CONVERSATION_SETS = ['multi_turn', 'casual', 'single'] as const;
 export type ConversationSet = (typeof CONVERSATION_SETS)[number];
 
 export const EXPECTED_KINDS = [
@@ -283,6 +284,8 @@ export type GotTurn = {
   /** 复核用（agent 事件里取）：检索给模型的候选 id（按顺序）与 pick_faq 的 confidence。 */
   candidateIds?: string[];
   confidence?: string | null;
+  /** 开思考时回答出自哪一路（thinking 或不思考的后备 quick）；没有后备为 null。 */
+  branch?: 'thinking' | 'quick' | null;
   /** 复核用：学员看到的模型短句（诚恳度复核要读原话）；没有的字段不写。 */
   said?: Partial<
     Record<'opening' | 'closing' | 'reply' | 'explanation', string>
@@ -460,12 +463,24 @@ function escapesOf(
   return out;
 }
 
-/** 从这一轮的 agent 事件里取检索候选与 pick_faq 的 confidence（只用于复核）。 */
-function stepDetails(log: { type: string; data: Record<string, unknown> }[]): {
+/**
+ * 从这一轮的 agent 事件里取检索候选与 pick_faq 的 confidence（只用于复核），只看给出回答的那一路
+ * （turn/end.branch；后备那一路的步骤带 branch quick）。
+ */
+export function stepDetails(
+  log: { type: string; data: Record<string, unknown> }[],
+): {
   candidateIds: string[];
   confidence: string | null;
+  branch: 'thinking' | 'quick' | null;
 } {
-  const ends = log.filter((e) => e.type === 'step/end');
+  const used = log.find((e) => e.type === 'turn/end')?.data.branch;
+  const branch = used === 'thinking' || used === 'quick' ? used : null;
+  const ends = log.filter(
+    (e) =>
+      e.type === 'step/end' &&
+      (e.data.branch === 'quick') === (branch === 'quick'),
+  );
   const retrieve = ends.find((e) => e.data.name === 'retrieve')?.data.output as
     { candidates?: { id?: unknown }[] } | undefined;
   const pick = ends.find((e) => e.data.name === 'pick_faq')?.data.args as
@@ -475,6 +490,7 @@ function stepDetails(log: { type: string; data: Record<string, unknown> }[]): {
       .map((c) => c.id)
       .filter((id): id is string => typeof id === 'string'),
     confidence: typeof pick?.confidence === 'string' ? pick.confidence : null,
+    branch,
   };
 }
 

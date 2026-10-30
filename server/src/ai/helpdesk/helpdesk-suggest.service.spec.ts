@@ -15,6 +15,7 @@ import {
   suggestModel,
   suggestThinking,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_THINKING_CUTOFF_MS,
   SUGGEST_THINKING_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
   SUGGEST_TIMEOUT_MS,
@@ -930,20 +931,28 @@ describe('Helpdesk suggest: model choice', () => {
       expect(context.model).not.toHaveProperty('thinking');
   });
 
-  it('gives a thinking chat 15 s in all (p99 of high was 12.6 s), and 3.5 s with thinking off', () => {
-    expect(SUGGEST_THINKING_DEADLINE_MS).toBe(15_000);
+  it('cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
+    // 用户 2026-10-30：思考截在 6.3 秒（盲评 high 档 p95 6.3 秒、p99 12.6 秒），同时发不思考的后备
+    expect(SUGGEST_THINKING_CUTOFF_MS).toBe(6_300);
+    expect(SUGGEST_THINKING_DEADLINE_MS).toBe(8_000);
     expect(suggestLimits(true, {})).toEqual({
       thinking: 'high',
-      deadlineMs: 15_000,
-      stepMs: 15_000,
+      deadlineMs: 8_000,
+      stepMs: 8_000,
+      cutoffMs: 6_300,
     });
     expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'low' })).toEqual({
       thinking: 'low',
-      deadlineMs: 15_000,
-      stepMs: 15_000,
+      deadlineMs: 8_000,
+      stepMs: 8_000,
+      cutoffMs: 6_300,
     });
     expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'off' })).toEqual({
       thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
+    expect(suggestLimits(false, {})).toEqual({
       deadlineMs: 3_500,
       stepMs: 3_000,
     });

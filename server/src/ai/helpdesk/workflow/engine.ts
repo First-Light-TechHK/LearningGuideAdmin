@@ -125,6 +125,8 @@ export type WorkflowDeps = {
   traceparent: () => string;
   /** 每开一步就告诉调用方步骤名（Portal 的「思考中」面板）；它抛错也不影响这次 run。 */
   onStep?: (name: string) => void;
+  /** 同一次推荐里并行的另一路（例如不思考的后备）：每个 step/start、step/end 都带上它。 */
+  branch?: string;
 };
 
 const ABORTED: AgentStepOutcome = { kind: 'aborted' };
@@ -173,6 +175,7 @@ export async function runWorkflow<S>(
   let state = initial;
   let name = template.start;
   const trail: string[] = [];
+  const branch: JsonObject = deps.branch ? { branch: deps.branch } : {};
   // 每一步至多走一次：步骤表多大，就最多走多少步
   for (let taken = 0; taken < Object.keys(template.steps).length; taken++) {
     const step = Object.hasOwn(template.steps, name)
@@ -188,7 +191,13 @@ export async function runWorkflow<S>(
     const no = trace.nextStep();
     let then: Transition;
     if (step.kind === 'code') {
-      trace.emit('step/start', { turn, step: no, name, kind: 'code' });
+      trace.emit('step/start', {
+        turn,
+        step: no,
+        name,
+        kind: 'code',
+        ...branch,
+      });
       try {
         const result = await step.run(state);
         state = result.state;
@@ -198,6 +207,7 @@ export async function runWorkflow<S>(
           step: no,
           name,
           kind: 'code',
+          ...branch,
           then,
           ...(result.output ? { output: result.output } : {}),
         });
@@ -208,6 +218,7 @@ export async function runWorkflow<S>(
           step: no,
           name,
           kind: 'code',
+          ...branch,
           then,
           error: {
             name: error instanceof Error ? error.name : 'Error',
@@ -223,6 +234,7 @@ export async function runWorkflow<S>(
         name,
         kind: 'agent',
         tools: [spec.tool.name],
+        ...branch,
       });
       const timeout = AbortSignal.timeout(Math.max(1, deps.stepTimeoutMs()));
       const signal = deps.signal
@@ -260,6 +272,7 @@ export async function runWorkflow<S>(
         step: no,
         name,
         kind: 'agent',
+        ...branch,
         outcome: outcome.kind,
         ...(outcome.kind === 'called' ? { args: outcome.args } : {}),
         // 模型写的短句只记长度（文字可能复述学员原文）；列表与真 / 假是枚举，原样记

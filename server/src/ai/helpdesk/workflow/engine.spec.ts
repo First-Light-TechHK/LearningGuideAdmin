@@ -222,6 +222,17 @@ describe('runWorkflow', () => {
     expect(result).toMatchObject({ reason: 'answered', trail: seen });
   });
 
+  it('labels every step of a side branch, so two runs of one request stay apart in the trace', async () => {
+    // 聊天开思考时同一次推荐同时跑两路（思考、不思考的后备）：后备那一路的步骤带 branch
+    const { deps, events } = setup({
+      run: () => Promise.resolve({ kind: 'called', args: { option: 'a' } }),
+    });
+    await runWorkflow(template, { trail: [] }, { ...deps, branch: 'quick' });
+    const steps = (await events()).filter((e) => e.type.startsWith('step/'));
+    expect(steps).toHaveLength(6);
+    expect(steps.map((e) => e.data.branch)).toEqual(Array(6).fill('quick'));
+  });
+
   it('lets the template decide on no tool call', async () => {
     const { deps } = setup({ run: () => Promise.resolve({ kind: 'no_call' }) });
     await expect(

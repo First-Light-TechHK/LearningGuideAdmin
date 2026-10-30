@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { Pool } from 'pg';
 
 import type {
+  AgentStepContext,
   AgentStepOutcome,
   AgentStepRunner,
   AgentStepSpec,
@@ -24,6 +25,7 @@ import {
   markdownConversationReport,
   runConversations,
   summarizeConversations,
+  stepDetails,
   type ConversationOutcome,
   type EvalConversation,
   type TurnResult,
@@ -190,12 +192,16 @@ function scriptedRunner(script: {
 }) {
   const prompts: Record<string, unknown>[] = [];
   const runner: AgentStepRunner = {
-    run(spec: AgentStepSpec): Promise<AgentStepOutcome> {
+    run(
+      spec: AgentStepSpec,
+      context: AgentStepContext,
+    ): Promise<AgentStepOutcome> {
       const prompt = JSON.parse(spec.prompt) as Record<string, unknown> & {
         candidates?: { id: string }[];
         shown?: { id: string } | null;
       };
-      prompts.push(prompt);
+      // 开思考的聊天同时发一个不思考的后备：只记思考那一路（两路的提示一样）
+      if (context.model.thinking !== 'off') prompts.push(prompt);
       if (spec.tool.name === 'explain') {
         const e = script.explain?.[prompt.followUp as string] ?? {
           covered: false,
@@ -237,6 +243,43 @@ const ENV = {
   OPENROUTER_BASE_URL: 'http://fake-model.invalid/api/v1',
   HELPDESK_SUGGEST_MODEL: 'fake/scripted',
 };
+
+describe('which branch answered', () => {
+  // 开思考的聊天同时跑两路：复核要看给出回答的那一路的候选与 confidence
+  const step = (name: string, data: Record<string, unknown>) => ({
+    type: 'step/end',
+    data: { name, ...data },
+  });
+  const log = (branch?: string) => [
+    step('retrieve', {
+      branch: 'quick',
+      output: { candidates: [{ id: 'q1' }] },
+    }),
+    step('retrieve', { output: { candidates: [{ id: 't1' }, { id: 't2' }] } }),
+    step('pick_faq', { branch: 'quick', args: { confidence: 'sure' } }),
+    step('pick_faq', { args: { confidence: 'unsure' } }),
+    { type: 'turn/end', data: branch ? { branch } : {} },
+  ];
+
+  it.each([
+    ['thinking', ['t1', 't2'], 'unsure'],
+    ['quick', ['q1'], 'sure'],
+  ])('reads the steps of the %s branch', (branch, candidateIds, confidence) => {
+    expect(stepDetails(log(branch))).toEqual({
+      candidateIds,
+      confidence,
+      branch,
+    });
+  });
+
+  it('reads the only branch when there is no backup', () => {
+    expect(stepDetails(log().slice(1))).toEqual({
+      candidateIds: ['t1', 't2'],
+      confidence: 'unsure',
+      branch: null,
+    });
+  });
+});
 
 describe('running conversations like the Portal chat', () => {
   const conversation: EvalConversation = {

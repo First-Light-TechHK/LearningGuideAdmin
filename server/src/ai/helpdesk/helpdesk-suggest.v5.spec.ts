@@ -13,6 +13,7 @@ import {
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_THINKING_CUTOFF_MS,
   SUGGEST_THINKING_DEADLINE_MS,
 } from './helpdesk-suggest.service';
 import type {
@@ -28,7 +29,7 @@ import type {
   AgentStepSpec,
 } from './workflow/engine';
 import { PICK_FAQ_V5_SYSTEM } from './workflow/assist-workflow';
-import { ANSWER_LINES, ANSWER_TONES, TEMPLATES } from './workflow/guard';
+import { ANSWER_LINES, TEMPLATES } from './workflow/guard';
 import { LEARNER_STATE_RULE } from './workflow/learner-facts';
 import {
   loadPi,
@@ -134,7 +135,6 @@ function pick(
   options: {
     confidence?: string;
     blocks?: string[];
-    tone?: string;
     reply?: string;
   } = {},
 ) {
@@ -145,7 +145,6 @@ function pick(
       intent,
       faqId,
       confidence: options.confidence ?? 'sure',
-      ...(options.tone !== undefined ? { tone: options.tone } : {}),
     },
     { lists: options.blocks ? { blocks: options.blocks } : {}, texts },
   );
@@ -198,7 +197,6 @@ function setup(
           (() =>
             pick('question', PAID.id, {
               blocks: ['b2', 'b3'],
-              tone: 'problem',
             }))
         )(spec, context),
   );
@@ -301,7 +299,7 @@ describe('v5 is opt-in: requests without context get exactly the v5 answer', () 
 });
 
 describe('v5 answer: opening, excerpt, closing (Part H)', () => {
-  it('answers with the fixed lines of the tone the model chose, the excerpt blocks and the release version', async () => {
+  it('answers with the fixed lines of the tone the message calls for, the excerpt blocks and the release version', async () => {
     const { service, run, findCandidates } = setup();
     const result = await ask(
       service,
@@ -344,11 +342,10 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
       intent: SUGGEST_INTENTS,
       faqId: [PAID.id, FAILED.id, RESET.id, 'none'],
       confidence: ['sure', 'unsure'],
-      tone: [...ANSWER_TONES, 'none'],
     });
     // 只有 PAID 的答案够长、可以摘录：块 id 来自它
     expect(spec.tool.listArgs).toEqual({ blocks: ['b1', 'b2', 'b3', 'b4'] });
-    // 开头结尾不让模型写（只选 tone），模型只写寒暄回复
+    // 开头结尾不让模型写，语气也由代码定（answerToneOf）；模型只写寒暄回复
     expect(Object.keys(spec.tool.textArgs ?? {})).toEqual(['reply']);
     const prompt = JSON.parse(spec.prompt) as Record<string, unknown> & {
       candidates: Record<string, unknown>[];
@@ -372,56 +369,59 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
     expect(prompt.candidates[1].blocks).toBeUndefined();
   });
 
-  it.each([['none'], ['unknown'], [undefined]])(
-    'uses the default lines when the tone is %s, and says so',
-    async (tone) => {
+  it.each([
+    ['paid not active', ['b2', 'b3'], 'problem'],
+    ['how do I get my plan working after paying?', ['b2', 'b3'], 'steps'],
+    // 摘录里没有步骤：不说「按下面的步骤来」
+    ['how do I get my plan working after paying?', ['b4'], 'explain'],
+    ['when does a plan start after paying?', [], 'explain'],
+  ] as const)(
+    'decides the tone in code from the message and the text shown, whatever the model says: %s %j',
+    async (message, blocks, tone) => {
+      // 2026-10-30 录下的思考：34 次长思考里 29 次在纠结 tone，所以不再问模型
       const { service } = setup({
-        pick: () => pick('question', PAID.id, { tone }),
+        pick: () =>
+          called(
+            {
+              intent: 'question',
+              faqId: PAID.id,
+              confidence: 'sure',
+              tone: 'none',
+            },
+            { lists: { blocks: [...blocks] }, texts: {} },
+          ),
       });
-      const result = await ask(service, chat('paid not active'));
-      expect(result).toMatchObject({
-        opening: TEMPLATES.opening.en,
-        closing: TEMPLATES.closing.en,
-        guard: {
-          result: 'fallback',
-          reason: 'missing',
-          fallback: ['opening', 'closing'],
-        },
+      expect(await ask(service, chat(message))).toMatchObject({
+        blocks,
+        opening: ANSWER_LINES[tone].opening.en,
+        closing: ANSWER_LINES[tone].closing.en,
+        guard: { result: 'passed', reason: null, fallback: [] },
       });
     },
   );
 
-  it("writes the chosen tone's lines in the learner's script (zh-CN / zh-TW)", async () => {
-    const { service } = setup({
-      pick: () => pick('question', PAID.id, { tone: 'explain' }),
-    });
-    expect(
-      await ask(service, { ...chat('我付了钱但是没开通'), locale: 'zh-CN' }),
-    ).toMatchObject({
-      opening: ANSWER_LINES.explain.opening['zh-CN'],
-      closing: ANSWER_LINES.explain.closing['zh-CN'],
-    });
-    expect(
-      await ask(service, { ...chat('我付了錢但是沒開通'), locale: 'zh-CN' }),
-    ).toMatchObject({
-      opening: ANSWER_LINES.explain.opening['zh-TW'],
-      closing: ANSWER_LINES.explain.closing['zh-TW'],
-    });
-  });
-
-  it("writes the templates in the learner's script (zh-CN / zh-TW)", async () => {
+  it("writes the lines in the learner's script (zh-CN / zh-TW)", async () => {
     const { service } = setup({ pick: () => pick('question', PAID.id) });
     expect(
       await ask(service, { ...chat('我付了钱但是没开通'), locale: 'zh-CN' }),
     ).toMatchObject({
-      opening: TEMPLATES.opening['zh-CN'],
-      closing: TEMPLATES.closing['zh-CN'],
+      opening: ANSWER_LINES.problem.opening['zh-CN'],
+      closing: ANSWER_LINES.problem.closing['zh-CN'],
     });
     expect(
       await ask(service, { ...chat('我付了錢但是沒開通'), locale: 'zh-CN' }),
     ).toMatchObject({
-      opening: TEMPLATES.opening['zh-TW'],
-      closing: TEMPLATES.closing['zh-TW'],
+      opening: ANSWER_LINES.problem.opening['zh-TW'],
+      closing: ANSWER_LINES.problem.closing['zh-TW'],
+    });
+    expect(
+      await ask(service, {
+        ...chat('我付了錢，課程什麼時候開通'),
+        locale: 'zh-CN',
+      }),
+    ).toMatchObject({
+      opening: ANSWER_LINES.explain.opening['zh-TW'],
+      closing: ANSWER_LINES.explain.closing['zh-TW'],
     });
   });
 
@@ -463,7 +463,6 @@ describe('v5 choice cards: unsure → the learner picks (graph design §4)', () 
       pick: () =>
         pick('question', PAID.id, {
           confidence: 'unsure',
-          tone: 'steps',
         }),
     });
     const result = await ask(service, chat('payment problem'));
@@ -498,7 +497,7 @@ describe('v5 choice cards: unsure → the learner picks (graph design §4)', () 
     const { service } = setup({ pick: () => pick('question', FAILED.id) });
     expect(await ask(service, chat('my card was declined'))).toMatchObject({
       nodeId: FAILED.id,
-      opening: TEMPLATES.opening.en,
+      opening: ANSWER_LINES.problem.opening.en,
     });
   });
 
@@ -579,7 +578,8 @@ describe('v5 small talk (Part B)', () => {
       guard: { result: 'passed', reason: null, fallback: [] },
       releaseVersion: 3,
     });
-    expect(run).toHaveBeenCalledTimes(1);
+    // 思考那一路与同时发出的不思考后备，各问一次
+    expect(run).toHaveBeenCalledTimes(2);
     expect(findPopular).not.toHaveBeenCalled();
   });
 
@@ -846,6 +846,39 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     );
   });
 
+  it('tells the model which words of the shown answer the message repeats, and nothing when it repeats none', async () => {
+    // 2026-10-30 录下的思考：「这句是在问屏幕上的卡片还是新问题」反复纠结；原样引用由代码先找出来
+    const { service, run } = setup({
+      found: [FAILED, RESET],
+      pick: () => pick('clarify', PAID.id),
+    });
+    await ask(
+      service,
+      chat('what do you mean by "sign out and sign in again"?', shown),
+    );
+    const shownOf = (n: number) =>
+      (
+        JSON.parse(
+          run.mock.calls.filter(
+            ([spec, context]) =>
+              spec.tool.name === 'pick_faq' && context.model.thinking !== 'off',
+          )[n][0].prompt,
+        ) as { shown: Record<string, unknown> }
+      ).shown;
+    expect(shownOf(0)).toEqual({
+      id: PAID.id,
+      question: PAID.question,
+      answer: PAID.answer,
+      quoted: 'sign out and sign in again',
+    });
+    await ask(service, chat('So do I just have to wait?', shown));
+    expect(shownOf(1)).toEqual({
+      id: PAID.id,
+      question: PAID.question,
+      answer: PAID.answer,
+    });
+  });
+
   it('without a card on screen, clarify is handled like a question', async () => {
     const { service, run } = setup({ pick: () => pick('clarify', PAID.id) });
     expect(await ask(service, chat('what does that mean?'))).toMatchObject({
@@ -947,32 +980,130 @@ describe('v5 without a model call', () => {
     });
   });
 
-  it('thinks high by default and waits up to 15 s for it; with thinking off the 3.5 s deadline holds', async () => {
-    // 用户 2026-10-30：DeepSeek 开 thinking（Portal 放「思考中」动画）。盲评 high 档 p95 6.3 s、p99 12.6 s
-    for (const [thinking, took, kind] of [
-      [undefined, 12_000, 'answer'],
-      [undefined, SUGGEST_THINKING_DEADLINE_MS + 1, 'no_match'],
-      ['low', 12_000, 'answer'],
-      ['off', 3_000, 'answer'],
-      ['off', SUGGEST_DEADLINE_MS + 1, 'no_match'],
-    ] as const) {
+  describe('thinking with a 6.3 s cut-off and a thinking-off backup sent at the same time', () => {
+    // 用户 2026-10-30：思考最多等 6.3 秒、指标不能降。录下的 256 次思考按 6.3 秒截断、超时用不思考的回答
+    // 模拟：long 错卡 0.72%、答对 92.8%（不截断 0.45% / 93.0%）
+    function hedged(options: {
+      thinking?: string;
+      thinkingTakes?: number;
+      thinkingFails?: boolean;
+      quickTakes?: number;
+    }) {
       let now = 1_000;
-      const { service, run } = setup({
-        env: {
-          OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
-          HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
-          ...(thinking ? { HELPDESK_SUGGEST_THINKING: thinking } : {}),
-        },
+      const quickSignals: AbortSignal[] = [];
+      const env = {
+        OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
+        HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+        ...(options.thinking
+          ? { HELPDESK_SUGGEST_THINKING: options.thinking }
+          : {}),
+      };
+      const harness = setup({
+        env,
         now: () => now,
-        pick: () => {
-          now += took;
-          return pick('question', PAID.id, { tone: 'problem' });
+        pick: (_spec, context) => {
+          if (context.model.thinking === 'off') {
+            quickSignals.push(context.signal);
+            now += options.quickTakes ?? 0;
+            return pick('question', FAILED.id);
+          }
+          now += options.thinkingTakes ?? 0;
+          return options.thinkingFails
+            ? Promise.resolve({ kind: 'error', message: 'provider down' })
+            : pick('question', PAID.id);
         },
       });
-      const result = await ask(service, chat('paid'));
-      expect([thinking, took, result.kind]).toEqual([thinking, took, kind]);
-      expect(run.mock.calls[0][1].model.thinking).toBe(thinking ?? 'high');
+      return { ...harness, quickSignals };
     }
+
+    const thinkingOf = (run: ReturnType<typeof setup>['run']) =>
+      run.mock.calls
+        .filter(([spec]) => spec.tool.name === 'pick_faq')
+        .map(([, context]) => context.model.thinking)
+        .sort();
+
+    it('thinks high by default and asks a thinking-off backup at the same time; a thinking answer in time wins and the backup is stopped', async () => {
+      const { service, run, quickSignals, events } = hedged({
+        thinkingTakes: SUGGEST_THINKING_CUTOFF_MS - 1,
+      });
+      const result = await ask(service, {
+        ...chat('paid but not active'),
+        runId: id(600),
+      });
+      expect(result).toMatchObject({ kind: 'answer', nodeId: PAID.id });
+      expect(thinkingOf(run)).toEqual(['high', 'off']);
+      expect(quickSignals[0].aborted).toBe(true);
+      await service.flushTraces();
+      const log = await events.read(id(600));
+      expect(log.find((e) => e.type === 'turn/end')?.data).toMatchObject({
+        branch: 'thinking',
+      });
+    });
+
+    it.each([
+      [
+        'takes longer than 6.3 s',
+        { thinkingTakes: SUGGEST_THINKING_CUTOFF_MS + 1 },
+      ],
+      ['fails', { thinkingFails: true }],
+    ])('uses the backup when the thinking %s', async (_name, options) => {
+      const { service, run, events } = hedged(options);
+      const result = await ask(service, {
+        ...chat('paid but not active'),
+        runId: id(601),
+      });
+      expect(result).toMatchObject({ kind: 'answer', nodeId: FAILED.id });
+      expect(thinkingOf(run)).toEqual(['high', 'off']);
+      await service.flushTraces();
+      const log = await events.read(id(601));
+      expect(log.find((e) => e.type === 'turn/end')?.data).toMatchObject({
+        branch: 'quick',
+      });
+      // 后备那一路的每一步都标了 branch
+      const quickSteps = log.filter(
+        (e) => e.type === 'step/start' && e.data.branch === 'quick',
+      );
+      expect(quickSteps.map((e) => e.data.name)).toEqual([
+        'retrieve',
+        'pick_faq',
+        'route',
+      ]);
+    });
+
+    it('gives up at 8 s when the backup is late too', async () => {
+      const { service } = hedged({
+        thinkingTakes: SUGGEST_THINKING_CUTOFF_MS + 1,
+        quickTakes: SUGGEST_THINKING_DEADLINE_MS - SUGGEST_THINKING_CUTOFF_MS,
+      });
+      expect(await ask(service, chat('paid'))).toMatchObject({
+        kind: 'no_match',
+      });
+    });
+
+    it('hedges every thinking level; with thinking off there is one call and the 3.5 s deadline', async () => {
+      for (const [thinking, calls] of [
+        ['low', ['low', 'off']],
+        ['medium', ['medium', 'off']],
+        ['off', ['off']],
+      ] as const) {
+        const { service, run } = hedged({ thinking });
+        await ask(service, chat('paid'));
+        expect([thinking, thinkingOf(run)]).toEqual([thinking, calls]);
+      }
+      const { service } = hedged({
+        thinking: 'off',
+        quickTakes: SUGGEST_DEADLINE_MS + 1,
+      });
+      expect(await ask(service, chat('paid'))).toMatchObject({
+        kind: 'no_match',
+      });
+    });
+
+    it('looks the candidates up once for both', async () => {
+      const { service, findCandidates } = hedged({});
+      await ask(service, chat('paid'));
+      expect(findCandidates).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('reports releaseVersion null before the first release, and when it cannot be read', async () => {
@@ -1011,11 +1142,7 @@ describe('v5 logging: codes and enums only, model text only in the learner-text 
         confidence: 'sure',
         nodeId: PAID.id,
         blocks: ['b2'],
-        guard: {
-          result: 'fallback',
-          reason: 'missing',
-          fallback: ['opening', 'closing'],
-        },
+        guard: { result: 'passed', reason: null, fallback: [] },
         covered: null,
         sessionId: id(100),
         releaseVersion: 3,
@@ -1106,15 +1233,17 @@ describe('v5 through the real pi runner (faux provider)', () => {
           purgeQueryText: () => Promise.resolve(0),
         },
         events: createMemoryAgentEventLog(),
+        // 不思考：每步一次请求，faux 的回话按顺序对上（思考 + 后备两路见上面 thinking 那组）
         env: () => ({
           OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
           HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+          HELPDESK_SUGGEST_THINKING: 'off',
         }),
       }),
     };
   }
 
-  it('answers with the blocks the model chose and the fixed lines of its tone', async () => {
+  it('answers with the blocks the model chose and the fixed lines of the tone the message calls for', async () => {
     const { service, handle } = await fauxService((pi) => [
       pi.ai.fauxAssistantMessage(
         [
@@ -1123,7 +1252,6 @@ describe('v5 through the real pi runner (faux provider)', () => {
             faqId: PAID.id,
             confidence: 'sure',
             blocks: ['b2', 'b3'],
-            tone: 'problem',
           }),
         ],
         { stopReason: 'toolUse' },
@@ -1148,7 +1276,6 @@ describe('v5 through the real pi runner (faux provider)', () => {
             intent: 'clarify',
             faqId: PAID.id,
             confidence: 'sure',
-            tone: 'none',
           }),
         ],
         { stopReason: 'toolUse' },

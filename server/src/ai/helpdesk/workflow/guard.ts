@@ -40,7 +40,8 @@ const { Converter } = openccT2cn as unknown as {
   Converter: (options: { from: string; to: string }) => Convert;
 };
 let simplifyFn: Convert | null = null;
-function simplify(text: string): string {
+/** 繁体转简体（opencc 台湾、香港两套）；比较中文时先过一遍。 */
+export function simplify(text: string): string {
   if (!simplifyFn) {
     const fromHongKong = Converter({ from: 'hk', to: 'cn' });
     const fromTaiwan = Converter({ from: 'tw', to: 'cn' });
@@ -514,12 +515,79 @@ export const TEMPLATES = {
 } as const;
 
 /**
- * 答案卡片前后的固定短句：模型只选语气（tone），文字由这里给。
+ * 答案卡片前后的固定短句：语气（tone）由代码定（answerToneOf），文字由这里给。
  * steps = 问怎么做；problem = 报告出问题或着急；explain = 问是什么、为什么、能不能、什么时候。
- * 模型选 none 或没选 → TEMPLATES.opening / closing。每一条都必须过守卫（guard.spec.ts 锁定）。
+ * 没有语气（点 chip 不看原话）→ TEMPLATES.opening / closing。每一条都必须过守卫（guard.spec.ts 锁定）。
  */
 export const ANSWER_TONES = ['steps', 'problem', 'explain'] as const;
 export type AnswerTone = (typeof ANSWER_TONES)[number];
+
+/** 报告出问题或着急（中文先转简体再比）。 */
+const PROBLEM_ZH =
+  /不行|不了|没反应|失败|报错|错误|出错|卡住|卡了|卡成|一直|老是|总是|转圈|掉线|闪退|黑屏|没声音|没有声音|听不到|看不到|找不到|收不到|没收到|进不去|打不开|登不上|没出现|没有出现|不显示|不见了|消失|没解锁|没开通|没有开通|未开通|没生效|锁着|锁住|被拒|被扣|扣了|扣钱|怎么回事|急|救命|崩溃|担心|害怕|坏了|无法|不能用|异常|没成功|有问题|出问题|回音|回声|提示|显示|跳出|弹出|不认识|！！|？？/;
+const PROBLEM_EN =
+  /not (?:working|active|unlocked|loading|showing)|doesn'?t work|does not work|won'?t|can'?t|cannot|error|fail|broken|stuck|crash|no sound|missing|disappeared|worried|urgent|charged|locked|never (?:got|received|arrived)|didn'?t (?:get|receive|arrive|work|go through)|declin|echo|freez|buffering|kick|keeps |it says|says |shows |!!|\?\?/i;
+const UPSET = /[😭😩😡😵😰😢😤🥲😫😖]/u;
+const HOW_ZH = /怎么|怎样|如何|在哪|哪里|步骤|点哪|要点|去哪/;
+const HOW_EN =
+  /\bhow (?:do|can|to|should|would)\b|\bwhere (?:do|can|is|are)\b|\bsteps?\b/i;
+const NUMBERED = /^\s*1\.|\n\s*2\./;
+
+/**
+ * 卡片前后短句的语气，由代码按学员原话与卡片答案定（2026-10-30 录下的思考：34 次长思考里 29 次在纠结
+ * tone）：报告出问题或着急 → problem；问怎么做、而卡片是编号步骤 → steps；其余 explain。
+ */
+export function answerToneOf(message: string, answer: string): AnswerTone {
+  const zh = simplify(message);
+  if (PROBLEM_ZH.test(zh) || PROBLEM_EN.test(message) || UPSET.test(message))
+    return 'problem';
+  if ((HOW_ZH.test(zh) || HOW_EN.test(message)) && NUMBERED.test(answer))
+    return 'steps';
+  return 'explain';
+}
+
+/** 引用够长才算：连续 6 个汉字，或连续 4 个英文词。 */
+const QUOTE_MIN = { han: 6, words: 4 } as const;
+/** 只比学员话的前 300 个字词、答案的前 3000 个（最长公共子串 O(n·m)）。 */
+const QUOTE_UNITS = { message: 300, answer: 3000 } as const;
+
+/** 比较单位：一个汉字或一个词（繁转简、全角转半角、小写；标点、空白、** 不算）。 */
+function quoteUnits(text: string, max: number): string[] {
+  return (
+    simplify(text.normalize('NFKC'))
+      .toLowerCase()
+      .match(/\p{Script=Han}|[\p{L}\p{N}]+(?:'\p{L}+)?/gu) ?? []
+  ).slice(0, max);
+}
+
+/**
+ * 学员原样引用的那段卡片答案（2026-10-30 录下的思考：模型反复纠结「这句在问屏幕上的卡片还是新问题」）：
+ * 两边按字词比的最长公共子串，够长（QUOTE_MIN）才给，否则 null。给模型的是规整后的文字。
+ */
+export function quotedPart(message: string, answer: string): string | null {
+  const a = quoteUnits(message, QUOTE_UNITS.message);
+  const b = quoteUnits(answer, QUOTE_UNITS.answer);
+  let best = 0;
+  let end = 0;
+  let prev = new Int32Array(b.length + 1);
+  for (const unit of a) {
+    const row = new Int32Array(b.length + 1);
+    for (let j = 1; j <= b.length; j++)
+      if (unit === b[j - 1]) {
+        row[j] = prev[j - 1] + 1;
+        if (row[j] > best) [best, end] = [row[j], j];
+      }
+    prev = row;
+  }
+  const units = b.slice(end - best, end);
+  const han = units.filter((u) => HAN.test(u)).length;
+  if (han < QUOTE_MIN.han && units.length - han < QUOTE_MIN.words) return null;
+  return units
+    .map((u, i) =>
+      i > 0 && !HAN.test(u) && !HAN.test(units[i - 1]) ? ` ${u}` : u,
+    )
+    .join('');
+}
 
 const ASK_AGAIN = {
   'zh-CN': '有不清楚的地方再问我。',
@@ -560,10 +628,6 @@ export const ANSWER_LINES: Record<
     closing: ASK_AGAIN,
   },
 };
-
-export function isAnswerTone(value: unknown): value is AnswerTone {
-  return (ANSWER_TONES as readonly unknown[]).includes(value);
-}
 
 export function replyTemplate(
   intent: ReplyIntent,

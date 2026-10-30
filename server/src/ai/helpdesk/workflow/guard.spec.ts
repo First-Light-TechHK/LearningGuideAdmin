@@ -10,11 +10,13 @@ import {
   AI_FILLER,
   ANSWER_LINES,
   ANSWER_TONES,
+  answerToneOf,
   chooseExcerpt,
   guardExplanation,
   guardShortText,
   guardSummary,
   learnerOf,
+  quotedPart,
   replyTemplate,
   TEMPLATES,
   textLength,
@@ -103,6 +105,68 @@ describe('learner script and template variant', () => {
 
   it('counts characters by code point (an emoji is one)', () => {
     expect(textLength('你好👍')).toBe(3);
+  });
+});
+
+describe('answer tone (code picks the fixed lines, not the model)', () => {
+  // 2026-10-30 录下的思考：34 次长思考里 29 次在纠结 tone。改由代码按学员原话与卡片定：
+  // 报告出问题或着急 → problem；问怎么做且卡片是步骤 → steps；其余 explain
+  const STEPS = '1. Open **My Learning**.\n2. Select **Cancel**.';
+  const PROSE = 'Your access stays until the end date.';
+  it.each([
+    ['直播课麦克风完全没反应 😵', PROSE, 'problem'],
+    ['影片一直轉圈圈 播不出來', PROSE, 'problem'],
+    ['手機一鎖屏直播就掉線 怎麼辦', STEPS, 'problem'],
+    [
+      'it says This account joined the Live Session elsewhere',
+      STEPS,
+      'problem',
+    ],
+    ["my card payment didn't go through", STEPS, 'problem'],
+    ['時間到了沒有現在加入按鈕啊!!!', STEPS, 'problem'],
+    ['I paid but my plan is not active', STEPS, 'problem'],
+    ['my card was declined', PROSE, 'problem'],
+    ['信用卡被拒了怎么回事', PROSE, 'problem'],
+    ['我付了錢但是沒開通', PROSE, 'problem'],
+    ['怎么取消订阅', STEPS, 'steps'],
+    ['怎麼重設密碼', STEPS, 'steps'],
+    ['how do i create a study group', STEPS, 'steps'],
+    ['订阅在哪里看', STEPS, 'steps'],
+    ['怎么取消订阅', PROSE, 'explain'],
+    ['试用期间要付钱吗？', STEPS, 'explain'],
+    ['what does the grace period mean', PROSE, 'explain'],
+    ['可以只买一门课吗', PROSE, 'explain'],
+  ] as const)('%s → %s', (message, answer, tone) => {
+    expect(answerToneOf(message, answer)).toBe(tone);
+    expect(ANSWER_TONES).toContain(tone);
+  });
+});
+
+describe('quoted part of the shown card (code tells the model what the learner refers to)', () => {
+  // 2026-10-30 录下的思考：模型反复纠结「这句是在问屏幕上那张卡片，还是新问题」。学员原样引用了卡片里的话，
+  // 代码先找出来（繁简、大小写、**、标点不计），模型就不用自己比
+  const ANSWER =
+    'Mic and Camera **only work after it connects**. 麦克风和摄像头只有连接成功后才能使用，请先等页面连上。';
+  it.each([
+    [
+      'what does "only work after it connects" mean?',
+      'only work after it connects',
+    ],
+    ['ONLY WORK AFTER IT CONNECTS??', 'only work after it connects'],
+    ['「只有连接成功后才能使用」是啥意思', '只有连接成功后才能使用'],
+    ['「只有連接成功後才能使用」是什麼意思', '只有连接成功后才能使用'],
+    ['只有連接成功後，才能使用？', '只有连接成功后才能使用'],
+  ] as const)('%s → %s', (message, quoted) => {
+    expect(quotedPart(message, ANSWER)).toBe(quoted);
+  });
+
+  it.each([
+    ['摄像头不能用', 'fewer than 6 Han characters in a row'],
+    ['camera after it', 'fewer than 4 words in a row'],
+    ['how do I connect my camera', 'only single words in common'],
+    ['', 'an empty message'],
+  ])('nothing for %s (%s)', (message) => {
+    expect(quotedPart(message, ANSWER)).toBeNull();
   });
 });
 
