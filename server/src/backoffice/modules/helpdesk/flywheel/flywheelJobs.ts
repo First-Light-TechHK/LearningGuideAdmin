@@ -19,7 +19,8 @@ import type { SqlClient, SqlDb } from '../faqs/faqRepository';
  * - 可观察：每次运行一行（计数、状态、尝试次数、实例、耗时、错误码，从不含学员文字）+ 一行结构化日志
  *   （JSON，type "helpdesk"）。
  * - 员工「立即运行」：按 Idempotency-Key 幂等（同一个 key 回同一次运行；别的员工用这个 key → conflict），
- *   在后台跑，接口马上返回；拿不到锁 → already_running。
+ *   在后台跑，接口马上返回；拿不到锁 → already_running；开始时出错 → error（503，可重试）。拿到锁的
+ *   一方先把死掉的实例留下的 running 手动运行记成失败（stale）。
  */
 export const FLYWHEEL_JOBS = ['gap_mining'] as const;
 export type FlywheelJob = (typeof FLYWHEEL_JOBS)[number];
@@ -229,6 +230,21 @@ export function createPgJobRunRepository(db: SqlDb = defaultDb) {
         : { kind: 'conflict' };
     },
 
+    /**
+     * 拿着锁的时候：还停在 running 的手动运行一定是死掉的实例留下的（每次运行都在锁里跑完），
+     * 记成失败（stale），不会永远卡在 running；返回改了几行。
+     */
+    async failStaleManual(job: FlywheelJob, now: Date): Promise<number> {
+      const rows = await db.query(
+        `UPDATE helpdesk_flywheel_runs
+            SET status = 'failed', finished_at = $2, error_code = 'stale'
+          WHERE job = $1 AND trigger = 'manual' AND status = 'running'
+          RETURNING id`,
+        [job, now],
+      );
+      return rows.length;
+    },
+
     async byKey(job: FlywheelJob, key: string): Promise<JobRun | null> {
       const [row] = await db.query(
         `SELECT ${COLUMNS} FROM helpdesk_flywheel_runs WHERE job = $1 AND idempotency_key = $2`,
@@ -365,7 +381,9 @@ export type ManualOutcome =
   | { outcome: 'started'; run: JobRun; done: Promise<JobRun> }
   | { outcome: 'existing'; run: JobRun }
   | { outcome: 'already_running' }
-  | { outcome: 'conflict' };
+  | { outcome: 'conflict' }
+  /** 开始时出错（比如数据库）：不是「已经在跑」，可以重试。 */
+  | { outcome: 'error'; errorCode: string };
 
 export function createJobRunner(deps: JobRunnerDeps) {
   const instance = deps.instance ?? instanceId();
@@ -376,6 +394,18 @@ export function createJobRunner(deps: JobRunnerDeps) {
 
   const log = (event: string, fields: Record<string, unknown>) =>
     logger.log(JSON.stringify({ type: 'helpdesk', event, ...fields }));
+
+  /** 拿着锁：死掉的实例留下的手动运行记成失败（一行日志）。 */
+  async function closeStaleManual(job: FlywheelJob): Promise<void> {
+    const closed = await deps.runs.failStaleManual(job, now());
+    if (closed > 0)
+      log('flywheel_job_takeover', {
+        job,
+        trigger: 'manual',
+        closed,
+        instance,
+      });
+  }
 
   /** 跑一次（已拿到锁与运行行）：心跳、工作、收尾、一行日志。 */
   async function execute(run: JobRun): Promise<JobRun> {
@@ -431,6 +461,7 @@ export function createJobRunner(deps: JobRunnerDeps) {
       if (at.getUTCHours() < JOB_SCHEDULE.startHourUtc)
         return { outcome: 'skipped', reason: 'too_early' };
       const locked = await deps.lock.withLock(async () => {
+        await closeStaleManual(job);
         const claim = await deps.runs.claimScheduled({
           job,
           day: day(at),
@@ -480,6 +511,7 @@ export function createJobRunner(deps: JobRunnerDeps) {
       // 拿锁、建行、回答，然后在锁里接着跑完（锁一直持有到跑完）
       void deps.lock
         .withLock(async () => {
+          await closeStaleManual(job);
           const start = await deps.runs.startManual({
             job,
             day: day(now()),
@@ -504,7 +536,8 @@ export function createJobRunner(deps: JobRunnerDeps) {
         })
         .catch((error: unknown) => {
           fail(error);
-          started({ outcome: 'already_running' });
+          // 还没回答时出的错（锁、建行）：如实说出错了，不是「已经在跑」
+          started({ outcome: 'error', errorCode: errorCode(error) });
         });
       done.catch(() => undefined);
       return answer;

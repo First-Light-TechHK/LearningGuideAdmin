@@ -27,21 +27,37 @@ import { createNgramSimilarity, type TextSimilarity } from './textSimilarity';
 /**
  * 每晚的数据飞轮（v5 Part G3）：
  * 1. 拉：从 Portal 的 insights（脱敏的轮 + 标签，契约 fixture v7）拉到 Admin 的事实表，
- *    从事实表里最新的一轮往回 72 小时开始（让投票、评分与工单结果落定；按轮 id 幂等 upsert），
+ *    从事实表里最新的一轮往回 72 小时开始（让投票、评分落定；按轮 id 幂等 upsert），
  *    空表从 30 天前开始；一晚至多 200 页（每页 500 轮），没拉完 → moreDue，下一次接着拉。
+ *    工单结果落定得更晚（工单在聊天后 24 小时内建，客服处理，再等至多 72 小时自动确认）：再补拉
+ *    一段更早的——从最近 14 天里结果还可能变的最早一轮（有工单没关的，或还没在它之后满 24 小时
+ *    看过的）到上面的起点（until），至多 100 页，与往前拉互不耽误。
  *    Portal 没接上（没配地址或令牌）→ 跳过拉取、照样挖（本地开发）；Portal 出错 → 照样挖已有的，
  *    这次运行记失败（调度器会重试）。
- * 2. 挖：最近 30 天、AI 没解决、还没归属的轮（最新的 2000 轮）→ 计划（flywheelMining.ts）→
+ * 2. 挖：最近 30 天、AI 没解决、值得挖、还没归属的轮（最新的 2000 轮）→ 计划（flywheelMining.ts）→
  *    并进已有候选 / 建新候选。新候选一组一次模型调用（GapLabeller：话题 + 一个学员口吻的问题 + 分类），
  *    大组先，一晚至多 30 次、至多 0.10 美元；模型关着、超预算、失败或没过守卫 → 代码写的标签。
  * 和已发布节点去重用工作表里已发布的节点（问题与问法），所以员工刚接受、还没发版的也算。
+ * 挖完再按成员轮的最新结果刷新待处理候选的草稿来源与原因构成（工单后来解决了 → 起草有了来源）。
  */
 export const PULL_LIMITS = {
   lookbackMs: 72 * 3_600_000,
   firstPullMs: 30 * 24 * 3_600_000,
   pageSize: INSIGHT_LIMITS.pageMax,
   pagesMax: 200,
+  /** 补拉工单结果：最多往回看这么久，一晚至多这么多页。 */
+  outcomeWindowMs: 14 * 24 * 3_600_000,
+  refreshPagesMax: 100,
 } as const;
+
+export type RefreshStats = {
+  since: string | null;
+  pages: number;
+  received: number;
+  inserted: number;
+  updated: number;
+  moreDue: boolean;
+};
 
 export type PullStats = {
   status: 'pulled' | 'not_connected' | 'failed';
@@ -53,6 +69,7 @@ export type PullStats = {
   updated: number;
   moreDue: boolean;
   errorCode: string | null;
+  refresh: RefreshStats;
 };
 
 export type MineStats = {
@@ -68,6 +85,8 @@ export type MineStats = {
   codeLabels: number;
   modelSkipped: Partial<Record<GapLabelSkip, number>>;
   costUsd: number;
+  /** 按成员轮的最新结果刷新了草稿来源或原因构成的待处理候选。 */
+  refreshed: number;
 };
 
 /** 工作表里已发布的节点的问题与问法（answer 节点；choice 节点不陈述事实，不当去重目标）。 */
@@ -127,6 +146,43 @@ export function createFlywheelService(deps: FlywheelServiceDeps) {
   const labeller = deps.labeller ?? noGapLabeller;
   const similarity = deps.similarity ?? createNgramSimilarity();
 
+  /** 一段时间的所有页 → 事实表（至多 pagesMax 页）。 */
+  async function pullWindow(
+    window: { since: string; until?: string },
+    pagesMax: number,
+    into: {
+      pages: number;
+      received: number;
+      inserted: number;
+      updated: number;
+      moreDue: boolean;
+    },
+  ): Promise<string | null> {
+    let cursor: string | undefined;
+    let until: string | null = null;
+    for (;;) {
+      const page = await deps.portal.insights({
+        since: window.since,
+        ...(window.until ? { until: window.until } : {}),
+        limit: PULL_LIMITS.pageSize,
+        ...(cursor ? { cursor } : {}),
+      });
+      into.pages += 1;
+      until = page.until;
+      into.received += page.turns.length;
+      const written = await deps.insights.upsertTurns(page.turns);
+      into.inserted += written.inserted;
+      into.updated += written.updated;
+      if (!page.nextCursor) break;
+      if (into.pages >= pagesMax) {
+        into.moreDue = true;
+        break;
+      }
+      cursor = page.nextCursor;
+    }
+    return until;
+  }
+
   async function pull(): Promise<PullStats> {
     const latest = await deps.insights.latestTurnAt();
     const at = now().getTime();
@@ -135,6 +191,14 @@ export function createFlywheelService(deps: FlywheelServiceDeps) {
         ? Math.min(Date.parse(latest), at) - PULL_LIMITS.lookbackMs
         : at - PULL_LIMITS.firstPullMs,
     ).toISOString();
+    const refresh: RefreshStats = {
+      since: null,
+      pages: 0,
+      received: 0,
+      inserted: 0,
+      updated: 0,
+      moreDue: false,
+    };
     const stats: PullStats = {
       status: 'pulled',
       since,
@@ -145,27 +209,23 @@ export function createFlywheelService(deps: FlywheelServiceDeps) {
       updated: 0,
       moreDue: false,
       errorCode: null,
+      refresh,
     };
-    let cursor: string | undefined;
     try {
-      for (;;) {
-        const page = await deps.portal.insights({
-          since,
-          limit: PULL_LIMITS.pageSize,
-          ...(cursor ? { cursor } : {}),
-        });
-        stats.pages += 1;
-        stats.until = page.until;
-        stats.received += page.turns.length;
-        const written = await deps.insights.upsertTurns(page.turns);
-        stats.inserted += written.inserted;
-        stats.updated += written.updated;
-        if (!page.nextCursor) break;
-        if (stats.pages >= PULL_LIMITS.pagesMax) {
-          stats.moreDue = true;
-          break;
-        }
-        cursor = page.nextCursor;
+      stats.until = await pullWindow({ since }, PULL_LIMITS.pagesMax, stats);
+      // 更早的、工单结果还可能变的轮：补拉到 since 为止（只在空表之外）
+      const open = latest
+        ? await deps.insights.earliestOpenOutcome(
+            new Date(at - PULL_LIMITS.outcomeWindowMs).toISOString(),
+          )
+        : null;
+      if (open && open < since) {
+        refresh.since = open;
+        await pullWindow(
+          { since: open, until: since },
+          PULL_LIMITS.refreshPagesMax,
+          refresh,
+        );
       }
     } catch (error) {
       if (
@@ -216,6 +276,7 @@ export function createFlywheelService(deps: FlywheelServiceDeps) {
       codeLabels: 0,
       modelSkipped: {},
       costUsd: 0,
+      refreshed: 0,
     };
     for (const growth of plan.grow) {
       const grown = await deps.candidates.growCandidate(
@@ -284,6 +345,7 @@ export function createFlywheelService(deps: FlywheelServiceDeps) {
       }
     }
     stats.costUsd = Math.round(stats.costUsd * 1e6) / 1e6;
+    stats.refreshed = await deps.candidates.refreshOpenFromMembers();
     return stats;
   }
 

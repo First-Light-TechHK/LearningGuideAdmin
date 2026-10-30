@@ -1,10 +1,12 @@
 import { uuidv7 } from '../../../../common/uuidv7';
 import { query, withTransaction } from '../../../lib/db';
 import type { SqlClient, SqlDb } from '../faqs/faqRepository';
+import { TURN_COLUMNS, toInsightTurn } from './insightRepository';
 import {
   addMix,
   answerSourcesOf,
   examplesOf,
+  miningTurn,
   sourceMixOf,
   type CandidateExample,
   type MiningTurn,
@@ -97,6 +99,8 @@ export type CandidateRevision = {
   before: unknown;
   after: unknown;
   employeeId: string | null;
+  /** 动作当时员工的显示名（之前的行没有 → null）。 */
+  employeeName: string | null;
   at: string;
 };
 
@@ -121,6 +125,7 @@ export type NewCandidate = {
   /** origin = ticket：没有成员轮，条数从 1 起。 */
   turnCount?: number;
   createdBy: string | null;
+  createdByName?: string | null;
 };
 
 export type CandidateFilter = {
@@ -211,16 +216,25 @@ export function toCandidate(row: Row): FaqCandidate {
   };
 }
 
-/** 审计行里存的：去掉大块的例句，留下状态与决定。 */
+/**
+ * 审计行里存的：状态与决定，不存任何从学员文字来的东西（例句、草稿来源只记条数；话题与提议的问题
+ * 可能是代码从例句截的，只记字数）。审计表只追加、改不了，所以这里从一开始就不放。
+ */
 function auditView(candidate: FaqCandidate | null) {
   if (!candidate) return null;
-  const { examples, answerSources, ...rest } = candidate;
+  const { examples, answerSources, topic, proposedQuestion, ...rest } =
+    candidate;
   return {
     ...rest,
+    topic: [...topic].length,
+    proposedQuestion: [...proposedQuestion].length,
     examples: examples.length,
     answerSources: answerSources.length,
   };
 }
+
+/** 以「含个人信息」驳回后话题与提议的问题换成的占位符。 */
+export const REDACTED = '<redacted>';
 
 async function writeRevision(
   client: SqlClient,
@@ -229,10 +243,11 @@ async function writeRevision(
   before: FaqCandidate | null,
   after: FaqCandidate | null,
   employeeId: string | null,
+  employeeName: string | null = null,
 ): Promise<void> {
   await client.query(
-    `INSERT INTO helpdesk_faq_candidate_revisions (id, candidate_id, action, before, after, employee_id)
-     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)`,
+    `INSERT INTO helpdesk_faq_candidate_revisions (id, candidate_id, action, before, after, employee_id, employee_name)
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)`,
     [
       uuidv7(),
       candidateId,
@@ -240,6 +255,7 @@ async function writeRevision(
       JSON.stringify(auditView(before)),
       JSON.stringify(auditView(after)),
       employeeId,
+      employeeName ? employeeName.slice(0, 200) : null,
     ],
   );
 }
@@ -396,6 +412,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
             null,
             candidate,
             input.createdBy,
+            input.createdByName ?? null,
           );
           return candidate;
         })
@@ -510,7 +527,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
 
     async revisions(id: string): Promise<CandidateRevision[]> {
       const rows = await db.query(
-        `SELECT id, candidate_id, action, before, after, employee_id, at
+        `SELECT id, candidate_id, action, before, after, employee_id, employee_name, at
            FROM helpdesk_faq_candidate_revisions WHERE candidate_id = $1 ORDER BY at, id`,
         [id],
       );
@@ -521,6 +538,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
         before: row.before ?? null,
         after: row.after ?? null,
         employeeId: (row.employee_id as string | null) ?? null,
+        employeeName: (row.employee_name as string | null) ?? null,
         at: iso(row.at) as string,
       }));
     },
@@ -535,6 +553,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
       decision: CandidateDecision,
       employeeId: string,
       actionKey: string | null,
+      employeeName: string | null = null,
     ): Promise<DecideResult> {
       return db.withTransaction(async (client) => {
         const before = await lockCandidate(client, id);
@@ -561,7 +580,29 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
             actionKey,
           ],
         );
-        const candidate = toCandidate(updated.rows[0]);
+        let candidate = toCandidate(updated.rows[0]);
+        if (
+          decision.status === 'dismissed' &&
+          decision.reason === 'personal_data'
+        ) {
+          // 含个人信息：同一事务里清掉候选的例句、草稿来源、话题与提议的问题，以及成员轮的文字与客服
+          // 回复（记 redacted_at，之后再拉到也不写回）
+          await client.query(
+            `UPDATE helpdesk_insight_turns
+                SET text = '', agent_reply = NULL, redacted_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id IN (SELECT turn_id FROM helpdesk_faq_candidate_turns WHERE candidate_id = $1)`,
+            [id],
+          );
+          const redacted = await client.query(
+            `UPDATE helpdesk_faq_candidates
+                SET examples = '[]'::jsonb, answer_sources = '[]'::jsonb, topic = $2,
+                    proposed_question = $2
+              WHERE id = $1 RETURNING ${COLUMNS}`,
+            [id, REDACTED],
+          );
+          candidate = toCandidate(redacted.rows[0]);
+        }
         await writeRevision(
           client,
           id,
@@ -569,6 +610,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
           before,
           candidate,
           employeeId,
+          employeeName,
         );
         return { kind: 'ok', candidate };
       });
@@ -584,6 +626,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
       targetId: string,
       employeeId: string,
       actionKey: string | null,
+      employeeName: string | null = null,
     ): Promise<
       | { kind: 'ok'; source: FaqCandidate; target: FaqCandidate }
       | { kind: 'not_found' }
@@ -655,6 +698,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
           source,
           after,
           employeeId,
+          employeeName,
         );
         await writeRevision(
           client,
@@ -663,9 +707,64 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
           target,
           afterTarget,
           employeeId,
+          employeeName,
         );
         return { kind: 'ok', source: after, target: afterTarget };
       });
+    },
+
+    /**
+     * 每晚挖完：按成员轮在事实表里的最新结果刷新待处理候选的原因构成与草稿来源（工单后来才解决、
+     * 有了客服的回复；后来才建的工单）。只往上加：每个原因取已有与成员算出的较大值（从工单转来、
+     * 合并进来的不丢）；草稿来源补到 3 条。不改版本（和夜间加轮一样）。返回改了的候选数。
+     */
+    async refreshOpenFromMembers(): Promise<number> {
+      const rows = await db.query(
+        `SELECT m.candidate_id, ${TURN_COLUMNS.split(',')
+          .map((c) => `t.${c.trim()}`)
+          .join(', ')}
+           FROM helpdesk_faq_candidate_turns m
+           JOIN helpdesk_faq_candidates c ON c.id = m.candidate_id AND c.status = 'new'
+           JOIN helpdesk_insight_turns t ON t.id = m.turn_id
+          ORDER BY m.candidate_id, t.created_at DESC, t.id`,
+      );
+      const members = new Map<string, MiningTurn[]>();
+      for (const row of rows) {
+        const id = row.candidate_id as string;
+        members.set(id, [
+          ...(members.get(id) ?? []),
+          miningTurn(toInsightTurn(row)),
+        ]);
+      }
+      let changed = 0;
+      for (const [id, turns] of members) {
+        const done = await db.withTransaction(async (client) => {
+          const before = await lockCandidate(client, id);
+          if (!before || before.status !== 'new') return false;
+          const derived = sourceMixOf(turns);
+          const mix: SourceMix = { ...before.sourceMix };
+          for (const [key, value] of Object.entries(derived) as [
+            keyof SourceMix,
+            number,
+          ][])
+            if (value > (mix[key] ?? 0)) mix[key] = value;
+          const sources = answerSourcesOf(turns, before.answerSources);
+          if (
+            JSON.stringify(mix) === JSON.stringify(before.sourceMix) &&
+            JSON.stringify(sources) === JSON.stringify(before.answerSources)
+          )
+            return false;
+          await client.query(
+            `UPDATE helpdesk_faq_candidates
+                SET source_mix = $2::jsonb, answer_sources = $3::jsonb, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $1`,
+            [id, JSON.stringify(mix), JSON.stringify(sources)],
+          );
+          return true;
+        });
+        if (done) changed += 1;
+      }
+      return changed;
     },
 
     /** 回归用例（幂等：同一节点、语言、文字只一条）；返回新加的条数。 */

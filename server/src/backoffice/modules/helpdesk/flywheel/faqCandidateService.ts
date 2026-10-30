@@ -315,6 +315,7 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
       },
       actor.employeeId ?? '',
       key,
+      actor.displayName ?? null,
     );
     if (decided.kind === 'not_found') throw candidateNotFound();
     if (decided.kind === 'conflict')
@@ -481,6 +482,7 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
         { status: 'dismissed', reason, reasonNote: note },
         actor.employeeId ?? '',
         key,
+        actor.displayName ?? null,
       );
       if (decided.kind === 'not_found') throw candidateNotFound();
       if (decided.kind === 'conflict')
@@ -516,6 +518,7 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
         targetId,
         actor.employeeId ?? '',
         key,
+        actor.displayName ?? null,
       );
       switch (result.kind) {
         case 'not_found':
@@ -643,6 +646,7 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
           lastSeenAt: at,
           turnCount: 1,
           createdBy: actor.employeeId,
+          createdByName: actor.displayName ?? null,
         },
         [],
       );

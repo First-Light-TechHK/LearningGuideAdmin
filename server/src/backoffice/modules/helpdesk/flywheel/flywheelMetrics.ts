@@ -16,6 +16,8 @@ import type {
  * - 没有匹配率 = no_match / 全部轮；有帮助率 = helpful + solved / 投了票的；平均评分 = 评分和 / 评分数；
  * - 转人工率 = handover / 全部轮；澄清覆盖率 = 覆盖到的澄清 / 澄清；守卫回退率 = 没过守卫 / 有守卫结果的。
  * 按日或周，切分：none | locale | entry（入口 = 轮的 source：submit / chat / chip）| signal。
+ * 日与周都按 UTC 切（timezone: 'UTC'），周从周一开始；这段时间只盖住一部分的周标 partial（比率与
+ * 完整的周不好直接比）。
  */
 export const METRICS_LIMITS = {
   dayRangeMax: 92,
@@ -83,6 +85,10 @@ export function createFlywheelMetrics(deps: {
   const now = deps.now ?? (() => new Date());
   const day = 86_400_000;
   const withRates = (row: MetricsRow) => ({ ...row, ...rates(row) });
+  const plusDays = (iso: string, n: number) =>
+    new Date(Date.parse(`${iso}T00:00:00Z`) + n * day)
+      .toISOString()
+      .slice(0, 10);
 
   return {
     async metrics(raw: Record<string, unknown>) {
@@ -141,7 +147,16 @@ export function createFlywheelMetrics(deps: {
         to,
         lastIngestedAt,
         source: 'portal_insights' as const,
-        series: rows.map(withRates),
+        timezone: 'UTC' as const,
+        weekStartsOn: 'monday' as const,
+        series: rows.map((row) => ({
+          ...withRates(row),
+          // 周桶（周一）早于 from 或周日晚于 to：这一周只算了一部分
+          partial:
+            granularity === 'week' &&
+            row.bucket !== null &&
+            (row.bucket < from || plusDays(row.bucket, 6) > to),
+        })),
         totals: totals.map(withRates),
         topGaps: gaps,
         ticketFaqs: tickets.map((t) => {

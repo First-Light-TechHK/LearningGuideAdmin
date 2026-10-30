@@ -9,8 +9,9 @@ Specs: `helpdesk-v5-context-chips-and-smalltalk.md` Part G, and `helpdesk-v5-faq
 - **Learner text.** Portal runs its code-only PII scrubber before any text leaves Portal. Placeholders look like `<email>`, `<phone>` and `<name>`.
 - **Everything else** is an enum label: kind, guard, vote, rating, covered, handover, the ticket outcome, and signals.
 - **What the feed never contains:** learner ids, names, emails, orders, ticket ids or titles, answer text, or trace ids.
-- **Upserts** are idempotent by Portal's turn id. A row that has not changed is not touched.
-- **Pull window.** Each pull starts 72 hours before the newest stored turn, so late votes, ratings and ticket outcomes settle. The first pull covers the last 30 days. One night reads at most 200 pages of 500 turns; if more remain, `moreDue` is set and the next run carries on.
+- **Upserts** are idempotent by Portal's turn id. A row whose content has not changed is not rewritten, but its `checked_at` is set to the time of the pull.
+- **Pull window.** Each pull starts 72 hours before the newest stored turn, so late votes and ratings settle. The first pull covers the last 30 days. One night reads at most 200 pages of 500 turns; if more remain, `moreDue` is set and the next run carries on.
+- **Outcome refresh.** Ticket outcomes settle later than 72 hours: a ticket can open up to 24 h after the chat, the agent then works on it, and auto-confirm waits up to 72 h more. So each night also re-pulls an older window, from the earliest turn of the last 14 days whose outcome can still change (a ticket that is not closed yet, or no pull yet at least 24 h after the turn) up to the start of the normal window (`until`), at most 100 pages. It is reported as `pull.refresh`. After mining, every open candidate's source mix and draft sources are refreshed from its member turns (`mine.refreshed`), so a ticket that was resolved later gives "起草" a source.
 - **If Portal is not configured,** the run skips the pull and still mines (`not_connected`). If Portal fails, the run still mines what is stored, but the run is recorded as failed and is retried.
 - **Raw text retention** (180 days, then scrubbed text and labels only) is Portal's job, `assist_retention`. Admin only shows its runs and has a "run now" button (see the endpoints below).
 
@@ -18,7 +19,7 @@ Specs: `helpdesk-v5-context-chips-and-smalltalk.md` Part G, and `helpdesk-v5-faq
 
 The code is in `server/src/backoffice/modules/helpdesk/flywheel/`.
 
-1. **Select.** Take the unsolved turns from the last 30 days that no candidate holds yet, newest first, at most 2,000. A turn is unsolved if it has `no_match`, a `not_helpful` vote, a clarify that was not covered, a handover, a ticket after the chat, or a rating of 2 or less.
+1. **Select.** Take the unsolved, mineable turns from the last 30 days that no candidate holds yet, newest first, at most 2,000. The mineable rule is applied in SQL before the limit, so small talk and greetings followed by a ticket never take the places of real gaps. A turn is unsolved if it has `no_match`, a `not_helpful` vote, a clarify that was not covered, a handover, a ticket after the chat, or a rating of 2 or less.
    - The same rule exists in SQL (the `unsolved` column of the view) and in TS (`unsolvedReasons`).
    - Small talk, handover requests, greetings and farewells, prompt-injection attempts and private-data turns are never mined.
 2. **Group.** Turns are grouped by meaning with the existing retrieval similarity: opencc forms, character n-grams and English stems, IDF weighted, compared by cosine to each group's centroid. This sits behind the `TextSimilarity` interface, so embeddings can replace it later.
@@ -38,7 +39,7 @@ The code is in `server/src/backoffice/modules/helpdesk/flywheel/`.
 **Scheduling** happens in process. `HelpdeskFlywheelScheduler` starts after application bootstrap. It first checks 2 to 3 minutes after start and then every 30 minutes, with unref'd timers, so it never blocks startup or shutdown.
 
 - From 18:00 UTC (02:00 Beijing time), a check takes the PostgreSQL advisory lock `(719320, 1)` and claims the day's row in `helpdesk_flywheel_runs`. The day's run happens once, which makes it idempotent per day.
-- A failed run is retried, up to 3 attempts a day. A run whose heartbeat is more than 30 minutes old is taken over.
+- A failed run is retried, up to 3 attempts a day. A run whose heartbeat is more than 30 minutes old is taken over. A manual run still `running` when another run takes the lock was left by an instance that died; it is closed as failed with error code `stale`.
 - Each run writes one structured log line: `{"type":"helpdesk","event":"flywheel_job_run",...}`, with counts and error codes only, never text.
 - **No new ops config.** It needs no AWS and no scheduler outside the app. The scheduler is not started under `NODE_ENV=test`.
 
@@ -49,15 +50,15 @@ All endpoints are under `/api/helpdesk/`. The guard is menu `helpDesk`: GET need
 | Method and path | What it does |
 | --- | --- |
 | `GET faq-candidates?status&suggestion&origin&q&page&pageSize` | The queue, biggest groups first, with per-status counts and node summaries |
-| `GET faq-candidates/:id` | One candidate, its revisions and its nodes |
+| `GET faq-candidates/:id` | One candidate, its revisions (with `employeeName`, the staff member's display name at the time) and its nodes. Revisions never hold learner text: examples, draft sources, topic and question are stored as counts |
 | `GET faq-candidates/:id/draft` | Prefill for a new FAQ or a follow-up: questions by language, category, placeholder-free phrasings. **The answer is empty for staff to write.** `answerDraft` holds only human replies from resolved enquiries, labelled 草稿 待核实 / "Draft, to be verified" |
 | `POST faq-candidates/:id/accept` `{as, faqId, parentId?, phrasings?, version}` | `as` is one of `add_phrasing`, `new_faq` or `follow_up`. FAQs have no draft state (saving publishes), so for `new_faq` and `follow_up` staff create the node with `POST faqs` from the draft first, then accept with its `faqId`. `follow_up` also links `parentId` to `faqId`. The chosen examples (`phrasings`, example numbers; by default every example without a placeholder) become `flywheel` phrasings and **regression cases for that node**. Unticked examples and examples with a placeholder never become cases. The whole accept runs under a per-candidate PostgreSQL advisory lock, so when two staff accept at once the second gets 409 and leaves no phrasings, edges or cases behind. |
-| `POST faq-candidates/:id/dismiss` `{reason, note?, version}` | `reason` is one of duplicate, not_a_gap, out_of_scope, personal_data, spam or other; `other` needs a note. The note is scrubbed |
+| `POST faq-candidates/:id/dismiss` `{reason, note?, version}` | `reason` is one of duplicate, not_a_gap, out_of_scope, personal_data, spam or other; `other` needs a note. The note is scrubbed. With `personal_data`, the same transaction empties the candidate's examples and draft sources, sets its topic and proposed question to `<redacted>`, and clears the text and agent reply of its member turns in the fact table (`redacted_at`, so a later pull does not write them back) |
 | `POST faq-candidates/:id/merge` `{targetId, version}` | Moves turns, counts and examples into an open candidate |
 | `POST tickets/:ticketId/faq-candidate` | "转成 FAQ 候选". Only for a resolved enquiry (CLOSED, not cancelled). Takes the learner's first message and the last public agent reply and scrubs them **in Admin** with the same scrubber (`piiScrubber.ts`, corpus pinned by hash in both repos) plus the learner's own name and emails. The reply becomes a draft source only, and only when the agent resolved the enquiry (close reason `user_confirmed` or `auto_confirmed`); a ticket the learner closed themselves (`user_closed`) gives no draft source. Idempotent per ticket: 201, then 200 |
 | `GET faq-eval-cases` | The regression cases as JSON Lines `{faqKey, locale, text}` |
 | `GET flywheel/jobs/gap_mining/runs`, `GET …/runs/:runId` | The run rows: status, attempts, counts, duration, error code, who started it |
-| `POST flywheel/jobs/gap_mining/run` (Idempotency-Key required) | Run now: 201 new (it runs in the background; poll the run), 200 same key, 409 `JOB_ALREADY_RUNNING`. Audited (`HELPDESK_JOB_RUN`) |
+| `POST flywheel/jobs/gap_mining/run` (Idempotency-Key required) | Run now: 201 new (it runs in the background; poll the run), 200 same key, 409 `JOB_ALREADY_RUNNING`, 503 `JOB_START_FAILED` when the run could not be started (for example a database error; try again). Audited (`HELPDESK_JOB_RUN`) |
 | `GET jobs/assist-retention`, `POST jobs/assist-retention/run` | Portal's retention job: its runs, and run now (Portal does the locking and idempotency). Audited |
 | `GET flywheel/metrics?granularity=day\|week&from&to&split=none\|locale\|entry\|signal` | See G6 below |
 
@@ -79,7 +80,7 @@ All metrics come from SQL over the view `helpdesk_insight_turn_facts`, with no s
 
 | Metric | Definition |
 | --- | --- |
-| AI-solved rate | Answers at least 24 h old with no ticket within 24 h, over answers at least 24 h old |
+| AI-solved rate | Settled answers with no ticket within 24 h, over settled answers. An answer is settled once a pull at least 24 h after it has seen it (`checked_at >= created_at + 24 h`), so a late or failed pull never overstates the rate |
 | no_match rate | `no_match` turns over all turns |
 | Helpful rate | helpful + solved, over all votes |
 | Average rating | Mean of the ratings given |
@@ -87,7 +88,7 @@ All metrics come from SQL over the view `helpdesk_insight_turn_facts`, with no s
 | Clarify covered rate | Covered clarifies over all clarifies |
 | Guard fallback rate | Guard result other than `passed`, over turns that have a guard result |
 
-- **Granularity:** daily (up to 92 days) or weekly (up to 366 days).
+- **Granularity:** daily (up to 92 days) or weekly (up to 366 days). Days and weeks are cut in UTC (`timezone: "UTC"`) and weeks start on Monday (`weekStartsOn: "monday"`). A week that the range covers only in part has `partial: true`.
 - **Splits:** by locale, by entry or by signal. Signals are unnested, and `none` means no signal.
 - **Also returned:** the top 10 gap groups, the 10 FAQs that most often lead to a ticket within 24 hours, and `lastIngestedAt`.
 

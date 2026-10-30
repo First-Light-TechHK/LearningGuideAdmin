@@ -610,8 +610,12 @@ model HelpdeskInsightTurn {
   ticketAgentReplied    Boolean? @map("ticket_agent_replied")
   agentReply            String?  @map("agent_reply")
   signals               String[] @default([])
-  ingestedAt            DateTime @default(now()) @map("ingested_at") @db.Timestamptz(6)
-  updatedAt             DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  ingestedAt            DateTime  @default(now()) @map("ingested_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  /// 最近一次从 Portal 拉到这一轮（内容没变也更新）；答案落定 = checked_at ≥ created_at + 24 小时
+  checkedAt             DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
+  /// 以「含个人信息」驳回候选时清掉了文字（之后的拉取不再写回）
+  redactedAt            DateTime? @map("redacted_at") @db.Timestamptz(6)
 
   @@index([createdAt, id], map: "helpdesk_insight_turns_created_idx")
   @@index([nodeId, createdAt], map: "helpdesk_insight_turns_node_idx")
@@ -674,8 +678,10 @@ model HelpdeskFaqCandidateRevision {
   action      String
   before      Json?
   after       Json?
-  employeeId  String?  @map("employee_id") @db.Uuid
-  at          DateTime @default(now()) @db.Timestamptz(6)
+  employeeId   String?  @map("employee_id") @db.Uuid
+  /// 动作当时员工的显示名
+  employeeName String?  @map("employee_name")
+  at           DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([candidateId, at], map: "helpdesk_faq_candidate_revisions_candidate_idx")
   @@map("helpdesk_faq_candidate_revisions")

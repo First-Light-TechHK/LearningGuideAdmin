@@ -5,6 +5,7 @@ import {
 } from '../contracts';
 import { query, withTransaction } from '../../../lib/db';
 import type { SqlDb } from '../faqs/faqRepository';
+import { NOT_QUESTIONS } from './flywheelMining';
 
 /**
  * 事实表 helpdesk_insight_turns 与指标视图 helpdesk_insight_turn_facts（迁移 20261031090000）。
@@ -26,7 +27,7 @@ const iso = (value: unknown): string | null =>
       ? new Date(value).toISOString()
       : null;
 
-const TURN_COLUMNS = `id, created_at, source, locale, text, session_id, turn_index, last_turn,
+export const TURN_COLUMNS = `id, created_at, source, locale, text, session_id, turn_index, last_turn,
   session_end_reason, kind, intent, guard, via, faq_id, node_id, parent_node_id, release_version,
   answered, vote, rating, covered, expanded, handover, ticket_after_chat, ticket_linked, ticket_status,
   ticket_close_reason, ticket_resolved_by_agent, ticket_agent_replied, agent_reply, signals`;
@@ -115,12 +116,16 @@ function turnParams(turn: InsightTurn): unknown[] {
   ];
 }
 
+/** 以「含个人信息」驳回过的轮（redacted_at）：再拉到也不写回文字与客服回复。 */
+const KEPT_TEXT = `CASE WHEN helpdesk_insight_turns.redacted_at IS NULL THEN EXCLUDED.text ELSE helpdesk_insight_turns.text END`;
+const KEPT_REPLY = `CASE WHEN helpdesk_insight_turns.redacted_at IS NULL THEN EXCLUDED.agent_reply ELSE NULL END`;
+
 const UPSERT_SQL = `
 INSERT INTO helpdesk_insight_turns (${TURN_COLUMNS})
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::text[])
 ON CONFLICT (id) DO UPDATE SET
-  source = EXCLUDED.source, locale = EXCLUDED.locale, text = EXCLUDED.text,
+  source = EXCLUDED.source, locale = EXCLUDED.locale, text = ${KEPT_TEXT},
   session_id = EXCLUDED.session_id, turn_index = EXCLUDED.turn_index, last_turn = EXCLUDED.last_turn,
   session_end_reason = EXCLUDED.session_end_reason, kind = EXCLUDED.kind, intent = EXCLUDED.intent,
   guard = EXCLUDED.guard, via = EXCLUDED.via, faq_id = EXCLUDED.faq_id, node_id = EXCLUDED.node_id,
@@ -130,8 +135,8 @@ ON CONFLICT (id) DO UPDATE SET
   ticket_after_chat = EXCLUDED.ticket_after_chat, ticket_linked = EXCLUDED.ticket_linked,
   ticket_status = EXCLUDED.ticket_status, ticket_close_reason = EXCLUDED.ticket_close_reason,
   ticket_resolved_by_agent = EXCLUDED.ticket_resolved_by_agent,
-  ticket_agent_replied = EXCLUDED.ticket_agent_replied, agent_reply = EXCLUDED.agent_reply,
-  signals = EXCLUDED.signals, updated_at = CURRENT_TIMESTAMP
+  ticket_agent_replied = EXCLUDED.ticket_agent_replied, agent_reply = ${KEPT_REPLY},
+  signals = EXCLUDED.signals, updated_at = CURRENT_TIMESTAMP, checked_at = CURRENT_TIMESTAMP
 WHERE (helpdesk_insight_turns.source, helpdesk_insight_turns.locale, helpdesk_insight_turns.text,
        helpdesk_insight_turns.session_id, helpdesk_insight_turns.turn_index,
        helpdesk_insight_turns.last_turn, helpdesk_insight_turns.session_end_reason,
@@ -145,13 +150,13 @@ WHERE (helpdesk_insight_turns.source, helpdesk_insight_turns.locale, helpdesk_in
        helpdesk_insight_turns.ticket_resolved_by_agent, helpdesk_insight_turns.ticket_agent_replied,
        helpdesk_insight_turns.agent_reply, helpdesk_insight_turns.signals)
   IS DISTINCT FROM
-      (EXCLUDED.source, EXCLUDED.locale, EXCLUDED.text, EXCLUDED.session_id, EXCLUDED.turn_index,
+      (EXCLUDED.source, EXCLUDED.locale, ${KEPT_TEXT}, EXCLUDED.session_id, EXCLUDED.turn_index,
        EXCLUDED.last_turn, EXCLUDED.session_end_reason, EXCLUDED.kind, EXCLUDED.intent, EXCLUDED.guard,
        EXCLUDED.via, EXCLUDED.faq_id, EXCLUDED.node_id, EXCLUDED.parent_node_id,
        EXCLUDED.release_version, EXCLUDED.answered, EXCLUDED.vote, EXCLUDED.rating, EXCLUDED.covered,
        EXCLUDED.expanded, EXCLUDED.handover, EXCLUDED.ticket_after_chat, EXCLUDED.ticket_linked,
        EXCLUDED.ticket_status, EXCLUDED.ticket_close_reason, EXCLUDED.ticket_resolved_by_agent,
-       EXCLUDED.ticket_agent_replied, EXCLUDED.agent_reply, EXCLUDED.signals)
+       EXCLUDED.ticket_agent_replied, ${KEPT_REPLY}, EXCLUDED.signals)
 RETURNING (xmax = 0) AS inserted`;
 
 export type MetricsGranularity = 'day' | 'week';
@@ -278,6 +283,12 @@ export function createPgInsightRepository(db: SqlDb = defaultDb) {
           if (row.inserted === true) inserted += 1;
           else updated += 1;
         }
+        // 内容没变的行也记下这次看过（答案满 24 小时之后的一次拉取才能判定 AI 解决）
+        await client.query(
+          `UPDATE helpdesk_insight_turns SET checked_at = CURRENT_TIMESTAMP
+            WHERE id = ANY($1::uuid[]) AND checked_at < CURRENT_TIMESTAMP`,
+          [turns.map((turn) => turn.id)],
+        );
         return { inserted, updated };
       });
     },
@@ -290,15 +301,34 @@ export function createPgInsightRepository(db: SqlDb = defaultDb) {
       return iso(row?.at);
     },
 
-    /** 最近一次写入事实表的时间（数据页显示「数据截至」）。 */
+    /** 最近一次从 Portal 拉到轮的时间（数据页显示「数据截至」）。 */
     async lastIngestedAt(): Promise<string | null> {
       const [row] = await db.query(
-        'SELECT max(updated_at) AS at FROM helpdesk_insight_turns',
+        'SELECT max(checked_at) AS at FROM helpdesk_insight_turns',
       );
       return iso(row?.at);
     },
 
-    /** since 之后、AI 没解决、还没归属任何候选的轮，最新的先，至多 limit 条。 */
+    /**
+     * since 之后、结果还可能变的最早一轮：有工单但还没关的（客服回复、解决、确认还会来），或者还没有
+     * 在它之后满 24 小时的一次拉取看过的（24 小时内会不会有工单还不知道）。每晚从这里往回补拉。
+     */
+    async earliestOpenOutcome(since: string): Promise<string | null> {
+      const [row] = await db.query(
+        `SELECT min(created_at) AS at FROM helpdesk_insight_turns
+          WHERE created_at >= $1::timestamptz
+            AND ((ticket_linked IS NOT NULL AND ticket_status IS DISTINCT FROM 'CLOSED')
+                 OR checked_at < created_at + interval '24 hours')`,
+        [since],
+      );
+      return iso(row?.at);
+    },
+
+    /**
+     * since 之后、AI 没解决、值得挖、还没归属任何候选的轮，最新的先，至多 limit 条。「值得挖」
+     * （flywheelMining.ts mineable 的同一套规则）在 SQL 里先筛：寒暄、要人工的那一轮、不是问题的
+     * 意图、去掉占位符后不到 2 个字的不占名额（服务层照样再筛一遍）。
+     */
     async unassignedUnsolved(input: {
       since: string;
       limit: number;
@@ -309,10 +339,14 @@ export function createPgInsightRepository(db: SqlDb = defaultDb) {
           .join(', ')}
            FROM helpdesk_insight_turn_facts f
           WHERE f.unsolved AND f.created_at >= $1::timestamptz
+            AND f.kind IS DISTINCT FROM 'smalltalk' AND f.kind IS DISTINCT FROM 'handover'
+            AND (f.intent IS NULL OR f.intent <> ALL ($3::text[]))
+            AND char_length(regexp_replace(regexp_replace(f.text, '<[a-z_]{2,16}>', '', 'g'),
+                                           '[[:punct:][:space:]]', '', 'g')) >= 2
             AND NOT EXISTS (SELECT 1 FROM helpdesk_faq_candidate_turns m WHERE m.turn_id = f.id)
           ORDER BY f.created_at DESC, f.id DESC
           LIMIT $2`,
-        [input.since, input.limit],
+        [input.since, input.limit, [...NOT_QUESTIONS]],
       );
       return rows.map(toInsightTurn);
     },

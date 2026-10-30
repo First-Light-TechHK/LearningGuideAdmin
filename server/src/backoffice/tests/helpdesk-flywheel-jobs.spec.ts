@@ -1,6 +1,7 @@
 import type { AuditEventInput } from '../repositories/auditRepository';
 import {
   JOB_SCHEDULE,
+  createJobRunner,
   errorCode,
   startFlywheelScheduler,
   type JobRun,
@@ -97,6 +98,37 @@ describe('in-process flywheel scheduler', () => {
   });
 });
 
+describe('the job runner’s run now when the database fails', () => {
+  it('reports an error (not already_running) when the run row cannot be written', async () => {
+    const runner = createJobRunner({
+      runs: {
+        byKey: () => Promise.resolve(null),
+        failStaleManual: () => Promise.resolve(0),
+        startManual: () =>
+          Promise.reject(Object.assign(new Error('x'), { code: 'ECONNRESET' })),
+      } as never,
+      lock: {
+        withLock: async <T>(fn: () => Promise<T>) => ({
+          acquired: true as const,
+          value: await fn(),
+        }),
+      },
+      work: {
+        gap_mining: () => Promise.resolve({ stats: {}, moreDue: false }),
+      },
+      instance: 'test',
+      logger: { log: () => undefined, warn: () => undefined },
+    });
+    expect(
+      await runner.runNow(
+        'gap_mining',
+        { id: '0192aaaa-0000-7000-8000-000000000001', name: 'Staff' },
+        '0192bbbb-0000-7000-8000-000000000001',
+      ),
+    ).toEqual({ outcome: 'error', errorCode: 'ECONNRESET' });
+  });
+});
+
 describe('staff run-now for the flywheel and Portal retention jobs', () => {
   const EMP = {
     employeeId: '0192aaaa-0000-7000-8000-000000000001',
@@ -176,6 +208,15 @@ describe('staff run-now for the flywheel and Portal retention jobs', () => {
     await expect(
       service({ outcome: 'conflict' }).svc.runNow(EMP, 'gap_mining', KEY),
     ).rejects.toMatchObject({ status: 422, code: 'IDEMPOTENCY_KEY_REUSED' });
+    // 开始时数据库出错：不是「已经在跑」，是一个可以重试的 503
+    const broken = service({ outcome: 'error', errorCode: 'ECONNRESET' });
+    await expect(
+      broken.svc.runNow(EMP, 'gap_mining', KEY),
+    ).rejects.toMatchObject({ status: 503, code: 'JOB_START_FAILED' });
+    expect(broken.audits[0]).toMatchObject({
+      result: 'FAILURE',
+      action: 'run_now:gap_mining',
+    });
     await expect(
       service({}).svc.runNow(EMP, 'gap_mining', undefined),
     ).rejects.toMatchObject({

@@ -170,4 +170,8 @@ export type FaqPhrasing = {
 };
 
 /** 写操作的执行人：员工（SessionEmployee 满足）或种子脚本（null）。 */
-export type FaqActor = { employeeId: string | null };
+export type FaqActor = {
+  employeeId: string | null;
+  /** 员工的显示名（登录会话带的；FAQ 候选的历史里显示是谁）。 */
+  displayName?: string | null;
+};

@@ -116,7 +116,7 @@ export function unsolvedReasons(turn: ReasonInput): UnsolvedReason[] {
 }
 
 /** 不是问题的轮：寒暄、要人工的那一轮本身、指令注入、想要别人的数据。 */
-const NOT_QUESTIONS = new Set([
+export const NOT_QUESTIONS: ReadonlySet<string> = new Set([
   'greeting',
   'farewell',
   'instructions',

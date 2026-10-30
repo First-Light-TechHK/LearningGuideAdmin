@@ -109,6 +109,18 @@ export function createFlywheelRunsService(deps: {
             'JOB_ALREADY_RUNNING',
             'This job is already running. Try again when it has finished.',
           );
+        case 'error':
+          await audit(
+            employee,
+            `run_now:${which}`,
+            'FAILURE',
+            outcome.errorCode,
+          );
+          throw new HelpdeskError(
+            503,
+            'JOB_START_FAILED',
+            'The job could not be started. Try again in a moment.',
+          );
         default:
           throw new HelpdeskError(
             422,
