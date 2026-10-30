@@ -33,6 +33,7 @@ import {
   type SuggestKind,
 } from '../../src/contracts/helpdesk-qa';
 import {
+  deadlineDeps,
   EVAL_LOCALES,
   percentile,
   serviceLocale,
@@ -488,6 +489,7 @@ export async function runConversations(
     log: noopLog,
     events,
     env: () => options.env,
+    ...deadlineDeps(options.env),
   });
   const results: TurnResult[] = [];
   let spentUsd = 0;

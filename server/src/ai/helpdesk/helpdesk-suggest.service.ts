@@ -191,6 +191,8 @@ export type HelpdeskSuggestDeps = {
   /** 每次调用现读（默认 process.env），便于轮换 key / 切模型。 */
   env?: () => NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** 整次推荐的总期限（默认 SUGGEST_DEADLINE_MS）；只有评测放宽（思考档位要看不截时限的质量与延迟）。 */
+  deadlineMs?: number;
   now?: () => number;
 };
 
@@ -340,12 +342,14 @@ function isV5(input: SuggestInput): boolean {
 
 export class HelpdeskSuggestService implements OnModuleDestroy {
   readonly timeoutMs: number;
+  readonly deadlineMs: number;
   private readonly logger = new Logger('HelpdeskSuggest');
   private lastPurge = Number.NEGATIVE_INFINITY;
   private readonly writing = new Set<Promise<void>>();
 
   constructor(private readonly deps: HelpdeskSuggestDeps) {
     this.timeoutMs = deps.timeoutMs ?? SUGGEST_TIMEOUT_MS;
+    this.deadlineMs = deps.deadlineMs ?? SUGGEST_DEADLINE_MS;
   }
 
   private env(): NodeJS.ProcessEnv {
@@ -597,7 +601,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     // chip 不调模型，不需要 key
     if (apiKey === '' && input.source !== 'chip')
       return { chosen: null, reason: 'no_key', model: null };
-    const deadline = this.now() + SUGGEST_DEADLINE_MS;
+    const deadline = this.now() + this.deadlineMs;
     const left = () => deadline - this.now();
     const limit =
       input.source === 'submit' ? SUGGEST_RATE_LIMIT : ASSIST_RATE_LIMIT;

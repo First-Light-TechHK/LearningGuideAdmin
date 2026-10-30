@@ -14,6 +14,7 @@ import {
   caseLanguage,
   chooseModel,
   DEFAULT_BUDGET_USD,
+  evalDeadline,
   EVAL_LANGUAGES,
   EVAL_LOCALES,
   EVAL_PERSONAS,
@@ -32,6 +33,7 @@ import {
   runRetrieval,
   summarize,
   summarizeRetrieval,
+  thinkingLabel,
   turnKind,
   writeReport,
   type CaseResult,
@@ -1140,6 +1142,32 @@ describe('model and budget settings', () => {
         AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
       }),
     ).toEqual({ kind: 'real', model: 'google/gemini-2.5-flash' });
+  });
+
+  it('takes a longer deadline from HELPDESK_EVAL_DEADLINE_MS for real models only, and names it in the label', () => {
+    // 思考档位要看不截时限时的质量与延迟；不给就是线上的 3.5 秒
+    expect(evalDeadline({})).toBeUndefined();
+    expect(evalDeadline({ HELPDESK_EVAL_DEADLINE_MS: ' 30000 ' })).toBe(30_000);
+    for (const bad of ['0', '-5', '1.5', 'abc', '600001'])
+      expect(() => evalDeadline({ HELPDESK_EVAL_DEADLINE_MS: bad })).toThrow(
+        'HELPDESK_EVAL_DEADLINE_MS must be a whole number of milliseconds, 1 to 600000',
+      );
+    const model = chooseModel({
+      OPENROUTER_API_KEY: 'k',
+      HELPDESK_SUGGEST_THINKING: 'low',
+      HELPDESK_EVAL_DEADLINE_MS: '30000',
+    });
+    expect(model).toEqual({
+      kind: 'real',
+      model: 'google/gemini-2.5-flash',
+      thinking: 'low',
+      deadlineMs: 30_000,
+    });
+    expect(thinkingLabel(model)).toBe(', thinking low, deadline 30000 ms');
+    expect(chooseModel({ HELPDESK_EVAL_DEADLINE_MS: '30000' })).toEqual({
+      kind: 'fake',
+      model: FAKE_MODEL_ID,
+    });
   });
 
   it('caps spend at HELPDESK_EVAL_BUDGET_USD, 5 USD by default', () => {

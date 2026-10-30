@@ -19,6 +19,7 @@ import type {
   AgentStepRunner,
   AgentStepSpec,
   ModelTarget,
+  ThinkingSetting,
 } from './engine';
 
 /**
@@ -112,6 +113,18 @@ export const openRouterSource: ModelSource = (pi, target) => {
           maxTokens: known?.maxTokens ?? 4_096,
         };
   return { models: openRouterModels, model, priced: known !== undefined };
+};
+
+/**
+ * 思考时在每步的 maxTokens 上另给的额度：思考的字也算在 max_tokens 里，不另给，选卡片的调用会被截断
+ * （2026-10-30 实测 DeepSeek low 档 23% 截断）。档位与 pi 给 Anthropic 等的默认思考预算相同；
+ * 只按用掉的计费，真正的上限是期限。
+ */
+export const THINKING_TOKENS: Readonly<Record<ThinkingSetting, number>> = {
+  off: 0,
+  low: 2_048,
+  medium: 8_192,
+  high: 16_384,
 };
 
 const clip = (text: string, max: number) =>
@@ -349,7 +362,8 @@ export class PiStepRunner implements AgentStepRunner {
           apiKey: context.model.apiKey,
           headers: { ...streamOptions?.headers, traceparent },
           temperature: 0,
-          maxTokens: spec.maxTokens,
+          maxTokens:
+            spec.maxTokens + THINKING_TOKENS[context.model.thinking ?? 'off'],
           maxRetries: 0,
           // openai-completions 原样转成 tool_choice（SimpleStreamOptions 的类型只列 auto / none）
           toolChoice: 'required' as SimpleStreamOptions['toolChoice'],

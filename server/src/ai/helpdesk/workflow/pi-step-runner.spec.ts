@@ -9,6 +9,7 @@ import {
   loadPi,
   openRouterSource,
   PiStepRunner,
+  THINKING_TOKENS,
   type ModelSource,
 } from './pi-step-runner';
 
@@ -584,13 +585,29 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
       ) as { reasoning?: unknown }
     ).reasoning;
 
+  const sentMaxTokens = (fetch: jest.Mock) => {
+    const body = JSON.parse(
+      (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
+    ) as { max_tokens?: number; max_completion_tokens?: number };
+    return body.max_tokens ?? body.max_completion_tokens;
+  };
+
   it.each([
-    ['off', { effort: 'none' }],
-    ['low', { effort: 'low' }],
-    ['high', { effort: 'high' }],
+    ['off', { effort: 'none' }, 0],
+    ['low', { effort: 'low' }, 2_048],
+    ['high', { effort: 'high' }, 16_384],
   ] as const)(
-    'sends thinking %s as the OpenRouter reasoning effort, also for a model missing from the catalog',
-    async (thinking, reasoning) => {
+    'sends thinking %s as the OpenRouter reasoning effort, with room to think on top of the step limit, also for a model missing from the catalog',
+    async (thinking, reasoning, room) => {
+      // 思考的字也算在 max_tokens 里：不另给额度，选卡片的调用会被截断（2026-10-30 实测 low 档 23% 截断）
+      // 档位与 pi 给 Anthropic 等的默认思考预算相同（medium 8192；DeepSeek 不收 medium 档）
+      expect(THINKING_TOKENS).toEqual({
+        off: 0,
+        low: 2_048,
+        medium: 8_192,
+        high: 16_384,
+      });
+      expect(THINKING_TOKENS[thinking]).toBe(room);
       for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
         const { outcome, fetch } = await call(picked, {
           ...TARGET,
@@ -599,6 +616,7 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
         });
         expect(outcome).toEqual({ kind: 'called', args: { faqId: IDS[0] } });
         expect(sentReasoning(fetch)).toEqual(reasoning);
+        expect(sentMaxTokens(fetch)).toBe(SPEC.maxTokens + room);
       }
     },
   );

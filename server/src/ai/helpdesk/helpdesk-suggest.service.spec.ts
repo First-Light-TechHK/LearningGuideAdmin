@@ -170,6 +170,7 @@ function setup(
     reply?: RunnerReply;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    deadlineMs?: number;
     now?: () => number;
   } = {},
 ) {
@@ -209,6 +210,7 @@ function setup(
     events,
     env: () => env,
     timeoutMs: options.timeoutMs,
+    deadlineMs: options.deadlineMs,
     now: options.now,
   });
   return {
@@ -611,6 +613,28 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(rows).toHaveLength(1);
     expect(rows[0].faqId).toBeNull();
+  });
+
+  it('takes a longer deadline when one is given (the thinking benchmark), 3.5 s by default', async () => {
+    let now = T0;
+    const { service, findCandidates, rows } = setup({
+      now: () => now,
+      timeoutMs: 30_000,
+      deadlineMs: 30_000,
+      reply: () => {
+        now += 12_000;
+        return pick(candidates[0].id);
+      },
+    });
+    findCandidates.mockImplementation(() => {
+      now += 1_000;
+      return Promise.resolve(candidates);
+    });
+    expect((await service.suggest(input)).suggestion?.faqId).toBe(
+      candidates[0].id,
+    );
+    expect(rows[0].faqId).toBe(candidates[0].id);
+    expect(new HelpdeskSuggestService({} as never).deadlineMs).toBe(3_500);
   });
 
   it('gives the model only the time that is left, then aborts it', async () => {

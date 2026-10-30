@@ -427,7 +427,13 @@ export async function pgReleaseQaSource(url: string): Promise<{
 /* ---------------------------------- 模型 ---------------------------------- */
 
 export type EvalModel =
-  | { kind: 'real'; model: string; thinking?: ThinkingSetting }
+  | {
+      kind: 'real';
+      model: string;
+      thinking?: ThinkingSetting;
+      /** 评测放宽的总期限（HELPDESK_EVAL_DEADLINE_MS）；没有 = 线上的期限。 */
+      deadlineMs?: number;
+    }
   | { kind: 'fake'; model: string };
 
 export const FAKE_MODEL_ID = 'fake/top-candidate';
@@ -436,8 +442,34 @@ export const FAKE_MODEL_ID = 'fake/top-candidate';
 export function thinkingLabel(model: {
   kind: string;
   thinking?: ThinkingSetting;
+  deadlineMs?: number;
 }): string {
-  return model.kind === 'real' ? `, thinking ${model.thinking ?? 'off'}` : '';
+  if (model.kind !== 'real') return '';
+  const deadline = model.deadlineMs ? `, deadline ${model.deadlineMs} ms` : '';
+  return `, thinking ${model.thinking ?? 'off'}${deadline}`;
+}
+
+/**
+ * 评测才有的总期限（HELPDESK_EVAL_DEADLINE_MS，毫秒）：看思考档位不截时限时的质量与延迟，
+ * 慢的那些线上会超时，报告里按延迟另算。不给就是线上的期限。
+ */
+export function evalDeadline(env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env.HELPDESK_EVAL_DEADLINE_MS?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0 || value > 600_000)
+    throw new Error(
+      'HELPDESK_EVAL_DEADLINE_MS must be a whole number of milliseconds, 1 to 600000',
+    );
+  return value;
+}
+
+/** 放宽期限时，模型那一步的时限也一起放宽。 */
+export function deadlineDeps(
+  env: NodeJS.ProcessEnv,
+): { deadlineMs: number; timeoutMs: number } | Record<string, never> {
+  const deadlineMs = evalDeadline(env);
+  return deadlineMs ? { deadlineMs, timeoutMs: deadlineMs } : {};
 }
 
 /**
@@ -471,10 +503,12 @@ export async function callCeilingUsd(model: string): Promise<number | null> {
 export function chooseModel(env: NodeJS.ProcessEnv): EvalModel {
   if (env.OPENROUTER_API_KEY?.trim()) {
     const thinking = suggestThinking(env);
+    const deadlineMs = evalDeadline(env);
     return {
       kind: 'real',
       model: suggestModel(env),
       ...(thinking ? { thinking } : {}),
+      ...(deadlineMs ? { deadlineMs } : {}),
     };
   }
   return { kind: 'fake', model: FAKE_MODEL_ID };
@@ -613,6 +647,7 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
     log: noopLog,
     events,
     env: () => options.env,
+    ...deadlineDeps(options.env),
   });
   const done: (CaseResult | undefined)[] = [];
   let spentUsd = 0;
