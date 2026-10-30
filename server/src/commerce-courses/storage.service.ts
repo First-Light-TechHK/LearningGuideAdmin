@@ -248,6 +248,37 @@ export class CourseStorageService {
     return this.staging.removePrefix(jobId);
   }
 
+  /** 只读诊断：返回当前生效的存储驱动信息（不含密钥），用于确认是否用上 S3。 */
+  describe(): {
+    driver: 's3' | 'local';
+    region?: string;
+    bucket?: string;
+    prefix?: string;
+    stagingBucket?: string;
+    stagingPrefix?: string;
+    mediaRoot?: string;
+    stagingRoot?: string;
+    mediaKeyPattern?: string;
+  } {
+    if (this.config.mediaBucket) {
+      return {
+        driver: 's3',
+        region: this.config.awsRegion ?? 'ap-southeast-1',
+        bucket: this.config.mediaBucket,
+        prefix: this.config.mediaPrefix ?? '',
+        stagingBucket: this.config.stagingBucket ?? this.config.mediaBucket,
+        stagingPrefix: this.config.stagingPrefix ?? 'staging/',
+        mediaKeyPattern: `${this.config.mediaPrefix ?? ''}course-media/<courseId>/<assetId>.<ext>`,
+      };
+    }
+    return {
+      driver: 'local',
+      mediaRoot: path.resolve(this.config.mediaRoot),
+      stagingRoot: path.resolve(this.config.packageStagingRoot),
+      mediaKeyPattern: 'course-media/<courseId>/<assetId>.<ext>',
+    };
+  }
+
   static sha256(bytes: Buffer): string {
     return createHash('sha256').update(bytes).digest('hex');
   }
