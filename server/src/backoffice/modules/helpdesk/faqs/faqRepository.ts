@@ -499,7 +499,7 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
             idempotencyKey,
             employeeId,
             faq.signals,
-            // 空 key：触发器按英文问题取第一个空闲的 slug（迁移 20261030090000）
+            // 空 key：触发器按英文问题取第一个空闲的 slug（迁移 20261030150000）
             faq.key === '' ? null : faq.key,
             faq.type,
             faq.entry,

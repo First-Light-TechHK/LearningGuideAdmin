@@ -19,7 +19,7 @@ import type { FaqReleaseSnapshot } from './faqRelease';
 import { toFaq, type SqlClient, type SqlDb } from './faqRepository';
 
 /**
- * v5 FAQ 问题树的 PostgreSQL 读写（helpdesk-v5-faq-graph-design §2，迁移 20261030090000）。原生 SQL，
+ * v5 FAQ 问题树的 PostgreSQL 读写（helpdesk-v5-faq-graph-design §2，迁移 20261030150000）。原生 SQL，
  * 与 faqRepository.ts 同一个 SqlDb。
  * - 边的每次写入都先拿同一把事务级 advisory 锁（helpdesk_faq_graph），所以「成环检查（递归 CTE）+ 插入」
  *   与另一个并发的建边不会交错：两条互相指向的边不可能同时通过；

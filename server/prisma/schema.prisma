@@ -386,7 +386,7 @@ model HelpdeskSuggestion {
   latencyMs    Int      @default(0) @map("latency_ms")
   outcome      String?
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  // v5（迁移 20261030100000_helpdesk_suggestion_turns）：请求带 context 的一轮；CHECK 与部分索引只在迁移里
+  // v5（迁移 20261030160000_helpdesk_suggestion_turns）：请求带 context 的一轮；CHECK 与部分索引只在迁移里
   kind           String?
   intent         String?
   confidence     String?
@@ -432,9 +432,9 @@ model HelpdeskFaq {
   questionZh     String   @map("question_zh")
   answerZh       String   @map("answer_zh")
   keywords       String[] @default([])
-  /// v5 Part A：学员情境信号标签（FAQ_SIGNALS；迁移 20261030080000_helpdesk_faq_signals）
+  /// v5 Part A：学员情境信号标签（FAQ_SIGNALS；迁移 20261030140000_helpdesk_faq_signals）
   signals        String[] @default([])
-  /// v5 问题树（迁移 20261030090000_helpdesk_faq_graph）：稳定的 slug（不给时触发器按英文问题取）
+  /// v5 问题树（迁移 20261030150000_helpdesk_faq_graph）：稳定的 slug（不给时触发器按英文问题取）
   key            String   @unique(map: "helpdesk_faqs_key_key")
   /// answer | choice
   nodeType       String   @default("answer") @map("node_type")

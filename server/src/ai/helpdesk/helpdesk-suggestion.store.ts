@@ -44,7 +44,7 @@ export function outcomeFits(
 }
 
 /**
- * v5（迁移 20261030100000_helpdesk_suggestion_turns，增量）：请求带 context 的一轮记下 kind、intent、
+ * v5（迁移 20261030160000_helpdesk_suggestion_turns，增量）：请求带 context 的一轮记下 kind、intent、
  * confidence、屏幕上 / 回包的节点、摘录块、守卫结果、clarify 是否讲成、会话与发布版本。只有代码与枚举，
  * 从不记模型写的文字。旧请求没有这些（列为 NULL / 空）。
  */

@@ -29,7 +29,7 @@ export const FAQ_LIMITS = {
   candidatesMax: 10,
   /** v5 Part A：每条 FAQ 的信号标签至多这么多个（= FAQ_SIGNALS 的个数）。 */
   signalsMax: 8,
-  /** v5 问题树（迁移 20261030090000）：key 的长度上限与格式（小写字母数字开头，再接字母数字 . _ -）。 */
+  /** v5 问题树（迁移 20261030150000）：key 的长度上限与格式（小写字母数字开头，再接字母数字 . _ -）。 */
   keyMax: 80,
   /** 学员问法（helpdesk_faq_phrasings.text）。 */
   phrasingMax: 200,
@@ -73,7 +73,7 @@ export type HelpdeskFaq = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
-  /** v5 Part A：这条 FAQ 适合哪些学员情境（FAQ_SIGNALS，按 chip 优先级排好、去重）；迁移 20261030080000。 */
+  /** v5 Part A：这条 FAQ 适合哪些学员情境（FAQ_SIGNALS，按 chip 优先级排好、去重）；迁移 20261030140000。 */
   signals: FaqSignal[];
   status: FaqStatus;
   version: number;

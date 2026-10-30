@@ -50,7 +50,7 @@ if (!url && process.env.CI === 'true')
 const describeDb = url ? describe : describe.skip;
 
 const MIGRATIONS = join(__dirname, '../../../prisma/migrations');
-const GRAPH_MIGRATION = '20261030090000_helpdesk_faq_graph';
+const GRAPH_MIGRATION = '20261030150000_helpdesk_faq_graph';
 
 function migrationSql(filter: (dir: string) => boolean = () => true): string {
   return readdirSync(MIGRATIONS)
@@ -99,7 +99,7 @@ async function rejects(
   return error as HelpdeskError;
 }
 
-describeDb('FAQ key backfill (migration 20261030090000)', () => {
+describeDb('FAQ key backfill (migration 20261030150000)', () => {
   const schema = `hdgraphmig_${process.pid}_${Date.now()}`;
   let admin: Pool;
   let pool: Pool;

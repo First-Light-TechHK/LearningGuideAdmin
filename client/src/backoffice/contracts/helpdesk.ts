@@ -255,9 +255,9 @@ export type HelpdeskFaq = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
-  /** v5 Part A：服务端总会给（迁移 20261030080000）；编辑器多选（待视觉验收）。 */
+  /** v5 Part A：服务端总会给（迁移 20261030140000）；编辑器多选（待视觉验收）。 */
   signals?: FaqSignal[];
-  /** v5 问题树（迁移 20261030090000；旧服务端没有 → 按 answer / 入口处理）：稳定的 slug。 */
+  /** v5 问题树（迁移 20261030150000；旧服务端没有 → 按 answer / 入口处理）：稳定的 slug。 */
   key?: string;
   type?: FaqNodeType;
   entry?: boolean;
