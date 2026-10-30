@@ -21,18 +21,20 @@ const LANGUAGES: { value: PreviewLocale; key: string }[] = [
   { value: 'zh-CN', key: 'helpDesk.preview.zh' },
 ]
 
-export function FaqPreview({ locale, faq, onClose, onTree }: { locale: Locale; faq: HelpdeskFaq; onClose: () => void; onTree?: () => void }) {
+export function FaqPreview({ locale, faq, onClose, onTree }: { locale: Locale; faq: HelpdeskFaq; onClose: () => void; onTree?: (opener: HTMLElement | null) => void }) {
   const uid = useId()
   const [language, setLanguage] = useState<PreviewLocale>(locale === 'zh-CN' ? 'zh-CN' : 'en-GB')
   const closeRef = useRef<HTMLButtonElement>(null)
   const radios = useRef<(HTMLButtonElement | null)[]>([])
   const dialogRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
   useModal(() => dialogRef.current, onClose)
 
+  // 打开它的按钮只记第一次：StrictMode 下 effect 会跑两遍，第二遍时焦点已经在关闭按钮上
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
+    openerRef.current ??= document.activeElement as HTMLElement | null
     closeRef.current?.focus()
-    return () => opener?.focus?.()
+    return () => openerRef.current?.focus?.()
   }, [])
 
   function onRadioKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -95,12 +97,8 @@ export function FaqPreview({ locale, faq, onClose, onTree }: { locale: Locale; f
         </article>
         {onTree ? (
           <footer className="hdPreviewFoot">
-            <button
-              type="button"
-              className="hdFaqPreview"
-              aria-label={t(locale, 'helpDesk.faqs.treeLabel', { question: locale === 'zh-CN' ? faq.questionZh : faq.questionEn })}
-              onClick={onTree}
-            >
+            {/* 名字就是看得到的字（WCAG 2.5.3）：对话框已经只关于这一条 FAQ。树关上时焦点回到打开 Preview 的那个按钮。 */}
+            <button type="button" className="hdFaqPreview" onClick={() => onTree(openerRef.current)}>
               {t(locale, 'helpDesk.preview.tree')}
             </button>
           </footer>

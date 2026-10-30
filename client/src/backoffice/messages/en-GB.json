@@ -811,7 +811,6 @@
       "emptyFiltered": "No FAQs match your search or filters.",
       "saved": "FAQ saved.",
       "deleted": "FAQ deleted.",
-      "treeLabel": "Question tree for {question}",
       "choiceTag": "Choice",
       "followUpTag": "Follow-up"
     },

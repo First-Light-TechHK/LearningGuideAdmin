@@ -21,7 +21,8 @@ import { useModal } from './useModal'
 type TabKey = 'outline' | 'chat'
 const TABS: TabKey[] = ['outline', 'chat']
 
-type Props = { locale: Locale; faq: HelpdeskFaq; onClose: () => void }
+/** returnFocus：从 Preview 打开时，Preview 已经关了，焦点要回到打开 Preview 的按钮，而不是 body。 */
+type Props = { locale: Locale; faq: HelpdeskFaq; onClose: () => void; returnFocus?: HTMLElement | null }
 type State = { kind: 'loading' } | { kind: 'ready'; tree: FaqTree } | { kind: 'failed'; code: string }
 
 function ruleText(locale: Locale, problem: GraphProblem): string {
@@ -44,7 +45,7 @@ function countWarnings(tree: FaqTree): number {
   return count
 }
 
-export function FaqTreeDrawer({ locale, faq, onClose }: Props) {
+export function FaqTreeDrawer({ locale, faq, onClose, returnFocus }: Props) {
   const uid = useId()
   const zh = locale === 'zh-CN'
   const [tab, setTab] = useState<TabKey>('outline')
@@ -55,10 +56,13 @@ export function FaqTreeDrawer({ locale, faq, onClose }: Props) {
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
   useModal(() => drawerRef.current, onClose)
 
+  // 焦点回到哪儿只记第一次：StrictMode 下 effect 会跑两遍，第二遍时焦点已经在关闭按钮上
+  const openerRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
+    openerRef.current ??= returnFocus ?? (document.activeElement as HTMLElement | null)
     closeRef.current?.focus()
-    return () => opener?.focus?.()
+    return () => openerRef.current?.focus?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在打开时记一次
   }, [])
 
   useEffect(() => {

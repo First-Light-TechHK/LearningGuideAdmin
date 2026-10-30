@@ -763,7 +763,7 @@ describe('the drawer, preview and confirmations are modal', () => {
     assert.ok(document.activeElement === close, 'focus on ' + close.textContent)
     // v5: the question tree's way in sits at the foot of the preview (the table keeps Figma's Edit / Preview), so it
     // is the last control; the browser moves Tab from Close to it, the layer wraps from it
-    const tree = within(dialog).getByRole('button', { name: 'Question tree for Preview me' })
+    const tree = within(dialog).getByRole('button', { name: 'View question tree', exact: true })
     assert.ok(close.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING, 'after Close')
     tree.focus()
     tab()

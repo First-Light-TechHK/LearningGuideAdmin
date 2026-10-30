@@ -811,7 +811,6 @@
       "emptyFiltered": "没有符合搜索或筛选条件的常见问题。",
       "saved": "常见问题已保存。",
       "deleted": "常见问题已删除。",
-      "treeLabel": "{question} 的问题树",
       "choiceTag": "选择题",
       "followUpTag": "追问"
     },
