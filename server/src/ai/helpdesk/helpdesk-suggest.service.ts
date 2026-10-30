@@ -89,6 +89,8 @@ export const SUGGEST_TIMEOUT_MS = 3_000;
  */
 export const SUGGEST_DEADLINE_MS = 3_500;
 export const SUGGEST_CANDIDATES = 8;
+/** v5 assist 一次给模型看的候选数（多出的 2 个给树上近亲与深层答案，见 ASSIST_SEARCH）。 */
+export const ASSIST_CANDIDATES = 10;
 export const SUGGEST_RATE_LIMIT = { limit: 10, windowMs: 3_600_000 } as const;
 export const QUERY_TEXT_RETENTION_DAYS = 90;
 /** 你可能想问：最多几个。 */
@@ -646,7 +648,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     };
     if (isV5(input)) {
       const { state, reason, trail } = await runWorkflow(
-        assistWorkflow({ qa: this.deps.qa, limit: SUGGEST_CANDIDATES, left }),
+        assistWorkflow({ qa: this.deps.qa, limit: ASSIST_CANDIDATES, left }),
         initialAssistState({
           locale: input.locale,
           category: input.faqCategory,

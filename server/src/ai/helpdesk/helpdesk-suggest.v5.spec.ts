@@ -327,9 +327,10 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
       locale: 'en-GB',
       category: null,
       text: 'I paid but my plan is not active',
-      limit: 8,
+      limit: 10,
       entryOnly: true,
       types: ['answer', 'choice'],
+      deepReserved: 2,
     });
     const spec = specOf(run, 'pick_faq') as AgentStepSpec;
     expect(spec.tool.enumArgs).toEqual({

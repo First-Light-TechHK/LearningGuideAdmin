@@ -9,11 +9,12 @@ import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 import {
+  ASSIST_CANDIDATES,
   HelpdeskSuggestService,
-  SUGGEST_CANDIDATES,
 } from '../../src/ai/helpdesk/helpdesk-suggest.service';
 import type { HelpdeskSuggestionLog } from '../../src/ai/helpdesk/helpdesk-suggestion.store';
 import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-event.store';
+import { ASSIST_SEARCH } from '../../src/ai/helpdesk/workflow/assist-workflow';
 import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
 import {
   guardExplanation,
@@ -705,10 +706,9 @@ export async function conversationRetrieval(options: {
           locale,
           category: null,
           text: turn.message,
-          limit: SUGGEST_CANDIDATES,
+          limit: ASSIST_CANDIDATES,
           ...(shown ? { nodeId: shown } : {}),
-          entryOnly: true,
-          types: ['answer', 'choice'],
+          ...ASSIST_SEARCH,
         });
         results.push({
           id: `${conversation.id}#${i + 1}`,
@@ -725,7 +725,7 @@ export async function conversationRetrieval(options: {
           ],
           candidateIds: found
             .filter((c) => c.id !== shown)
-            .slice(0, SUGGEST_CANDIDATES)
+            .slice(0, ASSIST_CANDIDATES)
             .map((c) => c.id),
           latencyMs: performance.now() - started,
         });

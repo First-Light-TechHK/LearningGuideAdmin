@@ -4,6 +4,7 @@ import {
   type ConfidenceLevel,
   type FaqCategory,
   type HelpdeskQaCandidate,
+  type HelpdeskQaSearch,
   type HelpdeskQaSource,
   type SuggestGuard,
   type SuggestIntent,
@@ -278,6 +279,15 @@ export function sharedChoice(
   return null;
 }
 
+/**
+ * v5 的候选检索：入口节点与 choice，另给命中的非入口答案留 2 个位置。真模型评测离线回放（2026-10-30，
+ * 2,922 个该出卡的回合）：加上树上近亲、这 2 个位置和 10 个候选（ASSIST_CANDIDATES），
+ * 对的卡在候选里的比例从 94.8% 到 98.1%。
+ */
+export const ASSIST_SEARCH: Required<
+  Pick<HelpdeskQaSearch, 'entryOnly' | 'types' | 'deepReserved'>
+> = { entryOnly: true, types: ['answer', 'choice'], deepReserved: 2 };
+
 export function assistWorkflow(deps: {
   qa: HelpdeskQaSource;
   limit: number;
@@ -303,8 +313,7 @@ export function assistWorkflow(deps: {
               text: state.queryText,
               limit: deps.limit,
               ...(nodeId ? { nodeId } : {}),
-              entryOnly: true,
-              types: ['answer', 'choice'],
+              ...ASSIST_SEARCH,
             }),
             nodeId
               ? deps.qa.findPublished(nodeId, state.enquiry.locale)

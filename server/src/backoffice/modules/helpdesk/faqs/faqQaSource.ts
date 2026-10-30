@@ -26,7 +26,8 @@ import { createPgFaqReleaseSource } from './faqReleaseService';
  * 照旧读逐条发布的行（边读工作表）。员工改了工作表，学员看到的要等下一次发布。
  *
  * 屏幕上有卡片（search.nodeId）时：先是它的全部子节点（命中的按得分在前，再按边的顺序），
- * 再是它父节点的其它子节点里命中的，最后是普通检索（入口节点）；按 id 去重，至多 limit 条。
+ * 再是树上近亲（父节点的其它子节点、各层祖先、祖先的其它子节点）里命中的，最后是普通检索（入口节点）；
+ * 调用方给了 deepReserved 时，命中的非入口 answer 节点另留几个位置。按 id 去重，至多 limit 条。
  */
 
 /** 运行时需要的边（发布版本里来自快照，之前来自工作表）。 */
@@ -132,35 +133,48 @@ export function createHelpdeskQaSource(
             .filter((edge) => edge.parentId === contextId)
             .sort((a, b) => a.position - b.position)
         : [];
-      const siblingIds = contextId
-        ? [
-            ...new Set(
-              v.edges
-                .filter((edge) => edge.childId === contextId)
-                .flatMap((parent) =>
-                  v.edges
-                    .filter(
-                      (edge) =>
-                        edge.parentId === parent.parentId &&
-                        edge.childId !== contextId,
-                    )
-                    .sort((a, b) => a.position - b.position)
-                    .map((edge) => edge.childId),
-                ),
-            ),
-          ]
-        : [];
-      const near = new Set([...children.map((e) => e.childId), ...siblingIds]);
+      // 树上近亲：从屏幕上的卡片往上走，每层祖先本身和它的其它子节点（真模型评测离线回放 2026-10-30：
+      // 往下走了两层的用户回头问祖父节点的另一个追问、或回到父节点，这些卡片既不是入口也不是兄弟）
+      const relatives = new Set<string>();
+      if (contextId) {
+        const visited = new Set<string>();
+        const queue = v.edges
+          .filter((edge) => edge.childId === contextId)
+          .map((edge) => edge.parentId);
+        for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+          if (visited.has(id)) continue;
+          visited.add(id);
+          relatives.add(id);
+          for (const edge of v.edges) {
+            if (edge.parentId === id) relatives.add(edge.childId);
+            if (edge.childId === id) queue.push(edge.parentId);
+          }
+        }
+        relatives.delete(contextId);
+      }
+      const entryOnly = search.entryOnly ?? true;
+      const types = search.types ?? ['answer'];
+      const deepWanted =
+        entryOnly && types.includes('answer')
+          ? Math.max(0, Math.min(search.deepReserved ?? 0, limit))
+          : 0;
+      // 子节点 / 近亲 / 深层答案可能不是入口、可能是 choice：先不限，下面再按调用方要的过滤普通检索
+      const wide = children.length > 0 || relatives.size > 0 || deepWanted > 0;
 
       const searched = await repository.searchPublished({
         locale,
         boost: search.category,
         text: search.text,
-        limit: near.size > 0 ? FAQ_LIMITS.publicLimitMax : limit,
+        limit: wide ? FAQ_LIMITS.publicLimitMax : limit,
         release: v.release,
-        // 子节点 / 兄弟节点可能不是入口、可能是 choice：先不限，下面再按调用方要的过滤普通检索
-        ...(near.size > 0
-          ? { entryOnly: false, types: ['answer', 'choice'] as const }
+        ...(wide
+          ? {
+              entryOnly: false,
+              types:
+                contextId !== undefined
+                  ? (['answer', 'choice'] as const)
+                  : search.types,
+            }
           : { entryOnly: search.entryOnly, types: search.types }),
       });
       const scored = new Map<string, ScoredFaq>(
@@ -210,10 +224,7 @@ export function createHelpdeskQaSource(
             }),
           );
       }
-      const entryOnly = search.entryOnly ?? true;
-      const types = search.types ?? ['answer'];
       const nearIds = new Set(nearList.map((item) => item.faq.id));
-      const siblings = new Set(siblingIds);
       type Queued = {
         faq: HelpdeskFaq;
         score: number;
@@ -221,19 +232,21 @@ export function createHelpdeskQaSource(
         index: number;
       };
       const searchList: Queued[] = [];
+      // 检索命中的非入口 answer 节点（按得分），至多占 deepWanted 个位置
+      const deepList: Queued[] = [];
       searched.forEach((faq, index) => {
         if (nearIds.has(faq.id)) return;
-        if (siblings.has(faq.id))
+        if (relatives.has(faq.id))
           searchList.push({
             faq,
             score: faq.score,
             relation: 'sibling',
             index,
           });
-        else if (!(
-          near.size > 0 &&
-          ((entryOnly && !faq.entry) || !types.includes(faq.type))
-        ))
+        else if (wide && entryOnly && !faq.entry) {
+          if (deepWanted > 0 && faq.type === 'answer')
+            deepList.push({ faq, score: faq.score, relation: 'search', index });
+        } else if (!(wide && !types.includes(faq.type)))
           searchList.push({ faq, score: faq.score, relation: 'search', index });
       });
       searchList.sort(
@@ -254,13 +267,21 @@ export function createHelpdeskQaSource(
         taken.add(faq.id);
         out.push(candidate(faq, score, locale, v, relation));
       };
+      // 顺序：子节点（让出检索与深层答案的位置）→ 检索队（让出深层答案的位置）→ 深层答案 → 余下的检索 → 余下的子节点
+      const deepRoom = Math.min(deepWanted, deepList.length);
       const reserved = Math.min(
         CANDIDATE_NEAR.searchReserved,
         searchList.length,
       );
-      const nearRoom = Math.max(0, limit - reserved);
+      const nearRoom = Math.max(0, limit - reserved - deepRoom);
       nearList
         .slice(0, nearRoom)
+        .forEach((item) => push(item.faq, item.score, item.relation));
+      for (const item of searchList)
+        if (out.length < limit - deepRoom)
+          push(item.faq, item.score, item.relation);
+      deepList
+        .slice(0, deepRoom)
         .forEach((item) => push(item.faq, item.score, item.relation));
       for (const item of searchList) push(item.faq, item.score, item.relation);
       nearList

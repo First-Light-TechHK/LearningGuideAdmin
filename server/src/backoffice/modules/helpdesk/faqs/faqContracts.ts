@@ -25,7 +25,8 @@ export const FAQ_LIMITS = {
   /** Portal 读列表的 limit 上限（§2）。 */
   publicLimitMax: 100,
   publicLimitDefault: 50,
-  candidatesMax: 8,
+  /** Agent 一次至多看这么多候选（v5 assist 用 10 个，v4 推荐 8 个）。 */
+  candidatesMax: 10,
   /** v5 Part A：每条 FAQ 的信号标签至多这么多个（= FAQ_SIGNALS 的个数）。 */
   signalsMax: 8,
   /** v5 问题树（迁移 20261030090000）：key 的长度上限与格式（小写字母数字开头，再接字母数字 . _ -）。 */

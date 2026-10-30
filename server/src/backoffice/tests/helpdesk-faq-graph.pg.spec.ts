@@ -2,7 +2,10 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Pool } from 'pg';
 
-import type { HelpdeskQaSource } from '../../contracts/helpdesk-qa';
+import type {
+  FaqNodeType,
+  HelpdeskQaSource,
+} from '../../contracts/helpdesk-qa';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
 import {
   createFaqGraphService,
@@ -1284,6 +1287,120 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
         id: best.id,
         relation: 'sibling',
       });
+    });
+
+    it('with a card on screen, matching relatives further up count as siblings: the ancestors and their other children', async () => {
+      // offline replay of the real-model eval turns 2026-10-30: two levels down, the learner asks about a follow-up of
+      // the grandparent (or goes back to the parent); neither is an entry, a child or a sibling, so it never reached the model
+      const { qa } = wire();
+      const billing = await create({ questionEn: 'Billing help' });
+      const refund = await create({
+        entry: false,
+        questionEn: 'How do refunds work?',
+      });
+      const trial = await create({
+        entry: false,
+        questionEn: 'Can I get my trial money back?',
+      });
+      const cancel = await create({
+        entry: false,
+        questionEn: 'How do I cancel my subscription?',
+      });
+      const upgrade = await create({
+        entry: false,
+        questionEn: 'How do I upgrade my plan?',
+      });
+      await link(billing, refund);
+      await link(billing, cancel);
+      await link(billing, upgrade);
+      await link(refund, trial);
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+
+      const search = {
+        locale: 'en-GB',
+        category: null,
+        limit: 8,
+        nodeId: trial.id,
+        entryOnly: true,
+        types: ['answer', 'choice'] as FaqNodeType[],
+      };
+      const uncle = await qa.findCandidates({
+        ...search,
+        text: 'cancel my subscription',
+      });
+      // a relative without a hit (upgrade) stays out
+      expect(uncle.map((c) => [c.id, c.relation])).toEqual([
+        [cancel.id, 'sibling'],
+      ]);
+      const parent = await qa.findCandidates({
+        ...search,
+        text: 'how do refunds work',
+      });
+      expect(parent.map((c) => [c.id, c.relation])).toEqual([
+        [refund.id, 'sibling'],
+      ]);
+    });
+
+    it('deepReserved keeps up to that many places for follow-up answers that match, after the entry search', async () => {
+      // offline replay 2026-10-30: a learner asks straight away about a detail only a follow-up answers; with entries
+      // only, that card never reached the model
+      const { qa } = wire();
+      const certificates = await create({ questionEn: 'Certificates' });
+      const misspelled = await create({
+        entry: false,
+        questionEn: 'Why is the name on my certificate misspelled?',
+      });
+      await link(certificates, misspelled);
+      const entries: HelpdeskFaq[] = [certificates];
+      for (const what of [
+        'download',
+        'print',
+        'share',
+        'rename',
+        'verify',
+        'renew',
+        'translate',
+        'frame',
+      ])
+        entries.push(
+          await create({ questionEn: `How do I ${what} my certificate?` }),
+        );
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+
+      const search = {
+        locale: 'en-GB',
+        category: null,
+        text: 'certificate name misspelled',
+        limit: 8,
+        entryOnly: true,
+        types: ['answer', 'choice'] as FaqNodeType[],
+      };
+      const entriesOnly = await qa.findCandidates(search);
+      expect(entriesOnly).toHaveLength(8);
+      expect(entriesOnly.every((c) => c.entry)).toBe(true);
+
+      // one follow-up matches, 2 places kept: it takes one, the entry search fills the other
+      const deep = await qa.findCandidates({ ...search, deepReserved: 2 });
+      expect(deep).toHaveLength(8);
+      expect(
+        deep.filter((c) => !c.entry).map((c) => [c.id, c.relation]),
+      ).toEqual([[misspelled.id, 'search']]);
+      expect(
+        deep
+          .filter((c) => c.entry)
+          .every((c) => entries.some((e) => e.id === c.id)),
+      ).toBe(true);
+
+      // the old callers (answer types only, no reservation) still get entries only
+      const legacy = await qa.findCandidates({
+        locale: 'en-GB',
+        category: null,
+        text: 'certificate name misspelled',
+        limit: 8,
+      });
+      expect(legacy.every((c) => c.entry)).toBe(true);
     });
 
     it('the real retrieval gate searches the snapshot with each entry question and phrasing', async () => {

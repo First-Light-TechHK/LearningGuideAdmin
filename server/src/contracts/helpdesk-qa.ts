@@ -67,8 +67,8 @@ export type HelpdeskQaCandidate = {
    * v5 问题树（helpdesk-v5-faq-graph-design §4，增量；旧的调用方不读）：节点类型、是否入口、
    * 该语言的答案块（answer 节点；发布版本里是冻结时切好的，之前按同一规则现切）、
    * 哪些 choice 节点把它当选项（「几个候选都是同一个 choice 节点的选项」时显示那个 choice 节点），
-   * 以及它为什么在候选里：child = 屏幕上那张卡片的子节点，sibling = 那张卡片父节点的其它子节点，
-   * search = 检索命中。
+   * 以及它为什么在候选里：child = 屏幕上那张卡片的子节点，sibling = 同一棵树上的近亲（父节点的其它
+   * 子节点，以及更上层的祖先和祖先的其它子节点，只在检索命中时进来），search = 检索命中。
    */
   type?: FaqNodeType;
   entry?: boolean;
@@ -86,13 +86,16 @@ export type HelpdeskQaSearch = {
   /**
    * v5 问题树（增量，都可不给）：
    * - nodeId：屏幕上的卡片（context.nodeId）。给了 → 先是它的子节点（全部，按得分、再按顺序），
-   *   再是它父节点的其它子节点里命中的，最后才是普通检索；
-   * - entryOnly：普通检索只要入口节点（缺省 true；子节点 / 兄弟节点不受它限制）；
-   * - types：普通检索要哪些节点类型（缺省 ['answer']：旧的 Portal 不会渲染 choice 节点）。
+   *   再是树上近亲（父节点的其它子节点、祖先、祖先的其它子节点）里命中的，最后才是普通检索；
+   * - entryOnly：普通检索只要入口节点（缺省 true；子节点 / 近亲不受它限制）；
+   * - types：普通检索要哪些节点类型（缺省 ['answer']：旧的 Portal 不会渲染 choice 节点）；
+   * - deepReserved：entryOnly 时另给检索命中的非入口 answer 节点留至多这么多个位置（缺省 0）：
+   *   用户一上来就问到只有某个追问才答的细节。
    */
   nodeId?: string;
   entryOnly?: boolean;
   types?: FaqNodeType[];
+  deepReserved?: number;
 };
 
 /** 热门已发布 FAQ（v3 §1「你可能想问」：检索不到候选时的兜底）。 */
