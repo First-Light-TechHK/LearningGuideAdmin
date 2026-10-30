@@ -2,7 +2,11 @@ import JSZip from 'jszip';
 import type { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
 import { buildCourseSnapshot, type CourseAggregate } from './snapshot';
-import { PACKAGE_FORMAT, PACKAGE_FORMAT_VERSION, type PackageManifest } from './contracts/manifest';
+import {
+  PACKAGE_FORMAT,
+  PACKAGE_FORMAT_VERSION,
+  type PackageManifest,
+} from './contracts/manifest';
 
 /**
  * 从课程聚合生成 .lgcourse.zip（导出）。见设计文档 §4/§5.6。

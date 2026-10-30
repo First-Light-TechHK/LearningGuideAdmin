@@ -16,7 +16,9 @@ export class CommerceCoursesService {
   ) {}
 
   /** 读取课程封面字节（Admin 预览用）。 */
-  async getCoverBytes(id: string): Promise<{ bytes: Buffer; extension: string } | null> {
+  async getCoverBytes(
+    id: string,
+  ): Promise<{ bytes: Buffer; extension: string } | null> {
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id },
       select: { cover: { select: { storageKey: true, extension: true } } },
@@ -27,7 +29,10 @@ export class CommerceCoursesService {
   }
 
   /** 读取课程某媒体资产字节（Admin 预览用，仅限该课程内资产）。 */
-  async getMediaBytes(id: string, assetId: string): Promise<{ bytes: Buffer; extension: string } | null> {
+  async getMediaBytes(
+    id: string,
+    assetId: string,
+  ): Promise<{ bytes: Buffer; extension: string } | null> {
     const asset = await this.prisma.courseMediaAsset.findUnique({
       where: { id: assetId },
       select: { courseId: true, storageKey: true, extension: true },
@@ -48,7 +53,8 @@ export class CommerceCoursesService {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 10));
     const where: Prisma.CommerceCourseWhereInput = {};
-    if (query.lifecycleStatus) where.lifecycleStatus = query.lifecycleStatus as never;
+    if (query.lifecycleStatus)
+      where.lifecycleStatus = query.lifecycleStatus as never;
     if (query.liveStatus) where.liveStatus = query.liveStatus as never;
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.search?.trim()) {
@@ -56,7 +62,11 @@ export class CommerceCoursesService {
       where.OR = [
         { code: { contains: q, mode: 'insensitive' } },
         { slug: { contains: q, mode: 'insensitive' } },
-        { localizations: { some: { title: { contains: q, mode: 'insensitive' } } } },
+        {
+          localizations: {
+            some: { title: { contains: q, mode: 'insensitive' } },
+          },
+        },
       ];
     }
     const [rows, total, counts] = await Promise.all([
@@ -123,13 +133,24 @@ export class CommerceCoursesService {
         },
       },
     });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+    if (!course)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
     return course;
   }
 
   async assertExists(id: string) {
-    const found = await this.prisma.commerceCourse.findUnique({ where: { id }, select: { id: true } });
-    if (!found) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+    const found = await this.prisma.commerceCourse.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!found)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
   }
 
   async changeStatus(
@@ -149,9 +170,19 @@ export class CommerceCoursesService {
 
   // ===== 工作流 =====
   async publishUat(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    if (course.archivedAt) throw new ConflictException({ code: 'COURSE_ARCHIVED', message: 'Archived course cannot be published' });
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id },
+    });
+    if (!course)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
+    if (course.archivedAt)
+      throw new ConflictException({
+        code: 'COURSE_ARCHIVED',
+        message: 'Archived course cannot be published',
+      });
     await this.prisma.commerceCourse.update({
       where: { id },
       data: {
@@ -165,10 +196,19 @@ export class CommerceCoursesService {
   }
 
   async approve(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id },
+    });
+    if (!course)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
     if (course.lifecycleStatus !== 'IN_UAT') {
-      throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be in UAT before approval' });
+      throw new ConflictException({
+        code: 'COURSE_INVALID_TRANSITION',
+        message: 'Course must be in UAT before approval',
+      });
     }
     await this.prisma.commerceCourse.update({
       where: { id },
@@ -178,10 +218,19 @@ export class CommerceCoursesService {
   }
 
   async goLive(id: string, actorEmployeeId: string | null) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id },
+    });
+    if (!course)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
     if (course.lifecycleStatus !== 'APPROVED') {
-      throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be approved before going live' });
+      throw new ConflictException({
+        code: 'COURSE_INVALID_TRANSITION',
+        message: 'Course must be approved before going live',
+      });
     }
     const snapshot = await this.buildSnapshotData(id);
     const last = await this.prisma.courseVersion.findFirst({
@@ -193,7 +242,7 @@ export class CommerceCoursesService {
       data: {
         courseId: id,
         versionNo: (last?.versionNo ?? 0) + 1,
-        snapshotData: snapshot as Prisma.InputJsonValue,
+        snapshotData: snapshot,
         wentLiveAt: new Date(),
         createdBy: actorEmployeeId ?? null,
       },
@@ -210,9 +259,14 @@ export class CommerceCoursesService {
   }
 
   async restore(id: string, versionId: string) {
-    const version = await this.prisma.courseVersion.findUnique({ where: { id: versionId } });
+    const version = await this.prisma.courseVersion.findUnique({
+      where: { id: versionId },
+    });
     if (!version || version.courseId !== id) {
-      throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Version not found' });
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Version not found',
+      });
     }
     // 简化：仅返回快照供后续编辑器导入；实际重写工作副本在 P1b 编辑器实现时接入。
     return { restoredFrom: version.versionNo, snapshot: version.snapshotData };
@@ -222,19 +276,30 @@ export class CommerceCoursesService {
     return this.prisma.courseVersion.findMany({
       where: { courseId: id },
       orderBy: { versionNo: 'desc' },
-      select: { id: true, versionNo: true, wentLiveAt: true, sourceVersionId: true, createdAt: true },
+      select: {
+        id: true,
+        versionNo: true,
+        wentLiveAt: true,
+        sourceVersionId: true,
+        createdAt: true,
+      },
     });
   }
 
   // ===== 编辑工作区（第一版） =====
-  private static readonly LEARNING_MODES = ['VIDEO_ONLY', 'TEXT_ONLY', 'VIDEO_AND_TEXT'];
+  private static readonly LEARNING_MODES = [
+    'VIDEO_ONLY',
+    'TEXT_ONLY',
+    'VIDEO_AND_TEXT',
+  ];
 
-  private normaliseMode(mode?: string): 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT' {
+  private normaliseMode(
+    mode?: string,
+  ): 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT' {
     const m = (mode ?? '').toUpperCase();
-    return (CommerceCoursesService.LEARNING_MODES.includes(m) ? m : 'VIDEO_AND_TEXT') as
-      | 'VIDEO_ONLY'
-      | 'TEXT_ONLY'
-      | 'VIDEO_AND_TEXT';
+    return (
+      CommerceCoursesService.LEARNING_MODES.includes(m) ? m : 'VIDEO_AND_TEXT'
+    ) as 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT';
   }
 
   private slugify(input: string): string {
@@ -274,7 +339,7 @@ export class CommerceCoursesService {
           slug,
           learningMode: this.normaliseMode(body.learningMode),
           defaultContentLanguage: language,
-          learningLanguages: learningLanguages as Prisma.InputJsonValue,
+          learningLanguages: learningLanguages,
           categoryId: body.categoryId || null,
           subtitle: body.subtitle ?? null,
           localizations: {
@@ -331,7 +396,9 @@ export class CommerceCoursesService {
             ? { defaultContentLanguage: body.defaultContentLanguage }
             : {}),
           ...(body.learningLanguages !== undefined
-            ? { learningLanguages: body.learningLanguages as Prisma.InputJsonValue }
+            ? {
+                learningLanguages: body.learningLanguages,
+              }
             : {}),
           ...(body.subtitle !== undefined ? { subtitle: body.subtitle } : {}),
           ...(body.level !== undefined ? { level: body.level } : {}),
@@ -443,7 +510,10 @@ export class CommerceCoursesService {
       select: { id: true, courseId: true },
     });
     if (!lesson || lesson.courseId !== id) {
-      throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
+      throw new NotFoundException({
+        code: 'LESSON_NOT_FOUND',
+        message: 'Lesson not found',
+      });
     }
     const language =
       body.language ||
@@ -473,8 +543,13 @@ export class CommerceCoursesService {
       const payload = {
         title: body.title ?? existing?.title ?? 'Untitled',
         description:
-          body.description !== undefined ? body.description : existing?.description ?? null,
-        textHtml: body.textHtml !== undefined ? body.textHtml : existing?.textHtml ?? null,
+          body.description !== undefined
+            ? body.description
+            : (existing?.description ?? null),
+        textHtml:
+          body.textHtml !== undefined
+            ? body.textHtml
+            : (existing?.textHtml ?? null),
       };
       await this.prisma.lessonLocalization.upsert({
         where: { lessonId_language: { lessonId, language } },
@@ -491,7 +566,10 @@ export class CommerceCoursesService {
       select: { id: true, courseId: true },
     });
     if (!lesson || lesson.courseId !== id) {
-      throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
+      throw new NotFoundException({
+        code: 'LESSON_NOT_FOUND',
+        message: 'Lesson not found',
+      });
     }
     await this.prisma.lesson.delete({ where: { id: lessonId } });
     return this.detail(id);
@@ -525,7 +603,11 @@ export class CommerceCoursesService {
           code: lesson.code,
           order: lesson.sortOrder,
           localizations: lesson.localizations,
-          exhibits: lesson.exhibits.map((ex) => ({ code: ex.code, type: ex.type, localized: ex.localized })),
+          exhibits: lesson.exhibits.map((ex) => ({
+            code: ex.code,
+            type: ex.type,
+            localized: ex.localized,
+          })),
           readings: lesson.readings,
           questions: lesson.questions,
           applicationTest: lesson.applicationTest,
@@ -549,7 +631,11 @@ export class CommerceCoursesService {
     liveVersionId: string | null;
     updatedAt: Date;
     category: { id: string; name: string } | null;
-    localizations: { language: string; title: string; shortDescription: string | null }[];
+    localizations: {
+      language: string;
+      title: string;
+      shortDescription: string | null;
+    }[];
     _count: { lessons: number };
   }) {
     const defaultLoc = row.localizations[0];
@@ -559,7 +645,9 @@ export class CommerceCoursesService {
       slug: row.slug,
       title: defaultLoc?.title ?? row.slug,
       subtitle: defaultLoc?.shortDescription ?? null,
-      category: row.category ? { id: row.category.id, name: row.category.name } : null,
+      category: row.category
+        ? { id: row.category.id, name: row.category.name }
+        : null,
       learningMode: row.learningMode,
       learningLanguages: row.learningLanguages,
       lessonCount: row._count.lessons,

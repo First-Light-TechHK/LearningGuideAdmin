@@ -49,7 +49,9 @@ async function main() {
   const input = workerData as WorkerInput;
   try {
     const result =
-      input.task === 'raw' ? await runRaw(input.payload) : await runInspect(input.payload);
+      input.task === 'raw'
+        ? await runRaw(input.payload)
+        : await runInspect(input.payload);
     parentPort?.postMessage({ ok: true, result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

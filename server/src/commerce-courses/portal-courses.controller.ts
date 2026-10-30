@@ -1,4 +1,10 @@
-import { Controller, Get, NotFoundException, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Query,
+} from '@nestjs/common';
 import { PortalProjectionService } from './portal-projection.service';
 
 /**
@@ -17,7 +23,11 @@ export class PortalCoursesController {
   @Get('courses/:id')
   async detail(@Param('id') id: string) {
     const course = await this.projection.getCourseById(id);
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
+    if (!course)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
     return course;
   }
 }

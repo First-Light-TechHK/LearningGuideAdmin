@@ -75,7 +75,11 @@ export interface PackageLesson {
   exhibits?: PackageExhibit[];
   recommendedReading?: Record<string, PackageReading[]>;
   knowledgeTest?: { enabled: boolean; questions: PackageKnowledgeQuestion[] };
-  applicationTest?: { enabled: boolean; scenario: string; referenceAnswer?: string };
+  applicationTest?: {
+    enabled: boolean;
+    scenario: string;
+    referenceAnswer?: string;
+  };
 }
 
 export interface PackageCourseLocalization {

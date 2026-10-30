@@ -14,17 +14,21 @@ export function runImportWorker<T = unknown>(
       workerData: { task, payload },
     });
     let settled = false;
-    worker.once('message', (msg: { ok: boolean; result?: unknown; error?: string }) => {
-      settled = true;
-      if (msg.ok) resolve(msg.result as T);
-      else reject(new Error(msg.error ?? 'import worker failed'));
-      void worker.terminate();
-    });
+    worker.once(
+      'message',
+      (msg: { ok: boolean; result?: unknown; error?: string }) => {
+        settled = true;
+        if (msg.ok) resolve(msg.result as T);
+        else reject(new Error(msg.error ?? 'import worker failed'));
+        void worker.terminate();
+      },
+    );
     worker.once('error', (err) => {
       if (!settled) reject(err);
     });
     worker.once('exit', (code) => {
-      if (!settled && code !== 0) reject(new Error(`import worker exited with code ${code}`));
+      if (!settled && code !== 0)
+        reject(new Error(`import worker exited with code ${code}`));
     });
   });
 }

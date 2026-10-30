@@ -39,8 +39,7 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
   };
   return {
     mediaRoot:
-      config.get<string>('COURSE_MEDIA_ROOT')?.trim() ||
-      'storage/course-media',
+      config.get<string>('COURSE_MEDIA_ROOT')?.trim() || 'storage/course-media',
     packageStagingRoot:
       config.get<string>('COURSE_PACKAGE_ROOT')?.trim() ||
       'storage/course-package',
@@ -51,9 +50,12 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
       config.get<string>('COURSE_PACKAGE_BUCKET')?.trim() ||
       config.get<string>('COURSE_MEDIA_BUCKET')?.trim() ||
       undefined,
-    stagingPrefix: config.get<string>('COURSE_PACKAGE_PREFIX')?.trim() || 'staging/',
+    stagingPrefix:
+      config.get<string>('COURSE_PACKAGE_PREFIX')?.trim() || 'staging/',
     s3Endpoint: config.get<string>('S3_ENDPOINT')?.trim() || undefined,
-    s3ForcePathStyle: (config.get<string>('S3_FORCE_PATH_STYLE') ?? '').toLowerCase() === 'true',
+    s3ForcePathStyle:
+      (config.get<string>('S3_FORCE_PATH_STYLE') ?? '').toLowerCase() ===
+      'true',
     maxImageBytes: num('MEDIA_MAX_IMAGE_BYTES', 20 * MB),
     maxVideoBytes: num('MEDIA_MAX_VIDEO_BYTES', 500 * MB),
     maxAudioBytes: num('MEDIA_MAX_AUDIO_BYTES', 100 * MB),

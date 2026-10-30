@@ -126,7 +126,8 @@ export class CommerceCoursesController {
   @Get(':id/cover')
   async cover(@Param('id') id: string, @Res() res: Response) {
     const media = await this.courses.getCoverBytes(id);
-    if (!media) throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
+    if (!media)
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
     res.setHeader('Content-Type', contentTypeFor(media.extension));
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.send(media.bytes);
@@ -139,7 +140,8 @@ export class CommerceCoursesController {
     @Res() res: Response,
   ) {
     const media = await this.courses.getMediaBytes(id, assetId);
-    if (!media) throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
+    if (!media)
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
     res.setHeader('Content-Type', contentTypeFor(media.extension));
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.send(media.bytes);
@@ -150,7 +152,16 @@ export class CommerceCoursesController {
   @HttpCode(200)
   updateCourse(
     @Param('id') id: string,
-    @Body() body: { code?: string; slug?: string; learningMode?: string; defaultContentLanguage?: string; learningLanguages?: string[]; subtitle?: string | null; level?: string | null },
+    @Body()
+    body: {
+      code?: string;
+      slug?: string;
+      learningMode?: string;
+      defaultContentLanguage?: string;
+      learningLanguages?: string[];
+      subtitle?: string | null;
+      level?: string | null;
+    },
   ) {
     return this.courses.updateCourse(id, body);
   }
@@ -160,20 +171,33 @@ export class CommerceCoursesController {
   updateLocalization(
     @Param('id') id: string,
     @Param('language') language: string,
-    @Body() body: { title: string; shortDescription?: string | null; overview?: string | null; whatYouLearn?: unknown; provides?: unknown },
+    @Body()
+    body: {
+      title: string;
+      shortDescription?: string | null;
+      overview?: string | null;
+      whatYouLearn?: unknown;
+      provides?: unknown;
+    },
   ) {
     return this.courses.updateLocalization(id, language, body);
   }
 
   @Post(':id/lessons')
   @HttpCode(201)
-  createLesson(@Param('id') id: string, @Body() body: { code?: string; language?: string; title: string }) {
+  createLesson(
+    @Param('id') id: string,
+    @Body() body: { code?: string; language?: string; title: string },
+  ) {
     return this.courses.createLesson(id, body);
   }
 
   @Put(':id/lessons/reorder')
   @HttpCode(200)
-  reorderLessons(@Param('id') id: string, @Body() body: { lessonIds: string[] }) {
+  reorderLessons(
+    @Param('id') id: string,
+    @Body() body: { lessonIds: string[] },
+  ) {
     return this.courses.reorderLessons(id, body.lessonIds);
   }
 
@@ -182,7 +206,15 @@ export class CommerceCoursesController {
   updateLesson(
     @Param('id') id: string,
     @Param('lessonId') lessonId: string,
-    @Body() body: { code?: string; sortOrder?: number; language?: string; title?: string; description?: string | null; textHtml?: string | null },
+    @Body()
+    body: {
+      code?: string;
+      sortOrder?: number;
+      language?: string;
+      title?: string;
+      description?: string | null;
+      textHtml?: string | null;
+    },
   ) {
     return this.courses.updateLesson(id, lessonId, body);
   }
@@ -235,10 +267,18 @@ export class CommerceCoursesController {
     @Req() request: BackofficeRequest,
   ) {
     if (!file?.buffer) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'No raw materials archive uploaded.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'No raw materials archive uploaded.',
+      );
     }
     if (!file.originalname.toLowerCase().endsWith('.zip')) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'Raw course materials must be uploaded as a .zip archive.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'Raw course materials must be uploaded as a .zip archive.',
+      );
     }
     const idempotencyKey =
       typeof request.headers['idempotency-key'] === 'string'
@@ -260,7 +300,9 @@ export class CommerceCoursesController {
     @Body() body: { dir?: string; courseCode?: string; slug?: string },
     @Req() request: BackofficeRequest,
   ) {
-    return wrap(() => this.jobs.createLocalRawImportJob(body ?? {}, actor(request)));
+    return wrap(() =>
+      this.jobs.createLocalRawImportJob(body ?? {}, actor(request)),
+    );
   }
 
   // ===== 导入 =====
@@ -271,10 +313,21 @@ export class CommerceCoursesController {
     @Req() request: BackofficeRequest,
   ) {
     if (!file?.buffer) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'No package file uploaded.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'No package file uploaded.',
+      );
     }
-    if (!file.originalname.toLowerCase().endsWith('.zip') && !file.originalname.toLowerCase().endsWith('.lgcourse.zip')) {
-      throw new PackageError('PACKAGE_NOT_A_COURSE', 422, 'Only .zip course packages or raw-material archives can be imported.');
+    if (
+      !file.originalname.toLowerCase().endsWith('.zip') &&
+      !file.originalname.toLowerCase().endsWith('.lgcourse.zip')
+    ) {
+      throw new PackageError(
+        'PACKAGE_NOT_A_COURSE',
+        422,
+        'Only .zip course packages or raw-material archives can be imported.',
+      );
     }
     const idempotencyKey =
       typeof request.headers['idempotency-key'] === 'string'
@@ -284,8 +337,16 @@ export class CommerceCoursesController {
     const isRaw = await this.looksLikeRawMaterials(file.buffer);
     return wrap(() =>
       isRaw
-        ? this.jobs.createRawImportJob({ name: file.originalname, bytes: file.buffer }, actor(request), idempotencyKey)
-        : this.jobs.createImportJob({ name: file.originalname, bytes: file.buffer }, actor(request), idempotencyKey),
+        ? this.jobs.createRawImportJob(
+            { name: file.originalname, bytes: file.buffer },
+            actor(request),
+            idempotencyKey,
+          )
+        : this.jobs.createImportJob(
+            { name: file.originalname, bytes: file.buffer },
+            actor(request),
+            idempotencyKey,
+          ),
     );
   }
 
@@ -294,7 +355,10 @@ export class CommerceCoursesController {
     try {
       const zip = await JSZip.loadAsync(bytes);
       const names = Object.keys(zip.files);
-      if (names.some((n) => n === 'manifest.json' || n.endsWith('/manifest.json'))) return false;
+      if (
+        names.some((n) => n === 'manifest.json' || n.endsWith('/manifest.json'))
+      )
+        return false;
       return names.some((n) => /\.xlsx$/i.test(n));
     } catch {
       return false;
@@ -310,7 +374,11 @@ export class CommerceCoursesController {
   @HttpCode(200)
   confirmImport(
     @Param('jobId') jobId: string,
-    @Body() body: { onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION'; reassignCodes?: boolean },
+    @Body()
+    body: {
+      onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
+      reassignCodes?: boolean;
+    },
     @Req() request: BackofficeRequest,
   ) {
     return wrap(() => this.jobs.confirmImport(jobId, body, actor(request)));
@@ -330,7 +398,11 @@ export class CommerceCoursesController {
     @Body() body: { version?: string },
     @Req() request: BackofficeRequest,
   ) {
-    return this.jobs.startExport(id, body?.version ?? 'working', actor(request));
+    return this.jobs.startExport(
+      id,
+      body?.version ?? 'working',
+      actor(request),
+    );
   }
 
   @Get('export/:jobId')
@@ -345,7 +417,10 @@ export class CommerceCoursesController {
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Export not ready.');
     }
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="course-${jobId}.lgcourse.zip"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="course-${jobId}.lgcourse.zip"`,
+    );
     res.send(bytes);
   }
 

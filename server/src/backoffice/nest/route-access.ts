@@ -81,7 +81,10 @@ function actionFor(method: string, segments: string[]): ActionKind {
  * - import/export/confirm/publish-uat/approve/go-live/live-status/restore = PUBLISH；
  * - 其余写操作按 CREATE。
  */
-function backofficeCourseAction(method: string, segments: string[]): ActionKind {
+function backofficeCourseAction(
+  method: string,
+  segments: string[],
+): ActionKind {
   if (method === 'GET' || method === 'HEAD') return 'VIEW';
   const publishSegments = new Set([
     'import',

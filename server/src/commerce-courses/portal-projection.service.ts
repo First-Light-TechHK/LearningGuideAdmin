@@ -14,7 +14,12 @@ export class PortalProjectionService {
       where: { liveStatus: 'ONLINE', liveVersionId: { not: null } },
       orderBy: { updatedAt: 'desc' },
       take: limit,
-      include: { category: true, cover: true, localizations: true, lessons: true },
+      include: {
+        category: true,
+        cover: true,
+        localizations: true,
+        lessons: true,
+      },
     });
     return rows.map((row) => this.toSummary(row));
   }
@@ -59,7 +64,12 @@ export class PortalProjectionService {
     referencePrice: number | null;
     discount: number | null;
     category: { name: string; id: string } | null;
-    localizations: { language: string; title: string; shortDescription: string | null; overview: string | null }[];
+    localizations: {
+      language: string;
+      title: string;
+      shortDescription: string | null;
+      overview: string | null;
+    }[];
     lessons: unknown[];
     cover: { storageKey: string } | null;
   }) {
@@ -93,7 +103,12 @@ export class PortalProjectionService {
     discount: number | null;
     category: { name: string } | null;
     cover: { storageKey: string } | null;
-    localizations: { language: string; title: string; shortDescription: string | null; overview: string | null }[];
+    localizations: {
+      language: string;
+      title: string;
+      shortDescription: string | null;
+      overview: string | null;
+    }[];
     lessons: Array<{
       id: string;
       code: string;
@@ -105,9 +120,27 @@ export class PortalProjectionService {
         video: { storageKey: string } | null;
         textHtml: string | null;
       }>;
-      exhibits: Array<{ id: string; code: string; type: string; media: { storageKey: string } | null }>;
-      learningPoints: Array<{ language: string; code: string; title: string; source: string; timeSeconds: number | null; sortOrder: number }>;
-      readings: Array<{ language: string; type: string; title: string; author: string | null; whyRecommended: string | null }>;
+      exhibits: Array<{
+        id: string;
+        code: string;
+        type: string;
+        media: { storageKey: string } | null;
+      }>;
+      learningPoints: Array<{
+        language: string;
+        code: string;
+        title: string;
+        source: string;
+        timeSeconds: number | null;
+        sortOrder: number;
+      }>;
+      readings: Array<{
+        language: string;
+        type: string;
+        title: string;
+        author: string | null;
+        whyRecommended: string | null;
+      }>;
     }>;
     trialRows: Array<{ lessonId: string; status: string }>;
   }) {
@@ -149,10 +182,32 @@ export class PortalProjectionService {
   }
 
   private rebuildContents(lesson: {
-    localizations: Array<{ language: string; video: { storageKey: string } | null; textHtml: string | null }>;
-    exhibits: Array<{ id: string; code: string; type: string; media: { storageKey: string } | null }>;
-    learningPoints: Array<{ language: string; code: string; title: string; source: string; timeSeconds: number | null; sortOrder: number }>;
-    readings: Array<{ language: string; type: string; title: string; author: string | null; whyRecommended: string | null }>;
+    localizations: Array<{
+      language: string;
+      video: { storageKey: string } | null;
+      textHtml: string | null;
+    }>;
+    exhibits: Array<{
+      id: string;
+      code: string;
+      type: string;
+      media: { storageKey: string } | null;
+    }>;
+    learningPoints: Array<{
+      language: string;
+      code: string;
+      title: string;
+      source: string;
+      timeSeconds: number | null;
+      sortOrder: number;
+    }>;
+    readings: Array<{
+      language: string;
+      type: string;
+      title: string;
+      author: string | null;
+      whyRecommended: string | null;
+    }>;
   }) {
     const lloc = lesson.localizations[0];
     const contents: unknown[] = [];

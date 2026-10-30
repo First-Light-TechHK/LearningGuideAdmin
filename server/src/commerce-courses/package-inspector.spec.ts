@@ -46,7 +46,12 @@ function validManifest() {
       defaultContentLanguage: 'en-GB',
       cover: 'media/cover.png',
       localized: {
-        'en-GB': { title: 'Test', shortDescription: 'desc', overview: 'ov', whatYouLearn: ['a'] },
+        'en-GB': {
+          title: 'Test',
+          shortDescription: 'desc',
+          overview: 'ov',
+          whatYouLearn: ['a'],
+        },
       },
       lessons: [
         {
@@ -56,7 +61,10 @@ function validManifest() {
             'en-GB': {
               title: 'Lesson 1',
               video: { file: 'media/video/L001/en-GB.mp4', learningPoints: [] },
-              text: { html: '<h1>Hello</h1>', learningPoints: [{ code: '1.1', heading: 'Hello' }] },
+              text: {
+                html: '<h1>Hello</h1>',
+                learningPoints: [{ code: '1.1', heading: 'Hello' }],
+              },
             },
           },
           exhibits: [],
@@ -67,7 +75,10 @@ function validManifest() {
   };
 }
 
-async function buildZip(files: Record<string, Buffer | string>, withChecksums = true): Promise<Buffer> {
+async function buildZip(
+  files: Record<string, Buffer | string>,
+  withChecksums = true,
+): Promise<Buffer> {
   const zip = new JSZip();
   for (const [name, content] of Object.entries(files)) {
     zip.file(name, content);
@@ -76,7 +87,8 @@ async function buildZip(files: Record<string, Buffer | string>, withChecksums = 
     const lines = Object.entries(files)
       .filter(([name]) => name !== 'manifest.json')
       .map(([name, content]) => {
-        const buf = typeof content === 'string' ? Buffer.from(content) : content;
+        const buf =
+          typeof content === 'string' ? Buffer.from(content) : content;
         return `${CourseStorageService.sha256(buf)}  ${name}`;
       });
     zip.file('checksums.sha256', lines.join('\n'));
@@ -89,7 +101,11 @@ function inspector() {
 }
 
 // A tiny fake mp4 (ftyp box) to satisfy signature check
-const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom', 'ascii'), Buffer.alloc(16)]);
+const MP4 = Buffer.concat([
+  Buffer.from([0, 0, 0, 0x18]),
+  Buffer.from('ftypisom', 'ascii'),
+  Buffer.alloc(16),
+]);
 
 describe('PackageInspector', () => {
   it('accepts a valid package', async () => {
@@ -110,11 +126,15 @@ describe('PackageInspector', () => {
     zip.file('media/video/L001/en-GB.mp4', MP4);
     zip.file('checksums.sha256', `${'a'.repeat(64)}  media/cover.png`);
     const buf = await zip.generateAsync({ type: 'nodebuffer' });
-    await expect(inspector().inspect(buf)).rejects.toMatchObject({ code: 'PACKAGE_CHECKSUM_MISMATCH' });
+    await expect(inspector().inspect(buf)).rejects.toMatchObject({
+      code: 'PACKAGE_CHECKSUM_MISMATCH',
+    });
   });
 
   it('rejects invalid zip', async () => {
-    await expect(inspector().inspect(Buffer.from('not a zip'))).rejects.toMatchObject({
+    await expect(
+      inspector().inspect(Buffer.from('not a zip')),
+    ).rejects.toMatchObject({
       code: 'PACKAGE_INVALID_ZIP',
     });
   });
@@ -137,6 +157,8 @@ describe('PackageInspector', () => {
       // cover.png intentionally omitted
       'media/video/L001/en-GB.mp4': MP4,
     });
-    await expect(inspector().inspect(zip)).rejects.toMatchObject({ code: 'PACKAGE_MEDIA_INVALID' });
+    await expect(inspector().inspect(zip)).rejects.toMatchObject({
+      code: 'PACKAGE_MEDIA_INVALID',
+    });
   });
 });

@@ -7,11 +7,7 @@ import type { CommerceCourseConfig } from './commerce.config';
  */
 export class MediaValidationError extends Error {
   constructor(
-    public code:
-      | 'too_large'
-      | 'unsupported'
-      | 'invalid'
-      | 'filename',
+    public code: 'too_large' | 'unsupported' | 'invalid' | 'filename',
     message: string,
   ) {
     super(message);
@@ -28,22 +24,102 @@ interface Format {
 }
 
 const FORMATS: Record<string, Format> = {
-  jpg: { kind: 'IMAGE', mime: 'image/jpeg', accepted: ['image/jpeg'], maxBytesKey: 'maxImageBytes' },
-  jpeg: { kind: 'IMAGE', mime: 'image/jpeg', accepted: ['image/jpeg'], maxBytesKey: 'maxImageBytes' },
-  png: { kind: 'IMAGE', mime: 'image/png', accepted: ['image/png'], maxBytesKey: 'maxImageBytes' },
-  gif: { kind: 'IMAGE', mime: 'image/gif', accepted: ['image/gif'], maxBytesKey: 'maxImageBytes' },
-  webp: { kind: 'IMAGE', mime: 'image/webp', accepted: ['image/webp'], maxBytesKey: 'maxImageBytes' },
-  pdf: { kind: 'PDF', mime: 'application/pdf', accepted: ['application/pdf'], maxBytesKey: 'maxPdfBytes' },
-  mp4: { kind: 'VIDEO', mime: 'video/mp4', accepted: ['video/mp4'], maxBytesKey: 'maxVideoBytes' },
-  mov: { kind: 'VIDEO', mime: 'video/quicktime', accepted: ['video/quicktime'], maxBytesKey: 'maxVideoBytes' },
-  webm: { kind: 'VIDEO', mime: 'video/webm', accepted: ['video/webm'], maxBytesKey: 'maxVideoBytes' },
-  mp3: { kind: 'AUDIO', mime: 'audio/mpeg', accepted: ['audio/mpeg', 'audio/mp3'], maxBytesKey: 'maxAudioBytes' },
-  wav: { kind: 'AUDIO', mime: 'audio/wav', accepted: ['audio/wav', 'audio/x-wav'], maxBytesKey: 'maxAudioBytes' },
-  ogg: { kind: 'AUDIO', mime: 'audio/ogg', accepted: ['audio/ogg'], maxBytesKey: 'maxAudioBytes' },
-  m4a: { kind: 'AUDIO', mime: 'audio/mp4', accepted: ['audio/mp4', 'audio/x-m4a'], maxBytesKey: 'maxAudioBytes' },
-  flac: { kind: 'AUDIO', mime: 'audio/flac', accepted: ['audio/flac'], maxBytesKey: 'maxAudioBytes' },
-  obj: { kind: 'MODEL3D', mime: 'model/obj', accepted: ['model/obj', 'text/plain', 'application/octet-stream'], maxBytesKey: 'maxModelBytes' },
-  glb: { kind: 'MODEL3D', mime: 'model/gltf-binary', accepted: ['model/gltf-binary', 'application/octet-stream'], maxBytesKey: 'maxModelBytes' },
+  jpg: {
+    kind: 'IMAGE',
+    mime: 'image/jpeg',
+    accepted: ['image/jpeg'],
+    maxBytesKey: 'maxImageBytes',
+  },
+  jpeg: {
+    kind: 'IMAGE',
+    mime: 'image/jpeg',
+    accepted: ['image/jpeg'],
+    maxBytesKey: 'maxImageBytes',
+  },
+  png: {
+    kind: 'IMAGE',
+    mime: 'image/png',
+    accepted: ['image/png'],
+    maxBytesKey: 'maxImageBytes',
+  },
+  gif: {
+    kind: 'IMAGE',
+    mime: 'image/gif',
+    accepted: ['image/gif'],
+    maxBytesKey: 'maxImageBytes',
+  },
+  webp: {
+    kind: 'IMAGE',
+    mime: 'image/webp',
+    accepted: ['image/webp'],
+    maxBytesKey: 'maxImageBytes',
+  },
+  pdf: {
+    kind: 'PDF',
+    mime: 'application/pdf',
+    accepted: ['application/pdf'],
+    maxBytesKey: 'maxPdfBytes',
+  },
+  mp4: {
+    kind: 'VIDEO',
+    mime: 'video/mp4',
+    accepted: ['video/mp4'],
+    maxBytesKey: 'maxVideoBytes',
+  },
+  mov: {
+    kind: 'VIDEO',
+    mime: 'video/quicktime',
+    accepted: ['video/quicktime'],
+    maxBytesKey: 'maxVideoBytes',
+  },
+  webm: {
+    kind: 'VIDEO',
+    mime: 'video/webm',
+    accepted: ['video/webm'],
+    maxBytesKey: 'maxVideoBytes',
+  },
+  mp3: {
+    kind: 'AUDIO',
+    mime: 'audio/mpeg',
+    accepted: ['audio/mpeg', 'audio/mp3'],
+    maxBytesKey: 'maxAudioBytes',
+  },
+  wav: {
+    kind: 'AUDIO',
+    mime: 'audio/wav',
+    accepted: ['audio/wav', 'audio/x-wav'],
+    maxBytesKey: 'maxAudioBytes',
+  },
+  ogg: {
+    kind: 'AUDIO',
+    mime: 'audio/ogg',
+    accepted: ['audio/ogg'],
+    maxBytesKey: 'maxAudioBytes',
+  },
+  m4a: {
+    kind: 'AUDIO',
+    mime: 'audio/mp4',
+    accepted: ['audio/mp4', 'audio/x-m4a'],
+    maxBytesKey: 'maxAudioBytes',
+  },
+  flac: {
+    kind: 'AUDIO',
+    mime: 'audio/flac',
+    accepted: ['audio/flac'],
+    maxBytesKey: 'maxAudioBytes',
+  },
+  obj: {
+    kind: 'MODEL3D',
+    mime: 'model/obj',
+    accepted: ['model/obj', 'text/plain', 'application/octet-stream'],
+    maxBytesKey: 'maxModelBytes',
+  },
+  glb: {
+    kind: 'MODEL3D',
+    mime: 'model/gltf-binary',
+    accepted: ['model/gltf-binary', 'application/octet-stream'],
+    maxBytesKey: 'maxModelBytes',
+  },
 };
 
 function starts(bytes: Buffer, hex: string): boolean {
@@ -70,17 +146,11 @@ function matchesSignature(bytes: Buffer, ext: string): boolean {
     case 'mp4':
     case 'mov':
     case 'm4a':
-      return (
-        bytes.length >= 12 &&
-        bytes.toString('ascii', 4, 8) === 'ftyp'
-      );
+      return bytes.length >= 12 && bytes.toString('ascii', 4, 8) === 'ftyp';
     case 'webm':
       return starts(bytes, '1a45dfa3');
     case 'mp3':
-      return (
-        starts(bytes, 'ff') ||
-        bytes.toString('ascii', 0, 3) === 'ID3'
-      );
+      return starts(bytes, 'ff') || bytes.toString('ascii', 0, 3) === 'ID3';
     case 'wav':
       return bytes.toString('ascii', 0, 4) === 'RIFF';
     case 'ogg':
@@ -90,7 +160,12 @@ function matchesSignature(bytes: Buffer, ext: string): boolean {
     case 'glb':
       return bytes.toString('ascii', 0, 4) === 'glTF';
     case 'obj':
-      return bytes.length > 0 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(bytes.toString('utf8', 0, Math.min(4096, bytes.length)));
+      return (
+        bytes.length > 0 &&
+        !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(
+          bytes.toString('utf8', 0, Math.min(4096, bytes.length)),
+        )
+      );
     default:
       return false;
   }

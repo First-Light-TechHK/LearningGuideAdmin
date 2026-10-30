@@ -4,7 +4,7 @@
  */
 export function mp4DurationSeconds(buf: Buffer): number | null {
   try {
-    const idx = buf.indexOf("mvhd");
+    const idx = buf.indexOf('mvhd');
     if (idx < 0 || idx + 4 > buf.length) return null;
     const p = idx + 4; // payload 起点（version 字节）
     const version = buf[p];

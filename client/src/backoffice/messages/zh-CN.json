@@ -373,7 +373,10 @@
       "notesPlaceholder": "Revision Notes（必填）",
       "tagEditing": "编辑中",
       "tagLive": "线上",
-      "tagTesting": "测试中"
+      "tagTesting": "测试中",
+      "downloadVersion": "下载",
+      "downloadVersionAria": "下载版本 {version} 为 ZIP",
+      "downloaded": "版本 {version} 已下载"
     },
     "tag": {
       "chooseColor": "选择颜色（不选则自动分配）",

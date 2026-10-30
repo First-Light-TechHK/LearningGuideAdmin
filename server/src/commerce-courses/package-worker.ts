@@ -51,7 +51,9 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
         await this.runExport(claimed);
       }
     } catch (error) {
-      this.logger.warn(`worker tick failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(
+        `worker tick failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     } finally {
       this.running = false;
     }
@@ -69,7 +71,9 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async claimExport() {
-    const rows = await this.prisma.$queryRaw<Array<{ id: string; courseId: string | null }>>`
+    const rows = await this.prisma.$queryRaw<
+      Array<{ id: string; courseId: string | null }>
+    >`
       UPDATE "CoursePackageJob"
       SET "lockedBy" = ${this.instanceId}, "lockedAt" = now(), "heartbeatAt" = now(),
           "attempts" = "attempts" + 1
@@ -86,7 +90,10 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
     return rows[0] ?? null;
   }
 
-  private async runExport(job: { id: string; courseId: string | null }): Promise<void> {
+  private async runExport(job: {
+    id: string;
+    courseId: string | null;
+  }): Promise<void> {
     if (!job.courseId) {
       await this.prisma.coursePackageJob.update({
         where: { id: job.id },
@@ -99,7 +106,12 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
         where: { id: job.id },
         data: { progress: 30, stage: 'PACKING' },
       });
-      const zip = await buildCoursePackage(this.prisma, this.storage, job.courseId, 'working');
+      const zip = await buildCoursePackage(
+        this.prisma,
+        this.storage,
+        job.courseId,
+        'working',
+      );
       const storageKey = this.storage.stagingKey(job.id, 'export.zip');
       await this.storage.putStaging(storageKey, zip);
       await this.prisma.coursePackageJob.update({
@@ -123,7 +135,9 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
 
   /** 导出下载：读 staging 的 export.zip。 */
   async readExport(jobId: string): Promise<Buffer | null> {
-    const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
     if (!job || job.status !== 'READY' || !job.storageKey) return null;
     return this.storage.getStaging(job.storageKey);
   }

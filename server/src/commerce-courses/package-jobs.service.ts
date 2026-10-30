@@ -10,7 +10,10 @@ import { CourseStorageService } from './storage.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 import { PackageInspector, PackageError } from './package-inspector';
 import { PackageImporter, ImportError } from './package-importer';
-import type { PackageManifest, PackageValidationReport } from './contracts/manifest';
+import type {
+  PackageManifest,
+  PackageValidationReport,
+} from './contracts/manifest';
 import { runImportWorker } from './heavy-tasks';
 
 export interface JobReport {
@@ -61,11 +64,17 @@ export class PackageJobsService {
     idempotencyKey?: string,
   ) {
     if (idempotencyKey) {
-      const existing = await this.prisma.coursePackageJob.findUnique({ where: { idempotencyKey } });
+      const existing = await this.prisma.coursePackageJob.findUnique({
+        where: { idempotencyKey },
+      });
       if (existing) return this.getJob(existing.id);
     }
     if (file.bytes.length > this.config.packageDirectUploadBytes) {
-      throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Package too large for direct upload; use chunked upload.');
+      throw new PackageError(
+        'PACKAGE_TOO_LARGE',
+        413,
+        'Package too large for direct upload; use chunked upload.',
+      );
     }
     const jobId = randomUUID();
     const storageKey = this.storage.stagingKey(jobId, 'package.zip');
@@ -114,9 +123,13 @@ export class PackageJobsService {
       };
       try {
         // 原始素材转换是 CPU 重活，放到 worker 线程，避免阻塞事件循环
-        built = await runImportWorker<typeof built>('raw', { rawPath, outPath });
+        built = await runImportWorker<typeof built>('raw', {
+          rawPath,
+          outPath,
+        });
       } catch (error) {
-        const message = error instanceof Error ? error.message : '原始素材解析失败';
+        const message =
+          error instanceof Error ? error.message : '原始素材解析失败';
         throw new PackageError('RAW_MATERIALS_INVALID', 422, message);
       }
       const pkgBytes = await fs.readFile(outPath);
@@ -129,7 +142,13 @@ export class PackageJobsService {
         ...job,
         sourceFileName: file.name,
         rawWarnings: built.warnings,
-        raw: { courseCode: built.courseCode, slug: built.slug, title: built.title, lessonCount: built.lessonCount, mediaCount: built.mediaCount },
+        raw: {
+          courseCode: built.courseCode,
+          slug: built.slug,
+          title: built.title,
+          lessonCount: built.lessonCount,
+          mediaCount: built.mediaCount,
+        },
       };
     } finally {
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
@@ -148,13 +167,21 @@ export class PackageJobsService {
     const repoRoot = path.resolve(process.cwd(), '..');
     const base = path.resolve(repoRoot, rel);
     if (base !== repoRoot && !base.startsWith(repoRoot + path.sep)) {
-      throw new PackageError('RAW_DIR_INVALID', 400, 'Directory is outside the repository.');
+      throw new PackageError(
+        'RAW_DIR_INVALID',
+        400,
+        'Directory is outside the repository.',
+      );
     }
     let names: string[];
     try {
       names = await fs.readdir(base);
     } catch {
-      throw new PackageError('RAW_DIR_NOT_FOUND', 404, `Directory not found: ${rel}`);
+      throw new PackageError(
+        'RAW_DIR_NOT_FOUND',
+        404,
+        `Directory not found: ${rel}`,
+      );
     }
     const zip = new JSZip();
     for (const name of names) {
@@ -165,11 +192,16 @@ export class PackageJobsService {
       zip.file(name, await fs.readFile(full));
     }
     const bytes = await zip.generateAsync({ type: 'nodebuffer' });
-    return this.createRawImportJob({ name: `${path.basename(base)}.zip`, bytes }, actorEmployeeId);
+    return this.createRawImportJob(
+      { name: `${path.basename(base)}.zip`, bytes },
+      actorEmployeeId,
+    );
   }
 
   private async runValidation(jobId: string): Promise<void> {
-    const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
     if (!job || !job.storageKey) return;
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-ins-'));
     try {
@@ -187,18 +219,31 @@ export class PackageJobsService {
       await this.prisma.coursePackageJob.update({
         where: { id: jobId },
         data: {
-          status: result.report.errors.length > 0 ? 'FAILED' : 'AWAITING_CONFIRM',
+          status:
+            result.report.errors.length > 0 ? 'FAILED' : 'AWAITING_CONFIRM',
           stage: 'VALIDATED',
           progress: 100,
           manifest: result.manifest as unknown as Prisma.InputJsonValue,
-          report: { errors: result.report.errors, warnings: result.report.warnings } as unknown as Prisma.InputJsonValue,
-          error: result.report.errors.length > 0 ? result.report.errors[0].message : null,
+          report: {
+            errors: result.report.errors,
+            warnings: result.report.warnings,
+          } as unknown as Prisma.InputJsonValue,
+          error:
+            result.report.errors.length > 0
+              ? result.report.errors[0].message
+              : null,
         },
       });
       // 暂存解压内容到 staging（媒体二进制 + manifest）
-      await this.persistExtractedFromDir(jobId, outDir, result.files, result.manifest);
+      await this.persistExtractedFromDir(
+        jobId,
+        outDir,
+        result.files,
+        result.manifest,
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Validation failed';
+      const message =
+        error instanceof Error ? error.message : 'Validation failed';
       await this.prisma.coursePackageJob.update({
         where: { id: jobId },
         data: { status: 'FAILED', error: message, progress: 100 },
@@ -216,7 +261,10 @@ export class PackageJobsService {
   ): Promise<void> {
     for (const name of names) {
       const bytes = await fs.readFile(path.join(outDir, name));
-      await this.storage.putStaging(this.storage.stagingKey(jobId, name), bytes);
+      await this.storage.putStaging(
+        this.storage.stagingKey(jobId, name),
+        bytes,
+      );
     }
     await this.storage.putStaging(
       this.storage.stagingKey(jobId, '__manifest.json'),
@@ -226,21 +274,35 @@ export class PackageJobsService {
 
   async confirmImport(
     jobId: string,
-    body: { onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION'; reassignCodes?: boolean },
+    body: {
+      onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
+      reassignCodes?: boolean;
+    },
     actorEmployeeId: string | null,
   ) {
-    const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
     if (job.status !== 'AWAITING_CONFIRM') {
-      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 409, `Job not awaiting confirm (status=${job.status}).`);
+      throw new PackageError(
+        'PACKAGE_JOB_NOT_FOUND',
+        409,
+        `Job not awaiting confirm (status=${job.status}).`,
+      );
     }
     await this.prisma.coursePackageJob.update({
       where: { id: jobId },
       data: { status: 'IMPORTING', progress: 0 },
     });
     try {
-      const manifestBytes = await this.storage.getStaging(this.storage.stagingKey(jobId, '__manifest.json'));
-      const manifest = JSON.parse(manifestBytes.toString('utf8')) as PackageManifest;
+      const manifestBytes = await this.storage.getStaging(
+        this.storage.stagingKey(jobId, '__manifest.json'),
+      );
+      const manifest = JSON.parse(
+        manifestBytes.toString('utf8'),
+      ) as PackageManifest;
       const files = await this.loadStagingFiles(jobId, manifest);
       const { courseId } = await this.importer.importPackage(manifest, files, {
         onConflict: body.onConflict,
@@ -265,14 +327,18 @@ export class PackageJobsService {
     }
   }
 
-  private async loadStagingFiles(jobId: string, manifest: PackageManifest): Promise<Map<string, Buffer>> {
+  private async loadStagingFiles(
+    jobId: string,
+    manifest: PackageManifest,
+  ): Promise<Map<string, Buffer>> {
     const files = new Map<string, Buffer>();
     const collect = (rel: string | undefined) => {
       if (rel) files.set(rel, Buffer.alloc(0));
     };
     if (manifest.course.cover) collect(manifest.course.cover);
     for (const lesson of manifest.course.lessons ?? []) {
-      for (const loc of Object.values(lesson.localized ?? {})) collect(loc.video?.file);
+      for (const loc of Object.values(lesson.localized ?? {}))
+        collect(loc.video?.file);
       for (const ex of lesson.exhibits ?? []) {
         collect(ex.file);
         collect(ex.thumbnail);
@@ -280,7 +346,9 @@ export class PackageJobsService {
     }
     for (const rel of [...files.keys()]) {
       try {
-        const bytes = await this.storage.getStaging(this.storage.stagingKey(jobId, rel));
+        const bytes = await this.storage.getStaging(
+          this.storage.stagingKey(jobId, rel),
+        );
         files.set(rel, bytes);
       } catch {
         // 缺失由导入阶段报 PACKAGE_MEDIA_INVALID
@@ -290,10 +358,17 @@ export class PackageJobsService {
   }
 
   async cancelJob(jobId: string) {
-    const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
     if (job.status === 'READY' || job.status === 'IMPORTING') {
-      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 409, 'Job cannot be cancelled.');
+      throw new PackageError(
+        'PACKAGE_JOB_NOT_FOUND',
+        409,
+        'Job cannot be cancelled.',
+      );
     }
     await this.prisma.coursePackageJob.update({
       where: { id: jobId },
@@ -304,8 +379,11 @@ export class PackageJobsService {
   }
 
   async getJob(jobId: string): Promise<JobView> {
-    const job = await this.prisma.coursePackageJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
     const manifest = job.manifest as PackageManifest | null;
     const report = job.report as JobReport | null;
     return {
@@ -334,8 +412,10 @@ export class PackageJobsService {
   private countMedia(manifest: PackageManifest): number {
     let n = manifest.course.cover ? 1 : 0;
     for (const lesson of manifest.course.lessons ?? []) {
-      for (const loc of Object.values(lesson.localized ?? {})) if (loc.video?.file) n++;
-      for (const ex of lesson.exhibits ?? []) n += (ex.file ? 1 : 0) + (ex.thumbnail ? 1 : 0);
+      for (const loc of Object.values(lesson.localized ?? {}))
+        if (loc.video?.file) n++;
+      for (const ex of lesson.exhibits ?? [])
+        n += (ex.file ? 1 : 0) + (ex.thumbnail ? 1 : 0);
     }
     return n;
   }
@@ -359,7 +439,11 @@ export class PackageJobsService {
   }
 
   // ===== 导出 =====
-  async startExport(courseId: string, version: string, actorEmployeeId: string | null) {
+  async startExport(
+    courseId: string,
+    version: string,
+    actorEmployeeId: string | null,
+  ) {
     // P1a：以 working 为导出源（live/version 需快照重建，后续迭代）
     const jobId = randomUUID();
     await this.prisma.coursePackageJob.create({

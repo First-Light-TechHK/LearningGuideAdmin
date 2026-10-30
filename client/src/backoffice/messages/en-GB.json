@@ -373,7 +373,10 @@
       "notesPlaceholder": "Revision Notes (required)",
       "tagEditing": "editing",
       "tagLive": "live",
-      "tagTesting": "testing"
+      "tagTesting": "testing",
+      "downloadVersion": "Download",
+      "downloadVersionAria": "Download version {version} as ZIP",
+      "downloaded": "Version {version} downloaded"
     },
     "tag": {
       "chooseColor": "Choose color (auto-assigned if not selected)",
