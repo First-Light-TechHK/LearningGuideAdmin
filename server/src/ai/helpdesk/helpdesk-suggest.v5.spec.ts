@@ -26,7 +26,7 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
-import { TEMPLATES } from './workflow/guard';
+import { ANSWER_LINES, ANSWER_TONES, TEMPLATES } from './workflow/guard';
 import {
   loadPi,
   PiStepRunner,
@@ -131,16 +131,19 @@ function pick(
   options: {
     confidence?: string;
     blocks?: string[];
-    opening?: string;
-    closing?: string;
+    tone?: string;
     reply?: string;
   } = {},
 ) {
   const texts: Record<string, string> = {};
-  for (const key of ['opening', 'closing', 'reply'] as const)
-    if (options[key] !== undefined) texts[key] = options[key];
+  if (options.reply !== undefined) texts.reply = options.reply;
   return called(
-    { intent, faqId, confidence: options.confidence ?? 'sure' },
+    {
+      intent,
+      faqId,
+      confidence: options.confidence ?? 'sure',
+      ...(options.tone !== undefined ? { tone: options.tone } : {}),
+    },
     { lists: options.blocks ? { blocks: options.blocks } : {}, texts },
   );
 }
@@ -192,9 +195,7 @@ function setup(
           (() =>
             pick('question', PAID.id, {
               blocks: ['b2', 'b3'],
-              opening: "Don't worry, this is usually quick to sort out:",
-              closing:
-                'Try these first, and tell me if it is still not active.',
+              tone: 'problem',
             }))
         )(spec, context),
   );
@@ -293,7 +294,7 @@ describe('v5 is opt-in: requests without context get exactly the v5 answer', () 
 });
 
 describe('v5 answer: opening, excerpt, closing (Part H)', () => {
-  it('answers with the guard-passed opening and closing, the excerpt blocks and the release version', async () => {
+  it('answers with the fixed lines of the tone the model chose, the excerpt blocks and the release version', async () => {
     const { service, run, findCandidates } = setup();
     const result = await ask(
       service,
@@ -314,8 +315,8 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
       confidence: 'sure',
       nodeId: PAID.id,
       blocks: ['b2', 'b3'],
-      opening: "Don't worry, this is usually quick to sort out:",
-      closing: 'Try these first, and tell me if it is still not active.',
+      opening: ANSWER_LINES.problem.opening.en,
+      closing: ANSWER_LINES.problem.closing.en,
       reply: null,
       explanation: null,
       covered: null,
@@ -335,14 +336,12 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
       intent: SUGGEST_INTENTS,
       faqId: [PAID.id, FAILED.id, RESET.id, 'none'],
       confidence: ['sure', 'unsure'],
+      tone: [...ANSWER_TONES, 'none'],
     });
     // 只有 PAID 的答案够长、可以摘录：块 id 来自它
     expect(spec.tool.listArgs).toEqual({ blocks: ['b1', 'b2', 'b3', 'b4'] });
-    expect(Object.keys(spec.tool.textArgs ?? {})).toEqual([
-      'opening',
-      'closing',
-      'reply',
-    ]);
+    // 开头结尾不让模型写（只选 tone），模型只写寒暄回复
+    expect(Object.keys(spec.tool.textArgs ?? {})).toEqual(['reply']);
     const prompt = JSON.parse(spec.prompt) as Record<string, unknown> & {
       candidates: Record<string, unknown>[];
     };
@@ -365,22 +364,40 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
     expect(prompt.candidates[1].blocks).toBeUndefined();
   });
 
-  it('uses the fixed templates for a missing or failing opening / closing, and says why', async () => {
+  it.each([['none'], ['unknown'], [undefined]])(
+    'uses the default lines when the tone is %s, and says so',
+    async (tone) => {
+      const { service } = setup({
+        pick: () => pick('question', PAID.id, { tone }),
+      });
+      const result = await ask(service, chat('paid not active'));
+      expect(result).toMatchObject({
+        opening: TEMPLATES.opening.en,
+        closing: TEMPLATES.closing.en,
+        guard: {
+          result: 'fallback',
+          reason: 'missing',
+          fallback: ['opening', 'closing'],
+        },
+      });
+    },
+  );
+
+  it("writes the chosen tone's lines in the learner's script (zh-CN / zh-TW)", async () => {
     const { service } = setup({
-      pick: () =>
-        pick('question', PAID.id, {
-          opening: 'It takes 5 minutes:',
-        }),
+      pick: () => pick('question', PAID.id, { tone: 'explain' }),
     });
-    const result = await ask(service, chat('paid not active'));
-    expect(result).toMatchObject({
-      opening: TEMPLATES.opening.en,
-      closing: TEMPLATES.closing.en,
-      guard: {
-        result: 'fallback',
-        reason: 'digit',
-        fallback: ['opening', 'closing'],
-      },
+    expect(
+      await ask(service, { ...chat('我付了钱但是没开通'), locale: 'zh-CN' }),
+    ).toMatchObject({
+      opening: ANSWER_LINES.explain.opening['zh-CN'],
+      closing: ANSWER_LINES.explain.closing['zh-CN'],
+    });
+    expect(
+      await ask(service, { ...chat('我付了錢但是沒開通'), locale: 'zh-CN' }),
+    ).toMatchObject({
+      opening: ANSWER_LINES.explain.opening['zh-TW'],
+      closing: ANSWER_LINES.explain.closing['zh-TW'],
     });
   });
 
@@ -438,7 +455,7 @@ describe('v5 choice cards: unsure → the learner picks (graph design §4)', () 
       pick: () =>
         pick('question', PAID.id, {
           confidence: 'unsure',
-          opening: 'Here you go:',
+          tone: 'steps',
         }),
     });
     const result = await ask(service, chat('payment problem'));
@@ -916,8 +933,7 @@ describe('v5 without a model call', () => {
 describe('v5 logging: codes and enums only, model text only in the learner-text field', () => {
   it('records the turn in helpdesk_suggestions', async () => {
     const { service, rows } = setup({
-      pick: () =>
-        pick('question', PAID.id, { blocks: ['b2'], opening: 'It is 5 pm:' }),
+      pick: () => pick('question', PAID.id, { blocks: ['b2'] }),
     });
     await service.suggest(
       chat('paid', { sessionId: id(100), nodeId: RESET.id }),
@@ -932,7 +948,7 @@ describe('v5 logging: codes and enums only, model text only in the learner-text 
         blocks: ['b2'],
         guard: {
           result: 'fallback',
-          reason: 'digit',
+          reason: 'missing',
           fallback: ['opening', 'closing'],
         },
         covered: null,
@@ -940,7 +956,6 @@ describe('v5 logging: codes and enums only, model text only in the learner-text 
         releaseVersion: 3,
       },
     });
-    expect(JSON.stringify(rows)).not.toContain('5 pm');
   });
 
   it('records clarify with the shown node and no faq_id', async () => {
@@ -1034,7 +1049,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
     };
   }
 
-  it('answers with the blocks, opening and closing the model wrote', async () => {
+  it('answers with the blocks the model chose and the fixed lines of its tone', async () => {
     const { service, handle } = await fauxService((pi) => [
       pi.ai.fauxAssistantMessage(
         [
@@ -1043,8 +1058,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
             faqId: PAID.id,
             confidence: 'sure',
             blocks: ['b2', 'b3'],
-            opening: 'No worries, here is what to try:',
-            closing: 'Let me know if it is still not active.',
+            tone: 'problem',
           }),
         ],
         { stopReason: 'toolUse' },
@@ -1054,8 +1068,8 @@ describe('v5 through the real pi runner (faux provider)', () => {
       kind: 'answer',
       nodeId: PAID.id,
       blocks: ['b2', 'b3'],
-      opening: 'No worries, here is what to try:',
-      closing: 'Let me know if it is still not active.',
+      opening: ANSWER_LINES.problem.opening.en,
+      closing: ANSWER_LINES.problem.closing.en,
       guard: { result: 'passed' },
     });
     expect(handle.state.callCount).toBe(1);
@@ -1069,6 +1083,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
             intent: 'clarify',
             faqId: PAID.id,
             confidence: 'sure',
+            tone: 'none',
           }),
         ],
         { stopReason: 'toolUse' },

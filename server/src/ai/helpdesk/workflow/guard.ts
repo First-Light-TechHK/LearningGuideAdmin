@@ -513,6 +513,58 @@ export const TEMPLATES = {
   },
 } as const;
 
+/**
+ * 答案卡片前后的固定短句：模型只选语气（tone），文字由这里给。
+ * steps = 问怎么做；problem = 报告出问题或着急；explain = 问是什么、为什么、能不能、什么时候。
+ * 模型选 none 或没选 → TEMPLATES.opening / closing。每一条都必须过守卫（guard.spec.ts 锁定）。
+ */
+export const ANSWER_TONES = ['steps', 'problem', 'explain'] as const;
+export type AnswerTone = (typeof ANSWER_TONES)[number];
+
+const ASK_AGAIN = {
+  'zh-CN': '有不清楚的地方再问我。',
+  'zh-TW': '有不清楚的地方再問我。',
+  en: 'Ask me if anything is unclear.',
+} as const;
+
+export const ANSWER_LINES: Record<
+  AnswerTone,
+  Record<'opening' | 'closing', Record<TemplateVariant, string>>
+> = {
+  steps: {
+    opening: {
+      'zh-CN': '可以按下面的步骤来：',
+      'zh-TW': '可以按下面的步驟來：',
+      en: 'Here are the steps:',
+    },
+    closing: ASK_AGAIN,
+  },
+  problem: {
+    opening: {
+      'zh-CN': '别担心，先看看下面的说明：',
+      'zh-TW': '別擔心，先看看下面的說明：',
+      en: "Don't worry, have a look at this first:",
+    },
+    closing: {
+      'zh-CN': '按上面试一下，还不行就告诉我。',
+      'zh-TW': '照上面試一下，還不行就告訴我。',
+      en: "Try this first, and tell me if it still doesn't work.",
+    },
+  },
+  explain: {
+    opening: {
+      'zh-CN': '帮助中心的说明是这样的：',
+      'zh-TW': '幫助中心的說明是這樣的：',
+      en: "Here's what the help centre says:",
+    },
+    closing: ASK_AGAIN,
+  },
+};
+
+export function isAnswerTone(value: unknown): value is AnswerTone {
+  return (ANSWER_TONES as readonly unknown[]).includes(value);
+}
+
 export function replyTemplate(
   intent: ReplyIntent,
   variant: TemplateVariant,

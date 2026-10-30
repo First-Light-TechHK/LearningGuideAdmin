@@ -44,16 +44,13 @@ describe('pick_faq v5 system prompt', () => {
     );
   });
 
-  it('keeps the opening and closing from promising anything or answering for the card', () => {
-    // sincerity review 2026-10-30: the model copied the example "Don't worry, this is usually quick to sort out:"
-    // ("別擔心，這通常很快就能解決") onto refund and timing questions, and openings like "你的学习进度不会丢失的" answered for the card
+  it('never lets the model write the opening or closing: it only picks a tone', () => {
+    // sincerity review 2026-10-30: model-written openings promised ("usually quick to sort out",
+    // "這通常很快就能解決") or answered for the card ("你的学习进度会保留的"); the user chose fixed lines
     expect(PICK_FAQ_V5_SYSTEM).not.toContain('usually quick to sort out');
-    expect(PICK_FAQ_V5_SYSTEM).not.toContain('别着急，这个一般是这样处理的');
+    expect(PICK_FAQ_V5_SYSTEM).not.toContain('opening is one warm line');
     expect(PICK_FAQ_V5_SYSTEM).toContain(
-      'The opening only leads into the card: never answer the question in it, never say yes or no, and never say it is quick, easy or usually solved.',
-    );
-    expect(PICK_FAQ_V5_SYSTEM).toContain(
-      'closing is one line that invites the next step and fits what they asked',
+      'tone: only with a picked answer, what kind of message it is, so the system can add its fixed lines before and after the card: steps = they ask how to do something; problem = they report something not working or sound worried; explain = they ask what, why, whether or when; otherwise none.',
     );
   });
 

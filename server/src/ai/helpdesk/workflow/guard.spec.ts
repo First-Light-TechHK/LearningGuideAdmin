@@ -8,6 +8,8 @@ import {
 } from '../../../contracts/helpdesk-qa';
 import {
   AI_FILLER,
+  ANSWER_LINES,
+  ANSWER_TONES,
   chooseExcerpt,
   guardExplanation,
   guardShortText,
@@ -344,6 +346,24 @@ describe('contract fixture v6 examples', () => {
     (ex.suggestContextRequest.message as string) ?? '',
     'en-GB',
   );
+
+  it('the fixed answer lines of every tone pass the guard in their own script', () => {
+    const samples: [TemplateVariant, string, string][] = [
+      ['zh-CN', '我付了钱但是没开通', 'zh-CN'],
+      ['zh-TW', '我付了錢但是沒開通', 'zh-TW'],
+      ['en', 'I paid but my plan is not active', 'en-GB'],
+    ];
+    for (const tone of ANSWER_TONES)
+      for (const [variant, message, locale] of samples)
+        for (const field of ['opening', 'closing'] as const)
+          expect(
+            guardShortText(
+              field,
+              ANSWER_LINES[tone][field][variant],
+              learnerOf(message, locale),
+            ),
+          ).toMatchObject({ ok: true });
+  });
 
   it('the answer example opening and closing pass the guard', () => {
     const answer = ex.suggestAnswerContextResponse;
