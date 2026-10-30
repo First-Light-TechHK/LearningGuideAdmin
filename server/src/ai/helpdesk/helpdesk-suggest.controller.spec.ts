@@ -167,6 +167,90 @@ describe('Helpdesk suggest integration endpoints', () => {
     await expect(aborted).resolves.toBe(true);
   });
 
+  describe('as a stream when Portal asks for text/event-stream (the thinking panel)', () => {
+    const events = (text: string) =>
+      text
+        .split('\n\n')
+        .filter((chunk) => chunk.trim() !== '')
+        .map((chunk) => {
+          const lines = chunk.split('\n');
+          const event = lines.find((l) => l.startsWith('event: '));
+          const data = lines.find((l) => l.startsWith('data: '));
+          return [
+            event?.slice('event: '.length),
+            JSON.parse(data?.slice('data: '.length) ?? 'null') as unknown,
+          ];
+        });
+    const stream = () =>
+      request(server())
+        .post('/api/integration/helpdesk/suggest')
+        .set('Authorization', `Bearer ${TOKEN}`)
+        .set('Accept', 'text/event-stream')
+        .buffer(true)
+        .parse((res, done) => {
+          let text = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk: string) => (text += chunk));
+          res.on('end', () => done(null, text));
+        })
+        .send(body);
+
+    it('sends each step name as it starts, then the same JSON as one event', async () => {
+      const suggestion = { id: SID, faqId: 'q1', question: 'Q', answer: 'A' };
+      service.suggest.mockImplementation(
+        (_body: unknown, context: { onStep?: (step: string) => void }) => {
+          context.onStep?.('retrieve');
+          context.onStep?.('pick');
+          return Promise.resolve({ suggestion });
+        },
+      );
+      const res = await stream().expect(200);
+      expect(res.headers['content-type']).toMatch(/^text\/event-stream/);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(events(res.body as string)).toEqual([
+        ['step', { step: 'retrieve' }],
+        ['step', { step: 'pick' }],
+        ['result', { suggestion }],
+      ]);
+    });
+
+    it('sends an error the way it is sent today, as the last event', async () => {
+      service.suggest.mockRejectedValue(
+        problem(400, 'invalid_request', 'message is required'),
+      );
+      const res = await stream().expect(200);
+      expect(events(res.body as string)).toEqual([
+        [
+          'error',
+          {
+            type: 'https://www.ilovelearningguide.com/problems/invalid_request',
+            title: 'Bad Request',
+            status: 400,
+            detail: 'message is required',
+            code: 'invalid_request',
+          },
+        ],
+      ]);
+    });
+
+    it('hides unexpected errors in the error event too', async () => {
+      service.suggest.mockImplementation(
+        (_body: unknown, context: { onStep?: (step: string) => void }) => {
+          context.onStep?.('retrieve');
+          return Promise.reject(new Error('SELECT secret FROM x'));
+        },
+      );
+      const res = await stream().expect(200);
+      const sent = events(res.body as string);
+      expect(sent[0]).toEqual(['step', { step: 'retrieve' }]);
+      expect(sent[1]).toEqual([
+        'error',
+        expect.objectContaining({ status: 500, code: 'internal_error' }),
+      ]);
+      expect(res.body).not.toContain('secret');
+    });
+  });
+
   it('returns { suggestion: null } as is', async () => {
     service.suggest.mockResolvedValue({ suggestion: null });
     const res = await request(server())

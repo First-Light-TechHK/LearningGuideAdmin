@@ -202,6 +202,26 @@ describe('runWorkflow', () => {
     ]);
   });
 
+  it('tells the listener each step as it starts; a listener that throws changes nothing', async () => {
+    const seen: string[] = [];
+    const { deps } = setup({
+      run: () => Promise.resolve({ kind: 'called', args: { option: 'a' } }),
+    });
+    const result = await runWorkflow(
+      template,
+      { trail: [] },
+      {
+        ...deps,
+        onStep: (name) => {
+          seen.push(name);
+          throw new Error('listener gone');
+        },
+      },
+    );
+    expect(seen).toEqual(['first', 'choose', 'last']);
+    expect(result).toMatchObject({ reason: 'answered', trail: seen });
+  });
+
   it('lets the template decide on no tool call', async () => {
     const { deps } = setup({ run: () => Promise.resolve({ kind: 'no_call' }) });
     await expect(

@@ -114,6 +114,8 @@ export type WorkflowDeps = {
   /** 一个 agent 步最多跑多久（开步时现算：min(3 s, 离总期限还剩)）；到时结束为 timeout。 */
   stepTimeoutMs: () => number;
   traceparent: () => string;
+  /** 每开一步就告诉调用方步骤名（Portal 的「思考中」面板）；它抛错也不影响这次 run。 */
+  onStep?: (name: string) => void;
 };
 
 const ABORTED: AgentStepOutcome = { kind: 'aborted' };
@@ -169,6 +171,11 @@ export async function runWorkflow<S>(
       : undefined;
     if (!step) return { state, reason: 'error', trail };
     trail.push(name);
+    try {
+      deps.onStep?.(name);
+    } catch {
+      // 听的人出了问题不算这次 run 的问题
+    }
     const no = trace.nextStep();
     let then: Transition;
     if (step.kind === 'code') {

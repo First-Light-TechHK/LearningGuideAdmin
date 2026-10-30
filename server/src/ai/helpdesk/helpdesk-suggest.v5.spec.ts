@@ -765,6 +765,26 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     },
   );
 
+  it('names each step it starts for the thinking panel: pick_faq is pick, and nothing else is said', async () => {
+    const { service } = setup({
+      found: [FAILED, RESET],
+      pick: () => pick('clarify', PAID.id),
+      explain: () =>
+        called(
+          {},
+          {
+            texts: { explanation: 'Only for a few minutes.' },
+            flags: { covered: true },
+          },
+        ),
+    });
+    const steps: string[] = [];
+    await service.suggest(chat('So do I just have to wait?', shown), {
+      onStep: (step) => steps.push(step),
+    });
+    expect(steps).toEqual(['retrieve', 'pick', 'explain', 'ground']);
+  });
+
   it('treats a pick of the shown card as a question about it', async () => {
     const { service, run } = setup({ pick: () => pick('question', PAID.id) });
     expect(await ask(service, chat('again?', shown))).toMatchObject({

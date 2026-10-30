@@ -153,11 +153,27 @@ type SuggestInput = {
   context: SuggestRequestContext | null;
 };
 
+/**
+ * 发给 Portal「思考中」面板的步骤名（只有名字，没有模型的文字）；pick_faq 对外叫 pick，
+ * 不在表里的步骤（chip 的 lookup、提交表单的 validate / answer）不发。
+ */
+export const STREAM_STEPS = {
+  retrieve: 'retrieve',
+  pick_faq: 'pick',
+  explain: 'explain',
+  route: 'route',
+  smalltalk: 'smalltalk',
+  ground: 'ground',
+} as const;
+export type StreamStep = (typeof STREAM_STEPS)[keyof typeof STREAM_STEPS];
+
 export type SuggestContext = {
   /** 收到的 W3C traceparent 头。 */
   traceparent?: string;
   /** 调用方放弃（Portal 断开）时中止。 */
   signal?: AbortSignal;
+  /** 每开一步（见 STREAM_STEPS）就调一次。 */
+  onStep?: (step: StreamStep) => void;
 };
 
 export type HelpdeskSuggestDeps = {
@@ -403,6 +419,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         trace,
         context.signal,
         retrieved,
+        context.onStep,
       );
       suggestion = decided.chosen
         ? {
@@ -558,6 +575,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     trace: TraceContext,
     callerSignal: AbortSignal | undefined,
     retrieved: Retrieved,
+    onStep?: SuggestContext['onStep'],
   ): Promise<Decided> {
     const env = this.env();
     const apiKey = env.OPENROUTER_API_KEY?.trim() ?? '';
@@ -582,6 +600,10 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       signal: callerSignal,
       stepTimeoutMs: () => Math.min(this.timeoutMs, left()),
       traceparent: () => childTraceparent(trace),
+      onStep: (name: string) => {
+        if (onStep && Object.hasOwn(STREAM_STEPS, name))
+          onStep(STREAM_STEPS[name as keyof typeof STREAM_STEPS]);
+      },
     };
 
     if (input.source === 'chip') {
