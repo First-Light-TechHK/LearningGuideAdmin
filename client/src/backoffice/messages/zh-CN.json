@@ -661,6 +661,7 @@
       "TICKET_NOT_RESOLVED": "只有已解决的工单能转成 FAQ 候选。",
       "TICKET_NO_QUESTION": "这张工单没有学员的问题。",
       "JOB_ALREADY_RUNNING": "任务正在运行，结束后再试。",
+      "JOB_START_FAILED": "任务没能开始，请稍后再试。",
       "JOB_NOT_FOUND": "没有这个任务。",
       "JOB_RUN_NOT_FOUND": "这次运行已不存在。"
     },
@@ -1215,6 +1216,7 @@
       },
       "byJob": "夜间任务",
       "byStaff": "员工 {id}",
+      "byName": "{name}",
       "historyItem": "{action} {who} · {when}",
       "newFaq": "新 FAQ",
       "addPhrasing": "加问法",
@@ -1240,8 +1242,8 @@
       "confirmDismiss": "驳回候选",
       "cancel": "取消",
       "saving": "保存中…",
-      "addedOne": "加了 1 条问法（跳过 {skipped} 条）。这些例句已成为这个 FAQ 的评测用例。",
-      "addedMany": "加了 {added} 条问法（跳过 {skipped} 条）。这些例句已成为这个 FAQ 的评测用例。",
+      "addedOne": "加了 1 条问法（跳过 {skipped} 条）。勾选的例句已成为这个 FAQ 的评测用例。",
+      "addedMany": "加了 {added} 条问法（跳过 {skipped} 条）。勾选的例句已成为这个 FAQ 的评测用例。",
       "dismissed": "已驳回候选。",
       "faqAccepted": "FAQ 已保存，候选已接受。",
       "faqNotAccepted": "FAQ 已保存，但候选没有接受：{error}",
@@ -1292,7 +1294,7 @@
       "splits": {
         "none": "不切分",
         "locale": "语言",
-        "entry": "入口",
+        "entry": "渠道",
         "signal": "信号"
       },
       "metrics": {
@@ -1330,6 +1332,9 @@
         "ticketRate": "工单率"
       },
       "weekOf": "{date} 那一周",
+      "partialWeek": "{label}（不完整的周）",
+      "utcNote": "日期按 UTC 计，每周从周一开始。",
+      "channelHint": "渠道是问题从哪里来：工单表单、聊天或推荐问题，不是学员当时所在的页面。",
       "topGaps": "最大的缺口组",
       "ticketFaqs": "最常导致工单的 FAQ",
       "open": "打开",
@@ -1348,7 +1353,7 @@
       "unknownFaq": "已删除的 FAQ",
       "bySplitName": {
         "locale": "按语言",
-        "entry": "按入口",
+        "entry": "按渠道",
         "signal": "按信号"
       }
     }

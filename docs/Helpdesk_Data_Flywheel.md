@@ -106,23 +106,28 @@ The code is in `client/src/backoffice/helpdesk/`. The pure logic is in `client/s
   - Gap mining then polls its run every second and reloads the queue when it ends. Retention reports the rows it scrubbed.
 - **Queue.** The server sorts it by count. Staff filter by status (default `new`), suggestion, origin and text. The filters live in the address bar.
 - **Each row** shows the topic, the proposed question, the suggestion, the source mix, the count and when it was last seen.
+- **Paging.** The pager shows whenever there is more than one page or the page is past the first. A page past the end (the queue shrank after a decision, or a stale link) goes back to the last page.
 
 **Candidate detail** (`?candidate=<id>`, `CandidateDrawer.tsx`) is open to every role. It shows:
 - the scrubbed examples, with placeholders marked as hidden personal details;
 - the source mix and the related nodes (closest FAQ and its similarity, parent, card on screen, accepted FAQ);
-- the source ticket, and the audit history (who and when).
+- the source ticket, and the audit history (who, by display name when the server has it, and when);
+- for a merged candidate, a button that opens the candidate it was merged into.
+
+Escape closes an open form, then the drawer, but does nothing while a decision is being sent or the draft is loading, so the result is always shown. If the drawer is closed while the draft loads, the FAQ editor does not open on its own.
 
 **Decisions** are for FULL staff, and only while the candidate is `new`. Each sends the candidate's `version` and an Idempotency-Key, and a retry of the same decision reuses the key. When someone else changed the candidate first (409 `CANDIDATE_CHANGED`), the drawer reloads it and explains.
 - **New FAQ** fetches `GET …/draft` and opens the FAQ editor prefilled: questions, category and entry come from the draft, and the answers are empty. When the group has human replies from resolved tickets, the editor shows a **草稿 待核实 / Draft, to be verified** panel. "起草" copies a reply into the answer box for its language and keeps a "check every fact" warning under that box. After the FAQ is saved, the page accepts the candidate with the new `faqId` and the ticked examples.
 - **Add as follow-up** first asks for the parent question; the default is the parent the learners were on. It then opens the same editor with entry off, and accepting creates the edge.
 - **Add phrasing** adds the ticked examples to the closest FAQ, or to another answer card found by search.
-- **Dismiss** needs a reason; `other` needs a note.
+- **Dismiss** needs a reason; `other` needs a note. `personal_data` also removes the examples, sources and the turns' text on the server.
 - Examples with a placeholder can never be ticked.
 
 **"转成 FAQ 候选"** appears under the action bar of a resolved ticket (CLOSED, not cancelled), for FULL staff only. The result notice links to the candidate.
 
 **"HelpDesk 数据" tab** (`/help-desk?tab=data`, `FlywheelDataView.tsx`):
-- **Controls:** daily (7, 28 or 92 days) or weekly (12, 26 or 52 weeks), ending today (UTC), and a split.
+- **Controls:** daily (7, 28 or 92 days) or weekly (12, 26 or 52 weeks), ending today (UTC), and a split. A note says that days and weeks are in UTC and weeks start on Monday; a week the range covers only in part is labelled "(partial week)".
+- **The "Channel" split** (`split=entry` in the API) is the turn's source: ticket form, chat or suggested question. A hint under the controls says it is not the page the learner was on (Portal's feed has no page yet).
 - **Seven stat cards** cover the whole period. Each shows the value, its numerator and denominator, and a one-line definition; a null rate shows as —.
 - **Tables:** a trend table (AI-solved rate with a decorative bar), a per-segment table when a split is chosen (the cards stay overall), the top gap groups (with "Open" to the candidate), and the FAQs that most often lead to a ticket.
 - **States:** loading, empty ("no conversations in this period yet") and error. The page also shows when data was last pulled from Portal.

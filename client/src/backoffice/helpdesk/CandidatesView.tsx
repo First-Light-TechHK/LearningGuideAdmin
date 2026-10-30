@@ -103,6 +103,13 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
   const rows = loaded?.candidates ?? []
   const total = loaded?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / CANDIDATE_PAGE_SIZE))
+  const pastEnd = !loading && loaded !== null && rows.length === 0 && total > 0 && filters.page > totalPages
+
+  // 页码超过了最后一页（队列变短了，或是旧链接）：回到最后一页，不留一张空表
+  useEffect(() => {
+    if (pastEnd) update({ page: totalPages }, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- update 只读 ref，按 pastEnd 触发
+  }, [pastEnd, totalPages])
   const range = showingRange(filters.page, CANDIDATE_PAGE_SIZE, total)
   const filtered =
     filters.q !== '' || filters.suggestion !== 'all' || filters.origin !== 'all' || filters.status !== DEFAULT_CANDIDATE_FILTERS.status
@@ -235,7 +242,7 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
                 </td>
               </tr>
             ))}
-            {loaded && rows.length === 0 && !errorCode ? (
+            {loaded && rows.length === 0 && !errorCode && !pastEnd ? (
               <tr>
                 <td colSpan={6} className="hdFaqEmpty">
                   {t(locale, `helpDesk.candidates.${emptyKey}`)}
@@ -253,7 +260,7 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
         </table>
       </div>
 
-      {total > CANDIDATE_PAGE_SIZE ? (
+      {total > CANDIDATE_PAGE_SIZE || filters.page > 1 ? (
         <footer className="hdFaqFooter">
           <span>{t(locale, 'helpDesk.candidates.showing', { from: range.from, to: range.to, total })}</span>
           <nav className="hdFaqPages" aria-label={t(locale, 'helpDesk.candidates.pagination')}>

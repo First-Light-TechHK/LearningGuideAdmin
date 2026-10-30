@@ -93,6 +93,12 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
     return granularity === 'week' ? t(locale, 'helpDesk.data.weekOf', { date }) : date
   }
 
+  /** 趋势表的一行：不完整的周（这段时间只盖住一部分）标出来，比率不好和完整的周直接比。 */
+  function seriesLabel(row: MetricsRow): string {
+    const label = bucketLabel(row.bucket)
+    return row.partial ? t(locale, 'helpDesk.data.partialWeek', { label }) : label
+  }
+
   const overall = state.overall
   const totals = overall ? overallTotals(overall) : null
   const metricLabel = (key: RateKey) => t(locale, `helpDesk.data.metrics.${key}`)
@@ -205,6 +211,8 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
           </span>
         ) : null}
       </div>
+      <p className="hdGraphHint hdDataNote">{t(locale, 'helpDesk.data.utcNote')}</p>
+      {split === 'entry' ? <p className="hdGraphHint hdDataNote">{t(locale, 'helpDesk.data.channelHint')}</p> : null}
 
       {state.error ? (
         <div className="hdNotice hdFaqError" role="alert">
@@ -236,7 +244,7 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
             t(locale, 'helpDesk.data.trend'),
             t(locale, 'helpDesk.data.columns.period'),
             overall.series,
-            (row) => bucketLabel(row.bucket),
+            seriesLabel,
             true,
           )}
 

@@ -661,6 +661,7 @@
       "TICKET_NOT_RESOLVED": "Only a resolved ticket can become an FAQ candidate.",
       "TICKET_NO_QUESTION": "This ticket has no question from the learner.",
       "JOB_ALREADY_RUNNING": "This job is already running. Try again when it has finished.",
+      "JOB_START_FAILED": "The job could not be started. Try again in a moment.",
       "JOB_NOT_FOUND": "This job does not exist.",
       "JOB_RUN_NOT_FOUND": "This run no longer exists."
     },
@@ -1215,6 +1216,7 @@
       },
       "byJob": "by the nightly job",
       "byStaff": "by staff {id}",
+      "byName": "by {name}",
       "historyItem": "{action} {who} · {when}",
       "newFaq": "New FAQ",
       "addPhrasing": "Add phrasing",
@@ -1240,8 +1242,8 @@
       "confirmDismiss": "Dismiss candidate",
       "cancel": "Cancel",
       "saving": "Saving…",
-      "addedOne": "Added 1 phrasing ({skipped} skipped). The examples are now eval cases for this FAQ.",
-      "addedMany": "Added {added} phrasings ({skipped} skipped). The examples are now eval cases for this FAQ.",
+      "addedOne": "Added 1 phrasing ({skipped} skipped). The ticked examples are now eval cases for this FAQ.",
+      "addedMany": "Added {added} phrasings ({skipped} skipped). The ticked examples are now eval cases for this FAQ.",
       "dismissed": "Candidate dismissed.",
       "faqAccepted": "FAQ saved and the candidate accepted.",
       "faqNotAccepted": "FAQ saved, but the candidate was not accepted: {error}",
@@ -1292,7 +1294,7 @@
       "splits": {
         "none": "No split",
         "locale": "Locale",
-        "entry": "Entry",
+        "entry": "Channel",
         "signal": "Signal"
       },
       "metrics": {
@@ -1330,6 +1332,9 @@
         "ticketRate": "Ticket rate"
       },
       "weekOf": "Week of {date}",
+      "partialWeek": "{label} (partial week)",
+      "utcNote": "Days and weeks are in UTC; weeks start on Monday.",
+      "channelHint": "Channel is where the question came from: the ticket form, the chat or a suggested question. It is not the page the learner was on.",
       "topGaps": "Top gap groups",
       "ticketFaqs": "FAQs that most often lead to a ticket",
       "open": "Open",
@@ -1348,7 +1353,7 @@
       "unknownFaq": "Removed FAQ",
       "bySplitName": {
         "locale": "By locale",
-        "entry": "By entry",
+        "entry": "By channel",
         "signal": "By signal"
       }
     }

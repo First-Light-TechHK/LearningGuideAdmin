@@ -276,6 +276,7 @@ describe('v5 Part G wording (FAQ 候选 / HelpDesk 数据, 待视觉验收)', ()
       'TICKET_NOT_RESOLVED',
       'TICKET_NO_QUESTION',
       'JOB_ALREADY_RUNNING',
+      'JOB_START_FAILED',
       'JOB_NOT_FOUND',
       'JOB_RUN_NOT_FOUND',
     ])

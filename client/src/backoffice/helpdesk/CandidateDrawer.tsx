@@ -69,6 +69,8 @@ type Props = {
   onChanged: () => void
   /** 新 FAQ / 追问：交给页面打开预填的 FAQ 编辑器。 */
   onCompose: (compose: Compose) => void
+  /** 打开另一个候选（合并到的那一个）。 */
+  onOpenCandidate?: (candidateId: string) => void
 }
 
 const when = (iso: string | null, locale: Locale) => (iso ? `${longDate(iso, locale)} ${cardTime(iso, locale)}` : '—')
@@ -96,7 +98,7 @@ function Example({ text, locale }: { text: string; locale: Locale }) {
   )
 }
 
-export function CandidateDrawer({ locale, candidateId, canWrite, onClose, onChanged, onCompose }: Props) {
+export function CandidateDrawer({ locale, candidateId, canWrite, onClose, onChanged, onCompose, onOpenCandidate }: Props) {
   const uid = useId()
   const zh = locale === 'zh-CN'
   const [detail, setDetail] = useState<CandidateDetail | null>(null)
@@ -116,10 +118,22 @@ export function CandidateDrawer({ locale, candidateId, canWrite, onClose, onChan
   const closeRef = useRef<HTMLButtonElement>(null)
   const noticeRef = useRef<HTMLDivElement>(null)
   const loadedFor = useRef<string | null>(null)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
+  // Esc：表单开着 → 关表单；正在发送决定或取草稿时不动（和点遮罩一样），结果还要显示出来
   useModal(
     () => drawerRef.current,
-    () => (mode !== 'view' && !busy ? closeForm() : onClose()),
+    () => {
+      if (busy) return
+      if (mode !== 'view') closeForm()
+      else onClose()
+    },
   )
 
   useEffect(() => {
@@ -251,6 +265,8 @@ export function CandidateDrawer({ locale, candidateId, canWrite, onClose, onChan
     setBusy(true)
     setNotice(null)
     const result = await getCandidateDraft(candidate.id)
+    // 抽屉在取草稿时关掉了：不再自己打开 FAQ 编辑器
+    if (!mounted.current) return
     setBusy(false)
     if (!result.ok) {
       say({ tone: 'alert', text: errorMessage(locale, result.code) })
@@ -275,9 +291,11 @@ export function CandidateDrawer({ locale, candidateId, canWrite, onClose, onChan
 
   function historyText(revision: CandidateRevision): string {
     const action = t(locale, `helpDesk.candidates.revision.${revision.action}`)
-    const who = revision.employeeId
-      ? t(locale, 'helpDesk.candidates.byStaff', { id: revision.employeeId.slice(0, 8) })
-      : t(locale, 'helpDesk.candidates.byJob')
+    const who = revision.employeeName
+      ? t(locale, 'helpDesk.candidates.byName', { name: revision.employeeName })
+      : revision.employeeId
+        ? t(locale, 'helpDesk.candidates.byStaff', { id: revision.employeeId.slice(0, 8) })
+        : t(locale, 'helpDesk.candidates.byJob')
     return t(locale, 'helpDesk.candidates.historyItem', {
       action: action.startsWith('helpDesk.') ? revision.action : action,
       who,
@@ -357,6 +375,11 @@ export function CandidateDrawer({ locale, candidateId, canWrite, onClose, onChan
           <div className="hdCandidateDecided">
             <p className="hdReleaseLive">{decided}</p>
             {candidate.reasonNote ? <p className="hdGraphHint">{candidate.reasonNote}</p> : null}
+            {candidate.status === 'merged' && candidate.mergedInto && onOpenCandidate ? (
+              <button type="button" className="hdFaqPreview" onClick={() => onOpenCandidate(candidate.mergedInto as string)}>
+                {t(locale, 'helpDesk.candidates.openMerged')}
+              </button>
+            ) : null}
           </div>
         ) : null}
 

@@ -280,7 +280,100 @@ describe('FAQ candidates queue (G4)', () => {
   })
 })
 
+describe('queue paging', () => {
+  test('a page past the end (the queue shrank, or a stale link) goes back to the last page instead of an empty table', async () => {
+    const many = Array.from({ length: 21 }, (_, i) => candidate(`p${i}`, { topic: `Topic ${i}`, turnCount: 30 - i }))
+    rows = many
+    server.on('GET', LIST, (call) => {
+      const page = Number(call.query.get('page') ?? 1)
+      const open = rows.filter((row) => row.status === 'new')
+      return {
+        data: {
+          candidates: open.slice((page - 1) * 20, page * 20),
+          total: open.length,
+          counts: { new: open.length, accepted: 0, dismissed: 0, merged: 0 },
+          page,
+          pageSize: 20,
+          nodes: NODES,
+        },
+      }
+    })
+    server.on('GET', MINING_RUNS, { data: { runs: [] } })
+    server.on('GET', RETENTION, { data: { job: 'assist_retention', retentionDays: 180, runs: [] } })
+    server.on('GET', '/api/helpdesk/tickets', { data: { tickets: [], nextCursor: null, counts: {} } })
+    server.on('GET', ONE, (call) => {
+      const found = rows.find((row) => row.id === call.path.split('/')[4])
+      return found ? { data: { candidate: found, revisions, nodes: NODES } } : { status: 404, error: 'CANDIDATE_NOT_FOUND' }
+    })
+    server.on('POST', DISMISS, decide({ status: 'dismissed', reason: 'spam' }))
+    await openQueue({ query: '&page=2' })
+    assert.ok(await screen.findByText('Topic 20'))
+    // 第 2 页唯一的一个处理掉了：队列只剩 20 个，第 2 页空了 → 回到第 1 页
+    const dialog = await openCandidate('Topic 20')
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Dismiss' }))
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'spam' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dismiss candidate' }))
+    await within(dialog).findByRole('status')
+    await waitFor(() => assert.equal(lastListQuery().page, '1'))
+    assert.ok(await screen.findByText('Topic 0'))
+    absent(screen.queryByText('No open candidates. The nightly mining adds new ones.'))
+  })
+})
+
 describe('candidate detail', () => {
+  test('the history names the staff member; a merged candidate links to the one it went into', async () => {
+    const merged = candidate('c7', { topic: 'Refund again', status: 'merged', mergedInto: 'c1', decidedAt: '2026-10-29T09:00:00Z', decidedBy: 'e1' })
+    serve(refundGroup, merged)
+    server.on('GET', ONE, (call) => {
+      const id = call.path.split('/')[4]
+      const found = rows.find((row) => row.id === id)
+      const history: CandidateRevision[] = [
+        { id: 'r1', candidateId: id, action: 'create', before: null, after: null, employeeId: null, employeeName: null, at: '2026-10-20T18:05:00Z' },
+        { id: 'r2', candidateId: id, action: 'merge', before: null, after: null, employeeId: '0192abcd-0000-7000-8000-000000000001', employeeName: 'Mei Staff', at: '2026-10-29T09:00:00Z' },
+        { id: 'r3', candidateId: id, action: 'grow', before: null, after: null, employeeId: '0192abcd-0000-7000-8000-000000000002', at: '2026-10-29T10:00:00Z' },
+      ]
+      return found ? { data: { candidate: found, revisions: history, nodes: NODES } } : { status: 404, error: 'CANDIDATE_NOT_FOUND' }
+    })
+    await openQueue({ query: '&status=all&candidate=c7' })
+    const dialog = await screen.findByRole('dialog', { name: 'FAQ candidate' })
+    await waitFor(() => assert.ok(within(dialog).getByRole('heading', { name: 'Refund again' })))
+    const history = within(dialog).getByRole('list', { name: 'History' })
+    const items = within(history).getAllByRole('listitem').map((li) => li.textContent ?? '')
+    assert.match(items[1], /by Mei Staff/)
+    assert.match(items[2], /by staff 0192abcd/)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Open the candidate it was merged into' }))
+    await waitFor(() => assert.match(location.current, /candidate=c1/))
+    assert.ok(await screen.findByRole('heading', { name: 'Refund timing' }))
+  })
+
+  test('Escape while a decision is being sent does not close the drawer, so its result is still shown', async () => {
+    serve(refundGroup)
+    const pending = deferred<Reply>()
+    server.on('POST', DISMISS, () => pending.promise)
+    await openQueue()
+    const dialog = await openCandidate('Refund timing')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dismiss' }))
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'spam' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dismiss candidate' }))
+    await waitFor(() => assert.equal(server.callsTo('POST', DISMISS).length, 1))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    assert.ok(screen.getByRole('dialog', { name: 'FAQ candidate' }))
+    pending.resolve(decide({ status: 'dismissed', reason: 'spam' })(server.callsTo('POST', DISMISS)[0]))
+    assert.equal((await within(dialog).findByRole('status')).textContent, 'Candidate dismissed.')
+  })
+
+  test('Escape while the draft for a new FAQ is loading keeps the drawer, and the editor does not open on its own later', async () => {
+    serve(refundGroup)
+    const pending = deferred<Reply>()
+    server.on('GET', DRAFT, () => pending.promise)
+    await openQueue()
+    const dialog = await openCandidate('Refund timing')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'New FAQ' }))
+    await waitFor(() => assert.equal(server.callsTo('GET', DRAFT).length, 1))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    assert.ok(screen.getByRole('dialog', { name: 'FAQ candidate' }))
+  })
+
   test('scrubbed examples (hidden details marked), source mix, the closest FAQ and the audit history', async () => {
     serve(refundGroup)
     await openQueue()
@@ -362,7 +455,7 @@ describe('candidate actions (FULL)', () => {
     assert.equal(call.path, '/api/helpdesk/faq-candidates/c1/accept')
     assert.deepEqual(call.body, { as: 'add_phrasing', faqId: REFUND, phrasings: [0, 2], version: 1 })
     assert.match(call.idempotencyKey ?? '', /^[0-9a-f-]{36}$/)
-    assert.equal((await within(dialog).findByRole('status')).textContent, 'Added 2 phrasings (0 skipped). The examples are now eval cases for this FAQ.')
+    assert.equal((await within(dialog).findByRole('status')).textContent, 'Added 2 phrasings (0 skipped). The ticked examples are now eval cases for this FAQ.')
     // 列表刷新：接受了的候选离开待处理队列
     await waitFor(() => absent(document.querySelector('.hdFaqTable tbody tr td button[aria-label="Review Refund timing"]')))
   })
@@ -416,7 +509,7 @@ describe('candidate actions (FULL)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add 1 phrasing' }))
     await waitFor(() => assert.equal(server.callsTo('POST', ACCEPT).length, 1))
     assert.deepEqual(server.callsTo('POST', ACCEPT)[0].body, { as: 'add_phrasing', faqId: NEW_FAQ, phrasings: [2], version: 1 })
-    assert.equal((await within(dialog).findByRole('status')).textContent, 'Added 1 phrasing (1 skipped). The examples are now eval cases for this FAQ.')
+    assert.equal((await within(dialog).findByRole('status')).textContent, 'Added 1 phrasing (1 skipped). The ticked examples are now eval cases for this FAQ.')
   })
 
   test('dismiss needs a reason; "Other" needs a note', async () => {

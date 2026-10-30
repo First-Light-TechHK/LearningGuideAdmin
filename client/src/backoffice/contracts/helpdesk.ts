@@ -571,6 +571,8 @@ export type CandidateRevision = {
   before: unknown;
   after: unknown;
   employeeId: string | null;
+  /** 动作当时员工的显示名（之前的行没有）。 */
+  employeeName?: string | null;
   at: string;
 };
 
@@ -706,7 +708,13 @@ export type MetricsCounts = {
   unsolved: number;
 };
 
-export type MetricsRow = MetricsCounts & MetricsRates & { bucket: string | null; segment: string };
+export type MetricsRow = MetricsCounts &
+  MetricsRates & {
+    bucket: string | null;
+    segment: string;
+    /** 周桶：这段时间只盖住了这一周的一部分。 */
+    partial?: boolean;
+  };
 
 export type GapGroupRow = {
   candidateId: string;
@@ -734,6 +742,9 @@ export type FlywheelMetrics = {
   to: string;
   lastIngestedAt: string | null;
   source: "portal_insights";
+  /** 日与周按 UTC 切，周从周一开始。 */
+  timezone?: "UTC";
+  weekStartsOn?: "monday";
   series: MetricsRow[];
   totals: MetricsRow[];
   topGaps: GapGroupRow[];

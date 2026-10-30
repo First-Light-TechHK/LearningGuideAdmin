@@ -202,6 +202,49 @@ describe('HelpDesk data (G6)', () => {
     absent(screen.queryByRole('group', { name: 'AI-solved rate' }))
   })
 
+  test('days and weeks are UTC, a partial week is marked, and the source split is named for what it is (not a page)', async () => {
+    serve((call) =>
+      call.query.get('split') === 'entry'
+        ? {
+            data: metrics({
+              split: 'entry',
+              totals: [metricsRow({ segment: 'chat', turns: 30 }), metricsRow({ segment: 'chip', turns: 10 })],
+            }),
+          }
+        : {
+            data: metrics({
+              granularity: 'week',
+              timezone: 'UTC',
+              weekStartsOn: 'monday',
+              series: [
+                metricsRow({ bucket: '2026-10-19', partial: false }),
+                metricsRow({ bucket: '2026-10-26', partial: true }),
+              ],
+            }),
+          },
+    )
+    await openData()
+    fireEvent.change(screen.getByLabelText('Period'), { target: { value: 'week' } })
+    const trend = await screen.findByRole('table', { name: 'Trend' })
+    await waitFor(() => assert.ok(within(trend).getByText('Week of 26 Oct 2026 (partial week)')))
+    assert.ok(within(trend).getByText('Week of 19 Oct 2026'))
+    assert.ok(screen.getByText('Days and weeks are in UTC; weeks start on Monday.'))
+    const split = screen.getByLabelText('Split by') as HTMLSelectElement
+    assert.ok(Array.from(split.options).some((o) => o.textContent === 'Channel'))
+    fireEvent.change(split, { target: { value: 'entry' } })
+    assert.ok(await screen.findByRole('table', { name: 'By channel' }))
+    assert.ok(screen.getByText('Channel is where the question came from: the ticket form, the chat or a suggested question. It is not the page the learner was on.'))
+  })
+
+  test('zh-CN: UTC note and the channel split', async () => {
+    serve(() => ({ data: metrics() }))
+    await openData({ locale: 'zh-CN' })
+    await waitFor(() => card('AI 解决率'))
+    assert.ok(screen.getByText('日期按 UTC 计，每周从周一开始。'))
+    const split = screen.getByLabelText('切分') as HTMLSelectElement
+    assert.ok(Array.from(split.options).some((o) => o.textContent === '渠道'))
+  })
+
   test('an error is announced', async () => {
     serve(() => ({ status: 503, error: 'HELPDESK_UNAVAILABLE' }))
     await openData()

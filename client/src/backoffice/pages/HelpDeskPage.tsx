@@ -235,6 +235,7 @@ export default function HelpDeskPage() {
             onClose={() => openCandidate(null)}
             onChanged={() => setCandidatesVersion((value) => value + 1)}
             onCompose={compose}
+            onOpenCandidate={(id) => openCandidate(id)}
           />
         ) : null}
 
