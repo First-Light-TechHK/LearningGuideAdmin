@@ -293,7 +293,20 @@
     "learnerNotSynced": "Not synced to Portal",
     "learnerNoLiveRelease": "No live release",
     "learnerNotOnline": "Not switched on",
-    "noRevisionNotes": "No version notes"
+    "noRevisionNotes": "No version notes",
+    "copy": "Copy",
+    "copyPlain": "Copy as plain text",
+    "copyMarkdown": "Copy as Markdown",
+    "copied": "Copied",
+    "copyFailed": "Could not copy",
+    "retry": "Resend",
+    "retryFailed": "Could not resend",
+    "undo": "Undo",
+    "undoConfirmTitle": "Undo this message?",
+    "undoConfirmContent": "This user message and its AI reply will be deleted. This cannot be undone.",
+    "undoConfirmOk": "Undo",
+    "undoDone": "Undone",
+    "cancel": "Cancel"
   },
   "knowledge": {
     "common": {
