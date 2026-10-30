@@ -153,11 +153,16 @@ export function createMemoryFaqRepository(seed: HelpdeskFaq[] = []) {
             (row) =>
               row.status === 'published' &&
               (!filter.category || row.category === filter.category) &&
-              (filter.popular === undefined || row.popular === filter.popular),
+              (filter.popular === undefined ||
+                row.popular === filter.popular) &&
+              !(filter.excludeIds ?? []).includes(row.id),
           )
           .sort(
             (a, b) =>
-              Number(b.popular) - Number(a.popular) || newestFirst(a, b),
+              Number(b.popular) - Number(a.popular) ||
+              Number(b.category === filter.boost) -
+                Number(a.category === filter.boost) ||
+              newestFirst(a, b),
           )
           .slice(0, filter.limit)
           .map((row) => ({ ...row })),

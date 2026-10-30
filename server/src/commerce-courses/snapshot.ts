@@ -35,10 +35,33 @@ type LessonLocRow = {
 type LessonRow = Lesson & {
   localizations: LessonLocRow[];
   exhibits: ExhibitRow[];
-  readings: { language: string; type: string; title: string; author: string | null; whyRecommended: string | null; sortOrder: number }[];
-  questions: { code: string; question: string; referenceAnswer: string | null; sortOrder: number }[];
-  applicationTest: { scenario: string; referenceAnswer: string | null; enabled: boolean } | null;
-  learningPoints: { language: string; code: string; title: string; source: string; timeSeconds: number | null; sortOrder: number }[];
+  readings: {
+    language: string;
+    type: string;
+    title: string;
+    author: string | null;
+    whyRecommended: string | null;
+    sortOrder: number;
+  }[];
+  questions: {
+    code: string;
+    question: string;
+    referenceAnswer: string | null;
+    sortOrder: number;
+  }[];
+  applicationTest: {
+    scenario: string;
+    referenceAnswer: string | null;
+    enabled: boolean;
+  } | null;
+  learningPoints: {
+    language: string;
+    code: string;
+    title: string;
+    source: string;
+    timeSeconds: number | null;
+    sortOrder: number;
+  }[];
   triggers: { exhibitId: string; language: string; timeSeconds: number }[];
 };
 export type CourseAggregate = CommerceCourse & {
@@ -52,8 +75,20 @@ export type CourseAggregate = CommerceCourse & {
     provides: unknown;
   }[];
   lessons: LessonRow[];
-  trialRows: { lessonId: string; videoCutoffSeconds: number | null; textCutoffLearningPointId: string | null; status: string }[];
+  trialRows: {
+    lessonId: string;
+    videoCutoffSeconds: number | null;
+    textCutoffLearningPointId: string | null;
+    status: string;
+  }[];
   cover?: { storageKey: string } | null;
+  plans?: Array<{
+    name: string;
+    termMonths: number;
+    amountMinor: number;
+    currency: string;
+    stripeLookupKey: string | null;
+  }>;
 };
 
 /** 媒体在包内的相对路径约定。 */
@@ -62,7 +97,8 @@ export const packageMediaPath = {
   video: (lessonCode: string, lang: string, ext: string) =>
     `media/video/${lessonCode}/${lang}.${ext}`,
   exhibit: (code: string, ext: string) => `media/exhibits/${code}.${ext}`,
-  exhibitThumb: (code: string, ext: string) => `media/exhibits/${code}.thumb.${ext}`,
+  exhibitThumb: (code: string, ext: string) =>
+    `media/exhibits/${code}.thumb.${ext}`,
 };
 
 export interface SnapshotMediaRef {
@@ -78,7 +114,10 @@ export interface CourseSnapshot {
 
 export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
   const media: SnapshotMediaRef[] = [];
-  const addMedia = (path: string, asset: { storageKey: string } | null | undefined): string | undefined => {
+  const addMedia = (
+    path: string,
+    asset: { storageKey: string } | null | undefined,
+  ): string | undefined => {
     if (!asset) return undefined;
     media.push({ path, storageKey: asset.storageKey, assetId: '' });
     return path;
@@ -115,14 +154,21 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
                 durationSeconds: loc.videoDurationSeconds ?? undefined,
                 learningPoints: lps
                   .filter((lp) => lp.source === 'VIDEO')
-                  .map((lp) => ({ code: lp.code, timeSeconds: lp.timeSeconds ?? 0, title: lp.title })),
+                  .map((lp) => ({
+                    code: lp.code,
+                    timeSeconds: lp.timeSeconds ?? 0,
+                    title: lp.title,
+                  })),
                 exhibitTriggers: lesson.triggers
                   .filter((t) => t.language === loc.language)
                   .map((t) => ({
                     timeSeconds: t.timeSeconds,
                     exhibitRef: exhibitCodeById(lesson.exhibits, t.exhibitId),
                   }))
-                  .filter((t): t is { timeSeconds: number; exhibitRef: string } => Boolean(t.exhibitRef)),
+                  .filter(
+                    (t): t is { timeSeconds: number; exhibitRef: string } =>
+                      Boolean(t.exhibitRef),
+                  ),
               }
             : null,
           text: loc.textHtml
@@ -140,17 +186,28 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
         code: ex.code,
         type: ex.type as PackageExhibit['type'],
         file: ex.media?.storageKey
-          ? addMedia(packageMediaPath.exhibit(ex.code, extOf(ex.media.storageKey)), { storageKey: ex.media.storageKey })
+          ? addMedia(
+              packageMediaPath.exhibit(ex.code, extOf(ex.media.storageKey)),
+              { storageKey: ex.media.storageKey },
+            )
           : undefined,
         thumbnail: ex.thumbnail?.storageKey
-          ? addMedia(packageMediaPath.exhibitThumb(ex.code, extOf(ex.thumbnail.storageKey)), { storageKey: ex.thumbnail.storageKey })
+          ? addMedia(
+              packageMediaPath.exhibitThumb(
+                ex.code,
+                extOf(ex.thumbnail.storageKey),
+              ),
+              { storageKey: ex.thumbnail.storageKey },
+            )
           : undefined,
         source: ex.sourceText ?? undefined,
         localized: (ex.localized as PackageExhibit['localized']) ?? {},
       }));
 
       const reading: Record<string, PackageReading[]> = {};
-      for (const r of lesson.readings.sort((a, b) => a.sortOrder - b.sortOrder)) {
+      for (const r of lesson.readings.sort(
+        (a, b) => a.sortOrder - b.sortOrder,
+      )) {
         (reading[r.language] ??= []).push({
           type: r.type as PackageReading['type'],
           title: r.title,
@@ -161,7 +218,11 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
 
       const questions: PackageKnowledgeQuestion[] = lesson.questions
         .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map((q) => ({ code: q.code, question: q.question, referenceAnswer: q.referenceAnswer ?? undefined }));
+        .map((q) => ({
+          code: q.code,
+          question: q.question,
+          referenceAnswer: q.referenceAnswer ?? undefined,
+        }));
 
       return {
         code: lesson.code,
@@ -174,7 +235,8 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
           ? {
               enabled: lesson.applicationTest.enabled,
               scenario: lesson.applicationTest.scenario,
-              referenceAnswer: lesson.applicationTest.referenceAnswer ?? undefined,
+              referenceAnswer:
+                lesson.applicationTest.referenceAnswer ?? undefined,
             }
           : undefined,
       };
@@ -206,12 +268,23 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
     slug: agg.slug,
     category: agg.category?.name ?? agg.legacyCategory ?? 'Uncategorized',
     learningMode: agg.learningMode,
-    learningLanguages: (agg.learningLanguages as string[]) ?? [agg.defaultContentLanguage],
+    learningLanguages: (agg.learningLanguages as string[]) ?? [
+      agg.defaultContentLanguage,
+    ],
     defaultContentLanguage: agg.defaultContentLanguage,
     cover,
     localized: courseLocalized,
     lessons,
     trial,
+    pricing: (agg.plans ?? [])
+      .filter((plan) => Boolean(plan.stripeLookupKey))
+      .map((plan) => ({
+        name: plan.name,
+        termMonths: plan.termMonths,
+        amountMinor: plan.amountMinor,
+        currency: plan.currency,
+        lookupKey: plan.stripeLookupKey as string,
+      })),
   };
 
   return { course, media };
@@ -227,7 +300,10 @@ function extOf(storageKey: string, originalName?: string): string {
   return 'bin';
 }
 
-function exhibitCodeById(exhibits: ExhibitRow[], exhibitId: string): string | undefined {
+function exhibitCodeById(
+  exhibits: ExhibitRow[],
+  exhibitId: string,
+): string | undefined {
   return exhibits.find((exhibit) => exhibit.id === exhibitId)?.code;
 }
 

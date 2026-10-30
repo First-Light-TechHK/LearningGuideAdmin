@@ -253,6 +253,24 @@ export function memoryQaSource(faqs: SeedFaq[]): HelpdeskQaSource {
       scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       return Promise.resolve(scored.slice(0, search.limit));
     },
+    // 热门 FAQ：同类在前，其余按文件顺序（种子库没有更新时间）
+    findPopular(search) {
+      const popular = faqs.filter(
+        (faq) => faq.popular && !search.excludeIds.includes(faq.id),
+      );
+      const ordered = [
+        ...popular.filter((faq) => faq.category === search.category),
+        ...popular.filter((faq) => faq.category !== search.category),
+      ];
+      return Promise.resolve(
+        ordered.slice(0, search.limit).map((faq) => ({
+          id: faq.id,
+          category: faq.category,
+          ...localised(faq, search.locale),
+          score: 0,
+        })),
+      );
+    },
     findPublished(id, locale) {
       const faq = faqs.find((item) => item.id === id);
       return Promise.resolve(
@@ -457,6 +475,8 @@ export type CaseResult = {
   validCall: boolean;
   /** 发出了却没有带价格回复的请求（被 abort、或模型不在价目里）。 */
   unpricedCalls: number;
+  /** 你可能想问（v3 §1）：没有答案时给学员的 FAQ，按给出的顺序。 */
+  alternativeIds: string[];
 };
 
 export type RunOptions = {
@@ -568,6 +588,7 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
         toolResults.length === 1 &&
         toolResults[0].data.error === undefined,
       unpricedCalls: Math.max(0, requests - priced),
+      alternativeIds: answer.alternatives.map((a) => a.faqId),
     };
     done[index] = result;
     const ceiling = options.callCeilingUsd ?? null;
@@ -646,6 +667,15 @@ export type EvalReport = {
     retrievalRecall: number | null;
     /** 上一项里模型答对的比例：只衡量模型。 */
     modelRecall: number | null;
+    /**
+     * 你可能想问的召回（v3 §1）：该有答案却没答（gotFaqId 为 null）的用例里，期望的 FAQ
+     * （或可接受的）在 alternatives 中的比例。
+     */
+    alternativesRecall: number | null;
+    /** 上一项的分子：期望的 FAQ 在 alternatives 中的用例数。 */
+    alternativesOffered: number;
+    /** 上一项的分母：该有答案却没答的用例数。 */
+    unansweredAnswerable: number;
     /** 该是 none、也是 none，但模型根本没被问到（检索没有候选）。 */
     noneWithoutModel: number;
     /** 问了模型、没出错，却没有恰好一次合法调用。 */
@@ -699,6 +729,11 @@ const isReachable = (r: CaseResult) =>
   r.expectedFaqId !== null &&
   [r.expectedFaqId, ...r.acceptableFaqIds].some((id) =>
     r.candidateIds.includes(id),
+  );
+const isOffered = (r: CaseResult) =>
+  r.expectedFaqId !== null &&
+  [r.expectedFaqId, ...r.acceptableFaqIds].some((id) =>
+    r.alternativeIds.includes(id),
   );
 const round = (value: number, digits = 4) =>
   Math.round(value * 10 ** digits) / 10 ** digits;
@@ -769,6 +804,9 @@ export function summarize(input: {
     (r) => r.gotFaqId === null && r.expectedFaqId === null,
   ).length;
   const latencies = results.map((r) => r.latencyMs);
+  const unanswered = results.filter(
+    (r) => r.expectedFaqId !== null && r.gotFaqId === null,
+  );
   const metrics: EvalReport['metrics'] = {
     accuracy: n ? round(results.filter(isRight).length / n) : 0,
     wrongAnswerRate: n ? round(results.filter(isWrong).length / n) : 0,
@@ -798,6 +836,12 @@ export function summarize(input: {
       results.filter((r) => isReachable(r) && isRight(r)).length,
       results.filter(isReachable).length,
     ),
+    alternativesRecall: share(
+      unanswered.filter(isOffered).length,
+      unanswered.length,
+    ),
+    alternativesOffered: unanswered.filter(isOffered).length,
+    unansweredAnswerable: unanswered.length,
     noneWithoutModel: results.filter(
       (r) => r.expectedFaqId === null && r.gotFaqId === null && !r.asked,
     ).length,
@@ -921,6 +965,7 @@ export function markdownReport(report: EvalReport): string {
     `| Model asked | ${report.metrics.modelAsked} of ${report.cases.run} |`,
     `| Retrieval recall@8 | ${pct(report.metrics.retrievalRecall)} |`,
     `| Model recall (FAQ retrieved) | ${pct(report.metrics.modelRecall)} |`,
+    `| Alternatives recall (answerable, no answer) | ${pct(report.metrics.alternativesRecall)} (${report.metrics.alternativesOffered} of ${report.metrics.unansweredAnswerable}) |`,
     `| none without the model | ${report.metrics.noneWithoutModel} |`,
     `| Invalid tool calls | ${report.metrics.invalidCalls} |`,
     `| Ended in error / timeout | ${report.metrics.failedRuns} |`,

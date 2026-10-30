@@ -25,6 +25,7 @@ import {
   markReadInput,
   mergeTickets,
   normalizeTag,
+  ratingValue,
   readEnquiryFilters,
   shouldMarkRead,
   splitThread,
@@ -335,6 +336,11 @@ describe('student timeline (Figma 1324:2 middle column)', () => {
     assert.equal(assistFeedbackTone('declined'), 'negative')
     assert.equal(assistFeedbackTone('edited'), null)
     assert.equal(assistFeedbackTone(null), null)
+  })
+
+  test('v3 §2 rating: only an integer 1-5 counts, anything else is no rating', () => {
+    for (const n of [1, 2, 3, 4, 5]) assert.equal(ratingValue(n), n)
+    for (const bad of [0, 6, 3.5, -1, Number.NaN, '4', null, undefined, {}]) assert.equal(ratingValue(bad), null, String(bad))
   })
 })
 

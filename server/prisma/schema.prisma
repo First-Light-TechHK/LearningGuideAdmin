@@ -539,6 +539,13 @@ model CommerceCourse {
   lastUatPublishedAt     DateTime?
   archivedAt             DateTime?
 
+  // P1b：草稿标记与来源（编辑/导入/恢复都只改草稿）
+  hasDraft               Boolean               @default(false)
+  draftSourceType        String?
+  draftSourceEnvironment String?
+  draftSourceVersionLabel String?
+  trialEnabled           Boolean               @default(false)
+
   // v1 兼容 / 迁移过渡
   subtitle               String?
   level                  String?
@@ -587,6 +594,7 @@ model Lesson {
   sortOrder          Int
   legacySectionId    String?
   legacySectionTitle String?
+  archivedAt         DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
@@ -706,21 +714,35 @@ model TrialSetting {
   lessonId                  String
   videoCutoffSeconds        Int?
   textCutoffLearningPointId String?
+  // 按学习语言分别保存截止点（PRD §14）；旧字段保留兼容单语言数据
+  videoCutoffByLanguage     Json?
+  textCutoffByLanguage      Json?
+  // Re-confirm 判定基线：确认时所在课时的视频与文本截止点
+  confirmedVideoAssetId     String?
+  confirmedTextCutoffCode   String?
   status                    TrialRowStatus @default(LOCKED)
+  updatedAt                 DateTime       @updatedAt
 
   @@unique([courseId, lessonId])
 }
 
 model CourseVersion {
-  id              String         @id @default(uuid())
-  courseId        String
-  course          CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  versionNo       Int
-  snapshotData    Json
-  sourceVersionId String?
-  wentLiveAt      DateTime?
-  createdBy       String?
-  createdAt       DateTime       @default(now())
+  id                  String         @id @default(uuid())
+  courseId            String
+  course              CommerceCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  versionNo           Int
+  versionLabel        String         @default("")
+  versionSeries       Int            @default(1)
+  versionMinor        Int            @default(1)
+  sourceVersionId     String?
+  sourceEnvironment   String?
+  sourceVersionLabel  String?
+  snapshotData        Json
+  wentLiveAt          DateTime?
+  exportedAt          DateTime?
+  exportedBy          String?        @db.Uuid
+  createdBy           String?
+  createdAt           DateTime       @default(now())
 
   @@unique([courseId, versionNo])
   @@index([courseId, wentLiveAt])
@@ -779,6 +801,12 @@ model CoursePlan {
   amountMinor     Int
   currency        String          @default("usd")
   stripeLookupKey String?
+  stripeProductId String?
+  stripePriceId   String?
+  lastSyncedAt    DateTime?
+  syncError       String?
+  active          Boolean         @default(true)
+  sortOrder       Int             @default(0)
   aiPoints        Int             @default(0)
   trialEligible   Boolean         @default(false)
   createdAt       DateTime        @default(now())
@@ -800,6 +828,7 @@ model CommerceCourseAuthor {
 model CourseAuthoringActivity {
   id              BigInt   @id @default(autoincrement())
   courseId        String?
+  versionNo       Int?
   actorEmployeeId String?  @db.Uuid
   action          String
   detail          Json?
@@ -819,11 +848,21 @@ model PopularCourseEntry {
 }
 
 model DiscoveryBanner {
-  id        String   @id @default("singleton")
-  enabled   Boolean  @default(false)
-  courseId  String?
-  localized Json?
-  updatedAt DateTime @updatedAt
+  id          String   @id @default("singleton")
+  enabled     Boolean  @default(false)
+  courseId    String?
+  localized   Json?
+  publishedAt DateTime?
+  publishedBy String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+}
+
+/** Popular Courses 运营位的发布状态（与 Discovery Banner 各自 Publish）。 */
+model PopularCoursesState {
+  id          String   @id @default("singleton")
+  publishedAt DateTime?
+  publishedBy String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
 }
 
 model CoursePackageJob {
@@ -835,6 +874,8 @@ model CoursePackageJob {
   idempotencyKey  String?                @unique
   packageHash     String?
   sourceFileName  String?
+  sourceVersionId String?
+  fileLabel       String?
   bytesTotal      Int?
   bytesReceived   Int?                   @default(0)
   stage           String?

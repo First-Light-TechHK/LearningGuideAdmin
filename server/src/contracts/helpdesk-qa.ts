@@ -73,6 +73,16 @@ export type HelpdeskQaSearch = {
   limit: number;
 };
 
+/** 热门已发布 FAQ（v3 §1「你可能想问」：检索不到候选时的兜底）。 */
+export type HelpdeskQaPopularSearch = {
+  locale: string;
+  /** 这一类排在前面；null 不分先后。 */
+  category: FaqCategory | null;
+  /** 不要这些 FAQ（刚给学员看过的）。 */
+  excludeIds: string[];
+  limit: number;
+};
+
 export const HELPDESK_QA_SOURCE = Symbol('HELPDESK_QA_SOURCE');
 
 /** 已发布 FAQ 的只读来源（实现归 BackOffice）。 */
@@ -84,4 +94,9 @@ export interface HelpdeskQaSource {
     id: string,
     locale: string,
   ): Promise<HelpdeskQaCandidate | null>;
+  /**
+   * 热门（popular）的已发布 FAQ 的该语言版本（score 为 0）：category 那一类在前，再按更新时间倒序；
+   * 不含 excludeIds。只用代码，不问模型。
+   */
+  findPopular(search: HelpdeskQaPopularSearch): Promise<HelpdeskQaCandidate[]>;
 }

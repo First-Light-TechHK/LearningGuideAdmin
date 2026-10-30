@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-30 ｜ Course P1b：Draft → Publish → Version / History / Operations / Stripe / 学员预览（Admin server + client）
+
+- **用户拍板**：依据 `docs/Course_Management_PRD_v2_Aligned_Design.md`（Final，2026-10-30）§12 路线开始 P1b 开发；设计中待确认事项按 PRD 默认规则落地（History 只记录 PRD §21 明确的 6 类操作 + Operations Publish + Create course；Lesson 软删除新增 `archivedAt`；Popular/Banner 各自 Publish）。
+- **变更清单**：
+  - 数据库：迁移 `20261030120000_course_p1b_draft_publish`（CourseVersion 编号/来源/导出标记、CommerceCourse 草稿与试看总开关、Lesson.archivedAt、TrialSetting 按语言截止点与 Re-confirm 基线、CoursePlan Stripe 字段与 active/sortOrder、CourseAuthoringActivity.versionNo、DiscoveryBanner published*、PopularCoursesState、CoursePackageJob sourceVersionId/fileLabel）；Prisma 生成通过。
+  - 后端：新增 `publishing.service.ts`（Publish/Delete draft/Restore/Change status/Versions/History/版本编号/导出门禁）、`trial.service.ts`、`pricing.service.ts`（Stripe Product/Price 同步，lookup key `CourseID_周期m`）、`preview.service.ts`（学员视角预览，对齐 Portal modeling-life 字段）、`operations.service.ts` + controller（Popular Courses 1–6、Discovery Banner、Publish）、`environment.controller.ts`（环境标识）、`completeness.ts`（3 步完成度、Publish/Export 门禁）、`version-snapshot.ts`（快照捕获与写回，试看/价格不入快照）。
+  - 课程包：导出只允许 Live 行，标记 Exported 并写 History；导入到已有课程仅替换草稿，Course ID 必须一致，试看/价格随包更新，价格在目标环境 Stripe 重新创建。
+  - Portal 投影改为从 Live 版本快照读取，保存草稿不再改变 Portal。
+  - 前端：Course Overview（列表 + Category 筛选 + Operations 入口）、Course Editor 4 区（Course Information / Course Content / Trial & Pricing / Versions & History）、学员视角预览、Operations 页、环境标识 badge；移除 Publish UAT / Approve / Go Live。
+  - RBAC：`backofficeCourseAction` 改为 `publish`/`delete-draft`/`live-status`/`restore` 等发布级动作；environment signedIn、operations PUBLISH。
+- **自测证据**：
+  - server：`npx prisma validate`、`prisma generate`、`prisma migrate deploy` 全绿；`npm run build` 通过；`npm run lint`（变更文件）0 error；`npm test -- --runInBand` 55/58 套件、748 通过，唯一失败 `helpdesk-faq-markdown.spec.ts` 为仓库已有、与 P1b 无关。
+  - client：`npm run build` 通过；`npm run lint` 0 error（与基线相同的 warnings）。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：未提交，未推送；请用户确认后提交与推送。
+- **下一步**：Review Agent 审查；用户手动 UI 验收 Publish/Delete draft/Restore/Change status/Export/Import/Operations/Preview；后续 P1c（KS/AI Tutor 按版本读取、学员进度重算与 AI 知识库更新）。
+
+---
+
+
+
 ## 2026-10-29 ｜ Helpdesk 推荐 v2：pi-agent-core 工作流 + 链路追踪 + 评测（Admin server + client，Portal 配合）
 
 - **用户拍板**：owner Oliver Zhang（2026-10-28）：不要自主 agent 循环；每一步用原样的 pi-agent-core 跑，步骤由我们写死的工作流决定；追踪照 DeepSeek Harness 的 SessionEvent。方案 `lg-helpdesk/helpdesk-agent-v2-pi-dsh.md`。

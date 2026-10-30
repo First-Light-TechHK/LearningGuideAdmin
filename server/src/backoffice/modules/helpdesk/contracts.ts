@@ -186,6 +186,8 @@ export type TicketAiAssist = {
   faqQuestion: string | null;
   answer: string | null;
   feedback: AssistFeedback | null;
+  /** 学员给这次 AI 回答的评分 1–5（v3 §2「本次服务满意吗？」）；没评或跳过为 null。 */
+  rating: number | null;
   createdAt: string;
 };
 

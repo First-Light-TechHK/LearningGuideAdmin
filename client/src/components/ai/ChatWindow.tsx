@@ -15,19 +15,23 @@ import {
   Tooltip,
   type MenuProps,
 } from '../ui'
-import { PlusOutlined, RobotOutlined, SendOutlined, UserOutlined } from '@ant-design/icons'
+import { CopyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SendOutlined, UndoOutlined, UserOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import rehypeRaw from 'rehype-raw'
 import { useAiStore, type ChatMessage } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
 import { useAiText } from './i18n'
+import { normalizeTutorMarkdown } from './normalizeTutorMarkdown'
+import { copyToClipboard, stripMarkdown } from './chatUtils'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 
 const katexPlugins = {
-  remarkPlugins: [remarkMath],
-  rehypePlugins: [rehypeKatex],
+  remarkPlugins: [remarkGfm, remarkMath],
+  rehypePlugins: [rehypeRaw, rehypeKatex],
 }
 
 /** 默认头像占位（后续可替换为课程/用户自定义头像） */
@@ -198,45 +202,136 @@ function ReleaseSelector() {
   )
 }
 
-/** 单条消息气泡：带头像，AI 左侧灰底，用户右侧蓝底（§4.3.5） */
-function Bubble({ msg }: { msg: ChatMessage }) {
+/** 单条消息气泡 + 工具栏（§4.3.5，2026-10-30：加复制/撤回/刷新） */
+function Bubble({
+  msg,
+  isLastUser,
+  streaming,
+  onCopyPlain,
+  onCopyMarkdown,
+  onRetry,
+  onUndo,
+  text,
+}: {
+  msg: ChatMessage
+  /** 是否为最后一条 user 消息（决定刷新/撤回按钮是否启用） */
+  isLastUser: boolean
+  streaming: boolean
+  onCopyPlain: () => Promise<void>
+  onCopyMarkdown: () => Promise<void>
+  onRetry: () => Promise<void>
+  onUndo: () => void
+  text: (key: string) => string
+}) {
   const isUser = msg.role === 'user'
+  const hasContent = Boolean(msg.content?.trim())
+
   return (
     <div
       style={{
         display: 'flex',
-        flexDirection: isUser ? 'row-reverse' : 'row',
-        alignItems: 'flex-start',
-        gap: tokens.spacing.sm,
+        flexDirection: 'column',
+        gap: 4,
       }}
     >
-      <Avatar
-        icon={isUser ? USER_AVATAR : AI_AVATAR}
-        style={{
-          backgroundColor: isUser ? tokens.color.primary : tokens.color.success,
-          flexShrink: 0,
-        }}
-      />
+      {/* 气泡行 */}
       <div
         style={{
-          maxWidth: '75%',
-          background: isUser ? tokens.color.primary : tokens.color.bg.layout,
-          color: isUser ? tokens.color.bg.container : 'inherit',
-          padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
-          borderRadius: tokens.radius.md,
-          whiteSpace: isUser ? 'pre-wrap' : 'normal',
+          display: 'flex',
+          flexDirection: isUser ? 'row-reverse' : 'row',
+          alignItems: 'flex-start',
+          gap: tokens.spacing.sm,
         }}
       >
-        {msg.content ? (
-          <div data-color-mode="light" className={isUser ? 'chat-bubble-user' : undefined}>
-            <MDEditor.Markdown
-              source={msg.content}
-              {...katexPlugins}
-              style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
-            />
-          </div>
+        <Avatar
+          icon={isUser ? USER_AVATAR : AI_AVATAR}
+          style={{
+            backgroundColor: isUser ? tokens.color.primary : tokens.color.success,
+            flexShrink: 0,
+          }}
+        />
+        <div
+          style={{
+            maxWidth: '75%',
+            background: isUser ? tokens.color.primary : tokens.color.bg.layout,
+            color: isUser ? tokens.color.bg.container : 'inherit',
+            padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
+            borderRadius: tokens.radius.md,
+            whiteSpace: isUser ? 'pre-wrap' : 'normal',
+          }}
+        >
+          {hasContent ? (
+            <div data-color-mode="light" className={isUser ? 'chat-bubble-user' : undefined}>
+              <MDEditor.Markdown
+                source={normalizeTutorMarkdown(msg.content)}
+                {...katexPlugins}
+                style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
+              />
+            </div>
+          ) : (
+            <Spin size="small" />
+          )}
+        </div>
+      </div>
+
+      {/* 工具栏行：AI 左侧、User 右侧 */}
+      <div
+        className={`chat-bubble-actions ${isUser ? 'user' : 'ai'}`}
+        style={{
+          display: 'flex',
+          gap: 4,
+          justifyContent: isUser ? 'flex-end' : 'flex-start',
+          paddingLeft: isUser ? 0 : 36, // 对齐气泡（左侧 Avatar 约 36px）
+          paddingRight: isUser ? 36 : 0, // 对齐气泡
+        }}
+      >
+        {!isUser ? (
+          // AI 工具栏：复制（Dropdown：纯文本 / Markdown）
+          <Dropdown
+            placement="topLeft"
+            menu={{
+              items: [
+                { key: 'plain', icon: <CopyOutlined />, label: text('copyPlain'), onClick: () => void onCopyPlain() },
+                { key: 'md', icon: <CopyOutlined />, label: text('copyMarkdown'), onClick: () => void onCopyMarkdown() },
+              ],
+            }}
+            trigger={['click']}
+          >
+            <Tooltip title={text('copy')}>
+              <Button type="text" size="small" icon={<CopyOutlined />} disabled={!hasContent} />
+            </Tooltip>
+          </Dropdown>
         ) : (
-          <Spin size="small" />
+          // User 工具栏：复制 + 刷新 + 撤回
+          <>
+            <Tooltip title={text('copy')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                disabled={!hasContent}
+                onClick={() => void onCopyMarkdown()}
+              />
+            </Tooltip>
+            <Tooltip title={text('retry')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined />}
+                disabled={!isLastUser || streaming}
+                onClick={() => void onRetry()}
+              />
+            </Tooltip>
+            <Tooltip title={text('undo')}>
+              <Button
+                type="text"
+                size="small"
+                icon={<UndoOutlined />}
+                disabled={!isLastUser || streaming}
+                onClick={onUndo}
+              />
+            </Tooltip>
+          </>
         )}
       </div>
     </div>
@@ -247,7 +342,7 @@ function Bubble({ msg }: { msg: ChatMessage }) {
  * AI Tutor 右侧对话面板（§4.3）：模式切换 / New Chat / 流式消息列表 / 输入框。
  */
 export function ChatWindow() {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const mode = useAiStore((s) => s.mode)
   const messages = useAiStore((s) => s.messages)
   const streaming = useAiStore((s) => s.streaming)
@@ -257,6 +352,8 @@ export function ChatWindow() {
   const setMode = useAiStore((s) => s.setMode)
   const newChat = useAiStore((s) => s.newChat)
   const send = useAiStore((s) => s.send)
+  const retryLastUserMessage = useAiStore((s) => s.retryLastUserMessage)
+  const undoLastUserMessage = useAiStore((s) => s.undoLastUserMessage)
   const { text, modeLabel } = useAiText()
 
   const [input, setInput] = useState('')
@@ -349,7 +446,44 @@ export function ChatWindow() {
         {messages.length === 0 ? (
           <Empty description={selectedCourseId ? text('emptyChat') : text('pickCourseFirst')} />
         ) : (
-          messages.map((m, i) => <Bubble key={`${m.createdAt}-${i}`} msg={m} />)
+          messages.map((m, i) => {
+            // 计算该消息是否为「最后一条 user 消息」——刷新/撤回按钮只对这个启用
+            const isLastUser = m.role === 'user' && messages.slice(i + 1).every((n) => n.role !== 'user')
+            return (
+              <Bubble
+                key={`${m.createdAt}-${i}`}
+                msg={m}
+                isLastUser={isLastUser}
+                streaming={streaming}
+                text={text}
+                onCopyPlain={async () => {
+                  const ok = await copyToClipboard(stripMarkdown(m.content))
+                  message[ok ? 'success' : 'error'](ok ? text('copied') : text('copyFailed'))
+                }}
+                onCopyMarkdown={async () => {
+                  const ok = await copyToClipboard(m.content)
+                  message[ok ? 'success' : 'error'](ok ? text('copied') : text('copyFailed'))
+                }}
+                onRetry={async () => {
+                  const ok = await retryLastUserMessage()
+                  if (!ok) message.error(text('retryFailed'))
+                }}
+                onUndo={() => {
+                  modal.confirm({
+                    title: text('undoConfirmTitle'),
+                    content: text('undoConfirmContent'),
+                    okText: text('undoConfirmOk'),
+                    cancelText: text('cancel'),
+                    okButtonProps: { danger: true },
+                    onOk: () => {
+                      undoLastUserMessage()
+                      message.success(text('undoDone'))
+                    },
+                  })
+                }}
+              />
+            )
+          })
         )}
       </div>
       <Space.Compact style={{ marginTop: tokens.spacing.md, width: '100%' }}>

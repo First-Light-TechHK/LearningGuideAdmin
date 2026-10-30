@@ -69,6 +69,7 @@ export type EnquiryRow = {
   confirmDueAt?: string | null;
   closedAt?: string | null;
   closeReason?: string | null;
+  /** 学员关闭后给工单的评分 1–5；没评为 null。BackOffice 卡片显示「评分 n/5 / 未评分」（v3 §2）。 */
   rating?: number | null;
   /** v2：员工标了「Flag follow-up」。 */
   flagged: boolean;
@@ -140,6 +141,8 @@ export type TicketAiAssist = {
   answer: string | null;
   feedback: AssistFeedback | null;
   createdAt: string;
+  /** v3 §2：学员给这次 AI 回答的评分 1–5（「本次服务满意吗？」）；没评或跳过为 null（旧服务端没有这个字段）。 */
+  rating?: number | null;
 };
 
 /**

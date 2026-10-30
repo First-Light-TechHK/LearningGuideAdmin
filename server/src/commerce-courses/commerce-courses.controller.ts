@@ -21,6 +21,10 @@ import { CommerceCoursesService } from './commerce-courses.service';
 import { PackageJobsService } from './package-jobs.service';
 import { PackageWorker } from './package-worker';
 import { PackageError } from './package-inspector';
+import { PublishingService } from './publishing.service';
+import { TrialService } from './trial.service';
+import { PricingService } from './pricing.service';
+import { PreviewService } from './preview.service';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
@@ -71,6 +75,10 @@ export class CommerceCoursesController {
     private readonly courses: CommerceCoursesService,
     private readonly jobs: PackageJobsService,
     private readonly worker: PackageWorker,
+    private readonly publishing: PublishingService,
+    private readonly trial: TrialService,
+    private readonly pricing: PricingService,
+    private readonly preview: PreviewService,
   ) {}
 
   @Get()
@@ -119,14 +127,40 @@ export class CommerceCoursesController {
 
   @Get(':id/versions')
   versions(@Param('id') id: string) {
-    return this.courses.listVersions(id);
+    return this.publishing.listVersions(id);
+  }
+
+  @Get(':id/versions/:versionId')
+  version(@Param('id') id: string, @Param('versionId') versionId: string) {
+    return this.publishing.getVersion(id, versionId);
+  }
+
+  @Get(':id/history')
+  history(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.publishing.listHistory(id, {
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  @Get(':id/preview')
+  previewCourse(
+    @Param('id') id: string,
+    @Query('versionId') versionId?: string,
+  ) {
+    return this.preview.preview(id, versionId || undefined);
   }
 
   // ===== 预览媒体（Admin 课程页展示封面 / 视频 / 展品图） =====
   @Get(':id/cover')
   async cover(@Param('id') id: string, @Res() res: Response) {
     const media = await this.courses.getCoverBytes(id);
-    if (!media) throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
+    if (!media)
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
     res.setHeader('Content-Type', contentTypeFor(media.extension));
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.send(media.bytes);
@@ -139,7 +173,8 @@ export class CommerceCoursesController {
     @Res() res: Response,
   ) {
     const media = await this.courses.getMediaBytes(id, assetId);
-    if (!media) throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
+    if (!media)
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
     res.setHeader('Content-Type', contentTypeFor(media.extension));
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.send(media.bytes);
@@ -150,7 +185,16 @@ export class CommerceCoursesController {
   @HttpCode(200)
   updateCourse(
     @Param('id') id: string,
-    @Body() body: { code?: string; slug?: string; learningMode?: string; defaultContentLanguage?: string; learningLanguages?: string[]; subtitle?: string | null; level?: string | null },
+    @Body()
+    body: {
+      code?: string;
+      slug?: string;
+      learningMode?: string;
+      defaultContentLanguage?: string;
+      learningLanguages?: string[];
+      subtitle?: string | null;
+      level?: string | null;
+    },
   ) {
     return this.courses.updateCourse(id, body);
   }
@@ -160,20 +204,33 @@ export class CommerceCoursesController {
   updateLocalization(
     @Param('id') id: string,
     @Param('language') language: string,
-    @Body() body: { title: string; shortDescription?: string | null; overview?: string | null; whatYouLearn?: unknown; provides?: unknown },
+    @Body()
+    body: {
+      title: string;
+      shortDescription?: string | null;
+      overview?: string | null;
+      whatYouLearn?: unknown;
+      provides?: unknown;
+    },
   ) {
     return this.courses.updateLocalization(id, language, body);
   }
 
   @Post(':id/lessons')
   @HttpCode(201)
-  createLesson(@Param('id') id: string, @Body() body: { code?: string; language?: string; title: string }) {
+  createLesson(
+    @Param('id') id: string,
+    @Body() body: { code?: string; language?: string; title: string },
+  ) {
     return this.courses.createLesson(id, body);
   }
 
   @Put(':id/lessons/reorder')
   @HttpCode(200)
-  reorderLessons(@Param('id') id: string, @Body() body: { lessonIds: string[] }) {
+  reorderLessons(
+    @Param('id') id: string,
+    @Body() body: { lessonIds: string[] },
+  ) {
     return this.courses.reorderLessons(id, body.lessonIds);
   }
 
@@ -182,7 +239,15 @@ export class CommerceCoursesController {
   updateLesson(
     @Param('id') id: string,
     @Param('lessonId') lessonId: string,
-    @Body() body: { code?: string; sortOrder?: number; language?: string; title?: string; description?: string | null; textHtml?: string | null },
+    @Body()
+    body: {
+      code?: string;
+      sortOrder?: number;
+      language?: string;
+      title?: string;
+      description?: string | null;
+      textHtml?: string | null;
+    },
   ) {
     return this.courses.updateLesson(id, lessonId, body);
   }
@@ -193,23 +258,21 @@ export class CommerceCoursesController {
     return this.courses.deleteLesson(id, lessonId);
   }
 
-  // ===== 工作流 =====
-  @Post(':id/publish-uat')
+  // ===== 草稿 / 发布 / 版本（PRD §15）=====
+  @Post(':id/publish')
   @HttpCode(200)
-  publishUat(@Param('id') id: string) {
-    return this.courses.publishUat(id);
+  publish(
+    @Param('id') id: string,
+    @Body() body: { notifyLearners?: boolean },
+    @Req() request: BackofficeRequest,
+  ) {
+    return this.publishing.publish(id, actor(request), body ?? {});
   }
 
-  @Post(':id/approve')
+  @Post(':id/delete-draft')
   @HttpCode(200)
-  approve(@Param('id') id: string) {
-    return this.courses.approve(id);
-  }
-
-  @Post(':id/go-live')
-  @HttpCode(200)
-  goLive(@Param('id') id: string, @Req() request: BackofficeRequest) {
-    return this.courses.goLive(id, actor(request));
+  deleteDraft(@Param('id') id: string, @Req() request: BackofficeRequest) {
+    return this.publishing.deleteDraft(id, actor(request));
   }
 
   @Post(':id/live-status')
@@ -217,14 +280,75 @@ export class CommerceCoursesController {
   changeStatus(
     @Param('id') id: string,
     @Body() body: { status: 'ONLINE' | 'HIDDEN' | 'OFFLINE'; reason?: string },
+    @Req() request: BackofficeRequest,
   ) {
-    return this.courses.changeStatus(id, body);
+    return this.publishing.changeStatus(id, body, actor(request));
   }
 
   @Post(':id/restore')
   @HttpCode(200)
-  restore(@Param('id') id: string, @Body() body: { versionId: string }) {
-    return this.courses.restore(id, body.versionId);
+  restore(
+    @Param('id') id: string,
+    @Body() body: { versionId: string },
+    @Req() request: BackofficeRequest,
+  ) {
+    return this.publishing.restore(id, body.versionId, actor(request));
+  }
+
+  // ===== Trial（不生成版本，PRD §14）=====
+  @Get(':id/trial')
+  getTrial(@Param('id') id: string) {
+    return this.trial.get(id);
+  }
+
+  @Put(':id/trial')
+  @HttpCode(200)
+  saveTrial(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      enabled: boolean;
+      rows?: Array<{
+        lessonId: string;
+        videoCutoffSeconds?: number | null;
+        textCutoffLearningPointId?: string | null;
+        videoCutoffByLanguage?: Record<string, number | null>;
+        textCutoffByLanguage?: Record<string, string | null>;
+      }>;
+    },
+  ) {
+    return this.trial.save(id, body);
+  }
+
+  // ===== Pricing（不生成版本，PRD §14）=====
+  @Get(':id/plans')
+  listPlans(@Param('id') id: string) {
+    return this.pricing.list(id);
+  }
+
+  @Put(':id/plans')
+  @HttpCode(200)
+  savePlans(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      plans: Array<{
+        id?: string;
+        name: string;
+        termMonths: number;
+        amountMinor: number;
+        currency?: string;
+        lookupKey?: string;
+      }>;
+    },
+  ) {
+    return this.pricing.save(id, body?.plans ?? []);
+  }
+
+  @Post(':id/plans/:planId/sync-stripe')
+  @HttpCode(200)
+  syncPlan(@Param('id') id: string, @Param('planId') planId: string) {
+    return this.pricing.syncPlan(id, planId);
   }
 
   // ===== 原始素材导入（Excel + Word/视频/图片素材 ZIP） =====
@@ -235,10 +359,18 @@ export class CommerceCoursesController {
     @Req() request: BackofficeRequest,
   ) {
     if (!file?.buffer) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'No raw materials archive uploaded.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'No raw materials archive uploaded.',
+      );
     }
     if (!file.originalname.toLowerCase().endsWith('.zip')) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'Raw course materials must be uploaded as a .zip archive.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'Raw course materials must be uploaded as a .zip archive.',
+      );
     }
     const idempotencyKey =
       typeof request.headers['idempotency-key'] === 'string'
@@ -260,7 +392,49 @@ export class CommerceCoursesController {
     @Body() body: { dir?: string; courseCode?: string; slug?: string },
     @Req() request: BackofficeRequest,
   ) {
-    return wrap(() => this.jobs.createLocalRawImportJob(body ?? {}, actor(request)));
+    return wrap(() =>
+      this.jobs.createLocalRawImportJob(body ?? {}, actor(request)),
+    );
+  }
+
+  // ===== 导入到已有课程（只替换草稿，CM16）=====
+  @Post(':id/import')
+  @UseInterceptors(FileInterceptor('file'))
+  async importIntoCourse(
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+    @Req() request: BackofficeRequest,
+  ) {
+    await this.courses.assertExists(id);
+    if (!file?.buffer) {
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'No package file uploaded.',
+      );
+    }
+    if (
+      !file.originalname.toLowerCase().endsWith('.zip') &&
+      !file.originalname.toLowerCase().endsWith('.lgcourse.zip')
+    ) {
+      throw new PackageError(
+        'PACKAGE_NOT_A_COURSE',
+        422,
+        'Only .lgcourse.zip course packages can be imported.',
+      );
+    }
+    const idempotencyKey =
+      typeof request.headers['idempotency-key'] === 'string'
+        ? request.headers['idempotency-key']
+        : undefined;
+    return wrap(() =>
+      this.jobs.createImportJob(
+        { name: file.originalname, bytes: file.buffer },
+        actor(request),
+        idempotencyKey,
+        id,
+      ),
+    );
   }
 
   // ===== 导入 =====
@@ -271,10 +445,21 @@ export class CommerceCoursesController {
     @Req() request: BackofficeRequest,
   ) {
     if (!file?.buffer) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'No package file uploaded.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'No package file uploaded.',
+      );
     }
-    if (!file.originalname.toLowerCase().endsWith('.zip') && !file.originalname.toLowerCase().endsWith('.lgcourse.zip')) {
-      throw new PackageError('PACKAGE_NOT_A_COURSE', 422, 'Only .zip course packages or raw-material archives can be imported.');
+    if (
+      !file.originalname.toLowerCase().endsWith('.zip') &&
+      !file.originalname.toLowerCase().endsWith('.lgcourse.zip')
+    ) {
+      throw new PackageError(
+        'PACKAGE_NOT_A_COURSE',
+        422,
+        'Only .zip course packages or raw-material archives can be imported.',
+      );
     }
     const idempotencyKey =
       typeof request.headers['idempotency-key'] === 'string'
@@ -284,8 +469,16 @@ export class CommerceCoursesController {
     const isRaw = await this.looksLikeRawMaterials(file.buffer);
     return wrap(() =>
       isRaw
-        ? this.jobs.createRawImportJob({ name: file.originalname, bytes: file.buffer }, actor(request), idempotencyKey)
-        : this.jobs.createImportJob({ name: file.originalname, bytes: file.buffer }, actor(request), idempotencyKey),
+        ? this.jobs.createRawImportJob(
+            { name: file.originalname, bytes: file.buffer },
+            actor(request),
+            idempotencyKey,
+          )
+        : this.jobs.createImportJob(
+            { name: file.originalname, bytes: file.buffer },
+            actor(request),
+            idempotencyKey,
+          ),
     );
   }
 
@@ -294,7 +487,10 @@ export class CommerceCoursesController {
     try {
       const zip = await JSZip.loadAsync(bytes);
       const names = Object.keys(zip.files);
-      if (names.some((n) => n === 'manifest.json' || n.endsWith('/manifest.json'))) return false;
+      if (
+        names.some((n) => n === 'manifest.json' || n.endsWith('/manifest.json'))
+      )
+        return false;
       return names.some((n) => /\.xlsx$/i.test(n));
     } catch {
       return false;
@@ -310,7 +506,11 @@ export class CommerceCoursesController {
   @HttpCode(200)
   confirmImport(
     @Param('jobId') jobId: string,
-    @Body() body: { onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION'; reassignCodes?: boolean },
+    @Body()
+    body: {
+      onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
+      reassignCodes?: boolean;
+    },
     @Req() request: BackofficeRequest,
   ) {
     return wrap(() => this.jobs.confirmImport(jobId, body, actor(request)));
@@ -325,12 +525,8 @@ export class CommerceCoursesController {
   // ===== 导出 =====
   @Post(':id/export')
   @HttpCode(202)
-  export(
-    @Param('id') id: string,
-    @Body() body: { version?: string },
-    @Req() request: BackofficeRequest,
-  ) {
-    return this.jobs.startExport(id, body?.version ?? 'working', actor(request));
+  export(@Param('id') id: string, @Req() request: BackofficeRequest) {
+    return wrap(() => this.jobs.startExport(id, actor(request)));
   }
 
   @Get('export/:jobId')
@@ -344,8 +540,13 @@ export class CommerceCoursesController {
     if (!bytes) {
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Export not ready.');
     }
+    const job = await this.jobs.getJob(jobId);
+    const fileName = job.fileLabel ?? `course-${jobId}.lgcourse.zip`;
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="course-${jobId}.lgcourse.zip"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+    );
     res.send(bytes);
   }
 

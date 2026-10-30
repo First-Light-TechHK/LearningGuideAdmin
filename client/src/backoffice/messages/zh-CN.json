@@ -135,7 +135,30 @@
   },
   "course": {
     "title": "课程",
-    "description": "这是登录后的默认落地页。课程相关业务功能由单独的 PRD 定义。"
+    "description": "这是登录后的默认落地页。课程相关业务功能由单独的 PRD 定义。",
+    "operations": "运营位",
+    "versions": "版本与历史",
+    "publish": "发布",
+    "deleteDraft": "删除草稿",
+    "importPackage": "导入课程包",
+    "exportPackage": "导出课程包",
+    "changeStatus": "变更状态",
+    "draft": "草稿",
+    "noDraft": "无草稿",
+    "notPublished": "未发布"
+  },
+  "operations": {
+    "title": "运营位",
+    "popularCourses": "热门课程",
+    "discoveryBanner": "发现页 Banner",
+    "publish": "发布"
+  },
+  "history": {
+    "title": "历史记录",
+    "time": "时间",
+    "operator": "操作人",
+    "action": "操作",
+    "detail": "详情"
   },
   "placeholder": {
     "title": "{menu}",
@@ -293,7 +316,20 @@
     "learnerNotSynced": "未同步到 Portal",
     "learnerNoLiveRelease": "无上线版本",
     "learnerNotOnline": "未开启",
-    "noRevisionNotes": "无版本说明"
+    "noRevisionNotes": "无版本说明",
+    "copy": "复制",
+    "copyPlain": "复制为纯文本",
+    "copyMarkdown": "复制为 Markdown",
+    "copied": "已复制",
+    "copyFailed": "复制失败",
+    "retry": "重新发送",
+    "retryFailed": "重新发送失败",
+    "undo": "撤回",
+    "undoConfirmTitle": "撤回该消息？",
+    "undoConfirmContent": "该用户消息及其 AI 回复将被删除。此操作不可撤销。",
+    "undoConfirmOk": "确认撤回",
+    "undoDone": "已撤回",
+    "cancel": "取消"
   },
   "knowledge": {
     "common": {
@@ -638,6 +674,10 @@
       "helpful": "学生反馈：已解决",
       "notHelpful": "学生反馈：仍提交给客服",
       "noAnswer": "没有匹配的常见问题，助手没有给出答案。"
+    },
+    "rating": {
+      "value": "评分 {n}/5",
+      "none": "未评分"
     },
     "trace": {
       "view": "查看链路",

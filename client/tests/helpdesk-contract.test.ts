@@ -18,7 +18,7 @@ import {
   statusLabel,
   subscriptionStatusLabel,
 } from '../src/backoffice/lib/helpdeskFormat'
-import { assistFeedbackTone, subscriptionTone } from '../src/backoffice/lib/helpdeskView'
+import { assistFeedbackTone, ratingValue, subscriptionTone } from '../src/backoffice/lib/helpdeskView'
 
 // The Portal <-> Admin Helpdesk wire contract (fixtures/helpdesk-contract.json, captured from a
 // real local run of both apps). The client shows what Portal sends, via the Admin server.
@@ -101,5 +101,11 @@ describe('HelpDesk client against the Portal contract', () => {
     assert.equal(typeof fixture.adminToPortal.detailResponse.flagged, 'boolean')
     const query = new URL(fixture.adminToPortal.timelineRequest, 'http://x').searchParams
     assert.equal(Number(query.get('limit')), TIMELINE_LIMIT)
+  })
+
+  test('v4: aiAssist items carry the learner rating as Portal sends it; the AI block shows a number 1-5, nothing for null', () => {
+    const items = fixture.adminToPortal.detailResponse.aiAssist as Array<{ rating: unknown }>
+    assert.deepEqual(items.map((item) => item.rating), [4, null])
+    assert.deepEqual(items.map((item) => ratingValue(item.rating)), [4, null])
   })
 })

@@ -342,6 +342,16 @@ function assistFeedback(value: unknown): AssistFeedback | null {
     : null;
 }
 
+/** AI 回答的评分：只认 1–5 的整数（Portal 新增的字段，旧的 Portal 不给），别的都当没评。 */
+function assistRating(value: unknown): number | null {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 5
+    ? value
+    : null;
+}
+
 function normaliseAiAssist(raw: Raw): TicketAiAssist {
   return {
     id: str(raw.id),
@@ -351,6 +361,7 @@ function normaliseAiAssist(raw: Raw): TicketAiAssist {
     faqQuestion: strOrNull(pick(raw, 'faqQuestion', 'faq_question')),
     answer: strOrNull(raw.answer),
     feedback: assistFeedback(raw.feedback),
+    rating: assistRating(raw.rating),
     createdAt: str(pick(raw, 'createdAt', 'created_at')),
   };
 }

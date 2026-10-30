@@ -57,6 +57,10 @@ export type FaqFilter = {
 export type PublishedFilter = {
   category?: FaqCategory;
   popular?: boolean;
+  /** 这一类排在前面（热门之后、更新时间之前）；不给不分先后（v3 §1 你可能想问）。 */
+  boost?: FaqCategory | null;
+  /** 不要这些 id。 */
+  excludeIds?: string[];
   limit: number;
 };
 
@@ -110,7 +114,7 @@ export type FaqRepository = {
     employeeId: string | null,
   ) => Promise<WriteResult<HelpdeskFaq>>;
   revisions: (id: string) => Promise<FaqRevision[]>;
-  /** Portal 列表（无搜索词）：热门在前，再按更新时间倒序。 */
+  /** Portal 列表（无搜索词）：热门在前（给了 boost 再同类在前），再按更新时间倒序。 */
   listPublished: (filter: PublishedFilter) => Promise<HelpdeskFaq[]>;
   /** 候选检索（推荐与 Help Centre 搜索共用）：按相关度排序。 */
   searchPublished: (search: FaqSearch) => Promise<ScoredFaq[]>;
@@ -468,9 +472,17 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
           WHERE status = 'published'
             AND ($1::text IS NULL OR category = $1::text)
             AND ($2::boolean IS NULL OR popular = $2::boolean)
-          ORDER BY popular DESC, updated_at DESC, id DESC
+            AND NOT (id::text = ANY ($5::text[]))
+          ORDER BY popular DESC, (category = $4::text) IS TRUE DESC,
+                   updated_at DESC, id DESC
           LIMIT $3`,
-        [filter.category ?? null, filter.popular ?? null, filter.limit],
+        [
+          filter.category ?? null,
+          filter.popular ?? null,
+          filter.limit,
+          filter.boost ?? null,
+          (filter.excludeIds ?? []).map((id) => id.toLowerCase()),
+        ],
       );
       return rows.map(toFaq);
     },
@@ -520,6 +532,22 @@ export function createPgHelpdeskQaSource(
         category: faq.category,
         ...localised(faq, locale),
         score: faq.score,
+      }));
+    },
+    async findPopular(search) {
+      if (!isHelpdeskLocale(search.locale)) return [];
+      const locale = search.locale;
+      const found = await repository.listPublished({
+        popular: true,
+        boost: search.category,
+        excludeIds: search.excludeIds,
+        limit: Math.min(search.limit, FAQ_LIMITS.candidatesMax),
+      });
+      return found.map((faq) => ({
+        id: faq.id,
+        category: faq.category,
+        ...localised(faq, locale),
+        score: 0,
       }));
     },
     async findPublished(id, locale) {

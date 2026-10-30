@@ -135,7 +135,30 @@
   },
   "course": {
     "title": "Course",
-    "description": "This is the default landing page after sign-in. Course business functions are defined in a separate PRD."
+    "description": "This is the default landing page after sign-in. Course business functions are defined in a separate PRD.",
+    "operations": "Operations",
+    "versions": "Versions & history",
+    "publish": "Publish",
+    "deleteDraft": "Delete draft",
+    "importPackage": "Import package",
+    "exportPackage": "Export package",
+    "changeStatus": "Change status",
+    "draft": "Draft",
+    "noDraft": "No draft",
+    "notPublished": "Not published"
+  },
+  "operations": {
+    "title": "Operations",
+    "popularCourses": "Popular Courses",
+    "discoveryBanner": "Discovery Banner",
+    "publish": "Publish"
+  },
+  "history": {
+    "title": "History",
+    "time": "Time",
+    "operator": "Operator",
+    "action": "Action",
+    "detail": "Detail"
   },
   "placeholder": {
     "title": "{menu}",
@@ -293,7 +316,20 @@
     "learnerNotSynced": "Not synced to Portal",
     "learnerNoLiveRelease": "No live release",
     "learnerNotOnline": "Not switched on",
-    "noRevisionNotes": "No version notes"
+    "noRevisionNotes": "No version notes",
+    "copy": "Copy",
+    "copyPlain": "Copy as plain text",
+    "copyMarkdown": "Copy as Markdown",
+    "copied": "Copied",
+    "copyFailed": "Could not copy",
+    "retry": "Resend",
+    "retryFailed": "Could not resend",
+    "undo": "Undo",
+    "undoConfirmTitle": "Undo this message?",
+    "undoConfirmContent": "This user message and its AI reply will be deleted. This cannot be undone.",
+    "undoConfirmOk": "Undo",
+    "undoDone": "Undone",
+    "cancel": "Cancel"
   },
   "knowledge": {
     "common": {
@@ -638,6 +674,10 @@
       "helpful": "Student feedback: Yes, this solved my issue",
       "notHelpful": "Student feedback: No, I still submit to support team",
       "noAnswer": "No FAQ matched, so the assistant showed no answer."
+    },
+    "rating": {
+      "value": "Rating {n}/5",
+      "none": "Not rated"
     },
     "trace": {
       "view": "View trace",

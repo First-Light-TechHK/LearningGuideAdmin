@@ -177,6 +177,26 @@ describe('Helpdesk suggest integration endpoints', () => {
     expect(res.body).toEqual({ suggestion: null });
   });
 
+  it('returns the alternatives as is (v3 §1)', async () => {
+    const answer = {
+      suggestion: null,
+      alternatives: [
+        {
+          faqId: '0192bbbb-0000-7000-8000-000000000001',
+          question: 'How do I reset my password?',
+        },
+      ],
+    };
+    service.suggest.mockResolvedValue(answer);
+    const res = await request(server())
+      .post('/api/integration/helpdesk/suggest')
+      .set('Authorization', `Bearer ${TOKEN}`)
+      .send(body)
+      .expect(200);
+    expect(res.body).toEqual(answer);
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
   it('records an outcome', async () => {
     service.recordOutcome.mockResolvedValue({
       id: SID,
@@ -288,6 +308,7 @@ describe('AiModule.register wiring (agent role owns suggest)', () => {
             useValue: {
               findCandidates: () => Promise.resolve([]),
               findPublished: () => Promise.resolve(null),
+              findPopular: () => Promise.resolve([]),
             },
           },
         }),
