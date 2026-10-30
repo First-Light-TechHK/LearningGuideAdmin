@@ -17,6 +17,13 @@ import {
 } from './faqRepository';
 import type { FaqReleaseSource, FaqSnapshotNode } from './faqRelease';
 import { createPgFaqReleaseSource } from './faqReleaseService';
+import {
+  createEnvFaqVectorSearch,
+  logFaqVectorSearchError,
+  retrievalMode,
+  withFaqVectorSearch,
+  type FaqVectorSearch,
+} from './faqVectors';
 
 /**
  * Agent 用的已发布 FAQ 来源（契约 HelpdeskQaSource 的实现；由 app.module.ts 交给 AiModule）。
@@ -321,10 +328,16 @@ export function createHelpdeskQaSource(
 export function createPgHelpdeskQaSource(
   repository?: FaqRepository,
   db?: SqlDb,
+  vectors: FaqVectorSearch = createEnvFaqVectorSearch(db),
 ): HelpdeskQaSource {
   const graph = createPgFaqGraphRepository(db);
   return createHelpdeskQaSource({
-    repository: repository ?? createPgFaqRepository(db),
+    // 候选检索按 HELPDESK_RETRIEVAL（每次现读，缺省 lexical = 和以前一样只走字词）
+    repository: withFaqVectorSearch(repository ?? createPgFaqRepository(db), {
+      vectors,
+      mode: () => retrievalMode(process.env),
+      onError: logFaqVectorSearchError,
+    }),
     releases: createPgFaqReleaseSource(graph),
     liveEdges: () => graph.allEdges(),
   });

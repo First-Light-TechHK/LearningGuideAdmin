@@ -32,6 +32,7 @@ import {
   type FaqReleaseGate,
 } from './faqReleaseGate';
 import { createPgFaqRepository } from './faqRepository';
+import { createEnvFaqVectorIndexer, type FaqVectorIndexer } from './faqVectors';
 
 /**
  * FAQ 问题树的发布（helpdesk-v5-faq-graph-design §2.2）：
@@ -186,6 +187,8 @@ export type FaqReleaseServiceOptions = {
   graph?: FaqGraphRepository;
   gate?: FaqReleaseGate;
   now?: () => Date;
+  /** 新版本建好、发布之后给它算向量（不等、不影响结果；没配向量模型 = 什么都不做）。 */
+  vectors?: FaqVectorIndexer;
 };
 
 export function createFaqReleaseService(
@@ -193,6 +196,9 @@ export function createFaqReleaseService(
 ) {
   const graph = options.graph ?? createPgFaqGraphRepository();
   const now = options.now ?? (() => new Date());
+  const vectors = options.vectors ?? createEnvFaqVectorIndexer();
+  // 幂等，失败只记日志；下一次发布或 npm run helpdesk:faq-vectors 会补上
+  const indexVectors = (version: number) => void vectors.index(version);
   const gate =
     options.gate ??
     createFaqReleaseGate({
@@ -310,6 +316,7 @@ export function createFaqReleaseService(
           : `Only a release that passed the checks and the eval can be published (this one is ${result.release.status})`,
       );
     // published / already：这一版就是上线的
+    indexVectors(result.release.version);
     return summary(result.release, result.release.version);
   }
 
@@ -438,6 +445,7 @@ export function createFaqReleaseService(
           release: summary(inserted, await liveVersion()),
           created: false,
         };
+      indexVectors(inserted.version);
       const evaluated = await evaluate({ ...inserted, snapshot }, checks);
       return {
         release: summary(evaluated, await liveVersion()),

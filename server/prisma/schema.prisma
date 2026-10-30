@@ -579,10 +579,42 @@ model HelpdeskFaqReleaseNode {
   updatedAt      DateTime @map("updated_at") @db.Timestamptz(6)
   phrasingText   String   @default("") @map("phrasing_text")
 
-  release HelpdeskFaqRelease @relation(fields: [releaseVersion], references: [version], onDelete: Restrict, onUpdate: NoAction)
+  release HelpdeskFaqRelease         @relation(fields: [releaseVersion], references: [version], onDelete: Restrict, onUpdate: NoAction)
+  vectors HelpdeskFaqReleaseVector[]
 
   @@id([releaseVersion, id])
   @@map("helpdesk_faq_release_nodes")
+}
+
+/// FAQ 文本的向量（迁移 20261031110000_helpdesk_faq_vectors，faqVectors.ts）：同一模型下同一段文本只存一个，
+/// 按 sha256 寻址，只追加。向量存 REAL[]；CHECK 与只追加触发器只在迁移里。
+model HelpdeskFaqEmbedding {
+  model     String
+  textHash  String   @map("text_hash")
+  text      String
+  dims      Int
+  embedding Float[]  @db.Real
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  releases HelpdeskFaqReleaseVector[]
+
+  @@id([model, textHash])
+  @@map("helpdesk_faq_embeddings")
+}
+
+/// 某一版的节点用了哪几段文本（source：question_en | question_zh | phrasing），只追加。
+model HelpdeskFaqReleaseVector {
+  releaseVersion Int    @map("release_version")
+  model          String
+  nodeId         String @map("node_id") @db.Uuid
+  textHash       String @map("text_hash")
+  source         String
+
+  node      HelpdeskFaqReleaseNode @relation(fields: [releaseVersion, nodeId], references: [releaseVersion, id], onDelete: Restrict, onUpdate: NoAction, map: "helpdesk_faq_release_vectors_node_fkey")
+  embedding HelpdeskFaqEmbedding   @relation(fields: [model, textHash], references: [model, textHash], onDelete: Restrict, onUpdate: NoAction, map: "helpdesk_faq_release_vectors_embedding_fkey")
+
+  @@id([releaseVersion, model, nodeId, textHash])
+  @@map("helpdesk_faq_release_vectors")
 }
 
 /// v5 Part G 数据飞轮（迁移 20261031090000_helpdesk_flywheel）：Admin 的事实表。Admin 读不到 Portal 的库，

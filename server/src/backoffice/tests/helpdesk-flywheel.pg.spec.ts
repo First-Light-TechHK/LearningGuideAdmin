@@ -187,6 +187,7 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
     await pool.query(
       `TRUNCATE helpdesk_flywheel_runs, helpdesk_faq_eval_cases, helpdesk_faq_candidate_revisions,
                 helpdesk_faq_candidate_turns, helpdesk_faq_candidates, helpdesk_insight_turns,
+                helpdesk_faq_release_vectors, helpdesk_faq_embeddings,
                 helpdesk_faq_release_nodes, helpdesk_faq_releases, helpdesk_faq_edge_revisions,
                 helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions, helpdesk_faqs CASCADE`,
     );

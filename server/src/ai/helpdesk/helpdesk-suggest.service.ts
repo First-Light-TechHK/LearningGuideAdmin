@@ -121,7 +121,7 @@ export const ALTERNATIVES_TIMEOUT_MS = 300;
 export const ASSIST_RATE_LIMIT = { limit: 30, windowMs: 3_600_000 } as const;
 const PURGE_EVERY_MS = 3_600_000;
 // 2026-10-29 真模型评测（qa10k dev 难例）：比 gpt-4o-mini 答错少、更快
-// 用户 2026-10-30：DeepSeek 为主模型（gemini-2.5-flash 只作评测对照）
+// 用户 2026-10-30：Helpdesk 只用 DeepSeek（21:38Z 起不再跑别的模型作对照；评委是 Claude，不让 DeepSeek 给自己打分）
 const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash';
 // OPENROUTER_BASE_URL 是 AI Tutor 已有的变量，这里同样每次现读
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';

@@ -241,7 +241,8 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
 
   beforeEach(async () => {
     await pool.query(
-      `TRUNCATE helpdesk_faq_release_nodes, helpdesk_faq_releases, helpdesk_faq_edge_revisions,
+      `TRUNCATE helpdesk_faq_release_vectors, helpdesk_faq_embeddings,
+                helpdesk_faq_release_nodes, helpdesk_faq_releases, helpdesk_faq_edge_revisions,
                 helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions, helpdesk_faqs`,
     );
     gateCalls = [];

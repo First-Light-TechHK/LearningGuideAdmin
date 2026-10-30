@@ -26,7 +26,8 @@
     "seed:demo": "ts-node prisma/seed-demo.ts",
     "prompts:sync": "ts-node src/ai/sync-prompts.ts",
     "eval:helpdesk": "ts-node eval/helpdesk/run.ts",
-    "seed:helpdesk-faqs": "ts-node eval/helpdesk/seed-faq-library.ts"
+    "seed:helpdesk-faqs": "ts-node eval/helpdesk/seed-faq-library.ts",
+    "helpdesk:faq-vectors": "ts-node eval/helpdesk/faq-vectors.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
