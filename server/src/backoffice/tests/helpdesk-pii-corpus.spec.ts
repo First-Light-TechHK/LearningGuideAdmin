@@ -29,7 +29,7 @@ const corpus = JSON.parse(raw.toString('utf8')) as {
 
 /** 两份一起改，再同时更新这里和 Portal 的 helpdesk-pii-corpus-fixture.test.ts。 */
 const PINNED_SHA256 =
-  '4518b4c60031110c8083b23942b0eb3e8d00cf0c5b5d4efa15f374a30ad8c643';
+  '1beb8cfe0c215511f02849f0a27ccc1911e96b286f343c90b056bc3ef72be261';
 
 describe('shared PII scrubber corpus', () => {
   it('is the pinned version (the same bytes as Portal’s copy)', () => {
