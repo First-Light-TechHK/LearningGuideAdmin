@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { App, Button, Input, Modal, Panel, Table, Tag, Typography } from '../ui'
 import type { ColumnsType } from '../ui'
 import { knowledgeApi, type ReleaseSummary } from '../../api/knowledge'
+import { DownloadOutlined } from '@ant-design/icons'
 import { CloseIcon } from '../icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
@@ -32,6 +33,7 @@ export function PublishPanel() {
   const [publishCourse, setPublishCourse] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
   const [publishing, setPublishing] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const loadReleases = useCallback(async () => {
     const map: Record<string, ReleaseSummary[]> = {}
@@ -103,6 +105,31 @@ export function PublishPanel() {
         }
       },
     })
+  }
+
+  /**
+   * 下载版本快照为 ZIP（方案 B，2026-10-30 新增）。
+   * VIEW 权限即可；纯读，不改变任何状态。
+   */
+  const doDownload = async (release: ReleaseSummary) => {
+    if (downloadingId) return
+    setDownloadingId(release.id)
+    try {
+      const { blob, filename } = await knowledgeApi.exportRelease(release.id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      message.success(text('publish.downloaded', { version: release.versionTag }))
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setDownloadingId(null)
+    }
   }
 
   const columns: ColumnsType<(typeof courses)[number]> = [
@@ -182,6 +209,16 @@ export function PublishPanel() {
               >
                 <div style={{ flex: 1 }}>
                   <Tag color={r.isActive ? 'green' : 'geekblue'}>{r.versionTag}</Tag>
+                  {/* 下载按钮（图标，VIEW 权限即可；2026-10-30 新增） */}
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    style={{ marginLeft: tokens.spacing.sm }}
+                    aria-label={text('publish.downloadVersionAria', { version: r.versionTag })}
+                    loading={downloadingId === r.id}
+                    onClick={() => doDownload(r)}
+                  />
                   {/* editing 紧贴版本名右侧（2026-10-20 三次改拍）；定序 editing → live → testing */}
                   {r.isEditing && <Tag color="green">{text('publish.tagEditing')}</Tag>}
                   {r.isActive && <Tag color="green">{text('publish.tagLive')}</Tag>}

@@ -36,7 +36,10 @@ class LocalDriver implements StorageDriver {
     }
     const full = path.join(this.root, normalised);
     const rootAbs = path.resolve(this.root);
-    if (!path.resolve(full).startsWith(rootAbs + path.sep) && path.resolve(full) !== rootAbs) {
+    if (
+      !path.resolve(full).startsWith(rootAbs + path.sep) &&
+      path.resolve(full) !== rootAbs
+    ) {
       throw new Error(`Storage key escapes root: ${key}`);
     }
     return full;
@@ -92,7 +95,11 @@ class S3Driver implements StorageDriver {
 
   async put(key: string, bytes: Buffer): Promise<void> {
     await this.client.send(
-      new PutObjectCommand({ Bucket: this.bucket, Key: this.k(key), Body: bytes }),
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: this.k(key),
+        Body: bytes,
+      }),
     );
   }
 
@@ -100,7 +107,8 @@ class S3Driver implements StorageDriver {
     const out = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: this.k(key) }),
     );
-    const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+    const body = out.Body as
+      { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
     if (!body) throw new Error(`Empty S3 body for ${key}`);
     if (typeof body.transformToByteArray === 'function') {
       return Buffer.from(await body.transformToByteArray());
@@ -146,7 +154,10 @@ class S3Driver implements StorageDriver {
         .map((k) => ({ Key: k }));
       if (objects.length > 0) {
         await this.client.send(
-          new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: objects } }),
+          new DeleteObjectsCommand({
+            Bucket: this.bucket,
+            Delete: { Objects: objects },
+          }),
         );
       }
       token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
@@ -160,7 +171,9 @@ export class CourseStorageService {
   private readonly media: StorageDriver;
   private readonly staging: StorageDriver;
 
-  constructor(@Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig) {
+  constructor(
+    @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
+  ) {
     const region = config.awsRegion ?? 'ap-southeast-1';
     const forcePathStyle = config.s3ForcePathStyle ?? false;
     if (config.mediaBucket) {
@@ -233,6 +246,37 @@ export class CourseStorageService {
 
   clearStagingPrefix(jobId: string): Promise<void> {
     return this.staging.removePrefix(jobId);
+  }
+
+  /** 只读诊断：返回当前生效的存储驱动信息（不含密钥），用于确认是否用上 S3。 */
+  describe(): {
+    driver: 's3' | 'local';
+    region?: string;
+    bucket?: string;
+    prefix?: string;
+    stagingBucket?: string;
+    stagingPrefix?: string;
+    mediaRoot?: string;
+    stagingRoot?: string;
+    mediaKeyPattern?: string;
+  } {
+    if (this.config.mediaBucket) {
+      return {
+        driver: 's3',
+        region: this.config.awsRegion ?? 'ap-southeast-1',
+        bucket: this.config.mediaBucket,
+        prefix: this.config.mediaPrefix ?? '',
+        stagingBucket: this.config.stagingBucket ?? this.config.mediaBucket,
+        stagingPrefix: this.config.stagingPrefix ?? 'staging/',
+        mediaKeyPattern: `${this.config.mediaPrefix ?? ''}course-media/<courseId>/<assetId>.<ext>`,
+      };
+    }
+    return {
+      driver: 'local',
+      mediaRoot: path.resolve(this.config.mediaRoot),
+      stagingRoot: path.resolve(this.config.packageStagingRoot),
+      mediaKeyPattern: 'course-media/<courseId>/<assetId>.<ext>',
+    };
   }
 
   static sha256(bytes: Buffer): string {

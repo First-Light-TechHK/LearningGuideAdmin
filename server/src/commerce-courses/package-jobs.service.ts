@@ -63,6 +63,11 @@ export class PackageJobsService {
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
 
+  /** 只读诊断：确认当前存储驱动（S3 或本地）。 */
+  storageInfo() {
+    return this.storage.describe();
+  }
+
   // ===== 导入 =====
   async createImportJob(
     file: { name: string; bytes: Buffer },
@@ -181,23 +186,41 @@ export class PackageJobsService {
         'Directory is outside the repository.',
       );
     }
-    let names: string[];
-    try {
-      names = await fs.readdir(base);
-    } catch {
+    // 递归收集子目录文件（flatten 到 zip 根：素材/模板可能放在嵌套文件夹里）
+    const files: { name: string; full: string }[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries: string[];
+      try {
+        entries = await fs.readdir(dir);
+      } catch {
+        if (dir === base) {
+          throw new PackageError(
+            'RAW_DIR_NOT_FOUND',
+            404,
+            `Directory not found: ${rel}`,
+          );
+        }
+        return;
+      }
+      for (const name of entries) {
+        if (name.startsWith('.') || name.startsWith('~$') || name === '__MACOSX') continue;
+        const full = path.join(dir, name);
+        const stat = await fs.stat(full);
+        if (stat.isDirectory()) await walk(full);
+        else if (stat.isFile()) files.push({ name, full });
+      }
+    };
+    await walk(base);
+    if (!files.length) {
       throw new PackageError(
-        'RAW_DIR_NOT_FOUND',
-        404,
-        `Directory not found: ${rel}`,
+        'RAW_DIR_EMPTY',
+        400,
+        `Directory has no importable files: ${rel}`,
       );
     }
     const zip = new JSZip();
-    for (const name of names) {
-      if (name.startsWith('.') || name.startsWith('~$')) continue;
-      const full = path.join(base, name);
-      const stat = await fs.stat(full);
-      if (!stat.isFile()) continue;
-      zip.file(name, await fs.readFile(full));
+    for (const file of files) {
+      zip.file(file.name, await fs.readFile(file.full));
     }
     const bytes = await zip.generateAsync({ type: 'nodebuffer' });
     return this.createRawImportJob(
@@ -465,9 +488,31 @@ export class PackageJobsService {
     });
   }
 
-  // ===== 导出（只导出线上版本，PRD §16）=====
-  async startExport(courseId: string, actorEmployeeId: string | null) {
-    const exportable = await this.publishing.assertExportable(courseId);
+  // ===== 导出（默认导出线上版本；也可指定 versionLabel 导出历史快照）=====
+  async startExport(
+    courseId: string,
+    actorEmployeeId: string | null,
+    versionLabel?: string,
+  ) {
+    let exportable: { versionId: string; versionLabel: string };
+    if (versionLabel && versionLabel !== 'working') {
+      // 指定了版本号：直接查找对应快照
+      const v = await this.prisma.courseVersion.findFirst({
+        where: { courseId, versionLabel },
+        select: { id: true, versionLabel: true },
+      });
+      if (!v) {
+        throw new PackageError(
+          'PACKAGE_VERSION_NOT_FOUND',
+          404,
+          `Version ${versionLabel} not found for this course.`,
+        );
+      }
+      exportable = { versionId: v.id, versionLabel: v.versionLabel };
+    } else {
+      // 默认：导出线上发布版本
+      exportable = await this.publishing.assertExportable(courseId);
+    }
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
       select: { code: true },

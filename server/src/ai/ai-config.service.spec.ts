@@ -866,9 +866,7 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       });
       mockPrisma.promptTemplate.findFirst.mockResolvedValue(null);
       const lecture = await service.resolvePrompts('c1', 'r1', 'LECTURE');
-      expect(lecture.systemPrompt).toBe(
-        `${DEFAULT_MAIN_PROMPT}\n\nL-ONLY`,
-      );
+      expect(lecture.systemPrompt).toBe(`${DEFAULT_MAIN_PROMPT}\n\nL-ONLY`);
       expect(lecture.systemPrompt).not.toMatch(/^\n/);
     });
   });

@@ -189,7 +189,6 @@ export class CommerceCoursesService {
     'TEXT_ONLY',
     'VIDEO_AND_TEXT',
   ];
-
   private normaliseMode(
     mode?: string,
   ): 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT' {
