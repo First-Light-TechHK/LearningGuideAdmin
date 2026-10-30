@@ -73,8 +73,9 @@ export function avatarColor(seed: string): Swatch {
   return AVATAR_PALETTE[hash(seed) % AVATAR_PALETTE.length]
 }
 
-export function tagColor(tag: string): Swatch {
-  return TAG_PALETTE[hash(tag.trim().toLowerCase()) % TAG_PALETTE.length]
+/** Figma 1324:2 按位置轮换：第 1 个蓝、第 2 个橙、第 3 个绿、第 4 个又是蓝（login issue / account access / payment / material access）。 */
+export function tagColor(index: number): Swatch {
+  return TAG_PALETTE[((index % TAG_PALETTE.length) + TAG_PALETTE.length) % TAG_PALETTE.length]
 }
 
 const CJK = /[぀-ヿ㐀-鿿가-힯]/
@@ -496,6 +497,14 @@ export function activeFilterCount(filters: EnquiryFilters): number {
 }
 
 /** 订阅状态胶囊：Active 绿色（Figma），付款异常（含 Portal 的 grace 宽限期）琥珀色，其它中性。 */
+/** v4 Part A 订单状态的标签色：已支付绿；待支付 / 支付失败琥珀（付款有问题）；已取消 / 已退款 / 未知灰。 */
+export function orderTone(status: string): 'success' | 'warning' | 'neutral' {
+  const value = status.trim().toLowerCase()
+  if (value === 'paid') return 'success'
+  if (value === 'pending' || value === 'failed') return 'warning'
+  return 'neutral'
+}
+
 export function subscriptionTone(status: string): 'success' | 'warning' | 'neutral' {
   const value = status.trim().toLowerCase()
   if (value === 'active' || value === 'trialing') return 'success'

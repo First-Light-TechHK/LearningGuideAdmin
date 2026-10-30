@@ -386,6 +386,18 @@ model HelpdeskSuggestion {
   latencyMs    Int      @default(0) @map("latency_ms")
   outcome      String?
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  // v5（迁移 20261030100000_helpdesk_suggestion_turns）：请求带 context 的一轮；CHECK 与部分索引只在迁移里
+  kind           String?
+  intent         String?
+  confidence     String?
+  nodeId         String?  @map("node_id") @db.Uuid
+  blocks         String[] @default([])
+  guardResult    String?  @map("guard_result")
+  guardReason    String?  @map("guard_reason")
+  guardFallback  String[] @default([]) @map("guard_fallback")
+  covered        Boolean?
+  sessionId      String?  @map("session_id") @db.Uuid
+  releaseVersion Int?     @map("release_version")
 
   @@index([qaId])
   @@index([faqId])
@@ -420,6 +432,16 @@ model HelpdeskFaq {
   questionZh     String   @map("question_zh")
   answerZh       String   @map("answer_zh")
   keywords       String[] @default([])
+  /// v5 Part A：学员情境信号标签（FAQ_SIGNALS；迁移 20261030080000_helpdesk_faq_signals）
+  signals        String[] @default([])
+  /// v5 问题树（迁移 20261030090000_helpdesk_faq_graph）：稳定的 slug（不给时触发器按英文问题取）
+  key            String   @unique(map: "helpdesk_faqs_key_key")
+  /// answer | choice
+  nodeType       String   @default("answer") @map("node_type")
+  /// 能否被新问题直接命中
+  entry          Boolean  @default(true)
+  /// 问法的检索文字（helpdesk_faq_phrasings 的触发器维护；phrasing_tsv 是生成列，不在 Prisma 里）
+  phrasingText   String   @default("") @map("phrasing_text")
   status         String   @default("published")
   version        Int      @default(1)
   idempotencyKey String?  @unique @map("idempotency_key") @db.Uuid
@@ -429,6 +451,9 @@ model HelpdeskFaq {
   updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   revisions HelpdeskFaqRevision[]
+  childEdges  HelpdeskFaqEdge[]     @relation("HelpdeskFaqEdgeParent")
+  parentEdges HelpdeskFaqEdge[]     @relation("HelpdeskFaqEdgeChild")
+  phrasings   HelpdeskFaqPhrasing[]
 
   @@index([status, popular(sort: Desc), updatedAt(sort: Desc)], map: "helpdesk_faqs_list_idx")
   @@index([keywords], map: "helpdesk_faqs_keywords_idx", type: Gin)
@@ -448,6 +473,266 @@ model HelpdeskFaqRevision {
 
   @@unique([faqId, version], map: "helpdesk_faq_revisions_faq_version_key")
   @@map("helpdesk_faq_revisions")
+}
+
+/// v5 FAQ 问题树的边（DAG；BackOffice 原生 SQL 读写，见 faqGraphRepository.ts）
+model HelpdeskFaqEdge {
+  id        String   @id @db.Uuid
+  parentId  String   @map("parent_id") @db.Uuid
+  childId   String   @map("child_id") @db.Uuid
+  /// follow_up | option
+  kind      String
+  position  Int      @default(0) @db.SmallInt
+  labelEn   String?  @map("label_en")
+  labelZh   String?  @map("label_zh")
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  parent HelpdeskFaq @relation("HelpdeskFaqEdgeParent", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  child  HelpdeskFaq @relation("HelpdeskFaqEdgeChild", fields: [childId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([parentId, childId], map: "helpdesk_faq_edges_parent_child_key")
+  @@index([parentId, position], map: "helpdesk_faq_edges_parent_position_idx")
+  @@index([childId], map: "helpdesk_faq_edges_child_idx")
+  @@map("helpdesk_faq_edges")
+}
+
+/// 边的修订（只追加）
+model HelpdeskFaqEdgeRevision {
+  id         String   @id @db.Uuid
+  edgeId     String   @map("edge_id") @db.Uuid
+  parentId   String   @map("parent_id") @db.Uuid
+  childId    String   @map("child_id") @db.Uuid
+  /// create | update | delete
+  action     String
+  before     Json?
+  after      Json?
+  employeeId String?  @map("employee_id") @db.Uuid
+  at         DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([edgeId, at], map: "helpdesk_faq_edge_revisions_edge_idx")
+  @@index([parentId, at], map: "helpdesk_faq_edge_revisions_parent_idx")
+  @@map("helpdesk_faq_edge_revisions")
+}
+
+/// 学员的问法（检索用）；唯一 (faq_id, locale, lower(text)) 是表达式索引，只在迁移里
+model HelpdeskFaqPhrasing {
+  id         String   @id @db.Uuid
+  faqId      String   @map("faq_id") @db.Uuid
+  /// en-GB | zh-CN | zh-TW
+  locale     String
+  text       String
+  searchText String   @map("search_text")
+  /// staff | flywheel | seed
+  source     String   @default("staff")
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  faq HelpdeskFaq @relation(fields: [faqId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("helpdesk_faq_phrasings")
+}
+
+/// FAQ 问题树的发布版本（快照写入后不再改；至多一行 published，部分唯一索引只在迁移里）
+model HelpdeskFaqRelease {
+  id            String    @id @db.Uuid
+  version       Int       @unique(map: "helpdesk_faq_releases_version_key")
+  /// draft | evaluating | published | rejected | superseded
+  status        String
+  snapshot      Json
+  snapshotHash  String    @map("snapshot_hash")
+  checks        Json
+  evalReport    Json?     @map("eval_report")
+  sourceVersion Int?      @map("source_version")
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedBy   String?   @map("published_by") @db.Uuid
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+
+  nodes HelpdeskFaqReleaseNode[]
+
+  @@index([snapshotHash], map: "helpdesk_faq_releases_hash_idx")
+  @@map("helpdesk_faq_releases")
+}
+
+/// 发布版本的检索行（从快照派生，只追加；typo_keys / phrasing_tsv 是生成列，不在 Prisma 里）
+model HelpdeskFaqReleaseNode {
+  releaseVersion Int      @map("release_version")
+  id             String   @db.Uuid
+  key            String
+  nodeType       String   @map("node_type")
+  entry          Boolean
+  category       String
+  popular        Boolean
+  questionEn     String   @map("question_en")
+  answerEn       String   @map("answer_en")
+  questionZh     String   @map("question_zh")
+  answerZh       String   @map("answer_zh")
+  keywords       String[]
+  signals        String[]
+  status         String   @default("published")
+  version        Int
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  createdAt      DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @map("updated_at") @db.Timestamptz(6)
+  phrasingText   String   @default("") @map("phrasing_text")
+
+  release HelpdeskFaqRelease @relation(fields: [releaseVersion], references: [version], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([releaseVersion, id])
+  @@map("helpdesk_faq_release_nodes")
+}
+
+/// v5 Part G 数据飞轮（迁移 20261031090000_helpdesk_flywheel）：Admin 的事实表。Admin 读不到 Portal 的库，
+/// 每一行都来自 Portal 的 insights 接口（学员文字已脱敏，其余是标签），按轮 id 幂等 upsert。
+/// 指标视图 helpdesk_insight_turn_facts、CHECK、外键与部分索引只在迁移里（服务层用 SQL 读写，不经 Prisma）。
+model HelpdeskInsightTurn {
+  id                    String   @id @db.Uuid
+  createdAt             DateTime @map("created_at") @db.Timestamptz(6)
+  source                String?
+  locale                String
+  text                  String
+  sessionId             String?  @map("session_id") @db.Uuid
+  turnIndex             Int?     @map("turn_index") @db.SmallInt
+  lastTurn              Boolean? @map("last_turn")
+  sessionEndReason      String?  @map("session_end_reason")
+  kind                  String?
+  intent                String?
+  guard                 String?
+  via                   String?
+  faqId                 String?  @map("faq_id") @db.Uuid
+  nodeId                String?  @map("node_id") @db.Uuid
+  parentNodeId          String?  @map("parent_node_id") @db.Uuid
+  releaseVersion        Int?     @map("release_version")
+  answered              Boolean  @default(false)
+  vote                  String?
+  rating                Int?     @db.SmallInt
+  covered               Boolean?
+  expanded              Boolean?
+  handover              Boolean  @default(false)
+  ticketAfterChat       Boolean  @default(false) @map("ticket_after_chat")
+  ticketLinked          Boolean? @map("ticket_linked")
+  ticketStatus          String?  @map("ticket_status")
+  ticketCloseReason     String?  @map("ticket_close_reason")
+  ticketResolvedByAgent Boolean? @map("ticket_resolved_by_agent")
+  ticketAgentReplied    Boolean? @map("ticket_agent_replied")
+  agentReply            String?  @map("agent_reply")
+  signals               String[] @default([])
+  ingestedAt            DateTime  @default(now()) @map("ingested_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  /// 最近一次从 Portal 拉到这一轮（内容没变也更新）；答案落定 = checked_at ≥ created_at + 24 小时
+  checkedAt             DateTime  @default(now()) @map("checked_at") @db.Timestamptz(6)
+  /// 以「含个人信息」驳回候选时清掉了文字（之后的拉取不再写回）
+  redactedAt            DateTime? @map("redacted_at") @db.Timestamptz(6)
+
+  @@index([createdAt, id], map: "helpdesk_insight_turns_created_idx")
+  @@index([nodeId, createdAt], map: "helpdesk_insight_turns_node_idx")
+  @@map("helpdesk_insight_turns")
+}
+
+/// FAQ 候选（v5 Part G3 / G4）：new | accepted | dismissed | merged。
+model HelpdeskFaqCandidate {
+  id               String    @id @db.Uuid
+  status           String    @default("new")
+  suggestion       String
+  origin           String
+  topic            String
+  proposedQuestion String    @map("proposed_question")
+  labelSource      String    @map("label_source")
+  category         String?
+  locale           String
+  turnCount        Int       @default(0) @map("turn_count")
+  examples         Json      @default("[]")
+  sourceMix        Json      @default("{}") @map("source_mix")
+  answerSources    Json      @default("[]") @map("answer_sources")
+  relatedNodeId    String?   @map("related_node_id") @db.Uuid
+  relatedScore     Float?    @map("related_score") @db.Real
+  parentNodeId     String?   @map("parent_node_id") @db.Uuid
+  shownNodeId      String?   @map("shown_node_id") @db.Uuid
+  ticketId         String?   @map("ticket_id")
+  firstSeenAt      DateTime  @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt       DateTime  @map("last_seen_at") @db.Timestamptz(6)
+  reason           String?
+  reasonNote       String?   @map("reason_note")
+  acceptedAs       String?   @map("accepted_as")
+  acceptedFaqId    String?   @map("accepted_faq_id") @db.Uuid
+  mergedInto       String?   @map("merged_into") @db.Uuid
+  decidedBy        String?   @map("decided_by") @db.Uuid
+  decidedAt        DateTime? @map("decided_at") @db.Timestamptz(6)
+  actionKey        String?   @map("action_key")
+  version          Int       @default(1)
+  createdBy        String?   @map("created_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, turnCount(sort: Desc), lastSeenAt(sort: Desc), id], map: "helpdesk_faq_candidates_queue_idx")
+  @@map("helpdesk_faq_candidates")
+}
+
+/// 一轮至多归一个候选。
+model HelpdeskFaqCandidateTurn {
+  turnId      String   @id @map("turn_id") @db.Uuid
+  candidateId String   @map("candidate_id") @db.Uuid
+  addedAt     DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  @@index([candidateId], map: "helpdesk_faq_candidate_turns_candidate_idx")
+  @@map("helpdesk_faq_candidate_turns")
+}
+
+/// 候选的审计（只追加）。
+model HelpdeskFaqCandidateRevision {
+  id          String   @id @db.Uuid
+  candidateId String   @map("candidate_id") @db.Uuid
+  action      String
+  before      Json?
+  after       Json?
+  employeeId   String?  @map("employee_id") @db.Uuid
+  /// 动作当时员工的显示名
+  employeeName String?  @map("employee_name")
+  at           DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([candidateId, at], map: "helpdesk_faq_candidate_revisions_candidate_idx")
+  @@map("helpdesk_faq_candidate_revisions")
+}
+
+/// 发布评测门的回归用例（v5 Part G5）；(faq_id, locale, lower(text)) 唯一是表达式索引，只在迁移里。
+model HelpdeskFaqEvalCase {
+  id          String   @id @db.Uuid
+  faqId       String   @map("faq_id") @db.Uuid
+  candidateId String?  @map("candidate_id") @db.Uuid
+  locale      String
+  text        String
+  source      String   @default("flywheel")
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([faqId], map: "helpdesk_faq_eval_cases_faq_idx")
+  @@map("helpdesk_faq_eval_cases")
+}
+
+/// 后台任务的运行行（每个任务每个 UTC 日至多一行定时运行；手动运行按 Idempotency-Key 幂等，部分唯一索引只在迁移里）。
+model HelpdeskFlywheelRun {
+  id              String    @id @db.Uuid
+  job             String
+  runDay          DateTime  @map("run_day") @db.Date
+  trigger         String
+  status          String
+  attempts        Int       @default(1) @db.SmallInt
+  instance        String
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  heartbeatAt     DateTime  @default(now()) @map("heartbeat_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+  stats           Json      @default("{}")
+  moreDue         Boolean   @default(false) @map("more_due")
+  errorCode       String?   @map("error_code")
+  requestedBy     String?   @map("requested_by") @db.Uuid
+  requestedByName String?   @map("requested_by_name")
+  idempotencyKey  String?   @map("idempotency_key")
+
+  @@index([job, startedAt(sort: Desc)], map: "helpdesk_flywheel_runs_recent_idx")
+  @@map("helpdesk_flywheel_runs")
 }
 
 // ==========================================

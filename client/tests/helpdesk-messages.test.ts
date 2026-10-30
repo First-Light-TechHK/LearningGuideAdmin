@@ -154,6 +154,22 @@ describe('HelpDesk messages', () => {
       'VERSION_CONFLICT',
       'FAQ_NOT_FOUND',
       'IDEMPOTENCY_KEY_REUSED',
+      // v5 question trees and releases (graph design §5)
+      'FAQ_EDGE_CYCLE',
+      'FAQ_EDGE_EXISTS',
+      'FAQ_TOO_MANY_CHILDREN',
+      'FAQ_ARCHIVED',
+      'FAQ_CHILDREN_CHANGED',
+      'FAQ_EDGE_NOT_FOUND',
+      'FAQ_TOO_MANY_PHRASINGS',
+      'FAQ_HAS_PARENTS',
+      'FAQ_KEY_TAKEN',
+      'FAQ_RELEASE_NOT_FOUND',
+      'FAQ_RELEASE_NOT_READY',
+      'FAQ_RELEASE_STALE',
+      'FAQ_RELEASE_LOCKED',
+      'FAQ_RELEASE_NOT_PUBLISHED',
+      'FAQ_RELEASE_CHECKS_FAILED',
       'generic',
     ]) {
       assert.equal(typeof get(enGB, `helpDesk.errors.${code}`), 'string', code)
@@ -221,5 +237,49 @@ describe('HelpDesk wiring', () => {
       'backoffice/lib/helpdeskMarkdown.ts',
     ].map(read)
     for (const source of sources) assert.doesNotMatch(source, /analytics|gtag|track\(|sendBeacon|traceparent/i)
+  })
+})
+
+describe('v5 Part G wording (FAQ 候选 / HelpDesk 数据, 待视觉验收)', () => {
+  test('the spec names: the FAQ 候选 and HelpDesk 数据 tabs, 转成 FAQ 候选, 草稿 待核实', () => {
+    assert.equal(get(zhCN.helpDesk, 'tabs.candidates'), 'FAQ 候选')
+    assert.equal(get(zhCN.helpDesk, 'tabs.data'), 'HelpDesk 数据')
+    assert.equal(get(zhCN.helpDesk, 'actions.toCandidate'), '转成 FAQ 候选')
+    assert.equal(get(zhCN.helpDesk, 'drawer.draft.title'), '草稿 待核实')
+    assert.equal(get(enGB.helpDesk, 'tabs.candidates'), 'FAQ candidates')
+    assert.equal(get(enGB.helpDesk, 'tabs.data'), 'HelpDesk data')
+    assert.equal(get(enGB.helpDesk, 'drawer.draft.title'), 'Draft, to be verified')
+  })
+
+  test('every enum the flywheel pages show has a label in both languages', () => {
+    const groups: [string, readonly string[]][] = [
+      ['candidates.status', ['new', 'accepted', 'dismissed', 'merged']],
+      ['candidates.suggestion', ['new_faq', 'add_phrasing', 'follow_up']],
+      ['candidates.origin', ['mining', 'ticket']],
+      ['candidates.reasons', ['duplicate', 'not_a_gap', 'out_of_scope', 'personal_data', 'spam', 'other']],
+      ['candidates.mix', ['no_match', 'not_helpful', 'clarify_not_covered', 'handover', 'ticket_after_chat', 'low_rating', 'ticket']],
+      ['candidates.revision', ['create', 'grow', 'accept', 'dismiss', 'merge']],
+      ['data.metrics', ['aiSolvedRate', 'noMatchRate', 'helpfulRate', 'avgRating', 'handoverRate', 'clarifyCoveredRate', 'guardFallbackRate']],
+      ['data.splits', ['none', 'locale', 'entry', 'signal']],
+      ['data.entry', ['submit', 'chat', 'chip']],
+    ]
+    for (const bundle of [enGB, zhCN])
+      for (const [group, values] of groups)
+        for (const value of values) assert.equal(typeof get(bundle.helpDesk, `${group}.${value}`), 'string', `${group}.${value}`)
+  })
+
+  test('the flywheel error codes have messages', () => {
+    for (const code of [
+      'CANDIDATE_NOT_FOUND',
+      'CANDIDATE_CHANGED',
+      'CANDIDATE_CLOSED',
+      'TICKET_NOT_RESOLVED',
+      'TICKET_NO_QUESTION',
+      'JOB_ALREADY_RUNNING',
+      'JOB_START_FAILED',
+      'JOB_NOT_FOUND',
+      'JOB_RUN_NOT_FOUND',
+    ])
+      for (const bundle of [enGB, zhCN]) assert.equal(typeof get(bundle, `helpDesk.errors.${code}`), 'string', code)
   })
 })

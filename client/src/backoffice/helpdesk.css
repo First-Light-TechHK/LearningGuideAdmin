@@ -1377,6 +1377,39 @@
   color: var(--hd-ink);
 }
 
+/* v4 Part A 右栏「订单」块：沿用订阅块 .hdPlanRow；订单号与「复制」同一格（无画板，待视觉验收） */
+.hdOrderNumberCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.hdOrderNumber {
+  font-size: 11px;
+  line-height: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* 空的时候不占位，但留在无障碍树里，复制结果才会被读屏播报 */
+.hdOrderCopyNotice:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+/* v4 Part A 左栏行内的小「订单」标签：沿用 .hdPill-neutral，缩到行高 13（无画板，待视觉验收） */
+.hdRowOrder {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 10px;
+  line-height: 13px;
+}
+
 /* 左栏行内的小旗子（v2，无画板，待视觉验收） */
 .hdRowFlag {
   flex: 0 0 auto;
@@ -1523,9 +1556,16 @@
   width: 8%;
 }
 
-.hdFaqColUpdated,
+.hdFaqColUpdated {
+  width: 12.9%;
+}
+
 .hdFaqColAction {
   width: 12.9%;
+}
+
+.hdFaqActions .hdFaqPreview {
+  white-space: nowrap;
 }
 
 .hdFaqTable th {
@@ -2228,6 +2268,14 @@
   padding: 20px 25px 24px;
 }
 
+/* v5 问题树入口（Preview 没有画板，待视觉验收）：复用表格里 Preview 的文字按钮样式 */
+.hdPreviewFoot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 25px 16px;
+  border-top: 1px solid #e8ecf2;
+}
+
 .hdPreviewQuestion {
   margin: 12px 0 10px;
   font-size: 16px;
@@ -2325,4 +2373,948 @@
 /* 加载失败：文案下一行放「重试」（待视觉验收） */
 .hdTraceBody .hdDrawerAlert p {
   margin: 0 0 4px;
+}
+
+/* ---------------------------------------------------------------------------
+ * v5 问题树（helpdesk-v5-faq-graph-design §5）：FAQ 抽屉的「追问与选项」、问题树抽屉（大纲 + 对话预览）、
+ * 版本发布抽屉。没有 Figma 画板：沿用上面抽屉、勾选框、按钮、胶囊、表格的颜色与尺寸，只补排版（待视觉验收）。
+ * 不加任何过渡；抽屉的滑入动画在「减少动态效果」下关掉。
+ * ------------------------------------------------------------------------- */
+
+.hdHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.hdReleasesButton {
+  height: 35px;
+}
+
+.hdGraphSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 13px;
+  border-top: 1px solid #e7ecf3;
+}
+
+.hdGraphTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #233858;
+}
+
+.hdGraphHint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: #667790;
+}
+
+.hdGraphProblem {
+  color: #dc2626;
+}
+
+.hdGraphKey {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.hdGraphFieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.hdGraphChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.hdGraphSignals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hdCheck.hdGraphCheck {
+  margin-top: 0;
+  gap: 8px;
+}
+
+.hdGraphRadio {
+  border-radius: 50%;
+}
+
+.hdGraphLinks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hdGraphChildren,
+.hdGraphResults,
+.hdGraphPhrasings,
+.hdGraphParents,
+.hdTreeOutline,
+.hdTreeWarnings,
+.hdReleaseList,
+.hdChatLog,
+.hdChatSteps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdGraphParents {
+  font-size: 12px;
+  color: #344964;
+}
+
+.hdGraphChildren {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e1e6ef;
+  border-radius: 6px;
+}
+
+.hdGraphChild {
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.hdGraphChild + .hdGraphChild {
+  border-top: 1px solid #eef2f7;
+}
+
+.hdGraphChildDragging {
+  opacity: 0.5;
+}
+
+.hdGraphChildRow,
+.hdGraphResult,
+.hdGraphPhrasing,
+.hdGraphPhrasingAdd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hdGraphResult,
+.hdGraphPhrasing {
+  padding: 6px 0;
+}
+
+.hdGraphResult + .hdGraphResult,
+.hdGraphPhrasing + .hdGraphPhrasing {
+  border-top: 1px solid #eef2f7;
+}
+
+.hdGraphGrip {
+  color: #94a3b8;
+  font-size: 12px;
+  letter-spacing: -2px;
+  cursor: grab;
+}
+
+.hdGraphLetter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #eaf3ff;
+  color: #2468df;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hdGraphChildText,
+.hdTreeText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.hdGraphChildLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 17px;
+  color: #273c5b;
+  overflow-wrap: anywhere;
+}
+
+.hdGraphChildActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.hdGraphChildActions .hdEditorTool {
+  width: 24px;
+  text-align: center;
+}
+
+.hdGraphChildActions .hdEditorTool:disabled {
+  color: #c3ccd8;
+  cursor: not-allowed;
+}
+
+.hdGraphTag {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: #f2f5f9;
+  color: #69778b;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hdGraphTagEntry {
+  background: #e8f8ef;
+  color: #1d8c50;
+}
+
+.hdGraphTagShared {
+  background: #f0ebff;
+  color: #7655c1;
+}
+
+.hdFaqNodeTag {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.hdGraphLabelForm,
+.hdGraphPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.hdGraphFormActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hdGraphAddRow {
+  margin-top: 2px;
+}
+
+.hdGraphTextarea {
+  min-height: 60px;
+}
+
+.hdGraphPhrasingAdd .hdDrawerInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.hdGraphLocale {
+  width: 120px;
+  height: 35px;
+}
+
+/* 问题树抽屉 */
+.hdTreeTabs {
+  padding: 0 24px;
+}
+
+.hdTreeSummary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #4d617e;
+}
+
+.hdTreeOutline {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e1e6ef;
+  border-radius: 6px;
+}
+
+.hdTreeRowBody {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-right: 10px;
+}
+
+/* v5 问题树：每一层是嵌套的列表（读屏软件听得出层级）；行与行之间的分隔线不变（待视觉验收） */
+.hdTreeBranch {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdTreeRow + .hdTreeRow,
+.hdTreeBranch > .hdTreeRow {
+  border-top: 1px solid #eef2f7;
+}
+
+.hdTreeLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding-left: 6px;
+}
+
+.hdTreeToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 11px;
+  color: #465e7a;
+  cursor: pointer;
+}
+
+.hdTreeToggle:hover {
+  background: #e8eef8;
+}
+
+.hdTreeLeaf {
+  cursor: default;
+}
+
+.hdTreeLeaf:hover {
+  background: transparent;
+}
+
+.hdTreeTags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.hdTreeNote,
+.hdTreeWarnings {
+  margin-left: 32px;
+}
+
+.hdTreeWarnings .hdFieldError {
+  margin: 2px 0 0;
+}
+
+/* 对话预览：学员气泡在右、AI 在左，引用卡片左侧 3px 品牌蓝（v5 Part H 的样子） */
+.hdChatPreview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hdChatControls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hdChatStart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 200px;
+  font-size: 12px;
+  color: #233858;
+}
+
+.hdChatStart .hdDrawerSelect {
+  flex: 1;
+  min-width: 0;
+  height: 35px;
+}
+
+.hdChatLog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.hdChatTurn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hdChatBubble {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.hdChatLearner {
+  align-self: flex-end;
+  background: var(--hd-blue);
+  color: #fff;
+}
+
+.hdChatAssistant {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  color: #273c5b;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.hdChatText {
+  margin: 0;
+}
+
+.hdChatExcerpt {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--hd-blue);
+  border-radius: 4px;
+  background: var(--hd-blue-tint);
+}
+
+.hdChatExcerpt .hdAiAnswer {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.hdChatSource {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: #667790;
+}
+
+.hdChatStepsTitle {
+  margin: 0;
+  font-size: 11px;
+  color: #667790;
+}
+
+.hdChatSteps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hdChatChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--hd-blue);
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hd-blue);
+  text-align: left;
+  cursor: pointer;
+}
+
+.hdChatChip:hover {
+  background: var(--hd-blue-tint);
+}
+
+.hdChatChip:focus-visible,
+.hdTreeToggle:focus-visible {
+  outline: 2px solid rgba(34, 107, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.hdChatSteps:has(.hdChatOption) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.hdChatOption {
+  border-radius: 6px;
+}
+
+/* 版本发布抽屉 */
+.hdReleasesDrawer {
+  width: 820px;
+}
+
+.hdReleaseHeading {
+  margin: 4px 0 0;
+}
+
+.hdReleaseProblems .hdFieldError {
+  margin: 0;
+}
+
+.hdReleasesDrawer .hdFaqTableWrap {
+  margin-top: 0;
+}
+
+.hdFaqTable.hdReleaseTable {
+  min-width: 0;
+  table-layout: auto;
+}
+
+.hdFaqTable.hdReleaseTable td,
+.hdFaqTable.hdReleaseTable th[scope='row'] {
+  height: auto;
+  padding: 10px 12px;
+  background: #fff;
+  vertical-align: top;
+}
+
+.hdReleaseCreated,
+.hdReleaseResult {
+  display: block;
+}
+
+.hdReleaseLive {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #233858;
+}
+
+.hdReleaseDiff,
+.hdReleaseChecks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hdReleaseGroup .hdFieldLabel {
+  margin: 0;
+}
+
+.hdReleaseList {
+  font-size: 12px;
+  line-height: 18px;
+  color: #344964;
+}
+
+.hdReleasePass {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #1d8c50;
+}
+
+.hdReleaseTable th[scope='row'] {
+  font-weight: 600;
+  color: #233858;
+}
+
+.hdReleaseTable td,
+.hdReleaseTable th {
+  font-size: 12px;
+}
+
+.hdReleaseActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.hdReleaseStatus-published {
+  background: #e8f8ef;
+  color: #1d8c50;
+}
+
+.hdReleaseStatus-draft {
+  background: #eaf3ff;
+  color: #2468df;
+}
+
+.hdReleaseStatus-rejected {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.hdReleaseStatus-evaluating,
+.hdReleaseStatus-superseded {
+  background: #f2f5f9;
+  color: #69778b;
+}
+
+.hdReleaseDiffRow td {
+  background: #f8fafc;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hdTreeDrawer,
+  .hdReleasesDrawer {
+    animation: none;
+  }
+}
+
+/* ------------------- v5 Part G 数据飞轮：FAQ 候选与 HelpDesk 数据（待视觉验收） ------------------- */
+
+.hdFlywheelJobs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.hdFlywheelJobs .hdFaqTableWrap {
+  margin-top: 0;
+}
+
+.hdJobsNotice {
+  margin: 0;
+}
+
+.hdCandidateFilters {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 43px;
+}
+
+.hdCandidateColTopic {
+  width: 34%;
+}
+
+.hdCandidateColSuggestion {
+  width: 13%;
+}
+
+.hdCandidateColMix {
+  width: 24%;
+}
+
+.hdCandidateColCount {
+  width: 8%;
+}
+
+.hdCandidateColSeen {
+  width: 11%;
+}
+
+.hdCandidateColAction {
+  width: 10%;
+}
+
+.hdCandidateCount,
+.hdDataNumber {
+  font-size: 13px;
+  font-weight: 600;
+  color: #203250;
+  font-variant-numeric: tabular-nums;
+}
+
+.hdCandidateMix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hdCandidateSuggestion-new_faq {
+  background: #eaf3ff;
+  color: #2468df;
+}
+
+.hdCandidateSuggestion-add_phrasing {
+  background: #e8f8ef;
+  color: #1d8c50;
+}
+
+.hdCandidateSuggestion-follow_up {
+  background: var(--hd-amber-bg);
+  color: var(--hd-amber-ink);
+}
+
+.hdCandidateStatus-new {
+  background: #eaf3ff;
+  color: #2468df;
+}
+
+.hdCandidateStatus-accepted {
+  background: #e8f8ef;
+  color: #1d8c50;
+}
+
+.hdCandidateStatus-dismissed,
+.hdCandidateStatus-merged {
+  background: #f2f5f9;
+  color: #69778b;
+}
+
+.hdCandidateHead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hdCandidateTopic {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--hd-ink);
+}
+
+.hdCandidateTags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.hdCandidateQuestion {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: #203250;
+}
+
+.hdCandidateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--hd-body);
+}
+
+.hdCandidateExamples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: #344964;
+}
+
+/* 脱敏占位符：<email>、<phone> …（读屏另读「已隐藏的个人信息」） */
+.hdPlaceholder {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--hd-line-soft);
+  color: var(--hd-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.hdCandidateNodes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.hdCandidateNode dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #203250;
+}
+
+.hdCandidateDecided {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hdCandidateForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hdCandidateNote {
+  min-height: 72px;
+}
+
+.hdFaqPicker {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hdFaqPickerOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.hdCardExtra {
+  margin: 6px 0 0 -4px;
+}
+
+.hdToCandidate {
+  font-size: 11px;
+}
+
+/* FAQ 抽屉：来自候选、「草稿 待核实」 */
+.hdDrawerOrigin {
+  margin: 0;
+}
+
+.hdDraftPanel {
+  padding: 12px;
+  border: 1px dashed var(--hd-amber-line);
+  border-radius: 8px;
+  background: var(--hd-amber-bg);
+}
+
+.hdDraftSources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.hdDraftSource {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.hdDraftQuote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--hd-amber-line);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--hd-body);
+  white-space: pre-wrap;
+}
+
+.hdDraftWarning {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--hd-amber-ink);
+}
+
+/* HelpDesk 数据：卡片 + 表格（客户端没有图表库） */
+.hdDataFilters {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 43px;
+}
+
+.hdDataLoading,
+.hdDataEmpty {
+  margin: 24px 0 0;
+}
+
+.hdStatGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.hdStatCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid #e1e7f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.hdStatLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #53657e;
+}
+
+.hdStatValue {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 30px;
+  color: var(--hd-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.hdStatDetail {
+  font-size: 12px;
+  color: var(--hd-body);
+}
+
+.hdStatHint {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--hd-muted);
+}
+
+.hdDataSection {
+  margin-top: 20px;
+}
+
+.hdDataTableWrap {
+  margin-top: 0;
+}
+
+.hdDataTable th[scope='row'] {
+  font-weight: 600;
+  color: #233858;
+}
+
+/* 趋势表里 AI 解决率的横条：只是装饰（aria-hidden），数字是正文 */
+.hdDataBar {
+  display: block;
+  width: 64px;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--hd-line-soft);
+  overflow: hidden;
+}
+
+.hdDataBarFill {
+  display: block;
+  height: 100%;
+  background: var(--hd-blue);
 }

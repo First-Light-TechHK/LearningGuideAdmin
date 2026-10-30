@@ -37,3 +37,34 @@ export function errorMessage(locale: Locale, code: string): string {
 export function faqCategoryLabel(locale: Locale, category: string): string {
   return labelOr(locale, `helpDesk.faqCategory.${category}`, category)
 }
+
+/** v5 Part A：FAQ 的学员情境信号（payment_failed …）。 */
+export function faqSignalLabel(locale: Locale, signal: string): string {
+  return labelOr(locale, `helpDesk.faqSignal.${signal}`, signal)
+}
+
+/* ------------------------------ v4 Part A：订单 ------------------------------ */
+
+export function orderStatusLabel(locale: Locale, status: string): string {
+  return labelOr(locale, `helpDesk.orderStatus.${status.trim().toLowerCase()}`, status)
+}
+
+export function paymentModeLabel(locale: Locale, mode: string): string {
+  return labelOr(locale, `helpDesk.paymentMode.${mode.trim().toLowerCase()}`, mode)
+}
+
+/**
+ * 订单金额：Portal 给的是最小货币单位的整数（3900 = 39.00）。按币种的小数位换算（JPY 等无小数的不除），
+ * 缺金额或币种时显示 —。
+ */
+export function formatOrderAmount(locale: Locale, amount: number | null | undefined, currency: string | null | undefined): string {
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || !currency) return '—'
+  const code = currency.toUpperCase()
+  try {
+    const format = new Intl.NumberFormat(locale, { style: 'currency', currency: code })
+    const digits = format.resolvedOptions().maximumFractionDigits ?? 2
+    return format.format(amount / 10 ** digits)
+  } catch {
+    return `${(amount / 100).toFixed(2)} ${code}`
+  }
+}

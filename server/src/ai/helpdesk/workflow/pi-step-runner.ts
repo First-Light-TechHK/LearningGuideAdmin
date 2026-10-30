@@ -13,11 +13,13 @@ import type {
 
 import type { JsonObject } from '../../../contracts/helpdesk-trace';
 import type {
+  AgentCallExtras,
   AgentStepContext,
   AgentStepOutcome,
   AgentStepRunner,
   AgentStepSpec,
   ModelTarget,
+  ThinkingSetting,
 } from './engine';
 
 /**
@@ -82,6 +84,7 @@ let openRouterModels: ReturnType<PiModules['ai']['createModels']> | undefined;
 /**
  * pi-ai 的 OpenRouter provider。模型 id 随 HELPDESK_SUGGEST_MODEL 任意：目录里有就用目录的价格
  * （openai-completions 接口），没有就按 OpenRouter 的 chat completions 现造；base URL 每次现读。
+ * 给了 target.thinking 就把模型标成能思考，价目外的模型 pi 才会发 reasoning（档位即 Agent 的 thinkingLevel）。
  */
 export const openRouterSource: ModelSource = (pi, target) => {
   if (!openRouterModels) {
@@ -89,22 +92,39 @@ export const openRouterSource: ModelSource = (pi, target) => {
     openRouterModels.setProvider(pi.openrouter.openrouterProvider());
   }
   const known = openRouterModels.getModel('openrouter', target.model);
+  const thinks = target.thinking !== undefined;
   const model: Model<Api> =
     known?.api === 'openai-completions'
-      ? { ...known, baseUrl: target.baseUrl }
+      ? {
+          ...known,
+          baseUrl: target.baseUrl,
+          ...(thinks ? { reasoning: true } : {}),
+        }
       : {
           id: target.model,
           name: target.model,
           api: 'openai-completions',
           provider: 'openrouter',
           baseUrl: target.baseUrl,
-          reasoning: false,
+          reasoning: thinks,
           input: ['text'],
           cost: known?.cost ?? NO_COST,
           contextWindow: known?.contextWindow ?? 128_000,
           maxTokens: known?.maxTokens ?? 4_096,
         };
   return { models: openRouterModels, model, priced: known !== undefined };
+};
+
+/**
+ * 思考时在每步的 maxTokens 上另给的额度：思考的字也算在 max_tokens 里，不另给，选卡片的调用会被截断
+ * （2026-10-30 实测 DeepSeek low 档 23% 截断）。档位与 pi 给 Anthropic 等的默认思考预算相同；
+ * 只按用掉的计费，真正的上限是期限。
+ */
+export const THINKING_TOKENS: Readonly<Record<ThinkingSetting, number>> = {
+  off: 0,
+  low: 2_048,
+  medium: 8_192,
+  high: 16_384,
 };
 
 const clip = (text: string, max: number) =>
@@ -182,22 +202,68 @@ export class PiStepRunner implements AgentStepRunner {
     const allowed = [spec.tool.name];
     const toolName = (name: string) =>
       IDENTIFIER.test(name) ? name : 'invalid_name';
-    // 原样记参数只限通过枚举的那种：恰好这些键、每个值都在枚举里
+    // v5 的列表参数：枚举为空（例如候选都没有答案块）就不给模型这个参数
+    const lists = Object.entries(spec.tool.listArgs ?? {}).filter(
+      ([, values]) => values.length > 0,
+    );
+    const texts = Object.entries(spec.tool.textArgs ?? {});
+    const flags = Object.entries(spec.tool.flagArgs ?? {});
+    const hasExtras =
+      spec.tool.listArgs !== undefined ||
+      spec.tool.textArgs !== undefined ||
+      spec.tool.flagArgs !== undefined;
+    const textKeys = new Set(texts.map(([key]) => key));
+    const known = new Set([
+      ...Object.keys(spec.tool.enumArgs),
+      ...lists.map(([key]) => key),
+      ...textKeys,
+      ...flags.map(([key]) => key),
+    ]);
+    // 原样记参数只限通过校验的那种：只有这些键、枚举都在、列表每项都在枚举里、真 / 假是布尔、短句是文字
     const valid = (args: unknown) => {
       if (typeof args !== 'object' || args === null || Array.isArray(args))
         return false;
-      const entries = Object.entries(args as Record<string, unknown>);
-      const enums = Object.entries(spec.tool.enumArgs);
+      const record = args as Record<string, unknown>;
       return (
-        entries.length === enums.length &&
-        enums.every(([key, values]) => {
-          const value = (args as Record<string, unknown>)[key];
+        Object.keys(record).every((key) => known.has(key)) &&
+        Object.entries(spec.tool.enumArgs).every(([key, values]) => {
+          const value = record[key];
           return typeof value === 'string' && values.includes(value);
-        })
+        }) &&
+        lists.every(([key, values]) => {
+          const value = record[key];
+          return (
+            value === undefined ||
+            (Array.isArray(value) &&
+              value.every((v) => typeof v === 'string' && values.includes(v)))
+          );
+        }) &&
+        flags.every(([key]) => typeof record[key] === 'boolean') &&
+        // pi 把数字、布尔转成文字（TypeBox 转换）再交给工具：这里同样接受，守卫再看内容
+        texts.every(([key]) =>
+          ['undefined', 'string', 'number', 'boolean'].includes(
+            typeof record[key],
+          ),
+        )
       );
+    };
+    // 日志里的参数：模型写的短句换成长度（可能复述学员原文），其余原样
+    const loggable = (args: unknown): JsonObject => {
+      if (textKeys.size === 0) return { arguments: JSON.stringify(args ?? {}) };
+      const record = args as Record<string, unknown>;
+      const kept = Object.fromEntries(
+        Object.entries(record).filter(([key]) => !textKeys.has(key)),
+      );
+      const lengths = Object.fromEntries(
+        Object.entries(record)
+          .filter(([key]) => textKeys.has(key))
+          .map(([key, value]) => [key, { length: [...String(value)].length }]),
+      );
+      return { arguments: JSON.stringify(kept), texts: lengths };
     };
     let closed = false;
     let picked: Record<string, string> | null = null;
+    let extras: AgentCallExtras | undefined;
     let lastStop: AssistantMessage['stopReason'] | null = null;
     const blocked = new Map<string, string>();
     const emit = (type: Parameters<typeof trace.emit>[0], data: JsonObject) => {
@@ -209,20 +275,68 @@ export class PiStepRunner implements AgentStepRunner {
       label: spec.tool.name,
       description: spec.tool.description,
       parameters: pi.ai.Type.Object(
-        Object.fromEntries(
-          Object.entries(spec.tool.enumArgs).map(([key, values]) => [
-            key,
-            pi.ai.StringEnum([...values]),
-          ]),
-        ),
+        {
+          ...Object.fromEntries(
+            Object.entries(spec.tool.enumArgs).map(([key, values]) => [
+              key,
+              pi.ai.StringEnum([...values]),
+            ]),
+          ),
+          // v5：长度、条数不写进 schema——超了也只是由代码守卫回退，不该让整个调用作废
+          ...Object.fromEntries(
+            lists.map(([key, values]) => [
+              key,
+              pi.ai.Type.Optional(
+                pi.ai.Type.Array(pi.ai.StringEnum([...values])),
+              ),
+            ]),
+          ),
+          ...Object.fromEntries(
+            texts.map(([key, description]) => [
+              key,
+              pi.ai.Type.Optional(pi.ai.Type.String({ description })),
+            ]),
+          ),
+          ...Object.fromEntries(
+            flags.map(([key, description]) => [
+              key,
+              pi.ai.Type.Boolean({ description }),
+            ]),
+          ),
+        },
         { additionalProperties: false },
       ),
       execute: (_id, args) => {
-        // pi 已按 TypeBox 校验：每个参数都是枚举里的字符串
-        picked = { ...(args as Record<string, string>) };
+        // pi 已按 TypeBox 校验：枚举参数是枚举里的字符串，列表每项在枚举里，短句是文字，真 / 假是布尔
+        const record = args as Record<string, unknown>;
+        picked = Object.fromEntries(
+          Object.keys(spec.tool.enumArgs).map((key) => [
+            key,
+            record[key] as string,
+          ]),
+        );
+        if (hasExtras)
+          extras = {
+            lists: Object.fromEntries(
+              lists
+                .filter(([key]) => Array.isArray(record[key]))
+                .map(([key]) => [key, [...(record[key] as string[])]]),
+            ),
+            texts: Object.fromEntries(
+              texts
+                .filter(([key]) => typeof record[key] === 'string')
+                .map(([key]) => [key, record[key] as string]),
+            ),
+            flags: Object.fromEntries(
+              flags.map(([key]) => [key, record[key] as boolean]),
+            ),
+          };
+        const details: JsonObject = extras
+          ? { ...picked, ...extras.lists, ...extras.flags }
+          : picked;
         return Promise.resolve({
           content: [{ type: 'text', text: 'Recorded.' }],
-          details: picked,
+          details,
           terminate: true,
         });
       },
@@ -233,7 +347,7 @@ export class PiStepRunner implements AgentStepRunner {
         systemPrompt: spec.system,
         model,
         tools: [tool],
-        thinkingLevel: 'off',
+        thinkingLevel: context.model.thinking ?? 'off',
       },
       streamFn: (requestModel, transcript, streamOptions) => {
         const traceparent = context.traceparent();
@@ -248,7 +362,8 @@ export class PiStepRunner implements AgentStepRunner {
           apiKey: context.model.apiKey,
           headers: { ...streamOptions?.headers, traceparent },
           temperature: 0,
-          maxTokens: spec.maxTokens,
+          maxTokens:
+            spec.maxTokens + THINKING_TOKENS[context.model.thinking ?? 'off'],
           maxRetries: 0,
           // openai-completions 原样转成 tool_choice（SimpleStreamOptions 的类型只列 auto / none）
           toolChoice: 'required' as SimpleStreamOptions['toolChoice'],
@@ -291,7 +406,7 @@ export class PiStepRunner implements AgentStepRunner {
           callId: event.toolCallId,
           name: toolName(event.toolName),
           ...(allowed.includes(event.toolName) && valid(event.args)
-            ? { arguments: raw }
+            ? loggable(event.args)
             : { rejectedArguments: { length: raw.length } }),
         });
       } else if (event.type === 'tool_execution_end') {
@@ -350,6 +465,9 @@ export class PiStepRunner implements AgentStepRunner {
         kind: 'error',
         message: clip(last?.errorMessage ?? 'no response', 300),
       };
-    return picked ? { kind: 'called', args: picked } : { kind: 'no_call' };
+    if (!picked) return { kind: 'no_call' };
+    return extras
+      ? { kind: 'called', args: picked, extras }
+      : { kind: 'called', args: picked };
   }
 }

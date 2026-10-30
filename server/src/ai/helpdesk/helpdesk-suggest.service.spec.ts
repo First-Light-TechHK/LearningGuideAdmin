@@ -11,8 +11,11 @@ import {
   ALTERNATIVES_TIMEOUT_MS,
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
+  suggestLimits,
   suggestModel,
+  suggestThinking,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_THINKING_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
   SUGGEST_TIMEOUT_MS,
 } from './helpdesk-suggest.service';
@@ -28,6 +31,7 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
+import { PICK_FAQ_SYSTEM } from './workflow/faq-workflow';
 
 /**
  * Helpdesk addendum §C：Agent 推荐答案（v2：写死的 FAQ 工作流 + 每个 agent 步一个 pi Agent）。
@@ -168,6 +172,7 @@ function setup(
     reply?: RunnerReply;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    deadlineMs?: number;
     now?: () => number;
   } = {},
 ) {
@@ -207,6 +212,7 @@ function setup(
     events,
     env: () => env,
     timeoutMs: options.timeoutMs,
+    deadlineMs: options.deadlineMs,
     now: options.now,
   });
   return {
@@ -293,9 +299,14 @@ describe('Helpdesk suggest: happy path', () => {
           'off_topic',
         ],
         faqId: [...candidates.map((c) => c.id), 'none'],
+        confidence: ['sure', 'unsure'],
       },
     });
-    expect(Object.keys(spec.tool.enumArgs)).toEqual(['intent', 'faqId']);
+    expect(Object.keys(spec.tool.enumArgs)).toEqual([
+      'intent',
+      'faqId',
+      'confidence',
+    ]);
     // 学员原文只放在 prompt 里，system 提示不含学员内容
     expect(spec.system).not.toContain('Ignore previous instructions');
     expect(spec.prompt).toContain('Ignore previous instructions');
@@ -303,7 +314,7 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.prompt).toContain(candidates[1].answer);
   });
 
-  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 80 tokens) but retrieves on the whole text', async () => {
+  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 150 tokens) but retrieves on the whole text', async () => {
     const long = candidates.map((c) => ({ ...c, answer: c.answer.repeat(40) }));
     const { service, complete, findCandidates } = setup({ found: long });
     // 长信的真正问题常在最后一段：送给模型的是开头 600 字 + 结尾 1400 字
@@ -334,7 +345,8 @@ describe('Helpdesk suggest: happy path', () => {
     expect(prompt.candidates.map((c) => c.answer)).toEqual(
       long.map((c) => c.answer.slice(0, 600)),
     );
-    expect(spec.maxTokens).toBe(80);
+    // 三个参数的调用 DeepSeek 要用约 80 个 token：80 会截断，留足余量（2026-10-30 qa10k dev 3484 / 4890 次截断）
+    expect(spec.maxTokens).toBe(150);
   });
 
   it('keeps the injection guard and the one-call rule in the system prompt', async () => {
@@ -359,6 +371,45 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.system).toContain(
       'the candidate that tells them how to do it themselves',
     );
+  });
+
+  it('shows no card for an unsure pick: the pick goes first in the alternatives, and an unsure none changes nothing', async () => {
+    // 2026-10-30 实测：「不确定」时给的卡片错得多，提交工单这条路同 v5 一样不出卡，让学员自己挑或转人工
+    expect(PICK_FAQ_SYSTEM).toContain(
+      'confidence: sure when one candidate clearly fits; unsure when two or more could fit or you are guessing.',
+    );
+    const unsure = (faqId: string) => () =>
+      Promise.resolve<AgentStepOutcome>({
+        kind: 'called',
+        args: { intent: 'question', faqId, confidence: 'unsure' },
+      });
+    const { service, rows } = setup({ reply: unsure(candidates[1].id) });
+    await expect(service.suggest(input)).resolves.toEqual({
+      suggestion: null,
+      alternatives: alternativesOf([candidates[1], candidates[0]]),
+    });
+    expect(rows[0]).toMatchObject({ faqId: null });
+    const none = setup({ reply: unsure('none') });
+    await expect(none.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.RANKED,
+    );
+    // sure, or no confidence at all (an older model reply), still answers
+    for (const confidence of ['sure', undefined]) {
+      const { service: sure } = setup({
+        reply: () =>
+          Promise.resolve<AgentStepOutcome>({
+            kind: 'called',
+            args: {
+              intent: 'question',
+              faqId: candidates[1].id,
+              ...(confidence ? { confidence } : {}),
+            },
+          }),
+      });
+      expect((await sure.suggest(input)).suggestion?.faqId).toBe(
+        candidates[1].id,
+      );
+    }
   });
 
   it('answers a question or an own-account request; every other intent is no answer, even with a valid id', async () => {
@@ -445,7 +496,10 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(Date.now() - started).toBeLessThan(1000);
     expect(signal?.aborted).toBe(true);
-    expect(new HelpdeskSuggestService({} as never).timeoutMs).toBe(3000);
+    expect(suggestLimits(false, {})).toEqual({
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
   });
 
   it('returns null when the model call fails', async () => {
@@ -565,6 +619,28 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
     await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(rows).toHaveLength(1);
     expect(rows[0].faqId).toBeNull();
+  });
+
+  it('takes a longer deadline when one is given (the thinking benchmark), 3.5 s by default', async () => {
+    let now = T0;
+    const { service, findCandidates, rows } = setup({
+      now: () => now,
+      timeoutMs: 30_000,
+      deadlineMs: 30_000,
+      reply: () => {
+        now += 12_000;
+        return pick(candidates[0].id);
+      },
+    });
+    findCandidates.mockImplementation(() => {
+      now += 1_000;
+      return Promise.resolve(candidates);
+    });
+    expect((await service.suggest(input)).suggestion?.faqId).toBe(
+      candidates[0].id,
+    );
+    expect(rows[0].faqId).toBe(candidates[0].id);
+    expect(suggestLimits(false, {}).deadlineMs).toBe(3_500);
   });
 
   it('gives the model only the time that is left, then aborts it', async () => {
@@ -819,18 +895,58 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
 
 describe('Helpdesk suggest: model choice', () => {
   it('uses the model fixed in code; HELPDESK_SUGGEST_MODEL only overrides it', () => {
-    // 2026-10-29 真模型评测（dev 难例）：gemini-2.5-flash 答错率最低、最快
-    expect(suggestModel({})).toBe('google/gemini-2.5-flash');
+    // 用户 2026-10-30：DeepSeek（deepseek-v4.1-flash）为主模型，gemini-2.5-flash 只作对照
+    expect(suggestModel({})).toBe('deepseek/deepseek-v4.1-flash');
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: '  ' })).toBe(
-      'google/gemini-2.5-flash',
+      'deepseek/deepseek-v4.1-flash',
     );
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: ' x/y ' })).toBe('x/y');
     // AI Tutor 的模型列表不影响推荐用的模型（DEV 上排第一的是 deepseek）
     expect(
       suggestModel({
-        AI_AVAILABLE_MODELS: 'deepseek/deepseek-v4.1-flash, openai/gpt-4o-mini',
+        AI_AVAILABLE_MODELS: 'openai/gpt-4o-mini, deepseek/deepseek-v4.1-flash',
       }),
-    ).toBe('google/gemini-2.5-flash');
+    ).toBe('deepseek/deepseek-v4.1-flash');
+  });
+
+  it('the chat thinks high unless HELPDESK_SUGGEST_THINKING names another level (read on every call); the ticket form never thinks', async () => {
+    // 用户 2026-10-30：DeepSeek 开 thinking。盲评：high 档错卡最少（长对话 0.45%，off 1.45%）
+    expect(suggestThinking({})).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: ' LOW ' })).toBe('low');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'off' })).toBe('off');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('high');
+    // 提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天：不思考、3.5 秒
+    for (const env of [{}, { HELPDESK_SUGGEST_THINKING: 'low' }])
+      expect(suggestLimits(false, env)).toEqual({
+        deadlineMs: SUGGEST_DEADLINE_MS,
+        stepMs: SUGGEST_TIMEOUT_MS,
+      });
+    const { service, complete, env } = setup();
+    await service.suggest(input);
+    env.HELPDESK_SUGGEST_THINKING = 'low';
+    await service.suggest(input);
+    await service.suggest({ ...input, source: 'chat' });
+    for (const [, context] of complete.mock.calls)
+      expect(context.model).not.toHaveProperty('thinking');
+  });
+
+  it('gives a thinking chat 15 s in all (p99 of high was 12.6 s), and 3.5 s with thinking off', () => {
+    expect(SUGGEST_THINKING_DEADLINE_MS).toBe(15_000);
+    expect(suggestLimits(true, {})).toEqual({
+      thinking: 'high',
+      deadlineMs: 15_000,
+      stepMs: 15_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'low' })).toEqual({
+      thinking: 'low',
+      deadlineMs: 15_000,
+      stepMs: 15_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'off' })).toEqual({
+      thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
   });
 });
 
@@ -1370,6 +1486,37 @@ describe('Helpdesk suggest v3: alternatives (你可能想问, spec v3 §1)', () 
       },
     ],
   ])('rejects shownFaqIds that is %s with 400', async (_name, patch) => {
+    const { service } = setup();
+    const error = await service
+      .suggest({ ...input, ...patch })
+      .catch((e: unknown) => e);
+    expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
+  });
+});
+
+describe('suggest request context (v5, contract fixture v6)', () => {
+  it('accepts the context a v5 Portal sends and still answers', async () => {
+    const { service } = setup();
+    await expect(
+      service.suggest({
+        ...input,
+        context: {
+          nodeId: '0192bbbb-0000-7000-8000-000000000001',
+          sessionId: '0192bbbb-0000-7000-8000-000000000002',
+          recentTurns: ['I paid but my plan is not active'],
+        },
+      }),
+    ).resolves.toHaveProperty('suggestion');
+  });
+
+  it.each([
+    ['not an object', { context: 'x' }],
+    ['a malformed nodeId', { context: { nodeId: 'faq-1' } }],
+    [
+      'more than 3 recent turns',
+      { context: { recentTurns: ['a', 'b', 'c', 'd'] } },
+    ],
+  ])('rejects a context that is %s with 400', async (_name, patch) => {
     const { service } = setup();
     const error = await service
       .suggest({ ...input, ...patch })

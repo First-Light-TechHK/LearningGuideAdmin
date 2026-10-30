@@ -107,6 +107,8 @@ export type TicketSummary = {
   rating: number | null;
   /** v2 §4a：员工标了「Flag follow-up」。 */
   flagged: boolean;
+  /** v4 Part A：学员从付款记录发起咨询时关联的订单号；没有订单（或旧的 Portal）为 null。 */
+  orderId: string | null;
 };
 
 export type TicketAttachment = {
@@ -191,9 +193,43 @@ export type TicketAiAssist = {
   createdAt: string;
 };
 
+/**
+ * v4 Part A（helpdesk-v4-order-and-chat-end.md）：工单关联订单的只读投影。Portal 用代码从学员
+ * 自己的订单记录构建（AI 助手从不接触订单）；这里只保留这 8 个字段，格式不对的字段为 null，
+ * Portal 多给的任何字段（卡号、Stripe 标识、地址……）一律丢弃。
+ */
+export const ORDER_STATUSES = [
+  'paid',
+  'pending',
+  'failed',
+  'canceled',
+  'refunded',
+] as const;
+export const ORDER_KINDS = ['purchase', 'trial_activation', 'upgrade'] as const;
+export const PAYMENT_MODES = ['demo', 'stripe'] as const;
+/** 与 Portal 一致：字母、数字、_、-，最长 64。 */
+export const ORDER_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const ORDER_PLAN_NAME_MAX = 200;
+
+export type TicketOrder = {
+  id: string;
+  /** ORDER_STATUSES 之一；Portal 以后新增的状态原样保留（界面显示原值）。 */
+  status: string | null;
+  /** 整数，最小货币单位（3900 = 39.00）。 */
+  amount: number | null;
+  /** ISO 4217 三位字母，小写（"usd"）。 */
+  currency: string | null;
+  planName: string | null;
+  kind: string | null;
+  createdAt: string | null;
+  paymentMode: string | null;
+};
+
 export type TicketDetail = TicketSummary & {
   student: TicketStudent | null;
   subscription: TicketSubscription | null;
+  /** v4 Part A：没有订单时为 null。 */
+  order: TicketOrder | null;
   messages: TicketMessage[];
   events: TicketEvent[];
   aiAssist: TicketAiAssist[];
@@ -251,4 +287,182 @@ export type EnquiryList = {
 export type EnquiryDetail = TicketDetail & {
   needsReply: boolean;
   available: AvailableActions;
+};
+
+// ------------------------------------------------------------------------
+// v5 Part G（契约 fixture v7）：数据飞轮读的 Portal insights 与 Portal 的原文清理任务
+// ------------------------------------------------------------------------
+
+/** 一轮的种类（Portal helpdesk_assist_log.kind）。 */
+export const TURN_KINDS = [
+  'answer',
+  'smalltalk',
+  'clarify',
+  'no_match',
+  'handover',
+] as const;
+export type TurnKind = (typeof TURN_KINDS)[number];
+
+/** 守卫结果或原因码（passed / fallback / 具体原因）。 */
+export const TURN_GUARDS = [
+  'passed',
+  'fallback',
+  'missing',
+  'too_long',
+  'link',
+  'email',
+  'digit',
+  'markup',
+  'blocked_phrase',
+  'ai_filler',
+  'script',
+  'ungrounded',
+  'not_covered',
+  'timeout',
+  'error',
+] as const;
+export type TurnGuard = (typeof TURN_GUARDS)[number];
+
+/** 学员怎么到的这一轮（graph design §3）。 */
+export const ASSIST_VIAS = [
+  'typed',
+  'follow_up',
+  'option',
+  'starter',
+  'signal',
+  'alternative',
+] as const;
+export type AssistVia = (typeof ASSIST_VIAS)[number];
+
+/** 聊天会话的结束原因。 */
+export const CHAT_END_REASONS = [
+  'idle',
+  'ended_by_learner',
+  'handover',
+  'ticket',
+] as const;
+export type ChatEndReason = (typeof CHAT_END_REASONS)[number];
+
+/** 工单的关闭原因。 */
+export const CLOSE_REASONS = [
+  'cancelled',
+  'user_confirmed',
+  'user_closed',
+  'auto_confirmed',
+] as const;
+export type CloseReason = (typeof CLOSE_REASONS)[number];
+
+/** Portal 脱敏器放进文字的占位符种类（<kind>）。 */
+export const PII_PLACEHOLDERS = [
+  'url',
+  'email',
+  'token',
+  'id',
+  'order',
+  'ticket',
+  'student_id',
+  'handle',
+  'ip',
+  'phone',
+  'card',
+  'number',
+  'name',
+] as const;
+export type PiiPlaceholder = (typeof PII_PLACEHOLDERS)[number];
+
+/** Portal 的后台任务（helpdesk_job_runs，Portal 迁移 024）。 */
+export const PORTAL_JOBS = ['assist_retention'] as const;
+export type PortalJob = (typeof PORTAL_JOBS)[number];
+export const PORTAL_JOB_TRIGGERS = ['schedule', 'manual'] as const;
+export type PortalJobTrigger = (typeof PORTAL_JOB_TRIGGERS)[number];
+export const PORTAL_JOB_STATUSES = ['running', 'succeeded', 'failed'] as const;
+export type PortalJobStatus = (typeof PORTAL_JOB_STATUSES)[number];
+
+/** 与 Portal 一致的 insights 限制（fixture insightsLimits）。 */
+export const INSIGHT_LIMITS = {
+  pageDefault: 200,
+  pageMax: 500,
+  settleMs: 60_000,
+  agentReplyMax: 2000,
+  ticketAfterHours: 24,
+  textMax: 500,
+} as const;
+
+/** 这一轮之后的工单结果（Portal 的 helpdesk_assist_outcomes 视图）；agentReply 已脱敏，只在客服解决时给。 */
+export type InsightTicket = {
+  linked: boolean;
+  status: TicketStatus | null;
+  closeReason: CloseReason | null;
+  resolvedByAgent: boolean;
+  agentReplied: boolean;
+  agentReply: string | null;
+};
+
+/**
+ * insights 的一轮：学员的文字已被 Portal 的代码脱敏器处理过（占位符 <kind>），其余全是标签。
+ * 从不含学员 id、姓名、邮箱、订单、工单 id / 编号 / 标题、答案原文或 trace id。
+ */
+export type InsightTurn = {
+  id: string;
+  createdAt: string;
+  source: (typeof ASSIST_SOURCES)[number] | null;
+  locale: string;
+  text: string;
+  sessionId: string | null;
+  turnIndex: number | null;
+  lastTurn: boolean | null;
+  sessionEndReason: ChatEndReason | null;
+  kind: TurnKind | null;
+  intent: string | null;
+  guard: TurnGuard | null;
+  via: AssistVia | null;
+  faqId: string | null;
+  nodeId: string | null;
+  parentNodeId: string | null;
+  releaseVersion: number | null;
+  answered: boolean;
+  vote: AssistFeedback | null;
+  rating: number | null;
+  covered: boolean | null;
+  expanded: boolean | null;
+  handover: boolean;
+  ticketAfterChat: boolean;
+  ticket: InsightTicket | null;
+  signals: string[];
+};
+
+/** 一页 insights：旧的在前；until 由第一页定，游标里带着。 */
+export type InsightsPage = {
+  turns: InsightTurn[];
+  nextCursor: string | null;
+  until: string;
+};
+
+/** Portal 一次后台任务运行（GET /jobs/assist-retention 的一行）。 */
+export type PortalJobRun = {
+  id: string;
+  job: PortalJob;
+  day: string;
+  trigger: PortalJobTrigger;
+  status: PortalJobStatus;
+  attempts: number;
+  startedAt: string;
+  finishedAt: string | null;
+  cutoff: string | null;
+  rowsScrubbed: number;
+  moreDue: boolean;
+  requestedBy: Agent | null;
+  errorCode: string | null;
+};
+
+export type PortalJobRuns = {
+  job: PortalJob;
+  retentionDays: number;
+  runs: PortalJobRun[];
+};
+
+/** 立即运行的结果：completed（跑完了，或同一个 Idempotency-Key 的那一次）/ already_running（别的实例在跑）。 */
+export type PortalJobRunResult = {
+  outcome: 'completed' | 'already_running';
+  run: PortalJobRun | null;
 };

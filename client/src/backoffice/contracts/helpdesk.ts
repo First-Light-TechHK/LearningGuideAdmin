@@ -73,6 +73,8 @@ export type EnquiryRow = {
   rating?: number | null;
   /** v2：员工标了「Flag follow-up」。 */
   flagged: boolean;
+  /** v4 Part A：学员从付款记录发起咨询时关联的订单号；没有订单为 null（旧服务端没有这个字段）。 */
+  orderId?: string | null;
   /** 每一行都带可用操作：学员时间线上的每张卡片都有操作栏。 */
   available: AvailableActions;
 };
@@ -165,9 +167,33 @@ export type AgentRun = {
   events: AgentRunEvent[];
 };
 
+/**
+ * v4 Part A：工单关联订单的只读投影（Portal 用代码从学员自己的订单记录构建，Admin Server 只保留这 8 个字段，
+ * 格式不对的字段为 null）。AI 助手从不接触订单。
+ */
+export const ORDER_STATUSES = ["paid", "pending", "failed", "canceled", "refunded"] as const;
+export const ORDER_KINDS = ["purchase", "trial_activation", "upgrade"] as const;
+export const PAYMENT_MODES = ["demo", "stripe"] as const;
+
+export type TicketOrder = {
+  id: string;
+  /** ORDER_STATUSES 之一；Portal 以后新增的值原样显示。 */
+  status: string | null;
+  /** 整数，最小货币单位（3900 = 39.00）。 */
+  amount: number | null;
+  /** ISO 4217，小写（"usd"）。 */
+  currency: string | null;
+  planName: string | null;
+  kind: string | null;
+  createdAt: string | null;
+  paymentMode: string | null;
+};
+
 export type EnquiryDetail = EnquiryRow & {
   student: TicketStudent | null;
   subscription: TicketSubscription | null;
+  /** v4 Part A：没有订单为 null；有 orderId 却为 null = Portal 这次没读到订单（旧服务端没有这个字段）。 */
+  order?: TicketOrder | null;
   messages: TicketMessage[];
   events: TicketEvent[];
   aiAssist: TicketAiAssist[];
@@ -203,6 +229,22 @@ export const TIMELINE_LIMIT = 10;
 export const FAQ_CATEGORIES = ["account_technical", "courses_learning", "payments_subscriptions", "other"] as const;
 export type FaqCategory = (typeof FAQ_CATEGORIES)[number];
 
+/**
+ * v5 Part A：FAQ 可打的学员情境信号（服务端 FAQ_SIGNALS，契约 fixture v6 的 faqSignal；顺序 = Portal 选
+ * 「你可能遇到的问题」的优先级）。open_ticket_waiting 不是 FAQ，不在这里。
+ */
+export const FAQ_SIGNALS = [
+  "payment_failed",
+  "payment_pending",
+  "recent_purchase",
+  "trial_ending",
+  "subscription_expired",
+  "subscription_cancelled",
+  "email_unverified",
+  "from_order",
+] as const;
+export type FaqSignal = (typeof FAQ_SIGNALS)[number];
+
 /** 一条中英双语 FAQ（保存即发布；删除 = 归档，列表里看不到）。 */
 export type HelpdeskFaq = {
   id: string;
@@ -213,6 +255,12 @@ export type HelpdeskFaq = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
+  /** v5 Part A：服务端总会给（迁移 20261030080000）；编辑器多选（待视觉验收）。 */
+  signals?: FaqSignal[];
+  /** v5 问题树（迁移 20261030090000；旧服务端没有 → 按 answer / 入口处理）：稳定的 slug。 */
+  key?: string;
+  type?: FaqNodeType;
+  entry?: boolean;
   status: "published" | "archived";
   version: number;
   createdBy: string | null;
@@ -231,4 +279,474 @@ export type FaqBody = {
   questionZh: string;
   answerZh: string;
   keywords: string[];
+  /** v5 Part A：不带 = 保留已存的标签（旧的编辑器只改文字不会清掉）。 */
+  signals?: FaqSignal[];
+  /** v5 问题树：不带 = 保留（新建缺省 answer、入口）。 */
+  type?: FaqNodeType;
+  entry?: boolean;
+};
+
+/* --------------------------- v5 问题树（graph design §5） --------------------------- */
+
+/** answer = FAQ 卡片；choice = 一句提问 + 2–4 个选项（A/B/C/D）。 */
+export const FAQ_NODE_TYPES = ["answer", "choice"] as const;
+export type FaqNodeType = (typeof FAQ_NODE_TYPES)[number];
+export const FAQ_EDGE_KINDS = ["follow_up", "option"] as const;
+export type FaqEdgeKind = (typeof FAQ_EDGE_KINDS)[number];
+
+/** 与服务端 faqContracts.ts FAQ_LIMITS 一致的图上限。 */
+export const FAQ_GRAPH_LIMITS = {
+  optionLabelMaxZh: 24,
+  optionLabelMaxEn: 40,
+  followUpLabelMax: 200,
+  optionsMin: 2,
+  optionsMax: 4,
+  followUpsMax: 6,
+  followUpsShown: 4,
+  phrasingMax: 200,
+  phrasingsMax: 30,
+  depthMax: 4,
+} as const;
+
+/** 节点摘要（树、父子清单）。 */
+export type FaqNodeSummary = {
+  id: string;
+  key: string;
+  type: FaqNodeType;
+  entry: boolean;
+  category: FaqCategory;
+  questionEn: string;
+  questionZh: string;
+  status: "published" | "archived";
+};
+
+export type FaqEdgeRow = {
+  id: string;
+  parentId: string;
+  childId: string;
+  kind: FaqEdgeKind;
+  position: number;
+  /** null = 用子节点的问题。 */
+  labelEn: string | null;
+  labelZh: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** GET /api/helpdesk/faqs/:id/edges 的一行：边、另一端的节点、解析好的文字。 */
+export type FaqEdgeView = {
+  edge: FaqEdgeRow;
+  node: FaqNodeSummary | null;
+  label: { en: string; zh: string };
+};
+
+export type FaqEdges = { children: FaqEdgeView[]; parents: FaqEdgeView[] };
+
+/** 服务端 faqGraphChecks.ts GRAPH_RULES（新规则没有文案时原样显示）。 */
+export const GRAPH_RULES = [
+  "edge_endpoint",
+  "duplicate_edge",
+  "cycle",
+  "depth",
+  "orphan",
+  "option_parent",
+  "choice_follow_up",
+  "choice_options",
+  "choice_prompt",
+  "follow_ups",
+  "language",
+  "label_length",
+  "answer_blocks",
+] as const;
+
+export type GraphProblem = {
+  rule: string;
+  nodeId: string | null;
+  key: string | null;
+  parentId?: string;
+  childId?: string;
+  detail: string;
+};
+
+export type FaqGraphCheckResult = {
+  passed: boolean;
+  problems: GraphProblem[];
+  counts: { nodes: number; entries: number; choices: number; edges: number; phrasings: number };
+  maxDepth: number;
+};
+
+export type FaqTreeNode = {
+  node: FaqNodeSummary;
+  edge: FaqEdgeRow | null;
+  label: { en: string; zh: string } | null;
+  depth: number;
+  parentCount: number;
+  alsoAppearsIn: { id: string; key: string; questionEn: string; questionZh: string }[];
+  warnings: GraphProblem[];
+  cycle: boolean;
+  truncated: boolean;
+  children: FaqTreeNode[];
+};
+
+export type FaqTree = { root: FaqTreeNode; nodes: number };
+
+export const PHRASING_LOCALES = ["en-GB", "zh-CN", "zh-TW"] as const;
+export type PhrasingLocale = (typeof PHRASING_LOCALES)[number];
+
+export type FaqPhrasing = {
+  id: string;
+  faqId: string;
+  locale: PhrasingLocale;
+  text: string;
+  source: "staff" | "flywheel" | "seed";
+  createdBy: string | null;
+  createdAt: string;
+};
+
+export const FAQ_RELEASE_STATUSES = ["draft", "evaluating", "published", "rejected", "superseded"] as const;
+export type FaqReleaseStatus = (typeof FAQ_RELEASE_STATUSES)[number];
+
+export type FaqReleaseEvalReport = {
+  kind: "retrieval" | "model" | "combined" | "rollback" | "skipped" | string;
+  passed: boolean;
+  summary: string;
+  ranAt: string;
+  metrics: Record<string, number>;
+  misses: { nodeId: string; key: string; locale: string; source: string; text: string; rank: number | null }[];
+  sourceVersion?: number;
+};
+
+export type FaqRelease = {
+  id: string;
+  version: number;
+  status: FaqReleaseStatus;
+  checks: FaqGraphCheckResult | null;
+  evalReport: FaqReleaseEvalReport | null;
+  /** 回滚版本：快照复制自哪个版本。 */
+  sourceVersion: number | null;
+  createdBy: string | null;
+  createdAt: string;
+  publishedBy: string | null;
+  publishedAt: string | null;
+  /** draft，且检查与评测都过了。 */
+  publishable: boolean;
+};
+
+export type FaqReleaseList = { releases: FaqRelease[]; published: number | null };
+
+export type FaqNodeRef = { id: string; key: string; questionEn: string; questionZh: string };
+
+export type FaqSnapshotEdge = {
+  parentId: string;
+  childId: string;
+  kind: FaqEdgeKind;
+  position: number;
+  labelEn: string | null;
+  labelZh: string | null;
+};
+
+export type FaqSnapshotDiff = {
+  nodes: { added: FaqNodeRef[]; removed: FaqNodeRef[]; changed: (FaqNodeRef & { fields: string[] })[] };
+  edges: {
+    added: FaqSnapshotEdge[];
+    removed: FaqSnapshotEdge[];
+    changed: { before: FaqSnapshotEdge; after: FaqSnapshotEdge; fields: string[] }[];
+  };
+  phrasings: { added: number; removed: number };
+  same: boolean;
+};
+
+/** 「发布新版本」：工作副本的检查与它和当前上线版本的差异。 */
+export type FaqWorkingCopy = { checks: FaqGraphCheckResult; diff: FaqSnapshotDiff; published: number | null };
+
+export type FaqReleaseDiff = { base: number | null; head: number | "working"; diff: FaqSnapshotDiff };
+
+/** 对话预览：与 Portal 读 faq-release/current 同一个投影（契约 FaqNode / FaqEdge）。 */
+export type FaqBlock = { id: string; text: string };
+
+export type FaqGraphNode = {
+  id: string;
+  key: string;
+  type: FaqNodeType;
+  entry: boolean;
+  category: FaqCategory;
+  popular: boolean;
+  question: string;
+  answer: string;
+  blocks: FaqBlock[];
+  signals: FaqSignal[];
+};
+
+export type FaqGraphEdge = { parentId: string; childId: string; kind: FaqEdgeKind; position: number; label: string };
+
+export type FaqGraphPreview = {
+  source: "working" | number;
+  published: number | null;
+  locale: HelpdeskLocale;
+  nodes: FaqGraphNode[];
+  edges: FaqGraphEdge[];
+};
+
+/* ------------------------ v5 Part G 数据飞轮（G3 / G4 / G6） ------------------------ */
+
+/**
+ * FAQ 候选（服务端 flywheel/candidateRepository.ts、faqCandidateService.ts）：夜间缺口挖掘把 AI 没解决的、
+ * Portal 已脱敏的学员问法按意思分组，或员工从已解决的工单「转成 FAQ 候选」。模型只给话题与一个学员式的问题，
+ * 从不写答案；答案由员工写（可选的「草稿 待核实」只来自已解决工单里人写的回复）。
+ */
+export const CANDIDATE_STATUSES = ["new", "accepted", "dismissed", "merged"] as const;
+export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
+export const CANDIDATE_SUGGESTIONS = ["new_faq", "add_phrasing", "follow_up"] as const;
+export type CandidateSuggestion = (typeof CANDIDATE_SUGGESTIONS)[number];
+export const CANDIDATE_ORIGINS = ["mining", "ticket"] as const;
+export type CandidateOrigin = (typeof CANDIDATE_ORIGINS)[number];
+export const DISMISS_REASONS = ["duplicate", "not_a_gap", "out_of_scope", "personal_data", "spam", "other"] as const;
+export type DismissReason = (typeof DISMISS_REASONS)[number];
+/** 原因构成的键：六种「AI 没解决」+ ticket（客服从工单转来的）。 */
+export const SOURCE_MIX_KEYS = [
+  "no_match",
+  "not_helpful",
+  "clarify_not_covered",
+  "handover",
+  "ticket_after_chat",
+  "low_rating",
+  "ticket",
+] as const;
+export type SourceMixKey = (typeof SOURCE_MIX_KEYS)[number];
+export type SourceMix = Partial<Record<SourceMixKey, number>>;
+
+/** 服务端 faqCandidateService.ts 的上限。 */
+export const CANDIDATE_LIMITS = { noteMax: 500, qMax: 100, pageSizeMax: 100 } as const;
+
+export type CandidateExample = {
+  turnId: string | null;
+  /** 已脱敏（占位符 <email>、<phone> …）。 */
+  text: string;
+  locale: PhrasingLocale;
+  reasons: SourceMixKey[];
+};
+
+export type FaqCandidate = {
+  id: string;
+  status: CandidateStatus;
+  suggestion: CandidateSuggestion;
+  origin: CandidateOrigin;
+  topic: string;
+  proposedQuestion: string;
+  labelSource: "model" | "code";
+  category: string | null;
+  locale: string;
+  turnCount: number;
+  examples: CandidateExample[];
+  sourceMix: SourceMix;
+  /** 已脱敏的、人写的已解决工单回复（只当草稿来源）。 */
+  answerSources: string[];
+  relatedNodeId: string | null;
+  relatedScore: number | null;
+  parentNodeId: string | null;
+  shownNodeId: string | null;
+  ticketId: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  reason: DismissReason | null;
+  reasonNote: string | null;
+  acceptedAs: CandidateSuggestion | null;
+  acceptedFaqId: string | null;
+  mergedInto: string | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  actionKey: string | null;
+  version: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** 审计（helpdesk_faq_candidate_revisions，只追加）。 */
+export type CandidateRevision = {
+  id: string;
+  candidateId: string;
+  action: "create" | "grow" | "accept" | "dismiss" | "merge" | string;
+  before: unknown;
+  after: unknown;
+  employeeId: string | null;
+  /** 动作当时员工的显示名（之前的行没有）。 */
+  employeeName?: string | null;
+  at: string;
+};
+
+export type CandidateList = {
+  candidates: FaqCandidate[];
+  total: number;
+  counts: Record<CandidateStatus, number>;
+  page: number;
+  pageSize: number;
+  nodes: FaqNodeSummary[];
+};
+
+export type CandidateDetail = { candidate: FaqCandidate; revisions: CandidateRevision[]; nodes: FaqNodeSummary[] };
+
+/** GET …/draft：新 FAQ / 追问的预填（答案留空，由员工写）。 */
+export type FaqCandidateDraft = {
+  candidateId: string;
+  version: number;
+  suggestion: CandidateSuggestion;
+  faq: {
+    type: "answer";
+    entry: boolean;
+    category: string | null;
+    questionEn: string;
+    questionZh: string;
+    answerEn: "";
+    answerZh: "";
+    keywords: string[];
+  };
+  parentId: string | null;
+  relatedNodeId: string | null;
+  phrasings: { index: number; locale: PhrasingLocale; text: string }[];
+  /** 只来自已解决工单里人写的回复，标「草稿 待核实」；没有为 null。 */
+  answerDraft: { label: { en: string; zh: string }; sources: string[] } | null;
+};
+
+export type AcceptCandidateBody = {
+  as: CandidateSuggestion;
+  faqId: string;
+  parentId?: string | null;
+  /** 选作问法的例句序号；不带 = 所有不含占位符的。 */
+  phrasings?: number[];
+  version: number;
+};
+
+export type AcceptCandidateResult = {
+  candidate: FaqCandidate;
+  replayed: boolean;
+  phrasingsAdded: number;
+  phrasingsSkipped: number;
+  evalCasesAdded: number;
+  edgeId: string | null;
+};
+
+export type DismissCandidateBody = { reason: DismissReason; note?: string | null; version: number };
+
+export type FromTicketResult = { candidate: FaqCandidate; created: boolean; similarCandidateId: string | null };
+
+/** Admin 的夜间缺口挖掘（helpdesk_flywheel_runs）。 */
+export const FLYWHEEL_JOBS = ["gap_mining"] as const;
+export type FlywheelJob = (typeof FLYWHEEL_JOBS)[number];
+export type JobRunStatus = "running" | "succeeded" | "failed";
+
+export type FlywheelJobRun = {
+  id: string;
+  job: FlywheelJob;
+  day: string;
+  trigger: "schedule" | "manual";
+  status: JobRunStatus;
+  attempts: number;
+  instance: string;
+  startedAt: string;
+  heartbeatAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  stats: Record<string, unknown>;
+  moreDue: boolean;
+  errorCode: string | null;
+  requestedBy: { id: string; name: string } | null;
+};
+
+/** Portal 的学员原文保留任务（helpdesk_job_runs，180 天后只留脱敏文字与标签）。 */
+export type PortalJobRun = {
+  id: string;
+  job: "assist_retention";
+  day: string;
+  trigger: "schedule" | "manual";
+  status: JobRunStatus;
+  attempts: number;
+  startedAt: string;
+  finishedAt: string | null;
+  cutoff: string | null;
+  rowsScrubbed: number;
+  moreDue: boolean;
+  requestedBy: Agent | null;
+  errorCode: string | null;
+};
+
+export type PortalJobRuns = { job: "assist_retention"; retentionDays: number; runs: PortalJobRun[] };
+export type PortalJobRunResult = { outcome: "completed" | "already_running"; run: PortalJobRun | null };
+
+/** G6 指标（服务端 flywheelMetrics.ts）：全部来自事实表的视图；分母为 0 的比率为 null。 */
+export const METRICS_GRANULARITIES = ["day", "week"] as const;
+export type MetricsGranularity = (typeof METRICS_GRANULARITIES)[number];
+export const METRICS_SPLITS = ["none", "locale", "entry", "signal"] as const;
+export type MetricsSplit = (typeof METRICS_SPLITS)[number];
+
+export type MetricsRates = {
+  aiSolvedRate: number | null;
+  noMatchRate: number | null;
+  helpfulRate: number | null;
+  avgRating: number | null;
+  handoverRate: number | null;
+  clarifyCoveredRate: number | null;
+  guardFallbackRate: number | null;
+};
+
+export type MetricsCounts = {
+  turns: number;
+  answers: number;
+  answersSettled: number;
+  aiSolved: number;
+  noMatch: number;
+  votes: number;
+  helpful: number;
+  ratings: number;
+  ratingSum: number;
+  handovers: number;
+  clarify: number;
+  clarifyCovered: number;
+  guarded: number;
+  guardFallback: number;
+  unsolved: number;
+};
+
+export type MetricsRow = MetricsCounts &
+  MetricsRates & {
+    bucket: string | null;
+    segment: string;
+    /** 周桶：这段时间只盖住了这一周的一部分。 */
+    partial?: boolean;
+  };
+
+export type GapGroupRow = {
+  candidateId: string;
+  topic: string;
+  proposedQuestion: string;
+  suggestion: string;
+  status: string;
+  turns: number;
+};
+
+export type TicketFaqRow = {
+  faqId: string;
+  answers: number;
+  ticketsAfter: number;
+  ticketRate: number | null;
+  key: string | null;
+  questionEn: string | null;
+  questionZh: string | null;
+};
+
+export type FlywheelMetrics = {
+  granularity: MetricsGranularity;
+  split: MetricsSplit;
+  from: string;
+  to: string;
+  lastIngestedAt: string | null;
+  source: "portal_insights";
+  /** 日与周按 UTC 切，周从周一开始。 */
+  timezone?: "UTC";
+  weekStartsOn?: "monday";
+  series: MetricsRow[];
+  totals: MetricsRow[];
+  topGaps: GapGroupRow[];
+  ticketFaqs: TicketFaqRow[];
 };

@@ -86,6 +86,62 @@ function setup(
 }
 
 describe('runWorkflow', () => {
+  it('v5: hands the extras (lists, short texts, flags) to decide, and logs the texts only by length', async () => {
+    const seen: unknown[] = [];
+    const withExtras: WorkflowTemplate<State> = {
+      ...template,
+      steps: {
+        ...template.steps,
+        choose: {
+          ...(template.steps.choose as Extract<
+            (typeof template.steps)[string],
+            { kind: 'agent' }
+          >),
+          decide: (state, args, extras) => {
+            seen.push(extras);
+            return {
+              state: { ...state, pick: args?.option },
+              then: { end: 'answered' },
+            };
+          },
+        },
+      },
+    };
+    const run = jest.fn<
+      ReturnType<AgentStepRunner['run']>,
+      Parameters<AgentStepRunner['run']>
+    >(() =>
+      Promise.resolve({
+        kind: 'called',
+        args: { option: 'a' },
+        extras: {
+          lists: { blocks: ['b1'] },
+          texts: { reply: 'Hi Lena!' },
+          flags: { covered: true },
+        },
+      }),
+    );
+    const { deps, events } = setup({ run });
+    await runWorkflow(withExtras, { trail: [] }, deps);
+    expect(seen).toEqual([
+      {
+        lists: { blocks: ['b1'] },
+        texts: { reply: 'Hi Lena!' },
+        flags: { covered: true },
+      },
+    ]);
+    const end = (await events()).find(
+      (e) => e.type === 'step/end' && e.data.name === 'choose',
+    );
+    expect(end?.data).toMatchObject({
+      args: { option: 'a' },
+      lists: { blocks: ['b1'] },
+      flags: { covered: true },
+      texts: { reply: { length: 8 } },
+    });
+    expect(JSON.stringify(end)).not.toContain('Lena');
+  });
+
   it('walks the step table the code chooses and records each step', async () => {
     const run = jest.fn<
       ReturnType<AgentStepRunner['run']>,
@@ -144,6 +200,26 @@ describe('runWorkflow', () => {
         },
       ],
     ]);
+  });
+
+  it('tells the listener each step as it starts; a listener that throws changes nothing', async () => {
+    const seen: string[] = [];
+    const { deps } = setup({
+      run: () => Promise.resolve({ kind: 'called', args: { option: 'a' } }),
+    });
+    const result = await runWorkflow(
+      template,
+      { trail: [] },
+      {
+        ...deps,
+        onStep: (name) => {
+          seen.push(name);
+          throw new Error('listener gone');
+        },
+      },
+    );
+    expect(seen).toEqual(['first', 'choose', 'last']);
+    expect(result).toMatchObject({ reason: 'answered', trail: seen });
   });
 
   it('lets the template decide on no tool call', async () => {

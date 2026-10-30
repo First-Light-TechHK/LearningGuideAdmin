@@ -15,8 +15,9 @@ export type MarkdownBlock =
   | { kind: 'ordered'; start: number; items: Line[][] }
   | { kind: 'bullet'; items: Line[][] };
 
-const ORDERED = /^ {0,3}(\d{1,9})[.)][ \t]+(.*)$/;
-const BULLET = /^ {0,3}[-*+][ \t]+(.*)$/;
+/** 编号列表项与无序列表项（faqBlocks.ts 切块用同一对规则）。 */
+export const ORDERED = /^ {0,3}(\d{1,9})[.)][ \t]+(.*)$/;
+export const BULLET = /^ {0,3}[-*+][ \t]+(.*)$/;
 const BARE_URL = /^https?:\/\/[^\s<>"'`]+/i;
 const TRAILING = '.,;:!?)]}\'"';
 

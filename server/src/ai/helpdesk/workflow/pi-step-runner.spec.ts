@@ -9,6 +9,7 @@ import {
   loadPi,
   openRouterSource,
   PiStepRunner,
+  THINKING_TOKENS,
   type ModelSource,
 } from './pi-step-runner';
 
@@ -387,6 +388,133 @@ describe('PiStepRunner on pi-agent-core', () => {
   });
 });
 
+/**
+ * v5（Part B / D / H）：pick_faq 多了可选的列表（答案块 id）与短句（opening / closing / reply），
+ * explain 有必填的真 / 假（covered）。pi 原样校验；短句从不进日志，只记长度。
+ */
+describe('PiStepRunner v5 arguments (lists, short texts, flags)', () => {
+  const V5: AgentStepSpec = {
+    ...SPEC,
+    tool: {
+      ...SPEC.tool,
+      enumArgs: { intent: ['question', 'greeting'], faqId: [...IDS, 'none'] },
+      listArgs: { blocks: ['b1', 'b2', 'b3'], unused: [] },
+      textArgs: { opening: 'One warm line.', reply: 'Small talk.' },
+    },
+  };
+  const EXPLAIN: AgentStepSpec = {
+    ...SPEC,
+    tool: {
+      name: 'explain',
+      description: 'Explain the shown answer.',
+      enumArgs: {},
+      textArgs: { explanation: 'In simpler words.' },
+      flagArgs: { covered: 'Does the answer say it?' },
+    },
+  };
+
+  async function call(spec: AgentStepSpec, name: string, args: JsonObject) {
+    const f = await faux();
+    f.handle.setResponses([
+      f.pi.ai.fauxAssistantMessage(
+        [f.pi.ai.fauxToolCall(name, args, { id: 'call_1' })],
+        { stopReason: 'toolUse' },
+      ),
+    ]);
+    return runStep(f, { spec });
+  }
+
+  it("returns lists and texts as extras, and logs only the texts' lengths", async () => {
+    const opening = "Don't worry, lena@example.com:";
+    const { outcome, events } = await call(V5, 'pick_faq', {
+      intent: 'question',
+      faqId: IDS[0],
+      blocks: ['b2', 'b3'],
+      opening,
+    });
+    expect(outcome).toEqual({
+      kind: 'called',
+      args: { intent: 'question', faqId: IDS[0] },
+      extras: {
+        lists: { blocks: ['b2', 'b3'] },
+        texts: { opening },
+        flags: {},
+      },
+    });
+    expect(JSON.stringify(events)).not.toContain('lena@example.com');
+    expect(of(events, 'tool/call')).toEqual([
+      {
+        turn: 1,
+        step: 2,
+        callId: 'call_1',
+        name: 'pick_faq',
+        arguments: JSON.stringify({
+          intent: 'question',
+          faqId: IDS[0],
+          blocks: ['b2', 'b3'],
+        }),
+        texts: { opening: { length: [...opening].length } },
+      },
+    ]);
+    expect(of(events, 'tool/result')[0].result).toEqual({
+      intent: 'question',
+      faqId: IDS[0],
+      blocks: ['b2', 'b3'],
+    });
+  });
+
+  it('accepts a call without the optional list and texts', async () => {
+    const { outcome } = await call(V5, 'pick_faq', {
+      intent: 'greeting',
+      faqId: 'none',
+    });
+    expect(outcome).toEqual({
+      kind: 'called',
+      args: { intent: 'greeting', faqId: 'none' },
+      extras: { lists: {}, texts: {}, flags: {} },
+    });
+  });
+
+  it.each([
+    ['a block id outside the enum', { blocks: ['b9'] }],
+    ['a list argument whose enum is empty (not offered)', { unused: ['x'] }],
+  ])('counts %s as no call', async (_name, patch) => {
+    const { outcome, events } = await call(V5, 'pick_faq', {
+      intent: 'question',
+      faqId: IDS[0],
+      ...(patch as JsonObject),
+    });
+    expect(outcome).toEqual({ kind: 'no_call' });
+    expect(of(events, 'tool/call')[0].arguments).toBeUndefined();
+  });
+
+  it('gets a number as text from pi (the code guard then rejects the digits)', async () => {
+    const { outcome, events } = await call(V5, 'pick_faq', {
+      intent: 'question',
+      faqId: IDS[0],
+      opening: 42,
+    });
+    expect(outcome).toMatchObject({ extras: { texts: { opening: '42' } } });
+    expect(of(events, 'tool/call')[0].texts).toEqual({
+      opening: { length: 2 },
+    });
+  });
+
+  it('returns a required flag, and a call without it is no call', async () => {
+    const explanation = 'Only a few minutes.';
+    expect(
+      (await call(EXPLAIN, 'explain', { explanation, covered: true })).outcome,
+    ).toEqual({
+      kind: 'called',
+      args: {},
+      extras: { lists: {}, texts: { explanation }, flags: { covered: true } },
+    });
+    expect((await call(EXPLAIN, 'explain', { explanation })).outcome).toEqual({
+      kind: 'no_call',
+    });
+  });
+});
+
 describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
   function sse(chunks: unknown[]) {
     const body =
@@ -406,7 +534,7 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
     ...extra,
   });
 
-  async function call(respond: () => Response) {
+  async function call(respond: () => Response, model: ModelTarget = TARGET) {
     const fetch = jest.fn((url: string | URL | Request, init?: RequestInit) => {
       void url;
       void init;
@@ -421,13 +549,91 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
       step: 2,
       name: 'pick_faq',
       signal: new AbortController().signal,
-      model: TARGET,
+      model,
       traceparent: () => TRACEPARENT,
     });
     trace.emit('turn/end', { turn: 1, reason: 'test' });
     await trace.flush();
     return { outcome, fetch, events: await log.read(RUN) };
   }
+  const picked = () =>
+    sse([
+      chunk({
+        role: 'assistant',
+        tool_calls: [
+          {
+            index: 0,
+            id: 'call_t',
+            type: 'function',
+            function: {
+              name: 'pick_faq',
+              arguments: JSON.stringify({ faqId: IDS[0] }),
+            },
+          },
+        ],
+      }),
+      {
+        ...chunk({}),
+        choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 100, completion_tokens: 40 },
+      },
+    ]);
+  const sentReasoning = (fetch: jest.Mock) =>
+    (
+      JSON.parse(
+        (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
+      ) as { reasoning?: unknown }
+    ).reasoning;
+
+  const sentMaxTokens = (fetch: jest.Mock) => {
+    const body = JSON.parse(
+      (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
+    ) as { max_tokens?: number; max_completion_tokens?: number };
+    return body.max_tokens ?? body.max_completion_tokens;
+  };
+
+  it.each([
+    ['off', { effort: 'none' }, 0],
+    ['low', { effort: 'low' }, 2_048],
+    ['high', { effort: 'high' }, 16_384],
+  ] as const)(
+    'sends thinking %s as the OpenRouter reasoning effort, with room to think on top of the step limit, also for a model missing from the catalog',
+    async (thinking, reasoning, room) => {
+      // 思考的字也算在 max_tokens 里：不另给额度，选卡片的调用会被截断（2026-10-30 实测 low 档 23% 截断）
+      // 档位与 pi 给 Anthropic 等的默认思考预算相同（medium 8192；DeepSeek 不收 medium 档）
+      expect(THINKING_TOKENS).toEqual({
+        off: 0,
+        low: 2_048,
+        medium: 8_192,
+        high: 16_384,
+      });
+      expect(THINKING_TOKENS[thinking]).toBe(room);
+      for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
+        const { outcome, fetch } = await call(picked, {
+          ...TARGET,
+          model,
+          thinking,
+        });
+        expect(outcome).toEqual({ kind: 'called', args: { faqId: IDS[0] } });
+        expect(sentReasoning(fetch)).toEqual(reasoning);
+        expect(sentMaxTokens(fetch)).toBe(SPEC.maxTokens + room);
+      }
+    },
+  );
+
+  it('without a thinking setting turns thinking off for a catalog model and sends nothing for any other', async () => {
+    // pi 的价目里 DeepSeek v4.1 flash 能思考：2026-10-30 之前的评测都是 effort none（思考关）
+    const { fetch } = await call(picked, {
+      ...TARGET,
+      model: 'deepseek/deepseek-v4.1-flash',
+    });
+    expect(sentReasoning(fetch)).toEqual({ effort: 'none' });
+    const other = await call(picked, {
+      ...TARGET,
+      model: 'acme/brand-new-model',
+    });
+    expect(sentReasoning(other.fetch)).toBeUndefined();
+  });
 
   it('sends one OpenRouter chat request with the enum-locked tool, required tool choice and the traceparent', async () => {
     const { outcome, fetch, events } = await call(() =>

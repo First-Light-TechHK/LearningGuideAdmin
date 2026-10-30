@@ -17,6 +17,7 @@ import { HdFilterIcon, HdFlagIcon, HdSearchIcon } from './icons'
 /**
  * 左栏 340px（Figma 1324:2 LeftPanel）：搜索 + 筛选按钮 + 咨询列表（滚动到底自动加载下一页）。
  * v2：标了 Flag follow-up 的行在名字旁有小旗子，筛选里多一个「Flagged」（两者都没有画板，待视觉验收）。
+ * v4 Part A：关联了订单（orderId）的行在预览旁有一个小「订单」标签（无画板，待视觉验收）。
  */
 
 export function LearnerAvatar({ seed, name, email }: { seed: string; name: string; email?: string }) {
@@ -229,6 +230,16 @@ export function EnquiryList(props: Props) {
                   <span className="hdRowSubject">{row.subject}</span>
                   <span className="hdRowBottom">
                     <span className="hdRowPreview">{row.preview}</span>
+                    {row.orderId ? (
+                      // v4 Part A：关联了订单的行带一个小「订单」标签（沿用中性 pill，无画板，待视觉验收）
+                      <span
+                        className="hdPill hdPill-neutral hdRowOrder"
+                        role="img"
+                        aria-label={t(locale, 'helpDesk.list.orderLabel', { id: row.orderId })}
+                      >
+                        {t(locale, 'helpDesk.list.order')}
+                      </span>
+                    ) : null}
                     {row.unreadByAgent ? (
                       <span className="hdUnreadDot" role="img" aria-label={t(locale, 'helpDesk.list.unread')} />
                     ) : null}

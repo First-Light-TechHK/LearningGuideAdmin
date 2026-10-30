@@ -14,6 +14,7 @@ import {
   caseLanguage,
   chooseModel,
   DEFAULT_BUDGET_USD,
+  evalDeadline,
   EVAL_LANGUAGES,
   EVAL_LOCALES,
   EVAL_PERSONAS,
@@ -32,6 +33,7 @@ import {
   runRetrieval,
   summarize,
   summarizeRetrieval,
+  thinkingLabel,
   turnKind,
   writeReport,
   type CaseResult,
@@ -41,6 +43,7 @@ import {
   type RetrievalReport,
   type RetrievalResult,
 } from './harness';
+import { PICK_FAQ_MAX_TOKENS } from '../../src/ai/helpdesk/workflow/faq-workflow';
 
 /**
  * Helpdesk 推荐评测（helpdesk-agent-v2-pi-dsh §5）在 CI 里跑：数据集合法且覆盖到位、
@@ -198,7 +201,7 @@ describe('eval dataset', () => {
     writeFileSync(
       path,
       [
-        { ...cases[0], role: 'parent' },
+        { ...cases[0], role: 'pays_for_another_account' },
         { ...cases[0], id: 't1', conversationId: 'conv-1', turn: 1 },
         { ...cases[0], id: 't2', conversationId: 'conv-1', turn: 2 },
         { ...cases[0], id: 'o1', origin: 'batch-01.jsonl#b1-001' },
@@ -209,7 +212,7 @@ describe('eval dataset', () => {
     expect(
       loadCases(path).map((c) => [c.role, c.conversationId, c.turn]),
     ).toEqual([
-      ['parent', undefined, undefined],
+      ['pays_for_another_account', undefined, undefined],
       [undefined, 'conv-1', 1],
       [undefined, 'conv-1', 2],
       [undefined, undefined, undefined],
@@ -547,8 +550,18 @@ describe('report', () => {
 
   it('breaks results down by role, by language (mixed-language cases on their own) and by turn', () => {
     const rs = [
-      result({ id: 'p1', expectedFaqId: A, gotFaqId: A, role: 'parent' }),
-      result({ id: 'p2', expectedFaqId: A, gotFaqId: B, role: 'parent' }),
+      result({
+        id: 'p1',
+        expectedFaqId: A,
+        gotFaqId: A,
+        role: 'pays_for_another_account',
+      }),
+      result({
+        id: 'p2',
+        expectedFaqId: A,
+        gotFaqId: B,
+        role: 'pays_for_another_account',
+      }),
       result({
         id: 'm1',
         expectedFaqId: A,
@@ -576,7 +589,11 @@ describe('report', () => {
     });
     expect(report.byRole).toEqual({
       '(none)': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0 },
-      parent: { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
+      pays_for_another_account: {
+        cases: 2,
+        accuracy: 0.5,
+        wrongAnswerRate: 0.5,
+      },
     });
     expect(report.byLanguage).toEqual({
       'en-GB': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
@@ -590,7 +607,7 @@ describe('report', () => {
     });
     const md = markdownReport(report);
     expect(md).toContain('## By role');
-    expect(md).toContain('| parent | 2 | 50.0% | 50.0% |');
+    expect(md).toContain('| pays_for_another_account | 2 | 50.0% | 50.0% |');
     expect(md).toContain('## By language');
     expect(md).toContain('| mixed | 1 | 100.0% | 0.0% |');
     expect(md).toContain('## By turn');
@@ -914,7 +931,12 @@ describe('retrieval only (--retrieval-only)', () => {
     const progress: number[] = [];
     const results = await runRetrieval({
       cases: [
-        { ...base, role: 'parent', conversationId: 'c', turn: 2 },
+        {
+          ...base,
+          role: 'pays_for_another_account',
+          conversationId: 'c',
+          turn: 2,
+        },
         { ...base, id: 'n', expectedFaqId: null },
       ],
       qa,
@@ -924,7 +946,7 @@ describe('retrieval only (--retrieval-only)', () => {
     expect(progress).toEqual([0, 1]);
     expect(results[0]).toMatchObject({
       id: 'q',
-      role: 'parent',
+      role: 'pays_for_another_account',
       conversationId: 'c',
       turn: 2,
       expectedFaqId: A,
@@ -961,7 +983,7 @@ describe('retrieval only (--retrieval-only)', () => {
       acceptableFaqIds: [C],
       persona: 'mixed_language',
       locale: 'zh-CN',
-      role: 'parent',
+      role: 'pays_for_another_account',
     }),
     hit({
       id: 'r4',
@@ -1032,7 +1054,10 @@ describe('retrieval only (--retrieval-only)', () => {
       recallAt8: null,
       noneEmpty: 1,
     });
-    expect(report.byRole.parent).toMatchObject({ answerable: 1, recallAt8: 1 });
+    expect(report.byRole.pays_for_another_account).toMatchObject({
+      answerable: 1,
+      recallAt8: 1,
+    });
     expect(report.byTurn.follow_up).toMatchObject({
       recallAt3: 0,
       recallAt8: 1,
@@ -1101,23 +1126,69 @@ describe('model and budget settings', () => {
       kind: 'fake',
       model: FAKE_MODEL_ID,
     });
+    // 和生产一样：聊天默认思考 high，提交工单那条路不思考
     expect(chooseModel({ OPENROUTER_API_KEY: 'k' })).toEqual({
       kind: 'real',
-      model: 'google/gemini-2.5-flash',
+      model: 'deepseek/deepseek-v4.1-flash',
+      thinking: 'high',
+    });
+    expect(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')).toEqual({
+      kind: 'real',
+      model: 'deepseek/deepseek-v4.1-flash',
     });
     expect(
-      chooseModel({
-        OPENROUTER_API_KEY: 'k',
-        HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
-      }),
-    ).toEqual({ kind: 'real', model: 'anthropic/claude-haiku' });
+      thinkingLabel(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')),
+    ).toBe(', thinking off');
+    expect(
+      chooseModel(
+        {
+          OPENROUTER_API_KEY: 'k',
+          HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
+          HELPDESK_SUGGEST_THINKING: 'off',
+        },
+        'chat',
+      ),
+    ).toEqual({
+      kind: 'real',
+      model: 'anthropic/claude-haiku',
+      thinking: 'off',
+    });
     // 没配 HELPDESK_SUGGEST_MODEL 时和生产选同一个模型（代码里定的那个）
     expect(
-      chooseModel({
-        OPENROUTER_API_KEY: 'k',
-        AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
-      }),
-    ).toEqual({ kind: 'real', model: 'google/gemini-2.5-flash' });
+      chooseModel(
+        {
+          OPENROUTER_API_KEY: 'k',
+          AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
+        },
+        'ticket',
+      ),
+    ).toEqual({ kind: 'real', model: 'deepseek/deepseek-v4.1-flash' });
+  });
+
+  it('takes a longer deadline from HELPDESK_EVAL_DEADLINE_MS for real models only, and names it in the label', () => {
+    // 思考档位要看不截时限时的质量与延迟；不给就是线上的 3.5 秒
+    expect(evalDeadline({})).toBeUndefined();
+    expect(evalDeadline({ HELPDESK_EVAL_DEADLINE_MS: ' 30000 ' })).toBe(30_000);
+    for (const bad of ['0', '-5', '1.5', 'abc', '600001'])
+      expect(() => evalDeadline({ HELPDESK_EVAL_DEADLINE_MS: bad })).toThrow(
+        'HELPDESK_EVAL_DEADLINE_MS must be a whole number of milliseconds, 1 to 600000',
+      );
+    const model = chooseModel({
+      OPENROUTER_API_KEY: 'k',
+      HELPDESK_SUGGEST_THINKING: 'low',
+      HELPDESK_EVAL_DEADLINE_MS: '30000',
+    });
+    expect(model).toEqual({
+      kind: 'real',
+      model: 'deepseek/deepseek-v4.1-flash',
+      thinking: 'low',
+      deadlineMs: 30_000,
+    });
+    expect(thinkingLabel(model)).toBe(', thinking low, deadline 30000 ms');
+    expect(chooseModel({ HELPDESK_EVAL_DEADLINE_MS: '30000' })).toEqual({
+      kind: 'fake',
+      model: FAKE_MODEL_ID,
+    });
   });
 
   it('caps spend at HELPDESK_EVAL_BUDGET_USD, 5 USD by default', () => {
@@ -1287,10 +1358,11 @@ describe('running the cases', () => {
     expect(outcome.stopped).toBe('unknown_cost');
   });
 
-  it('prices one call from the catalog: the longest prompt plus 80 output tokens, unknown off-catalog', async () => {
+  it('prices one call from the catalog: the longest prompt plus the step output limit (150 tokens), unknown off-catalog', async () => {
     // gpt-4o-mini: $0.15 / $0.60 per million tokens
+    expect(PICK_FAQ_MAX_TOKENS).toBe(150);
     expect(await callCeilingUsd('openai/gpt-4o-mini')).toBeCloseTo(
-      (CALL_PROMPT_TOKENS_MAX * 0.15 + 80 * 0.6) / 1e6,
+      (CALL_PROMPT_TOKENS_MAX * 0.15 + 150 * 0.6) / 1e6,
       12,
     );
     expect(await callCeilingUsd('acme/brand-new-model')).toBeNull();
@@ -1710,9 +1782,12 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
       } finally {
         await close();
         const pool = new Pool({ connectionString: url });
+        // only this process's scratch schemas: '_' is a LIKE wildcard, so 'hdeval_%' also matched the
+        // hdevalgate_* schema of the release gate suite running in another worker (flaky in the full run)
         schemas = (
           await pool.query<{ nspname: string }>(
-            "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'hdeval_%'",
+            'SELECT nspname FROM pg_namespace WHERE starts_with(nspname, $1)',
+            [`hdeval_${process.pid}_`],
           )
         ).rows.map((row) => row.nspname);
         await pool.end();

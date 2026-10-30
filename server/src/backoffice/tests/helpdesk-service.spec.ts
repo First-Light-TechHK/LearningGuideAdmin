@@ -59,6 +59,7 @@ function summary(overrides: Partial<TicketSummary> = {}): TicketSummary {
     closeReason: null,
     rating: null,
     flagged: false,
+    orderId: null,
     ...overrides,
   };
 }
@@ -68,6 +69,7 @@ function detail(overrides: Partial<TicketDetail> = {}): TicketDetail {
     ...summary(),
     student: null,
     subscription: null,
+    order: null,
     messages: [],
     events: [],
     aiAssist: [],
@@ -88,6 +90,9 @@ function fakeClient(): jest.Mocked<PortalHelpdeskClient> {
       data: Buffer.from('x'),
       fileName: null,
     }),
+    insights: jest.fn(),
+    assistRetentionRuns: jest.fn(),
+    runAssistRetention: jest.fn(),
   };
 }
 

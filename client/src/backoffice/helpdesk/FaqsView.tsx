@@ -202,7 +202,12 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
               return (
                 <tr key={faq.id}>
                   <td>
-                    <div className="hdFaqQuestion">{question}</div>
+                    <div className="hdFaqQuestion">
+                      {question}
+                      {/* v5 问题树：选择题 / 非入口的追问在问题旁标出（待视觉验收） */}
+                      {faq.type === 'choice' ? <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.choiceTag')}</span> : null}
+                      {faq.entry === false ? <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.followUpTag')}</span> : null}
+                    </div>
                     <div className="hdFaqSummary">{summaryLine(zh ? faq.answerZh : faq.answerEn)}</div>
                   </td>
                   <td>
