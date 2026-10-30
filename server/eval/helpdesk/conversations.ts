@@ -280,6 +280,8 @@ export type GotTurn = {
   /** 复核用（agent 事件里取）：检索给模型的候选 id（按顺序）与 pick_faq 的 confidence。 */
   candidateIds?: string[];
   confidence?: string | null;
+  /** 复核用：学员看到的模型短句（诚恳度复核要读原话）；没有的字段不写。 */
+  said?: Partial<Record<'opening' | 'closing' | 'reply' | 'explanation', string>>;
 };
 
 export type TurnResult = {
@@ -606,6 +608,12 @@ export async function runConversations(
           return typeof end === 'string' ? end : null;
         })(),
         ...stepDetails(log),
+        said: Object.fromEntries(
+          (['opening', 'closing', 'reply', 'explanation'] as const).flatMap(
+            (field) =>
+              typeof reply[field] === 'string' ? [[field, reply[field]]] : [],
+          ),
+        ),
       };
       const unsolved =
         got.kind === 'no_match' ||

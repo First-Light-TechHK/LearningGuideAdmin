@@ -328,6 +328,9 @@ describe('running conversations like the Portal chat', () => {
     // for review: the candidates the model saw and its confidence
     expect(results[1].got.candidateIds).toContain(FAQ(13));
     expect(results[1].got.confidence).toBe('sure');
+    // for the sincerity review: the words the learner saw
+    expect(results[0].got.said?.reply).toEqual(expect.any(String));
+    expect(results[2].got.said?.explanation).toEqual(expect.any(String));
     expect(results.every((r) => r.escapes.length === 0)).toBe(true);
     expect(outcome).toMatchObject({ conversationsRun: 1, stopped: null });
   });
