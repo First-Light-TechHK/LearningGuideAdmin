@@ -811,8 +811,6 @@
       "emptyFiltered": "没有符合搜索或筛选条件的常见问题。",
       "saved": "常见问题已保存。",
       "deleted": "常见问题已删除。",
-      "tree": "问题树",
-      "treeLabel": "{question} 的问题树",
       "choiceTag": "选择题",
       "followUpTag": "追问"
     },
@@ -880,7 +878,8 @@
       "hint": "帮助中心里的显示效果",
       "languages": "预览语言",
       "en": "EN",
-      "zh": "中文"
+      "zh": "中文",
+      "tree": "查看问题树"
     },
     "graph": {
       "announce": {

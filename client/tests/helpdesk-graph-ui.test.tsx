@@ -470,7 +470,16 @@ async function openTree(role: 'ADMIN' | 'COURSE_CREATOR' = 'ADMIN') {
   serveFaqs(PAY)
   server.on('GET', /\/tree$/, { data: TREE })
   await renderHelpDesk(server, { role, path: '/en-GB/help-desk?tab=faqs' })
-  fireEvent.click(await screen.findByRole('button', { name: 'Question tree for A problem with paying?' }))
+  // Figma 1379:2 的操作列只有 Edit / Preview：问题树从 Preview 进入
+  const row = (await screen.findByText('A problem with paying?')).closest('tr') as HTMLElement
+  assert.equal(within(row).queryByRole('button', { name: /question tree/i }), null, 'no Tree button in the table')
+  const opener = within(row).getByRole('button', { name: 'Preview A problem with paying?' })
+  opener.focus()
+  fireEvent.click(opener)
+  const preview = await screen.findByRole('dialog', { name: 'Preview FAQ' })
+  // the accessible name is the visible text (WCAG 2.5.3 label in name)
+  fireEvent.click(within(preview).getByRole('button', { name: 'View question tree', exact: true }))
+  await waitFor(() => absent(screen.queryByRole('dialog', { name: 'Preview FAQ' })))
   return screen.findByRole('dialog', { name: 'Question tree' })
 }
 
@@ -513,6 +522,8 @@ describe('tree view (graph design §5.2)', () => {
     assert.ok(await within(dialog).findByRole('list', { name: 'Question tree outline' }))
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => absent(screen.queryByRole('dialog')))
+    // the preview is gone: focus goes back to the row's Preview button that opened it, not to <body>
+    await waitFor(() => assert.equal(document.activeElement, screen.getByRole('button', { name: 'Preview A problem with paying?' })))
   })
 })
 

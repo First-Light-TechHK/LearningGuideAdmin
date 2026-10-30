@@ -36,13 +36,11 @@ type Props = {
   refreshKey: number
   onEdit: (faq: HelpdeskFaq) => void
   onPreview: (faq: HelpdeskFaq) => void
-  /** v5 问题树（大纲 + 对话预览），所有角色都能看。 */
-  onTree: (faq: HelpdeskFaq) => void
 }
 
 type Loaded = { faqs: HelpdeskFaq[]; total: number }
 
-export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview, onTree }: Props) {
+export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = readFaqFilters(searchParams)
   // 只在筛选真的变了时重新请求（地址栏里别的参数变化不算）
@@ -246,14 +244,6 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview, onTr
                         onClick={() => onPreview(faq)}
                       >
                         {t(locale, 'helpDesk.faqs.preview')}
-                      </button>
-                      <button
-                        type="button"
-                        className="hdFaqPreview"
-                        aria-label={t(locale, 'helpDesk.faqs.treeLabel', { question })}
-                        onClick={() => onTree(faq)}
-                      >
-                        {t(locale, 'helpDesk.faqs.tree')}
                       </button>
                     </div>
                   </td>

@@ -63,6 +63,7 @@ export default function HelpDeskPage() {
   /** 「查看链路」打开的 run（AI 块 id）；只读，VIEW 也能开。 */
   const [tracing, setTracing] = useState<string | null>(null)
   const [treeOf, setTreeOf] = useState<HelpdeskFaq | null>(null)
+  const [treeReturn, setTreeReturn] = useState<HTMLElement | null>(null)
   const [releasesOpen, setReleasesOpen] = useState(false)
   const [candidatesVersion, setCandidatesVersion] = useState(0)
   const candidateId = tab === 'candidates' ? searchParams.get('candidate') : null
@@ -208,7 +209,6 @@ export default function HelpDeskPage() {
               refreshKey={faqsVersion}
               onEdit={(faq) => setEditing({ faq })}
               onPreview={setPreviewing}
-              onTree={setTreeOf}
             />
           )}
         </div>
@@ -241,7 +241,7 @@ export default function HelpDeskPage() {
 
         {tracing ? <TraceDrawer key={tracing} locale={locale} runId={tracing} onClose={() => setTracing(null)} /> : null}
 
-        {treeOf ? <FaqTreeDrawer key={treeOf.id} locale={locale} faq={treeOf} onClose={() => setTreeOf(null)} /> : null}
+        {treeOf ? <FaqTreeDrawer key={treeOf.id} locale={locale} faq={treeOf} returnFocus={treeReturn} onClose={() => setTreeOf(null)} /> : null}
 
         {releasesOpen ? (
           <FaqReleasesDrawer
@@ -255,7 +255,18 @@ export default function HelpDeskPage() {
         ) : null}
       </div>
 
-      {previewing ? <FaqPreview locale={locale} faq={previewing} onClose={() => setPreviewing(null)} /> : null}
+      {previewing ? (
+        <FaqPreview
+          locale={locale}
+          faq={previewing}
+          onClose={() => setPreviewing(null)}
+          onTree={(opener) => {
+            setTreeReturn(opener)
+            setPreviewing(null)
+            setTreeOf(previewing)
+          }}
+        />
+      ) : null}
     </section>
   )
 }

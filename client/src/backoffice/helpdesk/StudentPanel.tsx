@@ -292,8 +292,8 @@ export function StudentPanel({ locale, ticket, editTags, busy, onAddTag, onRemov
           <p className="hdMuted">{t(locale, 'helpDesk.tags.empty')}</p>
         ) : (
           <ul className="hdTagList">
-            {ticket.tags.map((tag) => {
-              const colour = tagColor(tag)
+            {ticket.tags.map((tag, index) => {
+              const colour = tagColor(index)
               return (
                 <li key={tag} className="hdTag" style={{ background: colour.bg, color: colour.fg }}>
                   {tag}
