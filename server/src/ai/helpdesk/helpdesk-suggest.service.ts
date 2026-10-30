@@ -65,7 +65,7 @@ import { learnerOf } from './workflow/guard';
  *    或 none；模型写在代码里（DEFAULT_MODEL），HELPDESK_SUGGEST_MODEL 只在要换模型时才设，
  *    key / 模型 / base URL 每次现读；3 秒 AbortSignal、不重试，且整次推荐不超过 3.5 秒
  *    （Portal 等 4 秒），过期的答案不返回、不记 faq_id；没有 API key、任何错误都返回 null
- *    （绝不阻塞学员提交工单）；
+ *    （绝不阻塞学员提交工单）；v5 聊天缺省开思考（high），期限放到 15 秒（suggestLimits）；
  * 4. validate → answer：再核一遍是候选之一，返回库里的原答案，模型从不写给学员看的文字；
  * 5. 每次检索写一行 helpdesk_suggestions；query_text 90 天后清空（本实例每小时最多清一次）；
  * 6. 链路：每次推荐一个 run（id = Portal 给的 runId，否则新的 uuidv7；答中时也是 suggestion id），
@@ -90,6 +90,13 @@ export const SUGGEST_TIMEOUT_MS = 3_000;
  * 过了期限 Portal 已放弃、直接建单，学员没看到答案，所以不再记 qa_id（不计入 shown）。
  */
 export const SUGGEST_DEADLINE_MS = 3_500;
+/**
+ * 聊天开思考时的总期限（也是那一步的时限）：2026-10-30 盲评 DeepSeek high 档 p95 6.3 秒、p99 12.6 秒。
+ * Portal 聊天要等得比这更久（Portal 显示「思考中」）；提交工单不思考，仍是 3.5 秒。
+ */
+export const SUGGEST_THINKING_DEADLINE_MS = 15_000;
+/** 聊天的缺省思考档位（用户 2026-10-30：DeepSeek 开 thinking；盲评 high 档错卡最少）。 */
+export const DEFAULT_CHAT_THINKING: ThinkingSetting = 'high';
 export const SUGGEST_CANDIDATES = 8;
 /** v5 assist 一次给模型看的候选数（多出的 2 个给树上近亲与深层答案，见 ASSIST_SEARCH）。 */
 export const ASSIST_CANDIDATES = 10;
@@ -105,7 +112,8 @@ export const ALTERNATIVES_TIMEOUT_MS = 300;
 export const ASSIST_RATE_LIMIT = { limit: 30, windowMs: 3_600_000 } as const;
 const PURGE_EVERY_MS = 3_600_000;
 // 2026-10-29 真模型评测（qa10k dev 难例）：比 gpt-4o-mini 答错少、更快
-const DEFAULT_MODEL = 'google/gemini-2.5-flash';
+// 用户 2026-10-30：DeepSeek 为主模型（gemini-2.5-flash 只作评测对照）
+const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash';
 // OPENROUTER_BASE_URL 是 AI Tutor 已有的变量，这里同样每次现读
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 
@@ -190,8 +198,9 @@ export type HelpdeskSuggestDeps = {
   events: AgentEventLog;
   /** 每次调用现读（默认 process.env），便于轮换 key / 切模型。 */
   env?: () => NodeJS.ProcessEnv;
+  /** 模型那一步的时限（默认见 suggestLimits）；单测缩短，评测放宽。 */
   timeoutMs?: number;
-  /** 整次推荐的总期限（默认 SUGGEST_DEADLINE_MS）；只有评测放宽（思考档位要看不截时限的质量与延迟）。 */
+  /** 整次推荐的总期限（默认见 suggestLimits）；只有评测放宽（思考档位要看不截时限的质量与延迟）。 */
   deadlineMs?: number;
   now?: () => number;
 };
@@ -205,14 +214,34 @@ export function suggestModel(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * 思考档位（HELPDESK_SUGGEST_THINKING：off / low / medium / high，每次现读）；没设或不认识 → undefined，
- * 即 off（runner 的缺省）。基准对比见 eval/helpdesk。
+ * 聊天的思考档位（HELPDESK_SUGGEST_THINKING：off / low / medium / high，每次现读）；没设或不认识 →
+ * DEFAULT_CHAT_THINKING。基准对比见 eval/helpdesk。
  */
-export function suggestThinking(
-  env: NodeJS.ProcessEnv,
-): ThinkingSetting | undefined {
+export function suggestThinking(env: NodeJS.ProcessEnv): ThinkingSetting {
   const value = env.HELPDESK_SUGGEST_THINKING?.trim().toLowerCase();
-  return THINKING_LEVELS.find((level) => level === value);
+  return (
+    THINKING_LEVELS.find((level) => level === value) ?? DEFAULT_CHAT_THINKING
+  );
+}
+
+/**
+ * 这一次的思考档位、总期限与模型那一步的时限。只有 v5 聊天思考：提交工单（Portal 最多等 5 秒、
+ * 绝不挡提交）与没有 context 的旧聊天不思考（不带 thinking，runner 发 effort none）。
+ */
+export function suggestLimits(
+  v5: boolean,
+  env: NodeJS.ProcessEnv,
+): { thinking?: ThinkingSetting; deadlineMs: number; stepMs: number } {
+  const quick = { deadlineMs: SUGGEST_DEADLINE_MS, stepMs: SUGGEST_TIMEOUT_MS };
+  if (!v5) return quick;
+  const thinking = suggestThinking(env);
+  return thinking === 'off'
+    ? { thinking, ...quick }
+    : {
+        thinking,
+        deadlineMs: SUGGEST_THINKING_DEADLINE_MS,
+        stepMs: SUGGEST_THINKING_DEADLINE_MS,
+      };
 }
 
 function invalid(detail: string) {
@@ -341,16 +370,11 @@ function isV5(input: SuggestInput): boolean {
 }
 
 export class HelpdeskSuggestService implements OnModuleDestroy {
-  readonly timeoutMs: number;
-  readonly deadlineMs: number;
   private readonly logger = new Logger('HelpdeskSuggest');
   private lastPurge = Number.NEGATIVE_INFINITY;
   private readonly writing = new Set<Promise<void>>();
 
-  constructor(private readonly deps: HelpdeskSuggestDeps) {
-    this.timeoutMs = deps.timeoutMs ?? SUGGEST_TIMEOUT_MS;
-    this.deadlineMs = deps.deadlineMs ?? SUGGEST_DEADLINE_MS;
-  }
+  constructor(private readonly deps: HelpdeskSuggestDeps) {}
 
   private env(): NodeJS.ProcessEnv {
     return this.deps.env ? this.deps.env() : process.env;
@@ -601,7 +625,8 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     // chip 不调模型，不需要 key
     if (apiKey === '' && input.source !== 'chip')
       return { chosen: null, reason: 'no_key', model: null };
-    const deadline = this.now() + this.deadlineMs;
+    const limits = suggestLimits(isV5(input), env);
+    const deadline = this.now() + (this.deps.deadlineMs ?? limits.deadlineMs);
     const left = () => deadline - this.now();
     const limit =
       input.source === 'submit' ? SUGGEST_RATE_LIMIT : ASSIST_RATE_LIMIT;
@@ -617,7 +642,8 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     const steps = {
       trace: run,
       signal: callerSignal,
-      stepTimeoutMs: () => Math.min(this.timeoutMs, left()),
+      stepTimeoutMs: () =>
+        Math.min(this.deps.timeoutMs ?? limits.stepMs, left()),
       traceparent: () => childTraceparent(trace),
       onStep: (name: string) => {
         if (onStep && Object.hasOwn(STREAM_STEPS, name))
@@ -657,7 +683,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     }
 
     const model = suggestModel(env);
-    const thinking = suggestThinking(env);
+    const { thinking } = limits;
     const modelTarget = {
       provider: 'openrouter' as const,
       model,

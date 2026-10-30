@@ -11,9 +11,11 @@ import {
   ALTERNATIVES_TIMEOUT_MS,
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
+  suggestLimits,
   suggestModel,
   suggestThinking,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_THINKING_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
   SUGGEST_TIMEOUT_MS,
 } from './helpdesk-suggest.service';
@@ -494,7 +496,10 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(Date.now() - started).toBeLessThan(1000);
     expect(signal?.aborted).toBe(true);
-    expect(new HelpdeskSuggestService({} as never).timeoutMs).toBe(3000);
+    expect(suggestLimits(false, {})).toEqual({
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
   });
 
   it('returns null when the model call fails', async () => {
@@ -635,7 +640,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       candidates[0].id,
     );
     expect(rows[0].faqId).toBe(candidates[0].id);
-    expect(new HelpdeskSuggestService({} as never).deadlineMs).toBe(3_500);
+    expect(suggestLimits(false, {}).deadlineMs).toBe(3_500);
   });
 
   it('gives the model only the time that is left, then aborts it', async () => {
@@ -890,34 +895,58 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
 
 describe('Helpdesk suggest: model choice', () => {
   it('uses the model fixed in code; HELPDESK_SUGGEST_MODEL only overrides it', () => {
-    // 2026-10-29 真模型评测（dev 难例）：gemini-2.5-flash 答错率最低、最快
-    expect(suggestModel({})).toBe('google/gemini-2.5-flash');
+    // 用户 2026-10-30：DeepSeek（deepseek-v4.1-flash）为主模型，gemini-2.5-flash 只作对照
+    expect(suggestModel({})).toBe('deepseek/deepseek-v4.1-flash');
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: '  ' })).toBe(
-      'google/gemini-2.5-flash',
+      'deepseek/deepseek-v4.1-flash',
     );
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: ' x/y ' })).toBe('x/y');
     // AI Tutor 的模型列表不影响推荐用的模型（DEV 上排第一的是 deepseek）
     expect(
       suggestModel({
-        AI_AVAILABLE_MODELS: 'deepseek/deepseek-v4.1-flash, openai/gpt-4o-mini',
+        AI_AVAILABLE_MODELS: 'openai/gpt-4o-mini, deepseek/deepseek-v4.1-flash',
       }),
-    ).toBe('google/gemini-2.5-flash');
+    ).toBe('deepseek/deepseek-v4.1-flash');
   });
 
-  it('thinks only when HELPDESK_SUGGEST_THINKING names a level (read on every call); otherwise off', async () => {
-    expect(suggestThinking({})).toBeUndefined();
+  it('the chat thinks high unless HELPDESK_SUGGEST_THINKING names another level (read on every call); the ticket form never thinks', async () => {
+    // 用户 2026-10-30：DeepSeek 开 thinking。盲评：high 档错卡最少（长对话 0.45%，off 1.45%）
+    expect(suggestThinking({})).toBe('high');
     expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: ' LOW ' })).toBe('low');
-    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'high' })).toBe('high');
     expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'off' })).toBe('off');
-    expect(
-      suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' }),
-    ).toBeUndefined();
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('high');
+    // 提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天：不思考、3.5 秒
+    for (const env of [{}, { HELPDESK_SUGGEST_THINKING: 'low' }])
+      expect(suggestLimits(false, env)).toEqual({
+        deadlineMs: SUGGEST_DEADLINE_MS,
+        stepMs: SUGGEST_TIMEOUT_MS,
+      });
     const { service, complete, env } = setup();
     await service.suggest(input);
-    expect(complete.mock.calls[0][1].model).not.toHaveProperty('thinking');
     env.HELPDESK_SUGGEST_THINKING = 'low';
     await service.suggest(input);
-    expect(complete.mock.calls[1][1].model).toMatchObject({ thinking: 'low' });
+    await service.suggest({ ...input, source: 'chat' });
+    for (const [, context] of complete.mock.calls)
+      expect(context.model).not.toHaveProperty('thinking');
+  });
+
+  it('gives a thinking chat 15 s in all (p99 of high was 12.6 s), and 3.5 s with thinking off', () => {
+    expect(SUGGEST_THINKING_DEADLINE_MS).toBe(15_000);
+    expect(suggestLimits(true, {})).toEqual({
+      thinking: 'high',
+      deadlineMs: 15_000,
+      stepMs: 15_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'low' })).toEqual({
+      thinking: 'low',
+      deadlineMs: 15_000,
+      stepMs: 15_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'off' })).toEqual({
+      thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
   });
 });
 

@@ -13,6 +13,7 @@ import {
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_THINKING_DEADLINE_MS,
 } from './helpdesk-suggest.service';
 import type {
   HelpdeskSuggestionLog,
@@ -936,7 +937,7 @@ describe('v5 without a model call', () => {
     const { service } = setup({
       now: () => now,
       pick: () => {
-        now += SUGGEST_DEADLINE_MS + 1;
+        now += SUGGEST_THINKING_DEADLINE_MS + 1;
         return pick('greeting', 'none', { reply: 'Hi!' });
       },
     });
@@ -944,6 +945,34 @@ describe('v5 without a model call', () => {
       kind: 'no_match',
       reply: null,
     });
+  });
+
+  it('thinks high by default and waits up to 15 s for it; with thinking off the 3.5 s deadline holds', async () => {
+    // 用户 2026-10-30：DeepSeek 开 thinking（Portal 放「思考中」动画）。盲评 high 档 p95 6.3 s、p99 12.6 s
+    for (const [thinking, took, kind] of [
+      [undefined, 12_000, 'answer'],
+      [undefined, SUGGEST_THINKING_DEADLINE_MS + 1, 'no_match'],
+      ['low', 12_000, 'answer'],
+      ['off', 3_000, 'answer'],
+      ['off', SUGGEST_DEADLINE_MS + 1, 'no_match'],
+    ] as const) {
+      let now = 1_000;
+      const { service, run } = setup({
+        env: {
+          OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
+          HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+          ...(thinking ? { HELPDESK_SUGGEST_THINKING: thinking } : {}),
+        },
+        now: () => now,
+        pick: () => {
+          now += took;
+          return pick('question', PAID.id, { tone: 'problem' });
+        },
+      });
+      const result = await ask(service, chat('paid'));
+      expect([thinking, took, result.kind]).toEqual([thinking, took, kind]);
+      expect(run.mock.calls[0][1].model.thinking).toBe(thinking ?? 'high');
+    }
   });
 
   it('reports releaseVersion null before the first release, and when it cannot be read', async () => {

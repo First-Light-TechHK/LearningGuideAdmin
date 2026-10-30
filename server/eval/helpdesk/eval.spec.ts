@@ -1126,23 +1126,43 @@ describe('model and budget settings', () => {
       kind: 'fake',
       model: FAKE_MODEL_ID,
     });
+    // 和生产一样：聊天默认思考 high，提交工单那条路不思考
     expect(chooseModel({ OPENROUTER_API_KEY: 'k' })).toEqual({
       kind: 'real',
-      model: 'google/gemini-2.5-flash',
+      model: 'deepseek/deepseek-v4.1-flash',
+      thinking: 'high',
+    });
+    expect(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')).toEqual({
+      kind: 'real',
+      model: 'deepseek/deepseek-v4.1-flash',
     });
     expect(
-      chooseModel({
-        OPENROUTER_API_KEY: 'k',
-        HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
-      }),
-    ).toEqual({ kind: 'real', model: 'anthropic/claude-haiku' });
+      thinkingLabel(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')),
+    ).toBe(', thinking off');
+    expect(
+      chooseModel(
+        {
+          OPENROUTER_API_KEY: 'k',
+          HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
+          HELPDESK_SUGGEST_THINKING: 'off',
+        },
+        'chat',
+      ),
+    ).toEqual({
+      kind: 'real',
+      model: 'anthropic/claude-haiku',
+      thinking: 'off',
+    });
     // 没配 HELPDESK_SUGGEST_MODEL 时和生产选同一个模型（代码里定的那个）
     expect(
-      chooseModel({
-        OPENROUTER_API_KEY: 'k',
-        AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
-      }),
-    ).toEqual({ kind: 'real', model: 'google/gemini-2.5-flash' });
+      chooseModel(
+        {
+          OPENROUTER_API_KEY: 'k',
+          AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
+        },
+        'ticket',
+      ),
+    ).toEqual({ kind: 'real', model: 'deepseek/deepseek-v4.1-flash' });
   });
 
   it('takes a longer deadline from HELPDESK_EVAL_DEADLINE_MS for real models only, and names it in the label', () => {
@@ -1160,7 +1180,7 @@ describe('model and budget settings', () => {
     });
     expect(model).toEqual({
       kind: 'real',
-      model: 'google/gemini-2.5-flash',
+      model: 'deepseek/deepseek-v4.1-flash',
       thinking: 'low',
       deadlineMs: 30_000,
     });

@@ -501,15 +501,20 @@ export async function callCeilingUsd(model: string): Promise<number | null> {
   );
 }
 
-/** 有 OPENROUTER_API_KEY 就用真模型（和生产选同一个：suggestModel），否则用假模型。 */
-export function chooseModel(env: NodeJS.ProcessEnv): EvalModel {
+/**
+ * 有 OPENROUTER_API_KEY 就用真模型（和生产选同一个：suggestModel），否则用假模型。思考档位也和生产
+ * 一样：聊天（v5 对话集）按 suggestThinking，提交工单那条路（用例集）不思考。
+ */
+export function chooseModel(
+  env: NodeJS.ProcessEnv,
+  surface: 'chat' | 'ticket' = 'chat',
+): EvalModel {
   if (env.OPENROUTER_API_KEY?.trim()) {
-    const thinking = suggestThinking(env);
     const deadlineMs = evalDeadline(env);
     return {
       kind: 'real',
       model: suggestModel(env),
-      ...(thinking ? { thinking } : {}),
+      ...(surface === 'chat' ? { thinking: suggestThinking(env) } : {}),
       ...(deadlineMs ? { deadlineMs } : {}),
     };
   }

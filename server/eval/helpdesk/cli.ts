@@ -107,7 +107,7 @@ async function run(argv: string[], deps: CliDeps): Promise<number> {
   if (values['retrieval-only'])
     return retrievalOnly(values, faqs, cases, all.length, deps);
 
-  const model = chooseModel(deps.env);
+  const model = chooseModel(deps.env, 'ticket');
   const { runner, env } = await (deps.runnerFor ?? runnerFor)(model);
   const callCeiling =
     model.kind === 'real'
