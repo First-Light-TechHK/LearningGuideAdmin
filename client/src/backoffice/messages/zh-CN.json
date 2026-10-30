@@ -135,7 +135,30 @@
   },
   "course": {
     "title": "课程",
-    "description": "这是登录后的默认落地页。课程相关业务功能由单独的 PRD 定义。"
+    "description": "这是登录后的默认落地页。课程相关业务功能由单独的 PRD 定义。",
+    "operations": "运营位",
+    "versions": "版本与历史",
+    "publish": "发布",
+    "deleteDraft": "删除草稿",
+    "importPackage": "导入课程包",
+    "exportPackage": "导出课程包",
+    "changeStatus": "变更状态",
+    "draft": "草稿",
+    "noDraft": "无草稿",
+    "notPublished": "未发布"
+  },
+  "operations": {
+    "title": "运营位",
+    "popularCourses": "热门课程",
+    "discoveryBanner": "发现页 Banner",
+    "publish": "发布"
+  },
+  "history": {
+    "title": "历史记录",
+    "time": "时间",
+    "operator": "操作人",
+    "action": "操作",
+    "detail": "详情"
   },
   "placeholder": {
     "title": "{menu}",

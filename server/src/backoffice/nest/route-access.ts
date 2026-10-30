@@ -81,16 +81,18 @@ function actionFor(method: string, segments: string[]): ActionKind {
  * - import/export/confirm/publish-uat/approve/go-live/live-status/restore = PUBLISH；
  * - 其余写操作按 CREATE。
  */
-function backofficeCourseAction(method: string, segments: string[]): ActionKind {
+function backofficeCourseAction(
+  method: string,
+  segments: string[],
+): ActionKind {
   if (method === 'GET' || method === 'HEAD') return 'VIEW';
   const publishSegments = new Set([
     'import',
     'export',
     'confirm',
     'cancel',
-    'publish-uat',
-    'approve',
-    'go-live',
+    'publish',
+    'delete-draft',
     'live-status',
     'restore',
   ]);
@@ -133,6 +135,16 @@ export function routeAccess(method: string, path: string): RouteAccess {
     };
   }
   if (first === 'backoffice') {
+    // 环境标识是所有后台页面的公共信息
+    if (second === 'environment') return { kind: 'signedIn' };
+    // 运营位（/api/backoffice/operations/**）：读 = VIEW；保存/发布 = PUBLISH
+    if (second === 'operations') {
+      return {
+        kind: 'menu',
+        menus: ['course'],
+        action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+      };
+    }
     // 商品课程 v2（/api/backoffice/courses/**）：导入/导出/发布=发布级动作
     const action = backofficeCourseAction(verb, segments);
     return { kind: 'menu', menus: ['course'], action };
