@@ -17,6 +17,7 @@ import {
   runRetrieval,
   summarize,
   summarizeRetrieval,
+  thinkingLabel,
   writeReport,
 } from './harness';
 import {
@@ -120,7 +121,7 @@ async function run(argv: string[], deps: CliDeps): Promise<number> {
       )
     : null;
   deps.log(
-    `Helpdesk eval: ${cases.length} of ${all.length} cases, ${model.kind} model ${model.model}, ` +
+    `Helpdesk eval: ${cases.length} of ${all.length} cases, ${model.kind} model ${model.model}${thinkingLabel(model)}, ` +
       `${pg ? 'PostgreSQL' : 'in-memory'} retrieval, budget $${budgetUsd}`,
   );
   try {
@@ -312,7 +313,7 @@ async function conversationsWith(
       : null;
   deps.log(
     `Helpdesk v5 conversation eval: ${conversations.length} of ${all.length} conversations, ` +
-      `${model.kind} model ${model.model}, ${released ? `released library v${released.release}` : pg ? 'PostgreSQL' : 'in-memory'} retrieval, budget $${budgetUsd}`,
+      `${model.kind} model ${model.model}${thinkingLabel(model)}, ${released ? `released library v${released.release}` : pg ? 'PostgreSQL' : 'in-memory'} retrieval, budget $${budgetUsd}`,
   );
   try {
     const outcome = await runConversations({

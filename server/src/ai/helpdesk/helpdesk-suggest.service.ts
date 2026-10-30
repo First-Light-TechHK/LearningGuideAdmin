@@ -32,7 +32,9 @@ import {
 } from './trace/traceparent';
 import {
   runWorkflow,
+  THINKING_LEVELS,
   type AgentStepRunner,
+  type ThinkingSetting,
   type WorkflowTemplate,
 } from './workflow/engine';
 import {
@@ -198,6 +200,17 @@ export type HelpdeskSuggestDeps = {
  */
 export function suggestModel(env: NodeJS.ProcessEnv): string {
   return env.HELPDESK_SUGGEST_MODEL?.trim() || DEFAULT_MODEL;
+}
+
+/**
+ * 思考档位（HELPDESK_SUGGEST_THINKING：off / low / medium / high，每次现读）；没设或不认识 → undefined，
+ * 即 off（runner 的缺省）。基准对比见 eval/helpdesk。
+ */
+export function suggestThinking(
+  env: NodeJS.ProcessEnv,
+): ThinkingSetting | undefined {
+  const value = env.HELPDESK_SUGGEST_THINKING?.trim().toLowerCase();
+  return THINKING_LEVELS.find((level) => level === value);
 }
 
 function invalid(detail: string) {
@@ -640,11 +653,13 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     }
 
     const model = suggestModel(env);
+    const thinking = suggestThinking(env);
     const modelTarget = {
       provider: 'openrouter' as const,
       model,
       apiKey,
       baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
+      ...(thinking ? { thinking } : {}),
     };
     if (isV5(input)) {
       const { state, reason, trail } = await runWorkflow(

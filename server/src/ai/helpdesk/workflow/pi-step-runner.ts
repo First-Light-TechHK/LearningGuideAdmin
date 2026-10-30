@@ -83,6 +83,7 @@ let openRouterModels: ReturnType<PiModules['ai']['createModels']> | undefined;
 /**
  * pi-ai 的 OpenRouter provider。模型 id 随 HELPDESK_SUGGEST_MODEL 任意：目录里有就用目录的价格
  * （openai-completions 接口），没有就按 OpenRouter 的 chat completions 现造；base URL 每次现读。
+ * 给了 target.thinking 就把模型标成能思考，价目外的模型 pi 才会发 reasoning（档位即 Agent 的 thinkingLevel）。
  */
 export const openRouterSource: ModelSource = (pi, target) => {
   if (!openRouterModels) {
@@ -90,16 +91,21 @@ export const openRouterSource: ModelSource = (pi, target) => {
     openRouterModels.setProvider(pi.openrouter.openrouterProvider());
   }
   const known = openRouterModels.getModel('openrouter', target.model);
+  const thinks = target.thinking !== undefined;
   const model: Model<Api> =
     known?.api === 'openai-completions'
-      ? { ...known, baseUrl: target.baseUrl }
+      ? {
+          ...known,
+          baseUrl: target.baseUrl,
+          ...(thinks ? { reasoning: true } : {}),
+        }
       : {
           id: target.model,
           name: target.model,
           api: 'openai-completions',
           provider: 'openrouter',
           baseUrl: target.baseUrl,
-          reasoning: false,
+          reasoning: thinks,
           input: ['text'],
           cost: known?.cost ?? NO_COST,
           contextWindow: known?.contextWindow ?? 128_000,
@@ -328,7 +334,7 @@ export class PiStepRunner implements AgentStepRunner {
         systemPrompt: spec.system,
         model,
         tools: [tool],
-        thinkingLevel: 'off',
+        thinkingLevel: context.model.thinking ?? 'off',
       },
       streamFn: (requestModel, transcript, streamOptions) => {
         const traceparent = context.traceparent();

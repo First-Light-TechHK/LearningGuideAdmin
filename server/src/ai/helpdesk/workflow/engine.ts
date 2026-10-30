@@ -12,11 +12,20 @@ import type { RunTrace } from '../trace/run-trace';
  *   只给这一步的工具，参数全部枚举锁定；runner 只回报「调了什么」，怎么走由 decide 决定。
  * 新模板（订单状态卡片、只给链接、低置信度选项）= 新的一张步骤表，不动这里与 runner。
  */
+/** 思考档位（OpenRouter 的 reasoning effort；off = none）。 */
+export const THINKING_LEVELS = ['off', 'low', 'medium', 'high'] as const;
+export type ThinkingSetting = (typeof THINKING_LEVELS)[number];
+
 export type ModelTarget = {
   provider: 'openrouter';
   model: string;
   apiKey: string;
   baseUrl: string;
+  /**
+   * 给了就发 OpenRouter 的 reasoning effort（off → none；模型不支持的档位由 pi 就近取）。不给 = off：
+   * pi 价目里能思考的模型（DeepSeek v4.1 flash、Gemini 2.5 flash）发 none，价目外的什么都不发。
+   */
+  thinking?: ThinkingSetting;
 };
 
 export type AgentStepSpec = {

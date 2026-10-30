@@ -36,6 +36,7 @@ import {
   EVAL_LOCALES,
   percentile,
   serviceLocale,
+  thinkingLabel,
   type EvalLocale,
   type EvalModel,
   type RetrievalResult,
@@ -978,7 +979,7 @@ export function markdownConversationReport(report: ConversationReport): string {
   const lines = [
     '# Helpdesk v5 conversation eval',
     '',
-    `Generated ${report.generatedAt}. Model: ${report.model.kind} ${report.model.model}. Retrieval: ${report.retrieval}.`,
+    `Generated ${report.generatedAt}. Model: ${report.model.kind} ${report.model.model}${thinkingLabel(report.model)}. Retrieval: ${report.retrieval}.`,
     ...(report.model.note ? ['', `> ${report.model.note}`] : []),
     '',
     `Conversations: ${report.conversations.run} of ${report.conversations.total} run, ${report.conversations.allRight} fully right.`,

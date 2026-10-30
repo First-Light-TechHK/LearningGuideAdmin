@@ -533,7 +533,7 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
     ...extra,
   });
 
-  async function call(respond: () => Response) {
+  async function call(respond: () => Response, model: ModelTarget = TARGET) {
     const fetch = jest.fn((url: string | URL | Request, init?: RequestInit) => {
       void url;
       void init;
@@ -548,13 +548,74 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
       step: 2,
       name: 'pick_faq',
       signal: new AbortController().signal,
-      model: TARGET,
+      model,
       traceparent: () => TRACEPARENT,
     });
     trace.emit('turn/end', { turn: 1, reason: 'test' });
     await trace.flush();
     return { outcome, fetch, events: await log.read(RUN) };
   }
+  const picked = () =>
+    sse([
+      chunk({
+        role: 'assistant',
+        tool_calls: [
+          {
+            index: 0,
+            id: 'call_t',
+            type: 'function',
+            function: {
+              name: 'pick_faq',
+              arguments: JSON.stringify({ faqId: IDS[0] }),
+            },
+          },
+        ],
+      }),
+      {
+        ...chunk({}),
+        choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 100, completion_tokens: 40 },
+      },
+    ]);
+  const sentReasoning = (fetch: jest.Mock) =>
+    (
+      JSON.parse(
+        (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
+      ) as { reasoning?: unknown }
+    ).reasoning;
+
+  it.each([
+    ['off', { effort: 'none' }],
+    ['low', { effort: 'low' }],
+    ['high', { effort: 'high' }],
+  ] as const)(
+    'sends thinking %s as the OpenRouter reasoning effort, also for a model missing from the catalog',
+    async (thinking, reasoning) => {
+      for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
+        const { outcome, fetch } = await call(picked, {
+          ...TARGET,
+          model,
+          thinking,
+        });
+        expect(outcome).toEqual({ kind: 'called', args: { faqId: IDS[0] } });
+        expect(sentReasoning(fetch)).toEqual(reasoning);
+      }
+    },
+  );
+
+  it('without a thinking setting turns thinking off for a catalog model and sends nothing for any other', async () => {
+    // pi 的价目里 DeepSeek v4.1 flash 能思考：2026-10-30 之前的评测都是 effort none（思考关）
+    const { fetch } = await call(picked, {
+      ...TARGET,
+      model: 'deepseek/deepseek-v4.1-flash',
+    });
+    expect(sentReasoning(fetch)).toEqual({ effort: 'none' });
+    const other = await call(picked, {
+      ...TARGET,
+      model: 'acme/brand-new-model',
+    });
+    expect(sentReasoning(other.fetch)).toBeUndefined();
+  });
 
   it('sends one OpenRouter chat request with the enum-locked tool, required tool choice and the traceparent', async () => {
     const { outcome, fetch, events } = await call(() =>

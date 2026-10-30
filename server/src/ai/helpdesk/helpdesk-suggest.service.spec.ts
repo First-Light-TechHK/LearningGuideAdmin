@@ -12,6 +12,7 @@ import {
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
   suggestModel,
+  suggestThinking,
   SUGGEST_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
   SUGGEST_TIMEOUT_MS,
@@ -831,6 +832,22 @@ describe('Helpdesk suggest: model choice', () => {
         AI_AVAILABLE_MODELS: 'deepseek/deepseek-v4.1-flash, openai/gpt-4o-mini',
       }),
     ).toBe('google/gemini-2.5-flash');
+  });
+
+  it('thinks only when HELPDESK_SUGGEST_THINKING names a level (read on every call); otherwise off', async () => {
+    expect(suggestThinking({})).toBeUndefined();
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: ' LOW ' })).toBe('low');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'high' })).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'off' })).toBe('off');
+    expect(
+      suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' }),
+    ).toBeUndefined();
+    const { service, complete, env } = setup();
+    await service.suggest(input);
+    expect(complete.mock.calls[0][1].model).not.toHaveProperty('thinking');
+    env.HELPDESK_SUGGEST_THINKING = 'low';
+    await service.suggest(input);
+    expect(complete.mock.calls[1][1].model).toMatchObject({ thinking: 'low' });
   });
 });
 

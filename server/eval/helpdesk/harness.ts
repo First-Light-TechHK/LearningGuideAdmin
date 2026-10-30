@@ -10,10 +10,14 @@ import {
   HelpdeskSuggestService,
   SUGGEST_CANDIDATES,
   suggestModel,
+  suggestThinking,
 } from '../../src/ai/helpdesk/helpdesk-suggest.service';
 import type { HelpdeskSuggestionLog } from '../../src/ai/helpdesk/helpdesk-suggestion.store';
 import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-event.store';
-import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
+import type {
+  AgentStepRunner,
+  ThinkingSetting,
+} from '../../src/ai/helpdesk/workflow/engine';
 import { initialFaqState } from '../../src/ai/helpdesk/workflow/faq-workflow';
 import {
   loadPi,
@@ -423,9 +427,18 @@ export async function pgReleaseQaSource(url: string): Promise<{
 /* ---------------------------------- 模型 ---------------------------------- */
 
 export type EvalModel =
-  { kind: 'real'; model: string } | { kind: 'fake'; model: string };
+  | { kind: 'real'; model: string; thinking?: ThinkingSetting }
+  | { kind: 'fake'; model: string };
 
 export const FAKE_MODEL_ID = 'fake/top-candidate';
+
+/** 报告与日志里真模型的思考档位（没设 = off）。 */
+export function thinkingLabel(model: {
+  kind: string;
+  thinking?: ThinkingSetting;
+}): string {
+  return model.kind === 'real' ? `, thinking ${model.thinking ?? 'off'}` : '';
+}
 
 /**
  * 一次 pick_faq 请求最多多少 token 的提示：系统提示 + 学员原文（≤ 2000 字）+ 主题 + 8 个候选
@@ -456,8 +469,14 @@ export async function callCeilingUsd(model: string): Promise<number | null> {
 
 /** 有 OPENROUTER_API_KEY 就用真模型（和生产选同一个：suggestModel），否则用假模型。 */
 export function chooseModel(env: NodeJS.ProcessEnv): EvalModel {
-  if (env.OPENROUTER_API_KEY?.trim())
-    return { kind: 'real', model: suggestModel(env) };
+  if (env.OPENROUTER_API_KEY?.trim()) {
+    const thinking = suggestThinking(env);
+    return {
+      kind: 'real',
+      model: suggestModel(env),
+      ...(thinking ? { thinking } : {}),
+    };
+  }
   return { kind: 'fake', model: FAKE_MODEL_ID };
 }
 
@@ -1012,7 +1031,7 @@ export function markdownReport(report: EvalReport): string {
     `# Helpdesk suggestion eval`,
     '',
     `- Generated: ${report.generatedAt}`,
-    `- Model: ${report.model.kind} \`${report.model.model}\`${report.model.note ? ` (${report.model.note})` : ''}`,
+    `- Model: ${report.model.kind} \`${report.model.model}\`${thinkingLabel(report.model)}${report.model.note ? ` (${report.model.note})` : ''}`,
     `- Retrieval: ${report.retrieval}`,
     `- Cases: ${report.cases.run} of ${report.cases.total}`,
     `- Budget: $${report.budget.spentUsd.toFixed(4)} of $${report.budget.capUsd.toFixed(2)}${report.budget.stopped ? ` (stopped: ${report.budget.stopped})` : ''}`,
