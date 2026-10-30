@@ -17,7 +17,7 @@ import {
   type CourseCompleteness,
 } from './completeness';
 import {
-  applyVersionSnapshot,
+  applyVersionSnapshotInTx,
   captureVersionSnapshot,
   detailToCompletenessInput,
   snapshotToCompletenessInput,
@@ -175,64 +175,79 @@ export class PublishingService {
       });
     }
 
-    const snapshot = await captureVersionSnapshot(this.prisma, courseId);
-    const last = await this.prisma.courseVersion.findFirst({
-      where: { courseId },
-      orderBy: { versionNo: 'desc' },
-      select: {
-        versionNo: true,
-        versionSeries: true,
-        versionMinor: true,
-        exportedAt: true,
-      },
-    });
-    const numbering = nextVersionLabel(this.config.versionNumberingMode, last);
-
     const source = this.resolveSource(course);
-    const version = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.courseVersion.create({
-        data: {
-          courseId,
-          versionNo: (last?.versionNo ?? 0) + 1,
-          versionLabel: numbering.label,
-          versionSeries: numbering.series,
-          versionMinor: numbering.minor,
-          sourceEnvironment: source.environment,
-          sourceVersionLabel: source.label,
-          snapshotData: snapshot as unknown as Prisma.InputJsonValue,
-          wentLiveAt: new Date(),
-          createdBy: actorEmployeeId,
-        },
-      });
-      await tx.commerceCourse.update({
-        where: { id: courseId },
-        data: {
-          liveVersionId: created.id,
-          // 首次发布后为 Offline；之后发布保持当前状态（PRD §17）
-          liveStatus: course.liveVersionId ? course.liveStatus : 'OFFLINE',
-          lifecycleStatus: 'LIVE',
-          hasDraft: false,
-          draftSourceType: null,
-          draftSourceEnvironment: null,
-          draftSourceVersionLabel: null,
-        },
-      });
-      await tx.courseAuthoringActivity.create({
-        data: {
-          courseId,
-          versionNo: created.versionNo,
-          actorEmployeeId,
-          action: HISTORY_ACTIONS.PUBLISH,
-          detail: {
+    // 锁住课程行后再取上一版本号、拍快照：两人同时点发布时第二个请求等第一个提交，
+    // 然后看到草稿已发布返回 NO_DRAFT，不会撞 (courseId, versionNo) 唯一键变成 500。
+    const version = await this.prisma.$transaction(
+      async (tx) => {
+        const [locked] = await tx.$queryRaw<{ hasDraft: boolean }[]>`
+          SELECT "hasDraft" FROM "CommerceCourse" WHERE id = ${courseId} FOR UPDATE`;
+        if (!locked?.hasDraft) {
+          throw new ConflictException({
+            code: 'NO_DRAFT',
+            message: 'There is no draft to publish.',
+          });
+        }
+        const snapshot = await captureVersionSnapshot(tx, courseId);
+        const last = await tx.courseVersion.findFirst({
+          where: { courseId },
+          orderBy: { versionNo: 'desc' },
+          select: {
+            versionNo: true,
+            versionSeries: true,
+            versionMinor: true,
+            exportedAt: true,
+          },
+        });
+        const numbering = nextVersionLabel(
+          this.config.versionNumberingMode,
+          last,
+        );
+        const created = await tx.courseVersion.create({
+          data: {
+            courseId,
+            versionNo: (last?.versionNo ?? 0) + 1,
             versionLabel: numbering.label,
+            versionSeries: numbering.series,
+            versionMinor: numbering.minor,
             sourceEnvironment: source.environment,
             sourceVersionLabel: source.label,
-            notifyLearners: Boolean(options?.notifyLearners),
+            snapshotData: snapshot as unknown as Prisma.InputJsonValue,
+            wentLiveAt: new Date(),
+            createdBy: actorEmployeeId,
           },
-        },
-      });
-      return created;
-    });
+        });
+        await tx.commerceCourse.update({
+          where: { id: courseId },
+          data: {
+            liveVersionId: created.id,
+            // 首次发布后为 Offline；之后发布保持当前状态（PRD §17）
+            liveStatus: course.liveVersionId ? course.liveStatus : 'OFFLINE',
+            lifecycleStatus: 'LIVE',
+            hasDraft: false,
+            draftSourceType: null,
+            draftSourceEnvironment: null,
+            draftSourceVersionLabel: null,
+          },
+        });
+        await tx.courseAuthoringActivity.create({
+          data: {
+            courseId,
+            versionNo: created.versionNo,
+            actorEmployeeId,
+            action: HISTORY_ACTIONS.PUBLISH,
+            detail: {
+              versionLabel: numbering.label,
+              sourceEnvironment: source.environment,
+              sourceVersionLabel: source.label,
+              notifyLearners: Boolean(options?.notifyLearners),
+            },
+          },
+        });
+        return created;
+      },
+      { timeout: 30_000 },
+    );
 
     return {
       versionId: version.id,
@@ -266,68 +281,68 @@ export class PublishingService {
 
   /** Delete draft：用线上版本覆盖草稿；从未发布时不可用。 */
   async deleteDraft(courseId: string, actorEmployeeId: string | null) {
-    const course = await this.prisma.commerceCourse.findUnique({
-      where: { id: courseId },
-      select: {
-        id: true,
-        liveVersionId: true,
-        hasDraft: true,
-        liveStatus: true,
-      },
-    });
-    if (!course)
-      throw new NotFoundException({
-        code: 'COURSE_NOT_FOUND',
-        message: 'Course not found',
-      });
-    if (!course.liveVersionId || !course.hasDraft) {
-      throw new ConflictException({
-        code: 'NO_DRAFT',
-        message: 'There is no draft to delete. Publish a version first.',
-      });
-    }
-    const live = await this.prisma.courseVersion.findUnique({
-      where: { id: course.liveVersionId },
-      select: {
-        id: true,
-        versionNo: true,
-        versionLabel: true,
-        snapshotData: true,
-      },
-    });
-    if (!live)
-      throw new NotFoundException({
-        code: 'VERSION_NOT_FOUND',
-        message: 'Live version not found',
-      });
+    // 锁住课程行再判断和覆盖：重复点击或与发布同时发生时按顺序执行，第二次看到没有草稿返回 409。
+    return this.prisma.$transaction(
+      async (tx) => {
+        const [course] = await tx.$queryRaw<
+          { liveVersionId: string | null; hasDraft: boolean }[]
+        >`
+          SELECT "liveVersionId", "hasDraft" FROM "CommerceCourse"
+          WHERE id = ${courseId} FOR UPDATE`;
+        if (!course)
+          throw new NotFoundException({
+            code: 'COURSE_NOT_FOUND',
+            message: 'Course not found',
+          });
+        if (!course.liveVersionId || !course.hasDraft) {
+          throw new ConflictException({
+            code: 'NO_DRAFT',
+            message: 'There is no draft to delete. Publish a version first.',
+          });
+        }
+        const live = await tx.courseVersion.findUnique({
+          where: { id: course.liveVersionId },
+          select: {
+            id: true,
+            versionNo: true,
+            versionLabel: true,
+            snapshotData: true,
+          },
+        });
+        if (!live)
+          throw new NotFoundException({
+            code: 'VERSION_NOT_FOUND',
+            message: 'Live version not found',
+          });
 
-    await applyVersionSnapshot(
-      this.prisma,
-      courseId,
-      live.snapshotData as unknown as VersionSnapshot,
-    );
-    await this.prisma.$transaction([
-      this.prisma.commerceCourse.update({
-        where: { id: courseId },
-        data: {
-          hasDraft: false,
-          lifecycleStatus: 'LIVE',
-          draftSourceType: null,
-          draftSourceEnvironment: null,
-          draftSourceVersionLabel: null,
-        },
-      }),
-      this.prisma.courseAuthoringActivity.create({
-        data: {
+        await applyVersionSnapshotInTx(
+          tx,
           courseId,
-          versionNo: live.versionNo,
-          actorEmployeeId,
-          action: HISTORY_ACTIONS.DELETE_DRAFT,
-          detail: { keptVersion: live.versionLabel },
-        },
-      }),
-    ]);
-    return { deleted: true, keptVersion: live.versionLabel };
+          live.snapshotData as unknown as VersionSnapshot,
+        );
+        await tx.commerceCourse.update({
+          where: { id: courseId },
+          data: {
+            hasDraft: false,
+            lifecycleStatus: 'LIVE',
+            draftSourceType: null,
+            draftSourceEnvironment: null,
+            draftSourceVersionLabel: null,
+          },
+        });
+        await tx.courseAuthoringActivity.create({
+          data: {
+            courseId,
+            versionNo: live.versionNo,
+            actorEmployeeId,
+            action: HISTORY_ACTIONS.DELETE_DRAFT,
+            detail: { keptVersion: live.versionLabel },
+          },
+        });
+        return { deleted: true, keptVersion: live.versionLabel };
+      },
+      { timeout: 60_000 },
+    );
   }
 
   /** Restore：把版本快照写入草稿，发布后才影响线上。 */
@@ -345,30 +360,38 @@ export class PublishingService {
         message: 'Version not found',
       });
     }
-    await this.prisma.commerceCourse.update({
-      where: { id: courseId },
-      data: {
-        hasDraft: true,
-        lifecycleStatus: 'WORKING',
-        draftSourceType: 'RESTORE',
-        draftSourceEnvironment: null,
-        draftSourceVersionLabel: version.versionLabel,
+    // 标记草稿、写快照、记历史在同一事务里：中途失败不会留下"有草稿但内容没恢复"的半成品。
+    await this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`
+          SELECT id FROM "CommerceCourse" WHERE id = ${courseId} FOR UPDATE`;
+        await tx.commerceCourse.update({
+          where: { id: courseId },
+          data: {
+            hasDraft: true,
+            lifecycleStatus: 'WORKING',
+            draftSourceType: 'RESTORE',
+            draftSourceEnvironment: null,
+            draftSourceVersionLabel: version.versionLabel,
+          },
+        });
+        await applyVersionSnapshotInTx(
+          tx,
+          courseId,
+          version.snapshotData as unknown as VersionSnapshot,
+        );
+        await tx.courseAuthoringActivity.create({
+          data: {
+            courseId,
+            versionNo: version.versionNo,
+            actorEmployeeId,
+            action: HISTORY_ACTIONS.RESTORE,
+            detail: { restoredFrom: version.versionLabel },
+          },
+        });
       },
-    });
-    await applyVersionSnapshot(
-      this.prisma,
-      courseId,
-      version.snapshotData as unknown as VersionSnapshot,
+      { timeout: 60_000 },
     );
-    await this.prisma.courseAuthoringActivity.create({
-      data: {
-        courseId,
-        versionNo: version.versionNo,
-        actorEmployeeId,
-        action: HISTORY_ACTIONS.RESTORE,
-        detail: { restoredFrom: version.versionLabel },
-      },
-    });
     return { restoredFrom: version.versionLabel, hasDraft: true };
   }
 

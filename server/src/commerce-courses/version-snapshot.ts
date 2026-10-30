@@ -94,7 +94,7 @@ export interface SnapshotLesson {
 }
 
 export async function captureVersionSnapshot(
-  prisma: PrismaService,
+  prisma: PrismaService | Prisma.TransactionClient,
   courseId: string,
 ): Promise<VersionSnapshot> {
   const course = await prisma.commerceCourse.findUnique({
@@ -218,7 +218,19 @@ export async function applyVersionSnapshot(
   courseId: string,
   snapshot: VersionSnapshot,
 ): Promise<void> {
-  const course = await prisma.commerceCourse.findUnique({
+  await prisma.$transaction(
+    (tx) => applyVersionSnapshotInTx(tx, courseId, snapshot),
+    { timeout: 60_000 },
+  );
+}
+
+/** 在调用方已开启（并已锁住课程行）的事务里写入快照。 */
+export async function applyVersionSnapshotInTx(
+  tx: Prisma.TransactionClient,
+  courseId: string,
+  snapshot: VersionSnapshot,
+): Promise<void> {
+  const course = await tx.commerceCourse.findUnique({
     where: { id: courseId },
     select: {
       id: true,
@@ -238,187 +250,182 @@ export async function applyVersionSnapshot(
     ...snapshotLanguages.filter((lang) => !currentLanguages.includes(lang)),
   ];
 
-  await prisma.$transaction(
-    async (tx) => {
-      const existingLessons = await tx.lesson.findMany({
-        where: { courseId },
-        select: { id: true, code: true },
-      });
-      const idByCode = new Map(
-        existingLessons.map((lesson) => [lesson.code, lesson.id]),
-      );
-      const snapshotCodes = new Set(
-        snapshot.course.lessons.map((lesson) => lesson.code),
-      );
-
-      await tx.lesson.updateMany({
-        where: {
-          courseId,
-          code: { notIn: [...snapshotCodes] },
-          archivedAt: null,
-        },
-        data: { archivedAt: new Date() },
-      });
-
-      await tx.commerceCourse.update({
-        where: { id: courseId },
-        data: {
-          categoryId: snapshot.course.categoryId,
-          coverAssetId: snapshot.course.coverAssetId,
-          // 创建后锁定 Learning mode（PRD §22），保留当前值
-          learningMode: course.learningMode as never,
-          defaultContentLanguage: snapshot.course.defaultContentLanguage,
-          learningLanguages: learningLanguages,
-          hasDraft: true,
-        },
-      });
-
-      // 课程本地化：快照中的语言覆盖；快照外的语言保留（只增不减）
-      for (const loc of snapshot.course.localizations) {
-        await tx.courseLocalization.upsert({
-          where: { courseId_language: { courseId, language: loc.language } },
-          create: {
-            courseId,
-            language: loc.language,
-            title: loc.title,
-            shortDescription: loc.shortDescription,
-            overview: loc.overview,
-            whatYouLearn: (loc.whatYouLearn ?? null) as Prisma.InputJsonValue,
-            provides: (loc.provides ?? null) as Prisma.InputJsonValue,
-          },
-          update: {
-            title: loc.title,
-            shortDescription: loc.shortDescription,
-            overview: loc.overview,
-            whatYouLearn: (loc.whatYouLearn ?? null) as Prisma.InputJsonValue,
-            provides: (loc.provides ?? null) as Prisma.InputJsonValue,
-          },
-        });
-      }
-
-      for (const lesson of snapshot.course.lessons) {
-        const lessonId = idByCode.get(lesson.code) ?? lesson.id;
-        await tx.lesson.upsert({
-          where: { id: lessonId },
-          create: {
-            id: lessonId,
-            courseId,
-            code: lesson.code,
-            sortOrder: lesson.sortOrder,
-          },
-          update: {
-            code: lesson.code,
-            sortOrder: lesson.sortOrder,
-            archivedAt: null,
-          },
-        });
-
-        await tx.lessonLocalization.deleteMany({ where: { lessonId } });
-        await tx.exhibitTrigger.deleteMany({ where: { lessonId } });
-        await tx.exhibit.deleteMany({ where: { lessonId } });
-        await tx.learningPoint.deleteMany({ where: { lessonId } });
-        await tx.recommendedReading.deleteMany({ where: { lessonId } });
-        await tx.knowledgeQuestion.deleteMany({ where: { lessonId } });
-        await tx.applicationTest.deleteMany({ where: { lessonId } });
-
-        for (const loc of lesson.localizations) {
-          await tx.lessonLocalization.create({
-            data: {
-              lessonId,
-              language: loc.language,
-              title: loc.title,
-              description: loc.description,
-              videoAssetId: loc.videoAssetId,
-              videoDurationSeconds: loc.videoDurationSeconds,
-              textHtml: loc.textHtml,
-              textLearningPoints: (loc.textLearningPoints ??
-                null) as Prisma.InputJsonValue,
-            },
-          });
-        }
-
-        const exhibitIdByCode = new Map<string, string>();
-        for (const exhibit of lesson.exhibits) {
-          const created = await tx.exhibit.create({
-            data: {
-              lessonId,
-              code: exhibit.code,
-              type: exhibit.type as never,
-              mediaAssetId: exhibit.mediaAssetId,
-              thumbnailAssetId: exhibit.thumbnailAssetId,
-              sourceText: exhibit.sourceText,
-              localized: exhibit.localized ?? {},
-            },
-          });
-          exhibitIdByCode.set(exhibit.code, created.id);
-        }
-
-        for (const lp of lesson.learningPoints) {
-          await tx.learningPoint.create({
-            data: {
-              lessonId,
-              language: lp.language,
-              code: lp.code,
-              title: lp.title,
-              source: lp.source as never,
-              timeSeconds: lp.timeSeconds,
-              anchorHeading: lp.anchorHeading,
-              sortOrder: lp.sortOrder,
-            },
-          });
-        }
-        for (const trigger of lesson.triggers) {
-          const exhibitId = exhibitIdByCode.get(trigger.exhibitCode);
-          if (exhibitId) {
-            await tx.exhibitTrigger.create({
-              data: {
-                lessonId,
-                exhibitId,
-                language: trigger.language,
-                timeSeconds: trigger.timeSeconds,
-              },
-            });
-          }
-        }
-        for (const reading of lesson.readings) {
-          await tx.recommendedReading.create({
-            data: {
-              lessonId,
-              language: reading.language,
-              type: reading.type as never,
-              title: reading.title,
-              author: reading.author,
-              whyRecommended: reading.whyRecommended,
-              sortOrder: reading.sortOrder,
-            },
-          });
-        }
-        for (const question of lesson.questions) {
-          await tx.knowledgeQuestion.create({
-            data: {
-              lessonId,
-              code: question.code,
-              question: question.question,
-              referenceAnswer: question.referenceAnswer,
-              sortOrder: question.sortOrder,
-              enabled: question.enabled,
-            },
-          });
-        }
-        if (lesson.applicationTest) {
-          await tx.applicationTest.create({
-            data: {
-              lessonId,
-              scenario: lesson.applicationTest.scenario,
-              referenceAnswer: lesson.applicationTest.referenceAnswer,
-              enabled: lesson.applicationTest.enabled,
-            },
-          });
-        }
-      }
-    },
-    { timeout: 60_000 },
+  const existingLessons = await tx.lesson.findMany({
+    where: { courseId },
+    select: { id: true, code: true },
+  });
+  const idByCode = new Map(
+    existingLessons.map((lesson) => [lesson.code, lesson.id]),
   );
+  const snapshotCodes = new Set(
+    snapshot.course.lessons.map((lesson) => lesson.code),
+  );
+
+  await tx.lesson.updateMany({
+    where: {
+      courseId,
+      code: { notIn: [...snapshotCodes] },
+      archivedAt: null,
+    },
+    data: { archivedAt: new Date() },
+  });
+
+  await tx.commerceCourse.update({
+    where: { id: courseId },
+    data: {
+      categoryId: snapshot.course.categoryId,
+      coverAssetId: snapshot.course.coverAssetId,
+      // 创建后锁定 Learning mode（PRD §22），保留当前值
+      learningMode: course.learningMode as never,
+      defaultContentLanguage: snapshot.course.defaultContentLanguage,
+      learningLanguages: learningLanguages,
+      hasDraft: true,
+    },
+  });
+
+  // 课程本地化：快照中的语言覆盖；快照外的语言保留（只增不减）
+  for (const loc of snapshot.course.localizations) {
+    await tx.courseLocalization.upsert({
+      where: { courseId_language: { courseId, language: loc.language } },
+      create: {
+        courseId,
+        language: loc.language,
+        title: loc.title,
+        shortDescription: loc.shortDescription,
+        overview: loc.overview,
+        whatYouLearn: (loc.whatYouLearn ?? null) as Prisma.InputJsonValue,
+        provides: (loc.provides ?? null) as Prisma.InputJsonValue,
+      },
+      update: {
+        title: loc.title,
+        shortDescription: loc.shortDescription,
+        overview: loc.overview,
+        whatYouLearn: (loc.whatYouLearn ?? null) as Prisma.InputJsonValue,
+        provides: (loc.provides ?? null) as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  for (const lesson of snapshot.course.lessons) {
+    const lessonId = idByCode.get(lesson.code) ?? lesson.id;
+    await tx.lesson.upsert({
+      where: { id: lessonId },
+      create: {
+        id: lessonId,
+        courseId,
+        code: lesson.code,
+        sortOrder: lesson.sortOrder,
+      },
+      update: {
+        code: lesson.code,
+        sortOrder: lesson.sortOrder,
+        archivedAt: null,
+      },
+    });
+
+    await tx.lessonLocalization.deleteMany({ where: { lessonId } });
+    await tx.exhibitTrigger.deleteMany({ where: { lessonId } });
+    await tx.exhibit.deleteMany({ where: { lessonId } });
+    await tx.learningPoint.deleteMany({ where: { lessonId } });
+    await tx.recommendedReading.deleteMany({ where: { lessonId } });
+    await tx.knowledgeQuestion.deleteMany({ where: { lessonId } });
+    await tx.applicationTest.deleteMany({ where: { lessonId } });
+
+    for (const loc of lesson.localizations) {
+      await tx.lessonLocalization.create({
+        data: {
+          lessonId,
+          language: loc.language,
+          title: loc.title,
+          description: loc.description,
+          videoAssetId: loc.videoAssetId,
+          videoDurationSeconds: loc.videoDurationSeconds,
+          textHtml: loc.textHtml,
+          textLearningPoints: (loc.textLearningPoints ??
+            null) as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    const exhibitIdByCode = new Map<string, string>();
+    for (const exhibit of lesson.exhibits) {
+      const created = await tx.exhibit.create({
+        data: {
+          lessonId,
+          code: exhibit.code,
+          type: exhibit.type as never,
+          mediaAssetId: exhibit.mediaAssetId,
+          thumbnailAssetId: exhibit.thumbnailAssetId,
+          sourceText: exhibit.sourceText,
+          localized: exhibit.localized ?? {},
+        },
+      });
+      exhibitIdByCode.set(exhibit.code, created.id);
+    }
+
+    for (const lp of lesson.learningPoints) {
+      await tx.learningPoint.create({
+        data: {
+          lessonId,
+          language: lp.language,
+          code: lp.code,
+          title: lp.title,
+          source: lp.source as never,
+          timeSeconds: lp.timeSeconds,
+          anchorHeading: lp.anchorHeading,
+          sortOrder: lp.sortOrder,
+        },
+      });
+    }
+    for (const trigger of lesson.triggers) {
+      const exhibitId = exhibitIdByCode.get(trigger.exhibitCode);
+      if (exhibitId) {
+        await tx.exhibitTrigger.create({
+          data: {
+            lessonId,
+            exhibitId,
+            language: trigger.language,
+            timeSeconds: trigger.timeSeconds,
+          },
+        });
+      }
+    }
+    for (const reading of lesson.readings) {
+      await tx.recommendedReading.create({
+        data: {
+          lessonId,
+          language: reading.language,
+          type: reading.type as never,
+          title: reading.title,
+          author: reading.author,
+          whyRecommended: reading.whyRecommended,
+          sortOrder: reading.sortOrder,
+        },
+      });
+    }
+    for (const question of lesson.questions) {
+      await tx.knowledgeQuestion.create({
+        data: {
+          lessonId,
+          code: question.code,
+          question: question.question,
+          referenceAnswer: question.referenceAnswer,
+          sortOrder: question.sortOrder,
+          enabled: question.enabled,
+        },
+      });
+    }
+    if (lesson.applicationTest) {
+      await tx.applicationTest.create({
+        data: {
+          lessonId,
+          scenario: lesson.applicationTest.scenario,
+          referenceAnswer: lesson.applicationTest.referenceAnswer,
+          enabled: lesson.applicationTest.enabled,
+        },
+      });
+    }
+  }
 }
 
 /** 快照 → 完成度输入（工作区 detail 与快照共用同一套规则）。 */
