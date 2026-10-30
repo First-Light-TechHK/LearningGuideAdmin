@@ -31,10 +31,10 @@
     "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1159.0",
+    "@aws-sdk/client-s3": "^3.1160.0",
     "@aws-sdk/client-sesv2": "^3.1156.0",
-    "@earendil-works/pi-agent-core": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-agent-core": "^1.4.0",
+    "@earendil-works/pi-ai": "^1.4.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -47,7 +47,7 @@
     "jszip": "^3.10.2",
     "markitdown-ts": "^0.0.10",
     "nodemailer": "^10.2.1",
-    "opencc-js": "1.4.2",
+    "opencc-js": "^1.4.2",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
