@@ -26,7 +26,9 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
+import { PICK_FAQ_V5_SYSTEM } from './workflow/assist-workflow';
 import { ANSWER_LINES, ANSWER_TONES, TEMPLATES } from './workflow/guard';
+import { LEARNER_STATE_RULE } from './workflow/learner-facts';
 import {
   loadPi,
   PiStepRunner,
@@ -346,7 +348,7 @@ describe('v5 answer: opening, excerpt, closing (Part H)', () => {
     const prompt = JSON.parse(spec.prompt) as Record<string, unknown> & {
       candidates: Record<string, unknown>[];
     };
-    // 模型只收到学员的话、屏幕上的卡片与候选：从不收到学员数据
+    // 没有学员状态（v7）时模型只收到学员的话、屏幕上的卡片与候选
     expect(Object.keys(prompt).sort()).toEqual([
       'candidates',
       'message',
@@ -1137,4 +1139,152 @@ describe('v5 through the real pi runner (faux provider)', () => {
     });
     expect(handle.state.callCount).toBe(2);
   });
+});
+
+describe('v7 learner state (Portal → Agent)', () => {
+  const STATE = {
+    accountAgeDays: 30,
+    emailVerified: false,
+    plans: [
+      {
+        source: 'trial',
+        state: 'active',
+        scope: 'course',
+        device: 'pc',
+        endsInDays: 2,
+      },
+      {
+        source: 'purchase',
+        state: 'expired',
+        scope: 'everything',
+        device: null,
+        endsInDays: -10,
+      },
+    ],
+    courses: [
+      {
+        courseId: 'course_1',
+        title: 'Physics',
+        status: 'in_progress',
+        progress: 40,
+        minutes: 30,
+        lastStudiedDaysAgo: 1,
+        hasAccess: true,
+      },
+      {
+        courseId: 'course_2',
+        title: 'Chemistry',
+        status: 'not_started',
+        progress: 0,
+        minutes: 0,
+        lastStudiedDaysAgo: null,
+        hasAccess: false,
+      },
+    ],
+    notStartedWithAccess: 3,
+    studyGroups: {
+      groups: 2,
+      hosting: 1,
+      upcomingSessions: 1,
+      nextSessionInHours: 26,
+    },
+    latestOrder: { status: 'failed', daysAgo: 1 },
+    tickets: { open: 2, waitingOnUser: 1 },
+  };
+
+  it('gives the model the learner state as short facts written by code, with the rule for it, only when Portal sent one', async () => {
+    const { service, run } = setup();
+    await ask(
+      service,
+      chat('is my trial still on?', {
+        sessionId: id(100),
+        learnerState: STATE,
+      }),
+    );
+    const spec = specOf(run, 'pick_faq') as AgentStepSpec;
+    const prompt = JSON.parse(spec.prompt) as { user?: string[] };
+    expect(prompt.user).toEqual([
+      'account registered 30 days ago',
+      'email not verified',
+      'free trial (one course, on a computer): active, ends in 2 days',
+      'paid plan (all courses): ended 9 days ago',
+      'course "Physics": in progress, 40% done, 30 minutes studied, last studied 1 day ago',
+      'course "Chemistry": not started, no access now',
+      '3 courses they can open and have not started',
+      'in 2 study groups (hosts 1); next live session in 26 hours',
+      'latest order: failed, 1 day ago',
+      '2 open enquiries, 1 waiting for their reply',
+    ]);
+    expect(spec.system).toBe(`${PICK_FAQ_V5_SYSTEM}\n${LEARNER_STATE_RULE}`);
+
+    // without a state the prompt and the rules stay exactly as before (the benchmarks hold)
+    const plain = setup();
+    await ask(
+      plain.service,
+      chat('is my trial still on?', { sessionId: id(100) }),
+    );
+    const before = specOf(plain.run, 'pick_faq') as AgentStepSpec;
+    expect(before.system).toBe(PICK_FAQ_V5_SYSTEM);
+    expect(JSON.parse(before.prompt)).not.toHaveProperty('user');
+  });
+
+  it('says so when there was never a plan, nothing was studied and the account is brand new', async () => {
+    const { service, run } = setup();
+    await ask(
+      service,
+      chat('how do I start?', {
+        learnerState: {
+          ...STATE,
+          accountAgeDays: 0,
+          emailVerified: null,
+          plans: [],
+          courses: [],
+          notStartedWithAccess: 0,
+          studyGroups: {
+            groups: 0,
+            hosting: 0,
+            upcomingSessions: 0,
+            nextSessionInHours: null,
+          },
+          latestOrder: null,
+          tickets: { open: 0, waitingOnUser: 0 },
+        },
+      }),
+    );
+    const prompt = JSON.parse(
+      (specOf(run, 'pick_faq') as AgentStepSpec).prompt,
+    ) as { user?: string[] };
+    expect(prompt.user).toEqual([
+      'account registered today',
+      'no email on the account',
+      'never had a plan or a free trial',
+      'has not studied any course yet',
+    ]);
+  });
+
+  it.each([
+    ['a number out of range', { ...STATE, accountAgeDays: -1 }],
+    [
+      'an unknown plan state',
+      { ...STATE, plans: [{ ...STATE.plans[0], state: 'paused' }] },
+    ],
+    [
+      'too many courses',
+      { ...STATE, courses: Array(11).fill(STATE.courses[0]) },
+    ],
+    [
+      'a date',
+      { ...STATE, latestOrder: { status: 'paid', daysAgo: '2026-10-29' } },
+    ],
+    ['a missing part', { ...STATE, tickets: undefined }],
+  ])(
+    'treats a learner state with %s as none, never as a bad request',
+    async (_name, learnerState) => {
+      const { service, run } = setup();
+      await ask(service, chat('is my trial still on?', { learnerState }));
+      const spec = specOf(run, 'pick_faq') as AgentStepSpec;
+      expect(spec.system).toBe(PICK_FAQ_V5_SYSTEM);
+      expect(JSON.parse(spec.prompt)).not.toHaveProperty('user');
+    },
+  );
 });

@@ -14,6 +14,7 @@ import {
 import type { JsonObject } from '../../../contracts/helpdesk-trace';
 import type { AgentCallExtras, WorkflowTemplate } from './engine';
 import { NONE } from './faq-workflow';
+import { LEARNER_STATE_RULE, learnerFacts } from './learner-facts';
 import {
   ANSWER_LINES,
   ANSWER_TONES,
@@ -351,11 +352,16 @@ export function assistWorkflow(deps: {
             ...(state.shown ? [state.shown.id] : []),
             ...state.candidates.map((c) => c.id),
           ];
+          // v7：Portal 给了学员状态才多一条规则与 user（没给时提示逐字不变）
+          const learner = state.context.learnerState;
           return {
-            system: PICK_FAQ_V5_SYSTEM,
+            system: learner
+              ? `${PICK_FAQ_V5_SYSTEM}\n${LEARNER_STATE_RULE}`
+              : PICK_FAQ_V5_SYSTEM,
             prompt: JSON.stringify({
               message: clipMessage(state.enquiry.message),
               recentTurns: state.context.recentTurns ?? [],
+              ...(learner ? { user: learnerFacts(learner) } : {}),
               shown: state.shown
                 ? {
                     id: state.shown.id,

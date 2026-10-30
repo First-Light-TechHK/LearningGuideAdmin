@@ -351,6 +351,76 @@ export const SUGGEST_CONTEXT_LIMITS = {
   recentTurnMax: 500,
 } as const;
 
+/**
+ * v7 学员状态（产品负责人 2026-10-30：课表、上了哪些课、上了多久、哪些没上、课程状态、权益、注册时间，
+ * 用 JSON 给 Agent，按实际状态缩小卡片）。Portal 用自己的记录在代码里算（modules/helpdesk/learnerState.ts），
+ * 只有粗的数字与枚举：从不含姓名、邮箱、订单号、金额或日期（都是相对提问时刻的整天 / 整小时）。
+ */
+export const LEARNER_STATE_LIMITS = {
+  plansMax: 5,
+  coursesMax: 10,
+  courseTitleMax: 80,
+  daysMax: 3650,
+  hoursMax: 720,
+  minutesMax: 1_000_000,
+  countMax: 999,
+} as const;
+export const LEARNER_PLAN_STATES = [
+  'active',
+  'cancel_at_period_end',
+  'grace',
+  'expired',
+  'trial_canceled',
+] as const;
+export const LEARNER_COURSE_STATUSES = [
+  'not_started',
+  'in_progress',
+  'completed',
+] as const;
+export const LEARNER_ORDER_STATUSES = [
+  'paid',
+  'pending',
+  'failed',
+  'canceled',
+  'refunded',
+] as const;
+/** 一个订阅：endsInDays = 还剩几整天（0 = 不到一天；-1 = 一天内刚结束）。 */
+export type LearnerPlanState = {
+  source: 'trial' | 'purchase';
+  state: (typeof LEARNER_PLAN_STATES)[number];
+  scope: 'course' | 'category' | 'everything';
+  device: 'pc' | 'mobile' | null;
+  endsInDays: number;
+};
+export type LearnerCourseState = {
+  courseId: string;
+  title: string;
+  status: (typeof LEARNER_COURSE_STATUSES)[number];
+  progress: number;
+  minutes: number;
+  lastStudiedDaysAgo: number | null;
+  hasAccess: boolean;
+};
+export type LearnerState = {
+  accountAgeDays: number;
+  /** null：账号没有邮箱（例如微信登录）。 */
+  emailVerified: boolean | null;
+  plans: LearnerPlanState[];
+  courses: LearnerCourseState[];
+  notStartedWithAccess: number;
+  studyGroups: {
+    groups: number;
+    hosting: number;
+    upcomingSessions: number;
+    nextSessionInHours: number | null;
+  };
+  latestOrder: {
+    status: (typeof LEARNER_ORDER_STATUSES)[number];
+    daysAgo: number;
+  } | null;
+  tickets: { open: number; waitingOnUser: number };
+};
+
 export type SuggestRequestContext = {
   /** 学员屏幕上当前那张卡（节点 / FAQ id，小写 uuid）；Part D 的 shownFaqId 就是它。 */
   nodeId?: string;
@@ -358,7 +428,130 @@ export type SuggestRequestContext = {
   sessionId?: string;
   /** 之前的学员原文，旧的在前，至多 3 条、每条至多 500 字。 */
   recentTurns?: string[];
+  /** v7：打字提问时的学员状态（不合法就当没给，从不因为它拒绝请求）。 */
+  learnerState?: LearnerState;
 };
+
+const isInt = (value: unknown, min: number, max: number): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= min &&
+  value <= max;
+const oneOf = <T extends string>(values: readonly T[], value: unknown) =>
+  (values as readonly unknown[]).includes(value);
+const COURSE_ID = /^[A-Za-z0-9_*-]{1,80}$/;
+
+/** 严格校验 v7 学员状态：每个键都得在、类型与范围都对，否则 null（调用方当没给）。只留契约里的键。 */
+export function parseLearnerState(raw: unknown): LearnerState | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const body = raw as Record<string, unknown>;
+  const L = LEARNER_STATE_LIMITS;
+  const groups = body.studyGroups as Record<string, unknown> | null;
+  const tickets = body.tickets as Record<string, unknown> | null;
+  const order = body.latestOrder as Record<string, unknown> | null;
+  if (
+    !isInt(body.accountAgeDays, 0, L.daysMax) ||
+    !(body.emailVerified === null || typeof body.emailVerified === 'boolean') ||
+    !Array.isArray(body.plans) ||
+    body.plans.length > L.plansMax ||
+    !Array.isArray(body.courses) ||
+    body.courses.length > L.coursesMax ||
+    !isInt(body.notStartedWithAccess, 0, L.countMax) ||
+    !groups ||
+    typeof groups !== 'object' ||
+    !isInt(groups.groups, 0, L.countMax) ||
+    !isInt(groups.hosting, 0, L.countMax) ||
+    !isInt(groups.upcomingSessions, 0, L.countMax) ||
+    !(
+      groups.nextSessionInHours === null ||
+      isInt(groups.nextSessionInHours, 0, L.hoursMax)
+    ) ||
+    !tickets ||
+    typeof tickets !== 'object' ||
+    !isInt(tickets.open, 0, L.countMax) ||
+    !isInt(tickets.waitingOnUser, 0, L.countMax) ||
+    !(
+      order === null ||
+      (typeof order === 'object' &&
+        oneOf(LEARNER_ORDER_STATUSES, order.status) &&
+        isInt(order.daysAgo, 0, L.daysMax))
+    )
+  )
+    return null;
+  const plans: LearnerPlanState[] = [];
+  for (const item of body.plans as unknown[]) {
+    const plan = (item ?? {}) as Record<string, unknown>;
+    if (
+      !oneOf(['trial', 'purchase'], plan.source) ||
+      !oneOf(LEARNER_PLAN_STATES, plan.state) ||
+      !oneOf(['course', 'category', 'everything'], plan.scope) ||
+      !(plan.device === null || oneOf(['pc', 'mobile'], plan.device)) ||
+      !isInt(plan.endsInDays, -L.daysMax, L.daysMax)
+    )
+      return null;
+    plans.push({
+      source: plan.source as LearnerPlanState['source'],
+      state: plan.state as LearnerPlanState['state'],
+      scope: plan.scope as LearnerPlanState['scope'],
+      device: plan.device as LearnerPlanState['device'],
+      endsInDays: plan.endsInDays,
+    });
+  }
+  const courses: LearnerCourseState[] = [];
+  for (const item of body.courses as unknown[]) {
+    const course = (item ?? {}) as Record<string, unknown>;
+    if (
+      typeof course.courseId !== 'string' ||
+      !COURSE_ID.test(course.courseId) ||
+      typeof course.title !== 'string' ||
+      CONTEXT_CONTROL.test(course.title) ||
+      [...course.title].length > L.courseTitleMax ||
+      !oneOf(LEARNER_COURSE_STATUSES, course.status) ||
+      !isInt(course.progress, 0, 100) ||
+      !isInt(course.minutes, 0, L.minutesMax) ||
+      !(
+        course.lastStudiedDaysAgo === null ||
+        isInt(course.lastStudiedDaysAgo, 0, L.daysMax)
+      ) ||
+      typeof course.hasAccess !== 'boolean'
+    )
+      return null;
+    courses.push({
+      courseId: course.courseId,
+      title: course.title.trim(),
+      status: course.status as LearnerCourseState['status'],
+      progress: course.progress,
+      minutes: course.minutes,
+      lastStudiedDaysAgo: course.lastStudiedDaysAgo,
+      hasAccess: course.hasAccess,
+    });
+  }
+  return {
+    accountAgeDays: body.accountAgeDays,
+    emailVerified: body.emailVerified,
+    plans,
+    courses,
+    notStartedWithAccess: body.notStartedWithAccess,
+    studyGroups: {
+      groups: groups.groups,
+      hosting: groups.hosting,
+      upcomingSessions: groups.upcomingSessions,
+      nextSessionInHours: groups.nextSessionInHours,
+    },
+    latestOrder: order
+      ? {
+          status: order.status as NonNullable<
+            LearnerState['latestOrder']
+          >['status'],
+          daysAgo: order.daysAgo as number,
+        }
+      : null,
+    tickets: {
+      open: tickets.open,
+      waitingOnUser: tickets.waitingOnUser,
+    },
+  };
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // eslint-disable-next-line no-control-regex
@@ -405,6 +598,8 @@ export function parseSuggestContext(
     }
     out.recentTurns = texts;
   }
+  const state = parseLearnerState(body.learnerState);
+  if (state) out.learnerState = state;
   return out;
 }
 
