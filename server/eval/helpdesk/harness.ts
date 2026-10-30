@@ -18,7 +18,10 @@ import type {
   AgentStepRunner,
   ThinkingSetting,
 } from '../../src/ai/helpdesk/workflow/engine';
-import { initialFaqState } from '../../src/ai/helpdesk/workflow/faq-workflow';
+import {
+  initialFaqState,
+  PICK_FAQ_MAX_TOKENS,
+} from '../../src/ai/helpdesk/workflow/faq-workflow';
 import {
   loadPi,
   openRouterSource,
@@ -477,7 +480,6 @@ export function deadlineDeps(
  *（问题 + ≤ 600 字答案）约一万字；按最坏的一字一 token 计。
  */
 export const CALL_PROMPT_TOKENS_MAX = 10_000;
-const CALL_OUTPUT_TOKENS_MAX = 80;
 
 /**
  * 一次请求的费用上限（美元），按 pi 价目里的模型价格；不在价目里为 null（价格未知）。
@@ -494,7 +496,7 @@ export async function callCeilingUsd(model: string): Promise<number | null> {
   if (known === false) return null;
   return (
     (priced.cost.input * CALL_PROMPT_TOKENS_MAX +
-      priced.cost.output * CALL_OUTPUT_TOKENS_MAX) /
+      priced.cost.output * PICK_FAQ_MAX_TOKENS) /
     1e6
   );
 }

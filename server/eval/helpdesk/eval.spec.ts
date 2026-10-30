@@ -43,6 +43,7 @@ import {
   type RetrievalReport,
   type RetrievalResult,
 } from './harness';
+import { PICK_FAQ_MAX_TOKENS } from '../../src/ai/helpdesk/workflow/faq-workflow';
 
 /**
  * Helpdesk 推荐评测（helpdesk-agent-v2-pi-dsh §5）在 CI 里跑：数据集合法且覆盖到位、
@@ -1337,10 +1338,11 @@ describe('running the cases', () => {
     expect(outcome.stopped).toBe('unknown_cost');
   });
 
-  it('prices one call from the catalog: the longest prompt plus 80 output tokens, unknown off-catalog', async () => {
+  it('prices one call from the catalog: the longest prompt plus the step output limit (150 tokens), unknown off-catalog', async () => {
     // gpt-4o-mini: $0.15 / $0.60 per million tokens
+    expect(PICK_FAQ_MAX_TOKENS).toBe(150);
     expect(await callCeilingUsd('openai/gpt-4o-mini')).toBeCloseTo(
-      (CALL_PROMPT_TOKENS_MAX * 0.15 + 80 * 0.6) / 1e6,
+      (CALL_PROMPT_TOKENS_MAX * 0.15 + 150 * 0.6) / 1e6,
       12,
     );
     expect(await callCeilingUsd('acme/brand-new-model')).toBeNull();

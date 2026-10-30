@@ -312,7 +312,7 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.prompt).toContain(candidates[1].answer);
   });
 
-  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 80 tokens) but retrieves on the whole text', async () => {
+  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 150 tokens) but retrieves on the whole text', async () => {
     const long = candidates.map((c) => ({ ...c, answer: c.answer.repeat(40) }));
     const { service, complete, findCandidates } = setup({ found: long });
     // 长信的真正问题常在最后一段：送给模型的是开头 600 字 + 结尾 1400 字
@@ -343,7 +343,8 @@ describe('Helpdesk suggest: happy path', () => {
     expect(prompt.candidates.map((c) => c.answer)).toEqual(
       long.map((c) => c.answer.slice(0, 600)),
     );
-    expect(spec.maxTokens).toBe(80);
+    // 三个参数的调用 DeepSeek 要用约 80 个 token：80 会截断，留足余量（2026-10-30 qa10k dev 3484 / 4890 次截断）
+    expect(spec.maxTokens).toBe(150);
   });
 
   it('keeps the injection guard and the one-call rule in the system prompt', async () => {
