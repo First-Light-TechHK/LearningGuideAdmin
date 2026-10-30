@@ -1,4 +1,4 @@
-import { PICK_FAQ_V5_SYSTEM } from './assist-workflow';
+import { EXPLAIN_SYSTEM, PICK_FAQ_V5_SYSTEM } from './assist-workflow';
 
 /**
  * pick_faq v5 的系统提示里那几条分类规则（真模型评测 2026-10-30 的失败，用例在 eval-v5/casual.jsonl）：
@@ -61,6 +61,16 @@ describe('pick_faq v5 system prompt', () => {
     );
     expect(PICK_FAQ_V5_SYSTEM).toContain(
       'When the learner sounds upset or in a hurry ("救命", "😭", "urgent"), acknowledge it before asking what happened.',
+    );
+  });
+});
+
+describe('explain system prompt', () => {
+  it('keeps the conditions the answer gives instead of promising the outcome', () => {
+    // sincerity review 2026-10-30: the card says Mic and Camera "only work after it connects";
+    // the explanation said "Yes, your mic and camera will work after the page connects"
+    expect(EXPLAIN_SYSTEM).toContain(
+      'Keep every condition the answer gives: when it says something only works after a step, or depends on something, say that, never that it will work. Start with yes or no only when the answer itself says yes or no.',
     );
   });
 });
