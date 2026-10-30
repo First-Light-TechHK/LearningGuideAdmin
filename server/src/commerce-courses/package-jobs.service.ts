@@ -495,14 +495,28 @@ export class PackageJobsService {
     });
   }
 
-  // ===== 导出（默认导出线上版本；也可指定 versionLabel 导出历史快照）=====
+  // ===== 导出 =====
+  // 默认导出线上版本；versionLabel='working'/'draft' 导出当前草稿（不产生版本）；
+  // 其他值按版本号导出历史快照。
   async startExport(
     courseId: string,
     actorEmployeeId: string | null,
     versionLabel?: string,
   ) {
-    let exportable: { versionId: string; versionLabel: string };
-    if (versionLabel && versionLabel !== 'working') {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { code: true },
+    });
+    if (!course) {
+      throw new PackageError('COURSE_NOT_FOUND', 404, 'Course not found.');
+    }
+    let sourceVersionId: string | null;
+    let label: string;
+    if (versionLabel === 'working' || versionLabel === 'draft') {
+      // 草稿导出：不走版本快照，由 worker 从当前工作区聚合打包
+      sourceVersionId = null;
+      label = 'draft';
+    } else if (versionLabel) {
       // 指定了版本号：直接查找对应快照
       const v = await this.prisma.courseVersion.findFirst({
         where: { courseId, versionLabel },
@@ -515,16 +529,15 @@ export class PackageJobsService {
           `Version ${versionLabel} not found for this course.`,
         );
       }
-      exportable = { versionId: v.id, versionLabel: v.versionLabel };
+      sourceVersionId = v.id;
+      label = v.versionLabel;
     } else {
       // 默认：导出线上发布版本
-      exportable = await this.publishing.assertExportable(courseId);
+      const exportable = await this.publishing.assertExportable(courseId);
+      sourceVersionId = exportable.versionId;
+      label = exportable.versionLabel;
     }
-    const course = await this.prisma.commerceCourse.findUnique({
-      where: { id: courseId },
-      select: { code: true },
-    });
-    const fileLabel = `${course?.code ?? 'course'}_${exportable.versionLabel}.zip`;
+    const fileLabel = `${course.code}_${label}.zip`;
     const jobId = randomUUID();
     await this.prisma.coursePackageJob.create({
       data: {
@@ -533,7 +546,7 @@ export class PackageJobsService {
         status: 'EXPORTING',
         courseId,
         actorEmployeeId,
-        sourceVersionId: exportable.versionId,
+        sourceVersionId,
         fileLabel,
         progress: 0,
       },
@@ -541,8 +554,8 @@ export class PackageJobsService {
     return {
       jobId,
       status: 'EXPORTING',
-      versionId: exportable.versionId,
-      versionLabel: exportable.versionLabel,
+      versionId: sourceVersionId,
+      versionLabel: label,
       fileName: fileLabel,
     };
   }
