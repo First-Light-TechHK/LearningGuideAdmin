@@ -52,6 +52,8 @@ export interface JobView {
 @Injectable()
 export class PackageJobsService {
   private readonly logger = new Logger(PackageJobsService.name);
+  // 分块上传单块大小：远小于边缘（CloudFront/App Runner）的单请求限制，保证每块都快速完整传输
+  private static readonly RAW_CHUNK_BYTES = 5 * 1024 * 1024;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -162,9 +164,23 @@ export class PackageJobsService {
 
   /** 后台把原始素材包转成课程包并校验，复用同一个 jobId，供前端轮询。 */
   private async processRawImport(jobId: string, rawKey: string): Promise<void> {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-raw-'));
     try {
       const rawBytes = await this.storage.getStaging(rawKey);
+      await this.runRawProcessing(jobId, rawBytes);
+    } catch (error) {
+      await this.markRawFailed(jobId, error);
+    } finally {
+      await this.storage.removeStaging(rawKey).catch(() => undefined);
+    }
+  }
+
+  /** 把原始素材 ZIP 的字节转成课程包并校验（转换/校验都在 worker 线程里做）。 */
+  private async runRawProcessing(
+    jobId: string,
+    rawBytes: Buffer,
+  ): Promise<void> {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-raw-'));
+    try {
       const rawPath = path.join(tmp, 'raw.zip');
       const outPath = path.join(tmp, 'package.zip');
       await fs.writeFile(rawPath, rawBytes);
@@ -191,25 +207,180 @@ export class PackageJobsService {
         },
       });
       await this.runValidation(jobId, pkgBytes);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : '原始素材解析失败';
-      await this.prisma.coursePackageJob
-        .update({
-          where: { id: jobId },
-          data: {
-            status: 'FAILED',
-            error: message,
-            progress: 100,
-            stage: 'FAILED',
-          },
-        })
-        .catch(() => undefined);
     } finally {
-      await this.storage.removeStaging(rawKey).catch(() => undefined);
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+
+  private async markRawFailed(jobId: string, error: unknown): Promise<void> {
+    const message =
+      error instanceof Error ? error.message : '原始素材解析失败';
+    await this.prisma.coursePackageJob
+      .update({
+        where: { id: jobId },
+        data: { status: 'FAILED', error: message, progress: 100, stage: 'FAILED' },
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * 分块上传会话：大素材包（如 150MB+）单次 POST 会被 CloudFront/App Runner
+   * 的回源限制中途切断。这里改成前端分块、逐块上传，每块都是小请求。
+   * 这里只建作业，返回 jobId 与建议块大小。
+   */
+  async createRawUploadSession(
+    file: { name: string; bytesTotal: number },
+    actorEmployeeId: string | null,
+    idempotencyKey?: string,
+  ) {
+    if (idempotencyKey) {
+      const existing = await this.prisma.coursePackageJob.findUnique({
+        where: { idempotencyKey },
+      });
+      if (existing)
+        return {
+          jobId: existing.id,
+          chunkSize: PackageJobsService.RAW_CHUNK_BYTES,
+        };
+    }
+    if (!Number.isFinite(file.bytesTotal) || file.bytesTotal <= 0) {
+      throw new PackageError(
+        'INVALID_INPUT',
+        400,
+        'bytesTotal is required for a chunked upload.',
+      );
+    }
+    if (file.bytesTotal > this.config.packageMaxBytes) {
+      throw new PackageError(
+        'PACKAGE_TOO_LARGE',
+        413,
+        'Raw materials archive exceeds size limit.',
+      );
+    }
+    const jobId = randomUUID();
+    await this.prisma.coursePackageJob.create({
+      data: {
+        id: jobId,
+        kind: 'IMPORT',
+        status: 'VALIDATING',
+        stage: 'UPLOADING',
+        actorEmployeeId,
+        idempotencyKey: idempotencyKey ?? null,
+        sourceFileName: file.name,
+        bytesTotal: file.bytesTotal,
+        bytesReceived: 0,
+        progress: 0,
+      },
+    });
+    return { jobId, chunkSize: PackageJobsService.RAW_CHUNK_BYTES };
+  }
+
+  /** 写入单个分块到 staging，更新进度。每块很小，走的是普通小请求。 */
+  async appendRawChunk(
+    jobId: string,
+    index: number,
+    bytes: Buffer,
+  ): Promise<{ jobId: string; progress: number }> {
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    if (job.stage !== 'UPLOADING') {
+      throw new PackageError(
+        'RAW_UPLOAD_NOT_ACTIVE',
+        409,
+        'Upload is not in progress for this job.',
+      );
+    }
+    if (!Number.isInteger(index) || index < 0) {
+      throw new PackageError('INVALID_INPUT', 400, 'Invalid chunk index.');
+    }
+    if (bytes.length > PackageJobsService.RAW_CHUNK_BYTES + 1024) {
+      throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Chunk too large.');
+    }
+    await this.storage.putStaging(
+      this.storage.stagingKey(jobId, `rawchunk/${index}`),
+      bytes,
+    );
+    const total = job.bytesTotal ?? 0;
+    const expected = total ? Math.max(1, Math.ceil(total / PackageJobsService.RAW_CHUNK_BYTES)) : 1;
+    const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: { bytesReceived: Math.round((total * (index + 1)) / expected), progress },
+    });
+    return { jobId, progress };
+  }
+
+  /** 全部分块到达后：合并为原始素材包，后台转换 + 校验。 */
+  async completeRawUpload(jobId: string): Promise<JobView> {
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    if (job.stage !== 'UPLOADING') {
+      throw new PackageError(
+        'RAW_UPLOAD_NOT_ACTIVE',
+        409,
+        'Upload is not in progress for this job.',
+      );
+    }
+    const total = job.bytesTotal ?? 0;
+    if (!total) {
+      throw new PackageError('INVALID_INPUT', 400, 'Missing upload size.');
+    }
+    const count = Math.max(
+      1,
+      Math.ceil(total / PackageJobsService.RAW_CHUNK_BYTES),
+    );
+    for (let i = 0; i < count; i++) {
+      const present = await this.storage.hasStaging(
+        this.storage.stagingKey(jobId, `rawchunk/${i}`),
+      );
+      if (!present) {
+        throw new PackageError(
+          'RAW_UPLOAD_INCOMPLETE',
+          400,
+          `Missing chunk ${i + 1}/${count}.`,
+        );
+      }
+    }
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: { stage: 'RAW_QUEUED', progress: 88 },
+    });
+    void this.assembleAndProcessRaw(jobId, count).catch(() => undefined);
+    return this.getJob(jobId);
+  }
+
+  private async assembleAndProcessRaw(
+    jobId: string,
+    count: number,
+  ): Promise<void> {
+    try {
+      const parts: Buffer[] = [];
+      for (let i = 0; i < count; i++) {
+        parts.push(
+          await this.storage.getStaging(
+            this.storage.stagingKey(jobId, `rawchunk/${i}`),
+          ),
+        );
+      }
+      const rawBytes = Buffer.concat(parts);
+      await this.runRawProcessing(jobId, rawBytes);
+    } catch (error) {
+      await this.markRawFailed(jobId, error);
+    } finally {
+      for (let i = 0; i < count; i++) {
+        await this.storage
+          .removeStaging(this.storage.stagingKey(jobId, `rawchunk/${i}`))
+          .catch(() => undefined);
+      }
+    }
+  }
+
 
   /**
    * 本地目录导入：服务端直接读取仓库内素材目录（如 docs/modeling-life），

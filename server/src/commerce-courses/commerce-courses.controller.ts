@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   Param,
   Post,
@@ -389,6 +390,51 @@ export class CommerceCoursesController {
         idempotencyKey,
       ),
     );
+  }
+
+  // ===== 原始素材分块上传（大包：前端切块，逐块上传，规避边缘单请求限制）=====
+  @Post('import/raw/session')
+  @HttpCode(200)
+  createRawUploadSession(
+    @Body() body: { fileName?: string; bytesTotal?: number },
+    @Req() request: BackofficeRequest,
+  ) {
+    const idempotencyKey =
+      typeof request.headers['idempotency-key'] === 'string'
+        ? request.headers['idempotency-key']
+        : undefined;
+    return wrap(() =>
+      this.jobs.createRawUploadSession(
+        {
+          name: body?.fileName || 'raw.zip',
+          bytesTotal: Number(body?.bytesTotal) || 0,
+        },
+        actor(request),
+        idempotencyKey,
+      ),
+    );
+  }
+
+  @Put('import/:jobId/chunk')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('chunk'))
+  uploadRawChunk(
+    @Param('jobId') jobId: string,
+    @Headers('x-chunk-index') chunkIndex: string | undefined,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ) {
+    if (!file?.buffer) {
+      throw new PackageError('INVALID_INPUT', 400, 'No chunk uploaded.');
+    }
+    return wrap(() =>
+      this.jobs.appendRawChunk(jobId, Number(chunkIndex), file.buffer),
+    );
+  }
+
+  @Post('import/:jobId/complete')
+  @HttpCode(200)
+  completeRawUpload(@Param('jobId') jobId: string) {
+    return wrap(() => this.jobs.completeRawUpload(jobId));
   }
 
   // ===== 本地目录导入（服务端直接读取仓库内 docs 素材，规避浏览器上传大文件中断） =====
