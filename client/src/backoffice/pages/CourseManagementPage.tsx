@@ -26,10 +26,15 @@ type UploadResult<T> = { success: true; data: T } | { success: false; error: str
  * 带上传进度的文件上传（fetch 无法获取上传进度，改用 XHR 的 upload.onprogress）。
  * error 为稳定码：NETWORK_ERROR / ABORTED / 或后端信封里的错误码。
  */
-function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: number) => void): Promise<UploadResult<T>> {
+function uploadFileWithProgress<T>(
+  url: string,
+  file: Blob,
+  onProgress: (pct: number) => void,
+  opts?: { field?: string; method?: 'POST' | 'PUT' },
+): Promise<UploadResult<T>> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
+    xhr.open(opts?.method ?? 'POST', url)
     xhr.withCredentials = true
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
@@ -38,15 +43,16 @@ function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: nu
       try {
         const body = JSON.parse(xhr.responseText) as { success?: boolean; data?: T; error?: { code?: string; message?: string } | null }
         if (body?.success === true) resolve({ success: true, data: body.data as T })
-        else resolve({ success: false, error: body?.error?.code ?? 'INTERNAL_ERROR', errorMessage: body?.error?.message })
+        else resolve({ success: false, error: body?.error?.code ?? `HTTP_${xhr.status}`, errorMessage: body?.error?.message ?? `HTTP ${xhr.status}` })
       } catch {
-        resolve({ success: false, error: 'INTERNAL_ERROR' })
+        // 响应体不是 JSON 信封（多为网关 5xx/504 或单请求被边缘切断），把真实状态码带出来便于定位
+        resolve({ success: false, error: `HTTP_${xhr.status}`, errorMessage: `HTTP ${xhr.status}${xhr.statusText ? ' ' + xhr.statusText : ''}` })
       }
     }
     xhr.onerror = () => resolve({ success: false, error: 'NETWORK_ERROR' })
     xhr.onabort = () => resolve({ success: false, error: 'ABORTED' })
     const form = new FormData()
-    form.append('file', file)
+    form.append(opts?.field ?? 'file', file)
     xhr.send(form)
   })
 }
@@ -157,19 +163,52 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setBusy(true)
     setMessage(null)
     setUploadPct(0)
-    const result = await uploadFileWithProgress<JobView>(
-      `/api/backoffice/courses/import/raw`,
-      file,
-      setUploadPct,
+    // 大素材包单次 POST 会被 CloudFront/App Runner 中途切断，改为分块上传：
+    // 先开会话拿 jobId + 块大小，再把文件切成小块逐块 PUT，最后 complete。
+    const init = await boRequest<{ jobId: string; chunkSize: number }>(
+      `/api/backoffice/courses/import/raw/session`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, bytesTotal: file.size }),
+      },
     )
-    setUploadPct(null)
-    if (!result.success) {
+    if (!init.success) {
       setBusy(false)
-      setMessage(uploadErrorText(result.error, result.errorMessage))
+      setMessage(uploadErrorText(init.error, init.message))
       return
     }
-    setMessage(L('素材已上传，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
-    const job = await pollImportJob(result.data)
+    const { jobId } = init.data
+    const total = file.size
+    const size = Math.max(1, init.data.chunkSize || 5 * 1024 * 1024)
+    let sent = 0
+    for (let index = 0; sent < total; index++) {
+      const start = index * size
+      const blob = file.slice(start, Math.min(start + size, total))
+      const res = await uploadFileWithProgress<{ jobId: string; progress: number }>(
+        `/api/backoffice/courses/import/${jobId}/chunk?index=${index}`,
+        blob,
+        (pct) => setUploadPct(Math.min(99, Math.round(((sent + (blob.size * pct) / 100) / total) * 100))),
+        { field: 'chunk', method: 'PUT' },
+      )
+      if (!res.success) {
+        setBusy(false)
+        setUploadPct(null)
+        setMessage(uploadErrorText(res.error, res.errorMessage))
+        return
+      }
+      sent += blob.size
+      setUploadPct(Math.min(99, Math.round((sent / total) * 100)))
+    }
+    setUploadPct(null)
+    setMessage(L('上传完成，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
+    const comp = await boRequest<JobView>(`/api/backoffice/courses/import/${jobId}/complete`, { method: 'POST' })
+    if (!comp.success) {
+      setBusy(false)
+      setMessage(uploadErrorText(comp.error, comp.message))
+      return
+    }
+    const job = await pollImportJob(comp.data)
     setBusy(false)
     setImportJob(job)
     if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
