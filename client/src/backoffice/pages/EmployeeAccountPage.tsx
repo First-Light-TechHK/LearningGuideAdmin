@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ErrorCode } from "../contracts/envelope";
@@ -11,48 +11,16 @@ import {
   type EmployeeRole,
 } from "../contracts/employee";
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
   CloseCircleIcon,
   DotsIcon,
   PlusIcon,
   SearchIcon,
 } from "../components/icons";
+import { Pagination, usePageSize } from "../components/Pagination";
 import type { Locale } from "../lib/i18n/config";
 import { t } from "../lib/i18n/messages";
 import { boFetch } from "../lib/api";
 import { useResizableColumns } from "../components/resizableColumns";
-
-/** 设计稿默认一页 8 行；服务端上限 100（EMPLOYEE_PAGE_SIZE_MAX）。 */
-const DEFAULT_PAGE_SIZE = 8;
-const PAGE_SIZE_OPTIONS = [8, 10, 20, 50, 100] as const;
-const PAGE_SIZE_STORAGE_KEY = "lgbo_employee_page_size";
-
-function initialPageSize(): number {
-  if (typeof window === "undefined") return DEFAULT_PAGE_SIZE;
-  try {
-    const saved = Number(window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
-    return (PAGE_SIZE_OPTIONS as readonly number[]).includes(saved)
-      ? saved
-      : DEFAULT_PAGE_SIZE;
-  } catch {
-    return DEFAULT_PAGE_SIZE;
-  }
-}
-
-/** 页码按钮最多 7 个，超出时用省略号收口（与常见后台分页一致）。 */
-function pageItems(current: number, total: number): Array<number | "gap"> {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, index) => index + 1);
-  }
-  if (current <= 4) {
-    return [1, 2, 3, 4, 5, "gap", total];
-  }
-  if (current >= total - 3) {
-    return [1, "gap", total - 4, total - 3, total - 2, total - 1, total];
-  }
-  return [1, "gap", current - 1, current, current + 1, "gap", total];
-}
 
 type Filters = { email: string; role: string; status: string };
 
@@ -95,7 +63,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(initialPageSize);
+  const [pageSize, setPageSize] = usePageSize("employee-list");
   const [data, setData] = useState<EmployeeListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorCode, setErrorCode] = useState<ErrorCode | null>(null);
@@ -161,6 +129,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKeyDown);
+
     return () => {
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, true);
@@ -187,11 +156,6 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   function onPageSizeChange(value: number) {
     setPageSize(value);
     setPage(1);
-    try {
-      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(value));
-    } catch {
-      // 隐私模式下 localStorage 可能不可写，忽略即可
-    }
   }
 
   function toggleRowMenu(
@@ -341,13 +305,6 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       setLinkCopied(false);
     }
   }
-
-  const from = data && data.total > 0 ? (data.page - 1) * data.pageSize + 1 : 0;
-  const to = data ? Math.min(data.page * data.pageSize, data.total) : 0;
-  const totalPages = useMemo(() => {
-    if (!data || data.total === 0) return 1;
-    return Math.max(1, Math.ceil(data.total / data.pageSize));
-  }, [data]);
 
   return (
     <section className="card cardGrow">
@@ -516,81 +473,14 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
         </table>
       </div>
 
-      <div className="pagination">
-        <span className="paginationSummary">
-          {!data
-            ? t(locale, "common.loading")
-            : data.total === 0
-              ? t(locale, "employees.showingEmpty")
-              : from === to
-                ? t(locale, "employees.showingSingle", { from, total: data.total })
-                : t(locale, "employees.showing", { from, to, total: data.total })}
-        </span>
-        <div className="paginationControls">
-          <label className="pageSizeLabel">
-            {t(locale, "employees.pageSizeLabel")}
-            <select
-              className="pageSizeSelect"
-              value={pageSize}
-              onChange={(event) => onPageSizeChange(Number(event.target.value))}
-              aria-label={t(locale, "employees.pageSizeLabel")}
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <span className="pageOf">
-            {t(locale, "employees.pageOf", { page, total: totalPages })}
-          </span>
-
-          <span className="pager">
-            <button
-              type="button"
-              className="pagerButton"
-              disabled={page <= 1}
-              aria-label={t(locale, "common.previous")}
-              title={t(locale, "common.previous")}
-              onClick={() => setPage((value) => Math.max(1, value - 1))}
-            >
-              <ChevronLeftIcon size={14} />
-            </button>
-            {pageItems(page, totalPages).map((item, index) =>
-              item === "gap" ? (
-                <span key={`gap-${index}`} className="pagerGap" aria-hidden="true">
-                  …
-                </span>
-              ) : (
-                <button
-                  key={item}
-                  type="button"
-                  className={
-                    item === page ? "pagerButton pagerCurrent" : "pagerButton"
-                  }
-                  aria-current={item === page ? "page" : undefined}
-                  aria-label={t(locale, "employees.pageNumber", { page: item })}
-                  onClick={() => setPage(item)}
-                >
-                  {item}
-                </button>
-              )
-            )}
-            <button
-              type="button"
-              className="pagerButton"
-              disabled={page >= totalPages}
-              aria-label={t(locale, "common.next")}
-              title={t(locale, "common.next")}
-              onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-            >
-              <ChevronRightIcon size={14} />
-            </button>
-          </span>
-        </div>
-      </div>
+      <Pagination
+        locale={locale}
+        page={data?.page ?? page}
+        pageSize={data?.pageSize ?? pageSize}
+        total={data ? data.total : null}
+        onPageChange={setPage}
+        onPageSizeChange={onPageSizeChange}
+      />
 
       {openMenu
         ? createPortal(

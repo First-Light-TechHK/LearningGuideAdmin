@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEmployee } from '../ShellRoute'
 import type { CourseList } from '../contracts/course'
 import { useResizableColumns } from '../components/resizableColumns'
+import { Pagination, usePageSize } from '../components/Pagination'
 import { boRequest } from '../lib/api'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
@@ -86,6 +87,8 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const canPublish = employee.role === 'ADMIN' || employee.role === 'OPERATION_ADMIN'
   const [list, setList] = useState<CourseList | null>(null)
   const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('course-list')
   const [importJob, setImportJob] = useState<JobView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -107,13 +110,21 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
 
   const load = useCallback(async () => {
     setLoading(true)
-    const query = new URLSearchParams({ page: '1', pageSize: '50' })
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (categoryId) query.set('categoryId', categoryId)
     const result = await boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`)
     setLoading(false)
-    if (result.success) setList(result.data)
-    else setMessage(t(locale, 'common.sessionUnavailable'))
-  }, [locale, categoryId])
+    if (!result.success) {
+      setMessage(t(locale, 'common.sessionUnavailable'))
+      return
+    }
+    // 筛选/删除后总页数变少时把越界页码拉回最后一页，避免停在空白页
+    if (result.data.pages > 0 && page > result.data.pages) {
+      setPage(result.data.pages)
+      return
+    }
+    setList(result.data)
+  }, [locale, categoryId, page, pageSize])
 
   useEffect(() => {
     void load()
@@ -128,11 +139,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
 
   const categories = useMemo(() => {
     const map = new Map<string, string>()
+    for (const category of catalogCategories) map.set(category.id, category.name)
+    // 当前页出现的分类即使目录接口没返回（如已停用）也保留，避免已选筛选值丢失
     for (const course of list?.courses ?? []) {
       if (course.category) map.set(course.category.id, course.category.name)
     }
     return [...map.entries()]
-  }, [list])
+  }, [catalogCategories, list])
 
   async function createCourse(form: FormData) {
     setBusy(true)
@@ -391,7 +404,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <label style={{ fontSize: 13 }}>
           {L('分类', 'Category')}{' '}
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} style={{ padding: 7, borderRadius: 8 }}>
+          <select
+            value={categoryId}
+            onChange={(event) => {
+              setCategoryId(event.target.value)
+              setPage(1)
+            }}
+            style={{ padding: 7, borderRadius: 8 }}
+          >
             <option value="">{L('全部分类', 'All categories')}</option>
             {categories.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
@@ -447,7 +467,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       {loading && <p className="cardBody">{t(locale, 'common.loading')}</p>}
 
       {list && (
-        <div className="tableScroll" style={{ marginTop: 16 }}>
+        <div className="tableWrap" style={{ marginTop: 16 }}>
           <table className="table" style={courseTable.tableStyle}>
             {courseTable.colGroup}
             <thead>
@@ -504,6 +524,18 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
           </table>
         </div>
       )}
+
+      <Pagination
+        locale={locale}
+        page={list?.page ?? page}
+        pageSize={pageSize}
+        total={list ? list.total : null}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
     </section>
   )
 }
