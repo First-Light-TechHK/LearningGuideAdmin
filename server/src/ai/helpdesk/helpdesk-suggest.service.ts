@@ -107,7 +107,10 @@ export const SUGGEST_THINKING_DEADLINE_MS = 8_000;
 /** 聊天的缺省思考档位（用户 2026-10-30：DeepSeek 开 thinking；盲评 high 档错卡最少）。 */
 export const DEFAULT_CHAT_THINKING: ThinkingSetting = 'high';
 export const SUGGEST_CANDIDATES = 8;
-/** v5 assist 一次给模型看的候选数（多出的 2 个给树上近亲与深层答案，见 ASSIST_SEARCH）。 */
+/**
+ * v5 assist 一次给模型看的候选数（多出的 2 个给树上近亲与深层答案，见 ASSIST_SEARCH）；HELPDESK_LOCATOR=hybrid
+ * 时结构排序的前 3 张另加在最前面（faqQaSource.ts）。
+ */
 export const ASSIST_CANDIDATES = 10;
 export const SUGGEST_RATE_LIMIT = { limit: 10, windowMs: 3_600_000 } as const;
 export const QUERY_TEXT_RETENTION_DAYS = 90;

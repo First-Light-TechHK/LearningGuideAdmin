@@ -1021,7 +1021,10 @@
         "follow_ups": "More than 6 follow-ups.",
         "language": "English or Chinese text is missing.",
         "label_length": "A chip or option text is too long.",
-        "answer_blocks": "The answer is empty in one language."
+        "answer_blocks": "The answer is empty in one language.",
+        "map_shape": "A node in the process map or the rule table is at the wrong level.",
+        "map_placement": "A card hangs on a node that cannot hold cards (only steps, deviations and cells can).",
+        "map_primary": "A card has no primary place in the map, or more than one."
       }
     },
     "tree": {

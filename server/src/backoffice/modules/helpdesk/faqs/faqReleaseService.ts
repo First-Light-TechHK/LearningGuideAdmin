@@ -210,8 +210,8 @@ export function createFaqReleaseService(
     });
 
   async function workingSnapshot(): Promise<FaqReleaseSnapshot> {
-    const { faqs, edges, phrasings } = await graph.working();
-    return freezeSnapshot(faqs, edges, phrasings);
+    const { faqs, edges, phrasings, map } = await graph.working();
+    return freezeSnapshot(faqs, edges, phrasings, map);
   }
 
   async function publishedRelease(): Promise<FaqReleaseWithSnapshot | null> {

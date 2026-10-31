@@ -329,9 +329,8 @@ export function assistWorkflow(deps: {
               ? deps.qa.findPublished(nodeId, state.enquiry.locale)
               : Promise.resolve(null),
           ]);
-          const candidates = found
-            .filter((c) => c.id !== shown?.id)
-            .slice(0, deps.limit);
+          // 条数由来源定：缺省至多 limit；HELPDESK_LOCATOR=hybrid 时结构排序的前 3 张另加在最前面
+          const candidates = found.filter((c) => c.id !== shown?.id);
           return {
             state: { ...state, candidates, shown },
             // 没有候选也问模型：寒暄、clarify 要靠它分类

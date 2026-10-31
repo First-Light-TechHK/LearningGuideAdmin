@@ -358,6 +358,9 @@ export const GRAPH_RULES = [
   "language",
   "label_length",
   "answer_blocks",
+  "map_shape",
+  "map_placement",
+  "map_primary",
 ] as const;
 
 export type GraphProblem = {
@@ -454,6 +457,8 @@ export type FaqSnapshotDiff = {
     changed: { before: FaqSnapshotEdge; after: FaqSnapshotEdge; fields: string[] }[];
   };
   phrasings: { added: number; removed: number };
+  /** 流程树与对象表（节点与挂载）新增、去掉了几条；旧的服务端不给。 */
+  map?: { added: number; removed: number };
   same: boolean;
 };
 

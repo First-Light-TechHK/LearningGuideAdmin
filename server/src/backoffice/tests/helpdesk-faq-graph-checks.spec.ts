@@ -355,7 +355,7 @@ describe('FAQ graph checks (§2.3, pure)', () => {
   });
 
   it('names every rule it can report', () => {
-    expect(GRAPH_RULES).toHaveLength(13);
+    expect(GRAPH_RULES).toHaveLength(16);
   });
 });
 

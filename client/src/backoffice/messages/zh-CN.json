@@ -1021,7 +1021,10 @@
         "follow_ups": "追问超过 6 条。",
         "language": "缺少英文或中文。",
         "label_length": "chip 或选项的文字太长。",
-        "answer_blocks": "有一种语言的答案是空的。"
+        "answer_blocks": "有一种语言的答案是空的。",
+        "map_shape": "流程树或对象表里有节点放错了层级。",
+        "map_placement": "有卡挂在了不能挂卡的节点上（只能挂在步骤、岔子或格子上）。",
+        "map_primary": "有卡在流程树或对象表里没有主位置，或有不止一个。"
       }
     },
     "tree": {

@@ -14,6 +14,12 @@ import {
 import { HelpdeskError } from '../portalHelpdeskClient';
 import { splitAnswerBlocks } from './faqBlocks';
 import type { FaqEdgeRow, FaqPhrasing, HelpdeskFaq } from './faqContracts';
+import {
+  freezeMap,
+  type FaqMapNode,
+  type FaqPlacement,
+  type FaqSnapshotMap,
+} from './faqMap';
 
 /**
  * FAQ 问题树的发布快照（helpdesk-v5-faq-graph-design §2.2、§4「Caching」）：
@@ -68,6 +74,8 @@ export type FaqReleaseSnapshot = {
   nodes: FaqSnapshotNode[];
   edges: FaqSnapshotEdge[];
   phrasings: FaqSnapshotPhrasing[];
+  /** 流程树与对象表（faqMap.ts）；编辑区没有结构节点时不出现，指纹与加结构之前一样。 */
+  map?: FaqSnapshotMap;
 };
 
 /** 当前已发布的那一版（status = published 的唯一一行）。 */
@@ -185,13 +193,17 @@ export async function currentRelease(
 /**
  * 把工作表冻结成快照（「发布新版本」）：只要已发布的节点（按 id 排序）；父节点已发布的边都要
  * （子节点归档 / 不在 → 图检查 edge_endpoint 拦下），同一父节点下按 position、创建时间、id
- * 重新编号为 0..n-1；问法只要已发布节点的（按 faqId、语言、文字排序）。同样的工作表永远得到
- * 同样的快照（snapshotHash 相同），所以「没有改动」可以识别出来。
+ * 重新编号为 0..n-1；问法只要已发布节点的（按 faqId、语言、文字排序）；流程树与对象表见 freezeMap。
+ * 同样的工作表永远得到同样的快照（snapshotHash 相同），所以「没有改动」可以识别出来。
  */
 export function freezeSnapshot(
   faqs: readonly HelpdeskFaq[],
   edges: readonly FaqEdgeRow[],
   phrasings: readonly Pick<FaqPhrasing, 'faqId' | 'locale' | 'text'>[],
+  map: {
+    nodes: readonly FaqMapNode[];
+    placements: readonly Pick<FaqPlacement, 'faqId' | 'nodeId' | 'primary'>[];
+  } = { nodes: [], placements: [] },
 ): FaqReleaseSnapshot {
   const published = faqs
     .filter((faq) => faq.status === 'published')
@@ -258,8 +270,11 @@ export function freezeSnapshot(
           a.locale.localeCompare(b.locale) ||
           a.text.localeCompare(b.text),
       ),
+    ...frozenMap(freezeMap(map.nodes, map.placements, ids)),
   };
 }
+
+const frozenMap = (map: FaqSnapshotMap | undefined) => (map ? { map } : {});
 
 /** 快照的内容指纹（SHA-256 hex）：同样的工作表 → 同样的指纹（「没有改动」、幂等新建）。 */
 export function snapshotHash(snapshot: FaqReleaseSnapshot): string {
@@ -306,6 +321,8 @@ export type FaqSnapshotDiff = {
     }[];
   };
   phrasings: { added: number; removed: number };
+  /** 流程树与对象表：节点（整行比较）与挂载各新增、去掉了几条。 */
+  map: { added: number; removed: number };
   /** 什么都没变。 */
   same: boolean;
 };
@@ -378,10 +395,22 @@ export function diffSnapshots(
     added: [...newPhrasings].filter((k) => !oldPhrasings.has(k)).length,
     removed: [...oldPhrasings].filter((k) => !newPhrasings.has(k)).length,
   };
+  const mapRows = (snapshot: FaqReleaseSnapshot | null) =>
+    new Set([
+      ...(snapshot?.map?.nodes ?? []).map((node) => JSON.stringify(node)),
+      ...(snapshot?.map?.placements ?? []).map((p) => JSON.stringify(p)),
+    ]);
+  const oldMap = mapRows(base);
+  const newMap = mapRows(head);
+  const map = {
+    added: [...newMap].filter((row) => !oldMap.has(row)).length,
+    removed: [...oldMap].filter((row) => !newMap.has(row)).length,
+  };
   return {
     nodes,
     edges,
     phrasings,
+    map,
     same:
       nodes.added.length +
         nodes.removed.length +
@@ -390,7 +419,9 @@ export function diffSnapshots(
         edges.removed.length +
         edges.changed.length +
         phrasings.added +
-        phrasings.removed ===
+        phrasings.removed +
+        map.added +
+        map.removed ===
       0,
   };
 }

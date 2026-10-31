@@ -15,6 +15,7 @@ import {
   type ScoredFaq,
   type SqlDb,
 } from './faqRepository';
+import { locatorHead, locatorIndex, type FaqSnapshotMap } from './faqMap';
 import type { FaqReleaseSource, FaqSnapshotNode } from './faqRelease';
 import { createPgFaqReleaseSource } from './faqReleaseService';
 import {
@@ -35,6 +36,10 @@ import {
  * 屏幕上有卡片（search.nodeId）时：先是它的全部子节点（命中的按得分在前，再按边的顺序），
  * 再是树上近亲（父节点的其它子节点、各层祖先、祖先的其它子节点）里命中的，最后是普通检索（入口节点）；
  * 调用方给了 deepReserved 时，命中的非入口 answer 节点另留几个位置。按 id 去重，至多 limit 条。
+ *
+ * 定位方式（HELPDESK_LOCATOR，设计文档「Helpdesk 定位方式对比」）：缺省 flat = 上面这些；hybrid =
+ * 屏幕上没有卡片、发布版本里有流程树与对象表时，结构排序的前 3 张（faqMap.ts locatorHead）放在最前面，
+ * 后面照旧是上面的候选（去重），所以至多 limit + 3 条、上面的一张不少。
  */
 
 /** 运行时需要的边（发布版本里来自快照，之前来自工作表）。 */
@@ -51,13 +56,26 @@ export type HelpdeskQaSourceDeps = {
   releases: FaqReleaseSource;
   /** 第一版发布之前：工作表上的边。 */
   liveEdges: () => Promise<QaEdge[]>;
+  /** 定位方式（每次现读；缺省 flat）。 */
+  locator?: () => LocatorMode;
 };
+
+export const LOCATOR_MODES = ['flat', 'hybrid'] as const;
+export type LocatorMode = (typeof LOCATOR_MODES)[number];
+
+export function locatorMode(env: NodeJS.ProcessEnv): LocatorMode {
+  return env.HELPDESK_LOCATOR?.trim().toLowerCase() === 'hybrid'
+    ? 'hybrid'
+    : 'flat';
+}
 
 type View = {
   release: number | null;
   edges: QaEdge[];
   /** 发布版本里的节点（块是冻结时切好的）；live 时为空。 */
   nodes: Map<string, FaqSnapshotNode>;
+  /** 发布版本里的流程树与对象表（没有 → undefined）。 */
+  map?: FaqSnapshotMap;
 };
 
 /**
@@ -93,6 +111,7 @@ export function createHelpdeskQaSource(
         release: current.version,
         edges: current.snapshot.edges,
         nodes: new Map(current.snapshot.nodes.map((node) => [node.id, node])),
+        map: current.snapshot.map,
       };
     return {
       release: null,
@@ -294,6 +313,26 @@ export function createHelpdeskQaSource(
       nearList
         .slice(nearRoom)
         .forEach((item) => push(item.faq, item.score, item.relation));
+
+      // hybrid：结构排序的前几张放最前面（只在换话题 / 第一句、并且拿到了全部命中时）
+      if (
+        (deps.locator?.() ?? 'flat') === 'hybrid' &&
+        !contextId &&
+        deepWanted > 0 &&
+        v.map
+      ) {
+        const head = locatorHead({
+          index: locatorIndex(v.map),
+          text: search.text,
+          scored: searched,
+          flatTop: out.map((c) => c.id),
+        }).flatMap((id) => {
+          const faq = scored.get(id);
+          return faq ? [candidate(faq, faq.score, locale, v, 'search')] : [];
+        });
+        const ids = new Set(head.map((c) => c.id));
+        return [...head, ...out.filter((c) => !ids.has(c.id))];
+      }
       return out;
     },
 
@@ -340,5 +379,6 @@ export function createPgHelpdeskQaSource(
     }),
     releases: createPgFaqReleaseSource(graph),
     liveEdges: () => graph.allEdges(),
+    locator: () => locatorMode(process.env),
   });
 }

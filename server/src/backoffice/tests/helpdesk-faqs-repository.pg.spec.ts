@@ -108,7 +108,7 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
   beforeEach(async () => {
     await pool.query(
       // v5 问题树的表引用 helpdesk_faqs（外键），要一起清
-      'TRUNCATE helpdesk_faq_edge_revisions, helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions, helpdesk_faqs, helpdesk_suggestions',
+      'TRUNCATE helpdesk_faq_placements, helpdesk_faq_edge_revisions, helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions, helpdesk_faqs, helpdesk_suggestions',
     );
   });
 

@@ -220,7 +220,9 @@ export function diffTotal(diff: FaqSnapshotDiff): number {
     diff.edges.removed.length +
     diff.edges.changed.length +
     diff.phrasings.added +
-    diff.phrasings.removed
+    diff.phrasings.removed +
+    (diff.map?.added ?? 0) +
+    (diff.map?.removed ?? 0)
   )
 }
 

@@ -14,6 +14,13 @@ import type {
   PhrasingSource,
 } from './faqContracts';
 import type { FaqGraphCheckResult } from './faqGraphChecks';
+import type { FaqMapNode, FaqPlacement } from './faqMap';
+import {
+  MAP_NODE_COLUMNS,
+  PLACEMENT_COLUMNS,
+  toMapNode,
+  toPlacement,
+} from './faqMapRepository';
 import { phrasingSearchText } from './faqKeys';
 import type { FaqReleaseSnapshot } from './faqRelease';
 import { toFaq, type SqlClient, type SqlDb } from './faqRepository';
@@ -249,6 +256,7 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       faqs: HelpdeskFaq[];
       edges: FaqEdgeRow[];
       phrasings: FaqPhrasing[];
+      map: { nodes: FaqMapNode[]; placements: FaqPlacement[] };
     }> {
       return db.withTransaction(async (client) => {
         await client.query(
@@ -266,10 +274,21 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
              JOIN helpdesk_faqs f ON f.id = p.faq_id AND f.status = 'published'
             ORDER BY p.faq_id, p.created_at, p.id`,
         );
+        // 流程树与对象表（同一个快照读，与上面的节点一致）
+        const mapNodes = await client.query(
+          `SELECT ${MAP_NODE_COLUMNS} FROM helpdesk_faq_map_nodes ORDER BY key`,
+        );
+        const placements = await client.query(
+          `SELECT ${PLACEMENT_COLUMNS} FROM helpdesk_faq_placements ORDER BY faq_id, node_id`,
+        );
         return {
           faqs: faqs.rows.map(toFaq),
           edges: edges.rows.map(toEdge),
           phrasings: phrasings.rows.map(toPhrasing),
+          map: {
+            nodes: mapNodes.rows.map(toMapNode),
+            placements: placements.rows.map(toPlacement),
+          },
         };
       });
     },
