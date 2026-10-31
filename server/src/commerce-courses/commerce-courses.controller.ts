@@ -788,6 +788,7 @@ export class CommerceCoursesController {
     body: {
       onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
       reassignCodes?: boolean;
+      overwriteDraft?: boolean;
     },
     @Req() request: BackofficeRequest,
   ) {

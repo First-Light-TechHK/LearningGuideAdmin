@@ -189,7 +189,11 @@
 **从包新建课程**（CM04）：
 - 上传 .zip，显示文件名/大小/进度，可 Replace file。
 - 点 Create course：系统读取包，创建课程，使用包中 Course ID 与 Lesson ID；全部内容/文件/试看设置/价格写入新课程草稿；状态 Not published；草稿需 Publish 才生成版本。
-- 包中 Course ID 在本 Admin 已存在时拒绝，提示 "The Course ID must not already exist in this Admin, or the import is refused."；已存在课程请用 Import package。
+- 包中 Course ID 在本 Admin 已存在时按**Course ID 冲突规则**处理（见下）。
+- **Course ID 冲突处理（覆盖规则）**：包中 Excel 的 Course ID 与本环境中已有课程相同时：
+  - 已存在课程为**草稿状态**（从未发布、无线上版本，`liveVersionId` 为空）：询问是否覆盖——`Course <ID> already exists as a draft. Overwrite its sandbox draft?`；选**覆盖**→ 用包内容替换该课程草稿（仅影响沙盒草稿，线上版本不变）；选**忽略**→ 取消导入，不改动已有课程。
+  - 已存在课程为**已上线状态**（已有线上版本）：拒绝导入，提示 `Course <ID> is already live, the import is refused. Only draft courses can be overwritten.`；线上内容不受影响。
+  - 关键约束：覆盖仅作用于沙盒草稿内容，**绝不影响到已上线状态的内容/课程**；只有状态为草稿（从未发布）的课程才允许被覆盖。
 - 价格：导入完成后系统在本环境 Stripe 自动创建产品和价格。
 
 ### 1.14 课程状态（PRD §17）
