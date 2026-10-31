@@ -107,6 +107,20 @@ export class PackageJobsService {
     });
   }
 
+  /** 生成未被占用的兜底课程编号：TEMP001、TEMP002…（基于现有 TEMP* 课程自增）。 */
+  private async nextTempCourseCode(): Promise<string> {
+    const rows = await this.prisma.commerceCourse.findMany({
+      where: { code: { startsWith: 'TEMP' } },
+      select: { code: true },
+    });
+    let max = 0;
+    for (const { code } of rows) {
+      const m = /^TEMP(\d+)$/i.exec(code);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    return `TEMP${String(max + 1).padStart(3, '0')}`;
+  }
+
   /** 只读诊断：确认当前存储驱动（S3 或本地）。 */
   storageInfo() {
     return this.storage.describe();
@@ -222,6 +236,9 @@ export class PackageJobsService {
       const rawPath = path.join(tmp, 'raw.zip');
       const outPath = path.join(tmp, 'package.zip');
       await fs.writeFile(rawPath, rawBytes);
+      // 旧模板若没有 Course ID 字段，用一个不重复的 TEMP 编号兜底（TEMP001、TEMP002…）；
+      // 若 Excel 里带了 Course ID，worker 会优先用它，忽略这里传入的兜底值。
+      const fallbackCode = await this.nextTempCourseCode();
       const built = await runImportWorker<{
         warnings: string[];
         courseCode: string;
@@ -229,7 +246,7 @@ export class PackageJobsService {
         title: string;
         lessonCount: number;
         mediaCount: number;
-      }>('raw', { rawPath, outPath });
+      }>('raw', { rawPath, outPath, courseCode: fallbackCode });
       const pkgBytes = await fs.readFile(outPath);
       const pkgKey = this.storage.stagingKey(jobId, 'package.zip');
       await this.storage.putStaging(pkgKey, pkgBytes);

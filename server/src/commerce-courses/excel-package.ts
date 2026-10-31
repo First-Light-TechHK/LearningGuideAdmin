@@ -642,6 +642,22 @@ function slugify(text: string): string {
   return slug || `course-${Date.now().toString(36)}`;
 }
 
+/**
+ * 旧模板（course info 表）里可选读取课程编号：兼容 "Course ID" / "课程 ID" /
+ * "课程ID" / "课程编号" / "Course Code" 等写法（忽略大小写、空格、分隔符）。
+ * 找不到或为空返回 undefined，交由调用方决定默认值。
+ */
+function readLegacyCourseId(info: Map<string, string>): string | undefined {
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_\-:：/()（）]/g, "");
+  const keys = new Set(["courseid", "coursecode", "课程id", "课程编号", "课程代码"]);
+  for (const [k, v] of info.entries()) {
+    if (!keys.has(norm(k))) continue;
+    const val = String(v ?? "").trim();
+    if (val) return val;
+  }
+  return undefined;
+}
+
 // ===== 旧模板（modeling life课程信息.xlsx，单语） =====
 
 async function buildLegacyPackage(
@@ -667,8 +683,9 @@ async function buildLegacyPackage(
   const readings = parseReadings(sheetRows(wb, "exploration-reading list"));
   const knowledge = parseKnowledge(sheetRows(wb, "knowledge test"));
   const applications = parseApplications(sheetRows(wb, "application test"));
-  const courseCode = (options.courseCode || "C001").trim().toUpperCase();
-  const slug = (options.slug || "modeling-life").trim().toLowerCase();
+  const excelCode = readLegacyCourseId(info);
+  const courseCode = (excelCode || options.courseCode || "C001").trim().toUpperCase();
+  const slug = (options.slug || slugify(courseCode)).trim().toLowerCase();
 
   const cover = findMedia(media, (n) => n.includes("课程封面") && n.endsWith(".png"));
   const coverPath = cover ? "media/cover.png" : undefined;
