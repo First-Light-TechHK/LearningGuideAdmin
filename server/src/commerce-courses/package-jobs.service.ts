@@ -550,6 +550,7 @@ export class PackageJobsService {
     body: {
       onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
       reassignCodes?: boolean;
+      overwriteDraft?: boolean;
     },
     actorEmployeeId: string | null,
   ) {
@@ -558,6 +559,56 @@ export class PackageJobsService {
     });
     if (!job)
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+
+    // 读取已校验的包清单（用于判定 Course ID 冲突）
+    let manifest: PackageManifest;
+    try {
+      const manifestBytes = await this.storage.getStaging(
+        this.storage.stagingKey(jobId, '__manifest.json'),
+      );
+      manifest = JSON.parse(manifestBytes.toString('utf8')) as PackageManifest;
+    } catch {
+      throw new PackageError(
+        'PACKAGE_MANIFEST_MISSING',
+        409,
+        'Package manifest is no longer available; please re-upload the package.',
+      );
+    }
+
+    // 目标课程：来自「导入到已有课程」（Versions 页）时直接写入该课草稿，始终允许。
+    let targetCourseId: string | null = job.courseId;
+
+    if (!targetCourseId) {
+      // 从包新建：按 Course ID（Excel 中的 Course ID 字段）判断是否已存在
+      const existing = await this.prisma.commerceCourse.findFirst({
+        where: { code: manifest.course.code },
+        select: { id: true, code: true, liveVersionId: true },
+      });
+      if (existing) {
+        if (existing.liveVersionId) {
+          // 已上线课程：拒绝，避免影响线上内容（保持作业可取消，不置为 FAILED）
+          return {
+            jobId,
+            status: job.status,
+            refused: 'COURSE_ALREADY_LIVE' as const,
+            existingCourseCode: existing.code,
+            message: `Course ${existing.code} is already live. The import is refused: only draft courses (never published) can be overwritten, so live content is never affected.`,
+          };
+        }
+        if (!body.overwriteDraft) {
+          // 草稿课程：询问是否覆盖（不改动作业状态，等待用户确认）
+          return {
+            jobId,
+            status: job.status,
+            requiresOverwrite: true as const,
+            existingCourseId: existing.id,
+            existingCourseCode: existing.code,
+          };
+        }
+        // 用户确认覆盖 → 替换该草稿课程的沙盒草稿内容
+        targetCourseId = existing.id;
+      }
+    }
     // 条件认领：只有一次确认能把任务从 AWAITING_CONFIRM 拿到 IMPORTING�?
     // 双击或两人同时确认不会把同一个包导入两次
     const claimed = await this.prisma.coursePackageJob.updateMany({
@@ -576,16 +627,10 @@ export class PackageJobsService {
       );
     }
     try {
-      const manifestBytes = await this.storage.getStaging(
-        this.storage.stagingKey(jobId, '__manifest.json'),
-      );
-      const manifest = JSON.parse(
-        manifestBytes.toString('utf8'),
-      ) as PackageManifest;
       const files = await this.loadStagingFiles(jobId, manifest);
-      const { courseId } = job.courseId
+      const { courseId } = targetCourseId
         ? await this.importer.importIntoExistingCourse(
-            job.courseId,
+            targetCourseId,
             manifest,
             files,
             actorEmployeeId,

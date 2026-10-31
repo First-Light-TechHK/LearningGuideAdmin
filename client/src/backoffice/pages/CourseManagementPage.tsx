@@ -22,6 +22,15 @@ type JobView = {
   report: { errors: Array<{ code: string; message: string }>; warnings: Array<{ code: string; message: string }> }
 }
 
+type ConfirmOutcome = {
+  courseId?: string
+  requiresOverwrite?: boolean
+  existingCourseCode?: string
+  existingCourseId?: string
+  refused?: string
+  message?: string
+}
+
 type UploadResult<T> = { success: true; data: T } | { success: false; error: string; errorMessage?: string }
 
 /**
@@ -90,6 +99,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = usePageSize('course-list')
   const [importJob, setImportJob] = useState<JobView | null>(null)
+  const [confirmNotice, setConfirmNotice] = useState<{ kind: 'overwrite' | 'refused'; courseCode?: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -193,6 +203,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   async function onPickRawFile(file: File) {
     setBusy(true)
     setMessage(null)
+    setConfirmNotice(null)
     setUploadPct(0)
     // 大素材包单次 POST 会被 CloudFront/App Runner 中途切断，改为分块上传：
     // 先开会话拿 jobId + 块大小，再把文件切成小块逐块 PUT，最后 complete。
@@ -251,6 +262,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (dir === null) return
     setBusy(true)
     setMessage(null)
+    setConfirmNotice(null)
     const result = await boRequest<JobView>(`/api/backoffice/courses/import/local`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -327,23 +339,48 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     } else setMessage(uploadErrorText(result.error, result.errorMessage))
   }
 
-  async function confirmImport(onConflict: string) {
+  async function confirmImport(onConflict: string, overwriteDraft = false) {
     if (!importJob) return
     setBusy(true)
-    const result = await boRequest<{ courseId: string }>(`/api/backoffice/courses/import/${importJob.jobId}/confirm`, {
+    setConfirmNotice(null)
+    const result = await boRequest<ConfirmOutcome>(`/api/backoffice/courses/import/${importJob.jobId}/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ onConflict, reassignCodes: false }),
+      body: JSON.stringify({ onConflict, reassignCodes: false, overwriteDraft }),
     })
     setBusy(false)
-    if (result.success) {
-      setImportJob(null)
-      if (fileRef.current) fileRef.current.value = ''
-      await load()
-      openCourse(result.data.courseId)
-    } else {
-      setMessage(L(`确认导入失败：${result.error}`, `Confirm failed: ${result.error}`))
+    if (!result.success) {
+      setMessage(L(`确认导入失败：${result.message ?? result.error}`, `Confirm failed: ${result.message ?? result.error}`))
+      return
     }
+    const outcome = result.data
+    if (outcome.requiresOverwrite) {
+      // 同 Course ID 的草稿课程已存在 → 询问是否覆盖（覆盖仅影响沙盒草稿）
+      setConfirmNotice({ kind: 'overwrite', courseCode: outcome.existingCourseCode })
+      return
+    }
+    if (outcome.refused) {
+      // 同 Course ID 的课程已上线 → 拒绝导入
+      setConfirmNotice({ kind: 'refused', courseCode: outcome.existingCourseCode })
+      return
+    }
+    setImportJob(null)
+    setConfirmNotice(null)
+    if (fileRef.current) fileRef.current.value = ''
+    await load()
+    if (outcome.courseId) openCourse(outcome.courseId)
+  }
+
+  // 忽略：不覆盖同 Course ID 的草稿课程，直接取消该导入作业。
+  async function ignoreImport() {
+    if (!importJob) return
+    setBusy(true)
+    await boRequest(`/api/backoffice/courses/import/${importJob.jobId}/cancel`, { method: 'POST' })
+    setBusy(false)
+    setImportJob(null)
+    setConfirmNotice(null)
+    if (fileRef.current) fileRef.current.value = ''
+    setMessage(L('已忽略该课程包（未覆盖同名草稿）。', 'Package ignored (existing draft left untouched).'))
   }
 
   return (
@@ -459,8 +496,9 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
           job={importJob}
           busy={busy}
           locale={locale}
-          codeExists={Boolean(list?.courses.some((c) => c.code === importJob.package?.courseCode))}
+          notice={confirmNotice}
           onConfirm={confirmImport}
+          onIgnore={ignoreImport}
         />
       )}
 
@@ -544,14 +582,16 @@ function ImportPanel({
   job,
   busy,
   locale,
-  codeExists,
+  notice,
   onConfirm,
+  onIgnore,
 }: {
   job: JobView
   busy: boolean
   locale: string
-  codeExists: boolean
-  onConfirm: (onConflict: string) => void
+  notice: { kind: 'overwrite' | 'refused'; courseCode?: string } | null
+  onConfirm: (onConflict: string, overwriteDraft?: boolean) => void
+  onIgnore: () => void
 }) {
   const zh = locale.startsWith('zh')
   const errors = job.report?.errors ?? []
@@ -582,12 +622,33 @@ function ImportPanel({
       )}
       {job.status === 'AWAITING_CONFIRM' && (
         <div style={{ marginTop: 12 }}>
-          {codeExists ? (
-            <p style={{ fontSize: 13, color: '#9A6B00', background: '#FFF6E5', padding: '8px 12px', borderRadius: 8 }}>
-              {zh
-                ? `课程 ${job.package?.courseCode} 已存在，本后台拒绝重复导入。请进入该课程，使用「导入课程包」替换草稿。`
-                : `Course ${job.package?.courseCode} already exists. This Admin refuses the import; open the existing course and use "Import package" instead.`}
-            </p>
+          {notice?.kind === 'overwrite' ? (
+            <div style={{ fontSize: 13, background: '#FFF6E5', padding: '10px 12px', borderRadius: 8 }}>
+              <p style={{ margin: 0, color: '#9A6B00' }}>
+                {zh
+                  ? `课程 ${notice.courseCode} 已存在（草稿状态，从未上线）。是否用本课程包覆盖其沙盒草稿？覆盖只影响草稿，线上内容不受影响。`
+                  : `Course ${notice.courseCode} already exists as a draft (never published). Overwrite its sandbox draft with this package? Only the draft is replaced; live content is unaffected.`}
+              </p>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button className="button" disabled={busy} onClick={() => onConfirm('ABORT', true)}>
+                  {zh ? '覆盖草稿' : 'Overwrite draft'}
+                </button>
+                <button className="button buttonGhost" disabled={busy} onClick={onIgnore}>
+                  {zh ? '忽略' : 'Ignore'}
+                </button>
+              </div>
+            </div>
+          ) : notice?.kind === 'refused' ? (
+            <div style={{ fontSize: 13, color: '#b42318', background: '#FDECEC', padding: '10px 12px', borderRadius: 8 }}>
+              <p style={{ margin: 0 }}>
+                {zh
+                  ? `课程 ${notice.courseCode} 已上线，导入被拒绝。只能覆盖状态为草稿（从未发布）的课程，已上线课程的内容不受影响。`
+                  : `Course ${notice.courseCode} is already live, so the import is refused. Only draft (never published) courses can be overwritten; live content is never affected.`}
+              </p>
+              <button className="button buttonGhost" style={{ marginTop: 10 }} disabled={busy} onClick={onIgnore}>
+                {zh ? '知道了' : 'OK'}
+              </button>
+            </div>
           ) : (
             <button className="button" disabled={busy} onClick={() => onConfirm('ABORT')}>
               {zh ? '导入课程' : 'Import course'}
