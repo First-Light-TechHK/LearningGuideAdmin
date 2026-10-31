@@ -292,6 +292,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
             createFlywheelMetrics({
               insights: createPgInsightRepository(),
               graph,
+              portal: createPortalHelpdeskClient(),
             }),
         },
         HelpdeskFlywheelScheduler,

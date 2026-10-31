@@ -461,6 +461,37 @@ export type PortalJobRuns = {
   runs: PortalJobRun[];
 };
 
+/**
+ * Portal 的工单每日数字（GET /api/integration/helpdesk/ticket-stats，UTC 天，两端都含，至多 92 天）：
+ * created 当天新建；resolved / cancelled 当天关闭（取消 = 关闭原因 cancelled，其余关闭都算解决）；openAtEnd 当天结束时还开着；
+ * 首次回复 = 当天新建的工单里员工第一条公开回复（内部备注、系统消息不算），分钟，中位数与 P90 只算有回复的（firstReplies 张）。
+ */
+export type TicketDay = {
+  day: string;
+  created: number;
+  resolved: number;
+  cancelled: number;
+  openAtEnd: number;
+  firstReplies: number;
+  firstReplyMedianMinutes: number | null;
+  firstReplyP90Minutes: number | null;
+};
+
+export type TicketStats = {
+  from: string;
+  to: string;
+  timeZone: 'UTC';
+  days: TicketDay[];
+  totals: {
+    created: number;
+    resolved: number;
+    cancelled: number;
+    firstReplies: number;
+    firstReplyMedianMinutes: number | null;
+    firstReplyP90Minutes: number | null;
+  };
+};
+
 /** 立即运行的结果：completed（跑完了，或同一个 Idempotency-Key 的那一次）/ already_running（别的实例在跑）。 */
 export type PortalJobRunResult = {
   outcome: 'completed' | 'already_running';

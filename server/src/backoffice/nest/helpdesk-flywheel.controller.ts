@@ -165,6 +165,12 @@ export class BackofficeHelpdeskFlywheelController {
     return started;
   }
 
+  /** 工单每日数字（Portal 的只读汇总，UTC 天）：新建、解决、取消、当天结束时还开着、首次人工回复用时。 */
+  @Get('flywheel/ticket-stats')
+  ticketStats(@Query() query: Record<string, unknown>) {
+    return run(() => this.metrics.ticketStats(query));
+  }
+
   /** Portal 的学员原文保留任务（180 天后只留脱敏文字与标签）：运行记录。 */
   @Get('jobs/assist-retention')
   retentionRuns() {
