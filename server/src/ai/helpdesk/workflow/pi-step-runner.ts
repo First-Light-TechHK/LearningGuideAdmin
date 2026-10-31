@@ -81,12 +81,13 @@ export type ModelSource = (
 const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 /**
- * OpenRouter 的 provider 路由：先用吞吐最快的、且收下我们发的全部参数（工具、reasoning）的 provider。
- * 2026-10-30 录下的 256 次 DeepSeek 思考调用：超过 6.3 秒的约六成是慢的 provider（Alibaba 每秒 15 个
- * token、InferenceNet 中位 3.4 秒），换成快的就在 6.3 秒内。只写排序规则，不写 provider 名字（模型任意）。
+ * OpenRouter 的 provider 路由：先用最便宜的、且收下我们发的全部参数（工具、reasoning）的 provider。
+ * 2026-10-31 owner 选了「只选最便宜」：按吞吐排时最快的几家比最便宜的贵 10 到 20 倍（3,499 轮实花约
+ * 5.4 美元，按目录价只记 0.7 美元）；最便宜的慢一些（九成 4.5 秒内），慢的由 6.3 秒切换兜住。
+ * 只写排序规则，不写 provider 名字（模型任意）。按价格排时目录价接近实付，costUsd 也就接近真花费。
  */
 export const OPENROUTER_ROUTING = {
-  sort: 'throughput',
+  sort: 'price',
   require_parameters: true,
 } as const;
 let openRouterModels: ReturnType<PiModules['ai']['createModels']> | undefined;

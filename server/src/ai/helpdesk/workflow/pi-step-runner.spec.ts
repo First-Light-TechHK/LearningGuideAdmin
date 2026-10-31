@@ -622,8 +622,8 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
     },
   );
 
-  it('asks OpenRouter for its fastest providers that take every parameter we send, also for a model missing from the catalog', async () => {
-    // 2026-10-30 录下的 256 次 DeepSeek 思考调用：超过 6.3 秒的约六成是慢的 provider（Alibaba 每秒 15 个 token）
+  it('asks OpenRouter for its cheapest providers that take every parameter we send, also for a model missing from the catalog', async () => {
+    // owner 2026-10-31：只选最便宜（最快的几家贵 10 到 20 倍）；慢的由 6.3 秒切换兜住
     for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
       const { fetch } = await call(picked, { ...TARGET, model, thinking: 'high' });
       const body = JSON.parse(
@@ -631,7 +631,7 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
       ) as { provider?: unknown };
       expect(body.provider).toEqual(OPENROUTER_ROUTING);
       expect(OPENROUTER_ROUTING).toEqual({
-        sort: 'throughput',
+        sort: 'price',
         require_parameters: true,
       });
     }
