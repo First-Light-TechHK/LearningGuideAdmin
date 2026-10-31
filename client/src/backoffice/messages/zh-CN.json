@@ -702,7 +702,10 @@
       "JOB_ALREADY_RUNNING": "任务正在运行，结束后再试。",
       "JOB_START_FAILED": "任务没能开始，请稍后再试。",
       "JOB_NOT_FOUND": "没有这个任务。",
-      "JOB_RUN_NOT_FOUND": "这次运行已不存在。"
+      "JOB_RUN_NOT_FOUND": "这次运行已不存在。",
+      "PLACE_REQUIRED": "请先选一个位置。",
+      "INVALID_PLACE": "这个位置不能放卡，请选步骤、偏离或规则格。",
+      "FAQ_NOT_UPDATED": "这张卡还没改过：请先保存改动，再批准。"
     },
     "addFaq": "新增常见问题",
     "actions": {
@@ -1174,7 +1177,9 @@
       "suggestion": {
         "new_faq": "新 FAQ",
         "add_phrasing": "加问法",
-        "follow_up": "追问"
+        "follow_up": "追问",
+        "update_faq": "改已有卡",
+        "retire_faq": "标记失效"
       },
       "origin": {
         "mining": "夜间挖掘",
@@ -1396,6 +1401,277 @@
         "locale": "按语言",
         "entry": "按渠道",
         "signal": "按信号"
+      },
+      "charts": {
+        "title": "趋势",
+        "turns": "提问量",
+        "jobReceived": "后台任务",
+        "caption": {
+          "turns": "每个时间段的提问轮数",
+          "aiSolvedRate": "给了答案、之后 24 小时内没有工单的比例",
+          "noMatchRate": "没有匹配到任何 FAQ 的提问比例",
+          "handoverRate": "转给人工客服的提问比例",
+          "helpfulRate": "用户投「有帮助」或「已解决」的比例",
+          "avgRating": "用户评分（1 到 5）",
+          "jobReceived": "每晚缺口挖掘从 Portal 拉进来的对话轮数，下面是每天的运行结果"
+        },
+        "perDay": "按日",
+        "perWeek": "按周",
+        "turnsDetail": "其中 {answers} 轮给了答案",
+        "jobDetail": "成功的天数",
+        "empty": "这段时间没有数据。",
+        "partial": "不完整的周",
+        "noRuns": "还没有运行记录。",
+        "runsOk": "最近 {count} 天都跑成功了",
+        "runsFailed": "最近 {count} 天里有 {failed} 天失败",
+        "runsLabel": "每天的运行状态",
+        "status": {
+          "succeeded": "成功",
+          "failed": "失败",
+          "running": "进行中"
+        },
+        "created": "新建 {count} 个候选",
+        "showTable": "查看趋势表格（每个时间段的数字）",
+        "changePoints": "{n} 个百分点",
+        "change": "{n}",
+        "vsDay": "箭头是和前一天比",
+        "vsWeek": "箭头是和前一周比"
+      },
+      "lists": "缺口与工单",
+      "showAll": "显示全部 {count} 条",
+      "showLess": "收起"
+    },
+    "review": {
+      "viewLabel": "候选视图",
+      "view": {
+        "table": "表格",
+        "cards": "卡片审核"
+      },
+      "queue": "候选队列",
+      "queueCount": "待审核 {count} 条",
+      "keys": "J / K 切换 · Ctrl+Enter 提交",
+      "pickOne": "在左边选一个候选开始审核。",
+      "asks": "{count} 次提问",
+      "lastSeen": "最近 {when}",
+      "short": {
+        "new_faq": "新卡",
+        "follow_up": "追问",
+        "update_faq": "改卡",
+        "add_phrasing": "加说法",
+        "retire_faq": "下线"
+      },
+      "aiTag": "AI 建议",
+      "aCard": "一张卡",
+      "say": {
+        "new_faq": "新建一张卡回答这个问题。",
+        "follow_up": "在「{card}」下面加一个追问。",
+        "update_faq": "改一下「{card}」的内容：用户看了它还是没解决。",
+        "add_phrasing": "把用户的 {count} 种说法加到「{card}」，下次能找到它。",
+        "retire_faq": "把「{card}」下线（归档，不删除）。",
+        "no_change": "不用改，现有的卡已经够了。"
+      },
+      "userAsks": "用户在问：",
+      "facts": {
+        "asks": "提问次数",
+        "users": "提问的用户",
+        "usersMore": "看详细",
+        "net": "预计效果",
+        "netParts": "多答对 {gains} · 挤掉 {steals}"
+      },
+      "notYet": "暂无",
+      "evidence": "证据",
+      "tabs": {
+        "said": "用户怎么问的（{count}）",
+        "similar": "相似的卡（{count}）",
+        "users": "提问的用户"
+      },
+      "saidHint": "Portal 脱敏后的用户原话，和 AI 当时的处理。",
+      "saidPickHint": "勾选的说法会加到卡上，也会变成评测用例。含隐藏个人信息的不能勾。",
+      "locale": {
+        "en-GB": "英文",
+        "zh-CN": "简体",
+        "zh-TW": "繁体"
+      },
+      "shownCard": "当时给看的卡：{question}",
+      "unknownCard": "（已不在编辑区）",
+      "noCardShown": "当时没给卡",
+      "similarHint": "同位置的排前面，再按相似度。",
+      "source": {
+        "text": "（按文字相似）",
+        "vectors": "（按向量相似）"
+      },
+      "reviewMissing": "审核数据暂时没有：{error}",
+      "noSimilar": "没有相似的已有卡。",
+      "scoreTitle": "相似度",
+      "samePlace": "同位置",
+      "closeMatch": "很接近，请对比答案",
+      "closeMatchHint": "同位置、问题很像：可能重复、可能矛盾，也可能是不同情境下的不同问题。",
+      "wasShown": "当时给看的",
+      "pick": {
+        "target": "选这张",
+        "parent": "加在这张下面",
+        "chosen": "已选",
+        "moveTo": "说法挪到这张"
+      },
+      "states": {
+        "title": "提问用户的状态",
+        "total": "共 {total} 位用户",
+        "share": "{count} · {percent}%",
+        "none": "暂无。Portal 还没提供用户状态。",
+        "bucket": {
+          "paid_active": "已付费",
+          "trial_active": "试用中",
+          "cancelling": "取消中",
+          "payment_failed": "付款失败",
+          "ended": "已结束",
+          "never_had_plan": "仅注册",
+          "unknown": "未知"
+        }
+      },
+      "net": {
+        "title": "预计效果",
+        "gains": "多答对",
+        "steals": "挤掉别的卡",
+        "net": "净收益",
+        "basis": "按第 {version} 版的评测，{cases} 条用例。",
+        "negative": "净收益为负：这张卡挤掉的比多答对的多。",
+        "none": "暂无。这张卡还没进过建版本的评测。"
+      },
+      "decision": "你的处理",
+      "rejectTitle": "驳回这个候选",
+      "mergeTitle": "和另一个候选合并",
+      "howLabel": "处理方式",
+      "group": {
+        "add": "新增",
+        "update": "改已有的卡",
+        "retire": "下线",
+        "none": "不改"
+      },
+      "action": {
+        "new_faq": "新建一张卡",
+        "follow_up": "作为某张卡的追问",
+        "update_faq": "改卡的内容",
+        "add_phrasing": "只把说法加到卡上",
+        "retire_faq": "下线一张卡",
+        "no_change": "不用改"
+      },
+      "editor": {
+        "title": "卡片内容（直接改）",
+        "titleUpdate": "卡片内容（直接改，保存后进编辑区）",
+        "language": "语言",
+        "zh": "中文",
+        "en": "English",
+        "hasError": "有没填好的",
+        "sources": "参考：已解决工单里的回复（{count}）",
+        "insert": "插入到答案",
+        "verify": "草稿 待核实：插入后请核实每一个事实。",
+        "full": "在完整编辑器里打开（关键词、情境等）",
+        "unchanged": "内容还没改：改好再批准，或换成「只把说法加到卡上」。",
+        "current": "这张卡现在的内容",
+        "editInstead": "直接改这张卡的内容"
+      },
+      "targetLabel": "哪张卡",
+      "parentLabel": "加在哪张卡下面",
+      "noTarget": "还没选",
+      "fromSimilar": "从相似的卡里选",
+      "search": "搜索",
+      "needTarget": "请选一张卡。",
+      "needPlace": "请选放在哪。",
+      "mapMissing": "流程结构暂时读不到：{error}",
+      "moveToLabel": "说法挪到（可选）",
+      "noMoveTo": "不挪",
+      "moveToSelf": "不能挪到要下线的同一张卡。",
+      "note": "备注（可选）",
+      "noteHint": "不要贴个人信息：备注会脱敏。最多 500 字。",
+      "confirmRetire": "确认把「{question}」下线？它会归档，不会删除。",
+      "approve": {
+        "new_faq": "保存新卡并批准",
+        "follow_up": "保存追问并批准",
+        "update_faq": "保存修改并批准",
+        "add_phrasing": "批准：加 {count} 种说法",
+        "retire_faq": "批准下线",
+        "no_change": "确认不用改",
+        "confirmRetire": "确认下线"
+      },
+      "afterApprove": "批准后进编辑区，下次发版通过评测才上线。",
+      "reject": "驳回",
+      "merge": "合并",
+      "noMergeTargets": "队列里没有别的待处理候选。",
+      "confirmReject": "驳回候选",
+      "mergeInto": "合并到哪个候选",
+      "mergePlaceholder": "选择候选",
+      "mergeHint": "两个候选说的是同一件事时合并：这一个的说法并进去。",
+      "needMerge": "请选一个候选。",
+      "confirmMerge": "合并",
+      "readOnly": "你的角色只能查看。",
+      "decided": {
+        "accepted": "已批准：{as} · {when}",
+        "dismissed": "已驳回：{reason} · {when}",
+        "merged": "已合并到另一个候选 · {when}"
+      },
+      "done": {
+        "new_faq": "新卡已存进编辑区，候选已批准。",
+        "follow_up": "追问已存进编辑区，候选已批准。",
+        "update_faq": "卡片修改已存进编辑区，候选已批准。",
+        "add_phrasing": "说法已加进编辑区。",
+        "retire_faq": "卡片已下线（编辑区）。",
+        "no_change": "已记为不用改。",
+        "rejected": "已驳回候选。",
+        "merged": "已合并候选。"
+      },
+      "savedNotAccepted": "卡已存进编辑区，但候选没批准上，再点一次只会重试批准。",
+      "place": {
+        "legendRequired": "放在哪",
+        "legendOptional": "换个位置（可选）",
+        "other": "其他位置…",
+        "treeTitle": "选位置",
+        "search": "搜索位置",
+        "tree": "流程树与规则表",
+        "noMatch": "没有匹配的位置。",
+        "suggestedRegion": "建议的区域",
+        "cards": "{count} 张卡",
+        "kind": {
+          "stage": "阶段",
+          "step": "步骤",
+          "deviation": "偏离",
+          "object": "对象",
+          "cell": "规则格"
+        }
+      },
+      "shortcut": "Ctrl ↵",
+      "assist": {
+        "versions": "版本",
+        "previous": "上一个版本",
+        "next": "下一个版本",
+        "versionOf": "版本 {n} / {total}",
+        "startDraft": "AI 初稿",
+        "startCard": "现在的卡",
+        "manual": "你改的",
+        "byAi": "AI 按「{instruction}」改",
+        "label": "告诉 AI 怎么改这张卡",
+        "placeholder": "告诉 AI 怎么改这张卡…",
+        "working": "AI 正在改…",
+        "send": "发送",
+        "quick": "常用指令",
+        "quickLabel": {
+          "shorter": "短一点",
+          "friendlier": "更客气",
+          "steps": "改成步骤",
+          "translate": "补齐另一种语言"
+        },
+        "quickText": {
+          "shorter": "把答案改短一点，先说结论，去掉重复的话",
+          "friendlier": "语气更客气、更有耐心，但不要加没有的承诺",
+          "steps": "把答案改成 1、2、3 的操作步骤",
+          "translate": "按现在这一种语言的内容，补齐或更新另一种语言，意思保持一致"
+        },
+        "onlySelection": "只改选中的：「{text}」",
+        "wholeCard": "改整张卡",
+        "hint": "Enter 发送 · 每次 AI 改动都是一个新版本，可以切回去",
+        "tooLong": "最多 {max} 字。",
+        "noChange": "AI 没有改动，换个说法试试。",
+        "changedHere": "AI 改了这里",
+        "changedOther": "另一种语言也被 AI 改了"
       }
     }
   }

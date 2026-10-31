@@ -105,7 +105,7 @@ export default function HelpDeskPage() {
   /** 「新 FAQ / 加成追问」：关掉候选详情，打开预填的 FAQ 抽屉。 */
   function compose(next: Compose) {
     openCandidate(null)
-    setEditing({ faq: null, compose: next })
+    setEditing({ faq: next.faq ?? null, compose: next })
   }
 
   /** 从候选建的 FAQ 保存成功：用它的 id 接受候选（选中的例句成问法，追问另外建边）。 */
@@ -118,6 +118,7 @@ export default function HelpDeskPage() {
         ...(next.as === 'follow_up' ? { parentId: next.parentId } : {}),
         phrasings: next.phrasings,
         version: next.version,
+        ...(next.placementNodeId ? { placementNodeId: next.placementNodeId } : {}),
       },
       newIdempotencyKey(),
     )
@@ -196,6 +197,7 @@ export default function HelpDeskPage() {
               refreshKey={candidatesVersion}
               onOpen={(id) => !modal && openCandidate(id)}
               onRefresh={() => setCandidatesVersion((value) => value + 1)}
+              onCompose={(next) => !modal && compose(next)}
             />
           ) : tab === 'data' ? (
             <FlywheelDataView

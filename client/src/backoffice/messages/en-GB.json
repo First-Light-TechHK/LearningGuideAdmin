@@ -702,7 +702,10 @@
       "JOB_ALREADY_RUNNING": "This job is already running. Try again when it has finished.",
       "JOB_START_FAILED": "The job could not be started. Try again in a moment.",
       "JOB_NOT_FOUND": "This job does not exist.",
-      "JOB_RUN_NOT_FOUND": "This run no longer exists."
+      "JOB_RUN_NOT_FOUND": "This run no longer exists.",
+      "PLACE_REQUIRED": "Choose a place first.",
+      "INVALID_PLACE": "Cards cannot go in this place: choose a step, deviation or rule cell.",
+      "FAQ_NOT_UPDATED": "The card has not been edited yet: save your changes first, then approve."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -1174,7 +1177,9 @@
       "suggestion": {
         "new_faq": "New FAQ",
         "add_phrasing": "Add phrasing",
-        "follow_up": "Follow-up"
+        "follow_up": "Follow-up",
+        "update_faq": "Update card",
+        "retire_faq": "Mark obsolete"
       },
       "origin": {
         "mining": "Nightly mining",
@@ -1396,6 +1401,277 @@
         "locale": "By locale",
         "entry": "By channel",
         "signal": "By signal"
+      },
+      "charts": {
+        "title": "Trends",
+        "turns": "Questions",
+        "jobReceived": "Background job",
+        "caption": {
+          "turns": "Questions (turns) per period",
+          "aiSolvedRate": "Share of answers with no ticket in the next 24 hours",
+          "noMatchRate": "Share of questions that matched no FAQ",
+          "handoverRate": "Share of questions handed to a person",
+          "helpfulRate": "Share of votes that were helpful or solved",
+          "avgRating": "User rating (1 to 5)",
+          "jobReceived": "Turns pulled from Portal by the nightly gap mining, with each day's result below"
+        },
+        "perDay": "by day",
+        "perWeek": "by week",
+        "turnsDetail": "{answers} got an answer",
+        "jobDetail": "days that succeeded",
+        "empty": "No data in this period.",
+        "partial": "partial week",
+        "noRuns": "No runs yet.",
+        "runsOk": "All {count} recent days succeeded",
+        "runsFailed": "{failed} of the last {count} days failed",
+        "runsLabel": "Run status per day",
+        "status": {
+          "succeeded": "Succeeded",
+          "failed": "Failed",
+          "running": "Running"
+        },
+        "created": "{count} new candidates",
+        "showTable": "Show the trend table (numbers per period)",
+        "changePoints": "{n} pts",
+        "change": "{n}",
+        "vsDay": "arrows compare with the day before",
+        "vsWeek": "arrows compare with the week before"
+      },
+      "lists": "Gaps and tickets",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer"
+    },
+    "review": {
+      "viewLabel": "Candidate view",
+      "view": {
+        "table": "Table",
+        "cards": "Card review"
+      },
+      "queue": "Candidate queue",
+      "queueCount": "{count} to review",
+      "keys": "J / K to move · Ctrl+Enter to submit",
+      "pickOne": "Pick a candidate on the left to start.",
+      "asks": "{count} asks",
+      "lastSeen": "Last {when}",
+      "short": {
+        "new_faq": "New card",
+        "follow_up": "Follow-up",
+        "update_faq": "Edit card",
+        "add_phrasing": "Add wording",
+        "retire_faq": "Retire"
+      },
+      "aiTag": "AI suggests",
+      "aCard": "a card",
+      "say": {
+        "new_faq": "Write a new card for this question.",
+        "follow_up": "Add a follow-up under \"{card}\".",
+        "update_faq": "Edit \"{card}\": users saw it and were still stuck.",
+        "add_phrasing": "Add the users' {count} wordings to \"{card}\" so it is found next time.",
+        "retire_faq": "Retire \"{card}\" (archived, not deleted).",
+        "no_change": "No change: the existing cards already cover this."
+      },
+      "userAsks": "Users ask: ",
+      "facts": {
+        "asks": "Asks",
+        "users": "Who asked",
+        "usersMore": "See details",
+        "net": "Expected effect",
+        "netParts": "+{gains} answered · −{steals} taken"
+      },
+      "notYet": "Not yet",
+      "evidence": "Evidence",
+      "tabs": {
+        "said": "What users said ({count})",
+        "similar": "Similar cards ({count})",
+        "users": "Who asked"
+      },
+      "saidHint": "Users' own words, redacted by Portal, and what the AI did then.",
+      "saidPickHint": "Ticked wordings are added to the card and become eval cases. Lines with hidden personal details cannot be ticked.",
+      "locale": {
+        "en-GB": "English",
+        "zh-CN": "Simplified",
+        "zh-TW": "Traditional"
+      },
+      "shownCard": "Card shown then: {question}",
+      "unknownCard": "(no longer in the working copy)",
+      "noCardShown": "No card was shown",
+      "similarHint": "Same place first, then by similarity.",
+      "source": {
+        "text": "(text similarity)",
+        "vectors": "(vector similarity)"
+      },
+      "reviewMissing": "Review data is not available yet: {error}",
+      "noSimilar": "No similar existing cards.",
+      "scoreTitle": "Similarity",
+      "samePlace": "Same place",
+      "closeMatch": "Very close: compare the answers",
+      "closeMatchHint": "Same place and a very similar question: may be a duplicate, a contradiction, or a different question in another situation.",
+      "wasShown": "Shown then",
+      "pick": {
+        "target": "Use this",
+        "parent": "Add under this",
+        "chosen": "Chosen",
+        "moveTo": "Move wording here"
+      },
+      "states": {
+        "title": "State of the users who asked",
+        "total": "{total} users",
+        "share": "{count} · {percent}%",
+        "none": "Not available yet. Portal does not send user state yet.",
+        "bucket": {
+          "paid_active": "Paid",
+          "trial_active": "On trial",
+          "cancelling": "Cancelling",
+          "payment_failed": "Payment failed",
+          "ended": "Ended",
+          "never_had_plan": "Registered only",
+          "unknown": "Unknown"
+        }
+      },
+      "net": {
+        "title": "Expected effect",
+        "gains": "Gained",
+        "steals": "Taken from other cards",
+        "net": "Net",
+        "basis": "From the eval of release {version}, {cases} cases.",
+        "negative": "Negative: this card takes more hits from other cards than it adds.",
+        "none": "Not available yet. This card has not been through a release build."
+      },
+      "decision": "Your decision",
+      "rejectTitle": "Reject this candidate",
+      "mergeTitle": "Merge with another candidate",
+      "howLabel": "What to do",
+      "group": {
+        "add": "Add",
+        "update": "Change a card",
+        "retire": "Retire",
+        "none": "No change"
+      },
+      "action": {
+        "new_faq": "New card",
+        "follow_up": "Follow-up under a card",
+        "update_faq": "Edit the card",
+        "add_phrasing": "Only add the wording to a card",
+        "retire_faq": "Retire a card",
+        "no_change": "No change"
+      },
+      "editor": {
+        "title": "Card content (edit here)",
+        "titleUpdate": "Card content (edit here; saved to the working copy)",
+        "language": "Language",
+        "zh": "中文",
+        "en": "English",
+        "hasError": "has missing fields",
+        "sources": "Reference: replies from resolved tickets ({count})",
+        "insert": "Insert into the answer",
+        "verify": "Draft, to be checked: verify every fact after inserting.",
+        "full": "Open in the full editor (keywords, signals…)",
+        "unchanged": "Nothing changed yet: edit first, or switch to \"Only add the wording to a card\".",
+        "current": "The card as it is now",
+        "editInstead": "Edit this card's content instead"
+      },
+      "targetLabel": "Which card",
+      "parentLabel": "Under which card",
+      "noTarget": "Not chosen yet",
+      "fromSimilar": "Pick from similar cards",
+      "search": "Search",
+      "needTarget": "Choose a card.",
+      "needPlace": "Choose where it goes.",
+      "mapMissing": "The process map could not be loaded: {error}",
+      "moveToLabel": "Move wording to (optional)",
+      "noMoveTo": "Not moving",
+      "moveToSelf": "Cannot move wording to the card being retired.",
+      "note": "Note (optional)",
+      "noteHint": "Do not paste personal details: notes are redacted. Up to 500 characters.",
+      "confirmRetire": "Retire \"{question}\"? It will be archived, not deleted.",
+      "approve": {
+        "new_faq": "Save card and approve",
+        "follow_up": "Save follow-up and approve",
+        "update_faq": "Save changes and approve",
+        "add_phrasing": "Approve: add {count} wordings",
+        "retire_faq": "Approve retiring",
+        "no_change": "Confirm no change",
+        "confirmRetire": "Confirm retiring"
+      },
+      "afterApprove": "Approved changes go to the working copy and go live after the next release passes eval.",
+      "reject": "Reject",
+      "merge": "Merge",
+      "noMergeTargets": "No other open candidates in the queue.",
+      "confirmReject": "Reject candidate",
+      "mergeInto": "Merge into",
+      "mergePlaceholder": "Choose a candidate",
+      "mergeHint": "Merge when both candidates are about the same thing: this one's wording joins the other.",
+      "needMerge": "Choose a candidate.",
+      "confirmMerge": "Merge",
+      "readOnly": "Your role can only view.",
+      "decided": {
+        "accepted": "Approved: {as} · {when}",
+        "dismissed": "Rejected: {reason} · {when}",
+        "merged": "Merged into another candidate · {when}"
+      },
+      "done": {
+        "new_faq": "New card saved to the working copy; candidate approved.",
+        "follow_up": "Follow-up saved to the working copy; candidate approved.",
+        "update_faq": "Card changes saved to the working copy; candidate approved.",
+        "add_phrasing": "Wording added to the working copy.",
+        "retire_faq": "Card retired (working copy).",
+        "no_change": "Recorded as no change.",
+        "rejected": "Candidate rejected.",
+        "merged": "Candidate merged."
+      },
+      "savedNotAccepted": "The card is saved, but the candidate was not approved. Clicking again only retries the approval.",
+      "place": {
+        "legendRequired": "Where it goes",
+        "legendOptional": "Move it (optional)",
+        "other": "Other place…",
+        "treeTitle": "Choose a place",
+        "search": "Search places",
+        "tree": "Process tree and rule table",
+        "noMatch": "No matching place.",
+        "suggestedRegion": "Suggested area",
+        "cards": "{count} cards",
+        "kind": {
+          "stage": "Stage",
+          "step": "Step",
+          "deviation": "Deviation",
+          "object": "Object",
+          "cell": "Rule cell"
+        }
+      },
+      "shortcut": "Ctrl ↵",
+      "assist": {
+        "versions": "Versions",
+        "previous": "Previous version",
+        "next": "Next version",
+        "versionOf": "Version {n} of {total}",
+        "startDraft": "AI draft",
+        "startCard": "Current card",
+        "manual": "Your edit",
+        "byAi": "AI: “{instruction}”",
+        "label": "Tell AI how to change this card",
+        "placeholder": "Tell AI how to change this card…",
+        "working": "AI is editing…",
+        "send": "Send",
+        "quick": "Quick instructions",
+        "quickLabel": {
+          "shorter": "Shorter",
+          "friendlier": "Friendlier",
+          "steps": "As steps",
+          "translate": "Fill the other language"
+        },
+        "quickText": {
+          "shorter": "Make the answer shorter, answer first, remove repetition",
+          "friendlier": "Make the tone friendlier and more patient, without adding promises",
+          "steps": "Rewrite the answer as numbered steps",
+          "translate": "Fill in or update the other language from this one, keeping the meaning the same"
+        },
+        "onlySelection": "Only the selection: “{text}”",
+        "wholeCard": "Change the whole card",
+        "hint": "Enter to send · each AI change is a new version you can switch back from",
+        "tooLong": "At most {max} characters.",
+        "noChange": "AI made no change. Try saying it another way.",
+        "changedHere": "AI changed this",
+        "changedOther": "AI also changed the other language"
       }
     }
   }

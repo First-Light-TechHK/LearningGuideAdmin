@@ -10,6 +10,7 @@ import {
   type DismissReason,
   type FaqCandidate,
   type FaqNodeSummary,
+  type HelpdeskFaq,
 } from '../contracts/helpdesk'
 import type { FaqDraft } from '../lib/helpdeskFaqs'
 import {
@@ -49,12 +50,18 @@ import { useModal } from './useModal'
 
 export type Compose = {
   candidate: FaqCandidate
-  as: 'new_faq' | 'follow_up'
+  /** update_faq：卡片审核里「改这张卡」，打开已有的卡（faq），保存后接受。 */
+  as: 'new_faq' | 'follow_up' | 'update_faq'
   parentId: string | null
   phrasings: number[]
   version: number
-  initial: FaqDraft
+  /** 新卡的预填；update_faq 没有（编辑已有的卡）。 */
+  initial?: FaqDraft
   draftSources: string[]
+  /** update_faq：要改的那张卡。 */
+  faq?: HelpdeskFaq
+  /** 卡片审核里选的主位置（new_faq / follow_up 在结构不为空时必填）。 */
+  placementNodeId?: string | null
 }
 
 type Mode = 'view' | 'phrasing' | 'followUp' | 'dismiss'
