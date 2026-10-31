@@ -54,6 +54,8 @@ export class PackageJobsService {
   private readonly logger = new Logger(PackageJobsService.name);
   // 分块上传单块大小：远小于边缘（CloudFront/App Runner）的单请求限制，保证每块都快速完整传输
   private static readonly RAW_CHUNK_BYTES = 5 * 1024 * 1024;
+  // 允许分块比约定略大一点点的容差（避免末端对齐误差导致误判）
+  private static readonly RAW_CHUNK_SLACK_BYTES = 1024;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -64,6 +66,46 @@ export class PackageJobsService {
     private readonly publishing: PublishingService,
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
+
+  // ===== 原始素材分块上传的公共小工具 =====
+
+  /** 分块在 staging 中的键（第 index 块）。 */
+  private rawChunkKey(jobId: string, index: number): string {
+    return this.storage.stagingKey(jobId, `rawchunk/${index}`);
+  }
+
+  /** 按总字节数推算应有的分块数量（至少 1 块）。 */
+  private chunkCountFor(bytesTotal: number): number {
+    return Math.max(
+      1,
+      Math.ceil(bytesTotal / PackageJobsService.RAW_CHUNK_BYTES),
+    );
+  }
+
+  /** 读取一个仍处于上传中的作业；不存在 → 404，状态不对 → 409。 */
+  private async requireUploadingJob(jobId: string) {
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    if (job.stage !== 'UPLOADING') {
+      throw new PackageError(
+        'RAW_UPLOAD_NOT_ACTIVE',
+        409,
+        'Upload is not in progress for this job.',
+      );
+    }
+    return job;
+  }
+
+  /** 幂等键命中则返回既有作业，否则 null。 */
+  private findJobByIdempotencyKey(idempotencyKey?: string) {
+    if (!idempotencyKey) return Promise.resolve(null);
+    return this.prisma.coursePackageJob.findUnique({
+      where: { idempotencyKey },
+    });
+  }
 
   /** 只读诊断：确认当前存储驱动（S3 或本地）。 */
   storageInfo() {
@@ -127,12 +169,8 @@ export class PackageJobsService {
     actorEmployeeId: string | null,
     idempotencyKey?: string,
   ) {
-    if (idempotencyKey) {
-      const existing = await this.prisma.coursePackageJob.findUnique({
-        where: { idempotencyKey },
-      });
-      if (existing) return this.getJob(existing.id);
-    }
+    const existing = await this.findJobByIdempotencyKey(idempotencyKey);
+    if (existing) return this.getJob(existing.id);
     if (file.bytes.length > this.config.packageMaxBytes) {
       throw new PackageError(
         'PACKAGE_TOO_LARGE',
@@ -233,16 +271,12 @@ export class PackageJobsService {
     actorEmployeeId: string | null,
     idempotencyKey?: string,
   ) {
-    if (idempotencyKey) {
-      const existing = await this.prisma.coursePackageJob.findUnique({
-        where: { idempotencyKey },
-      });
-      if (existing)
-        return {
-          jobId: existing.id,
-          chunkSize: PackageJobsService.RAW_CHUNK_BYTES,
-        };
-    }
+    const existing = await this.findJobByIdempotencyKey(idempotencyKey);
+    if (existing)
+      return {
+        jobId: existing.id,
+        chunkSize: PackageJobsService.RAW_CHUNK_BYTES,
+      };
     if (!Number.isFinite(file.bytesTotal) || file.bytesTotal <= 0) {
       throw new PackageError(
         'INVALID_INPUT',
@@ -281,64 +315,40 @@ export class PackageJobsService {
     index: number,
     bytes: Buffer,
   ): Promise<{ jobId: string; progress: number }> {
-    const job = await this.prisma.coursePackageJob.findUnique({
-      where: { id: jobId },
-    });
-    if (!job)
-      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    if (job.stage !== 'UPLOADING') {
-      throw new PackageError(
-        'RAW_UPLOAD_NOT_ACTIVE',
-        409,
-        'Upload is not in progress for this job.',
-      );
-    }
+    const job = await this.requireUploadingJob(jobId);
     if (!Number.isInteger(index) || index < 0) {
       throw new PackageError('INVALID_INPUT', 400, 'Invalid chunk index.');
     }
-    if (bytes.length > PackageJobsService.RAW_CHUNK_BYTES + 1024) {
+    if (
+      bytes.length >
+      PackageJobsService.RAW_CHUNK_BYTES + PackageJobsService.RAW_CHUNK_SLACK_BYTES
+    ) {
       throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Chunk too large.');
     }
-    await this.storage.putStaging(
-      this.storage.stagingKey(jobId, `rawchunk/${index}`),
-      bytes,
-    );
+    await this.storage.putStaging(this.rawChunkKey(jobId, index), bytes);
     const total = job.bytesTotal ?? 0;
-    const expected = total ? Math.max(1, Math.ceil(total / PackageJobsService.RAW_CHUNK_BYTES)) : 1;
+    const expected = this.chunkCountFor(total);
     const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
     await this.prisma.coursePackageJob.update({
       where: { id: jobId },
-      data: { bytesReceived: Math.round((total * (index + 1)) / expected), progress },
+      data: {
+        bytesReceived: Math.round((total * (index + 1)) / expected),
+        progress,
+      },
     });
     return { jobId, progress };
   }
 
   /** 全部分块到达后：合并为原始素材包，后台转换 + 校验。 */
   async completeRawUpload(jobId: string): Promise<JobView> {
-    const job = await this.prisma.coursePackageJob.findUnique({
-      where: { id: jobId },
-    });
-    if (!job)
-      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    if (job.stage !== 'UPLOADING') {
-      throw new PackageError(
-        'RAW_UPLOAD_NOT_ACTIVE',
-        409,
-        'Upload is not in progress for this job.',
-      );
-    }
+    const job = await this.requireUploadingJob(jobId);
     const total = job.bytesTotal ?? 0;
     if (!total) {
       throw new PackageError('INVALID_INPUT', 400, 'Missing upload size.');
     }
-    const count = Math.max(
-      1,
-      Math.ceil(total / PackageJobsService.RAW_CHUNK_BYTES),
-    );
+    const count = this.chunkCountFor(total);
     for (let i = 0; i < count; i++) {
-      const present = await this.storage.hasStaging(
-        this.storage.stagingKey(jobId, `rawchunk/${i}`),
-      );
+      const present = await this.storage.hasStaging(this.rawChunkKey(jobId, i));
       if (!present) {
         throw new PackageError(
           'RAW_UPLOAD_INCOMPLETE',
@@ -362,11 +372,7 @@ export class PackageJobsService {
     try {
       const parts: Buffer[] = [];
       for (let i = 0; i < count; i++) {
-        parts.push(
-          await this.storage.getStaging(
-            this.storage.stagingKey(jobId, `rawchunk/${i}`),
-          ),
-        );
+        parts.push(await this.storage.getStaging(this.rawChunkKey(jobId, i)));
       }
       const rawBytes = Buffer.concat(parts);
       await this.runRawProcessing(jobId, rawBytes);
@@ -375,7 +381,7 @@ export class PackageJobsService {
     } finally {
       for (let i = 0; i < count; i++) {
         await this.storage
-          .removeStaging(this.storage.stagingKey(jobId, `rawchunk/${i}`))
+          .removeStaging(this.rawChunkKey(jobId, i))
           .catch(() => undefined);
       }
     }
