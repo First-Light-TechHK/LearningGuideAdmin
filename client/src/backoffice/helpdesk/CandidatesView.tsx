@@ -164,10 +164,11 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
       : 'emptyFiltered'
 
   return (
-    <div className="hdFaqs hdCandidates">
-      <FlywheelJobs locale={locale} canWrite={canWrite} onMiningFinished={onRefresh} />
+    <div className={`hdFaqs hdCandidates${view === 'cards' ? ' hdReviewMode' : ''}`}>
+      {/* 卡片审核要一屏放下：后台任务只在表格视图里 */}
+      {view === 'table' ? <FlywheelJobs locale={locale} canWrite={canWrite} onMiningFinished={onRefresh} /> : null}
 
-      <div className="hdFaqFilters hdCandidateFilters">
+      <div className={`hdFaqFilters hdCandidateFilters${view === 'cards' ? ' hdReviewFilters' : ''}`}>
         <label className="hdFaqSearch">
           <HdSearchIcon size={10} className="hdFaqSearchIcon" />
           <input
@@ -222,7 +223,7 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
             </option>
           ))}
         </select>
-        {loaded ? (
+        {loaded && view === 'table' ? (
           <span className="hdFaqCount" aria-live="polite">
             {t(locale, 'helpDesk.candidates.counts', loaded.counts)}
           </span>
@@ -256,6 +257,7 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
             locale={locale}
             canWrite={canWrite}
             rows={rows}
+            total={total}
             loading={loading}
             selectedId={reviewId}
             map={map.data}

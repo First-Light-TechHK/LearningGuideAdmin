@@ -3321,8 +3321,8 @@
 
 /* ---------------------------------------------------------------------------
  * FAQ 候选「卡片审核」（?tab=candidates&view=cards，CandidateReview.tsx / PlacePicker.tsx）。
- * 没有 Figma 画板：卡片沿用 Enquiry 卡片（白底、1px #dce5f0、圆角 10），队列沿用工单列表的选中样式
- *（#eff6ff 底 + 左侧 3px 蓝条），标签、按钮、单选与勾选框沿用候选详情抽屉。待视觉验收。
+ * owner 2026-10-31：一屏放下、看得懂、运营直接改内容。没有 Figma 画板：颜色、字号、标签、按钮沿用 HelpDesk，
+ * 组件按审核这件事重新排（三栏各自滚动，按钮固定在底部）。待视觉验收。
  * ------------------------------------------------------------------------- */
 
 /* 筛选行折成两行时不被下面的内容压扁（.hdFaqs 是定高的纵向 flex，min-height 43 会让它缩回一行高） */
@@ -3350,6 +3350,7 @@
   font-size: 12px;
   font-weight: 500;
   color: var(--hd-muted);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -3358,43 +3359,53 @@
   color: var(--hd-blue);
 }
 
+/* 卡片审核模式：整块占满剩下的高度，里面各栏自己滚动 */
+.hdCandidates.hdReviewMode {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.hdReviewFilters {
+  height: 36px;
+  min-height: 36px;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.hdReviewFilters .hdFaqSearch {
+  flex: 1 1 240px;
+  height: 36px;
+}
+
+.hdReviewFilters .hdFaqSelect {
+  flex: 0 1 150px;
+  width: auto;
+  min-width: 112px;
+  height: 36px;
+}
+
+.hdReviewLayout {
+  position: relative;
+  flex: 1 0 520px;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
 .hdReviewView:focus-visible,
-.hdReviewQueueCard:focus-visible {
+.hdReviewQueueCard:focus-visible,
+.hdReviewTab:focus-visible,
+.hdReviewMini:focus-visible,
+.hdReviewChip:focus-within {
   outline: 2px solid rgba(34, 107, 255, 0.35);
   outline-offset: 1px;
 }
 
-.hdReviewLayout {
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) 360px;
-  align-items: start;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.hdReviewFlash {
-  grid-column: 1 / -1;
-}
-
-.hdReviewNotice {
-  margin: 0;
-  padding: 9px 12px;
-  border: 1px solid #cfe0ff;
-  border-radius: 8px;
-  background: var(--hd-blue-tint);
-  font-size: 12px;
-  color: #233858;
-}
-
-.hdReviewNotice.hdDrawerAlert {
-  border-color: #fecaca;
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.hdReviewEmpty {
-  margin-top: 16px;
+.hdReviewEmpty,
+.hdReviewEmptyPanel {
   padding: 40px 16px;
   border: 1px dashed #dce5f0;
   border-radius: 10px;
@@ -3403,20 +3414,67 @@
   text-align: center;
 }
 
-/* 队列：工单列表的卡片版 */
+.hdReviewToast {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 520px;
+  padding: 9px 14px;
+  border: 1px solid #bfe3cc;
+  border-radius: 8px;
+  background: #f0faf4;
+  box-shadow: var(--lg-shadow-md);
+  font-size: 12px;
+  color: #1d6b42;
+}
+
+.hdReviewMuted {
+  color: var(--hd-faint);
+}
+
+/* ---------- 队列 ---------- */
 .hdReviewQueue {
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 220px);
-  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border: 1px solid #dce5f0;
   border-radius: 10px;
   background: #fff;
+  overflow: hidden;
+}
+
+.hdReviewQueueHead {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hd-line-soft);
+  font-size: 12px;
+  font-weight: 600;
+  color: #233858;
+}
+
+.hdReviewQueueHead > * {
+  white-space: nowrap;
+}
+
+.hdReviewKeys {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--hd-faint);
 }
 
 .hdReviewQueueList {
+  flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow: auto;
   list-style: none;
 }
 
@@ -3424,8 +3482,8 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 11px 14px 12px;
+  gap: 3px;
+  padding: 10px 14px;
   border: 0;
   border-bottom: 1px solid var(--hd-line-soft);
   background: #fff;
@@ -3444,26 +3502,6 @@
   box-shadow: inset 3px 0 0 var(--hd-blue);
 }
 
-.hdReviewQueueTop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.hdReviewQueueTop .hdFaqChip {
-  height: 20px;
-  padding: 0 8px;
-  font-size: 10px;
-}
-
-.hdReviewQueueCount,
-.hdReviewQueueSeen {
-  font-size: 11px;
-  color: var(--hd-faint);
-  font-variant-numeric: tabular-nums;
-}
-
 .hdReviewQueueTopic {
   font-size: 13px;
   font-weight: 600;
@@ -3472,65 +3510,195 @@
 }
 
 .hdReviewQueueQuestion {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
   overflow: hidden;
   font-size: 12px;
   line-height: 16px;
   color: var(--hd-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 中栏与右栏的卡片 */
-.hdReviewMain,
-.hdReviewSide {
+.hdReviewQueueMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--hd-faint);
+}
+
+.hdReviewQueueTag {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* ---------- 审核面板：两栏 + 底部按钮条 ---------- */
+.hdReviewPanel {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.hdReviewCard {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
   border: 1px solid #dce5f0;
   border-radius: 10px;
   background: #fff;
+  overflow: hidden;
 }
 
-.hdReviewCardHead {
+.hdReviewBody {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+}
+
+.hdReviewEvidence,
+.hdReviewDecide {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hdReviewDecide {
+  border-left: 1px solid var(--hd-line);
+  background: #fbfcfe;
+}
+
+.hdReviewScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+/* 这个候选是什么 */
+.hdReviewSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--hd-line-soft);
+}
+
+.hdReviewTitleRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hdReviewTitleRow .hdGraphTag {
+  align-self: center;
+}
+
+.hdReviewTopic {
+  margin: 0 4px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--hd-ink);
+}
+
+.hdReviewAsking {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--hd-ink);
+}
+
+.hdReviewFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  margin: 0;
+}
+
+.hdReviewFacts > div {
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--hd-panel);
+}
+
+.hdReviewFacts dt {
+  font-size: 11px;
+  color: var(--hd-muted);
+}
+
+.hdReviewFacts dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--hd-body);
+  overflow-wrap: anywhere;
+}
+
+.hdReviewFacts strong {
+  font-size: 17px;
+  font-weight: 600;
+  color: #203250;
+  font-variant-numeric: tabular-nums;
+}
+
+.hdReviewFactLink {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 0 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  color: var(--hd-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.hdReviewFactLink > span:last-child {
+  overflow: hidden;
+  
+  white-space: normal;
 }
 
 .hdReviewAdvice {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
   border-radius: 8px;
   background: #f5f9ff;
 }
 
-.hdReviewAdviceTitle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #233858;
+.hdReviewAdvice > .hdGraphTag {
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .hdReviewAdviceText {
   margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 19px;
+  color: #233858;
+}
+
+.hdReviewAdviceWhy {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 2px 0 0;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 17px;
   color: var(--hd-body);
 }
 
@@ -3544,31 +3712,50 @@
   color: var(--hd-amber-ink);
 }
 
-.hdReviewInlineTag {
-  margin-left: 6px;
-  vertical-align: 1px;
+/* 证据页签 */
+.hdReviewTabs {
+  display: flex;
+  gap: 18px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--hd-line);
 }
 
-/* 用户原话 */
-.hdReviewSaid {
+.hdReviewTab {
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hd-muted);
+  cursor: pointer;
+}
+
+.hdReviewTabOn {
+  border-bottom-color: var(--hd-blue);
+  color: var(--hd-blue);
+}
+
+.hdReviewRows {
   display: flex;
   flex-direction: column;
-  margin: 0;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
 }
 
-.hdReviewSaidItem {
+.hdReviewRow {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 0;
+  gap: 5px;
+  padding: 9px 0;
   border-top: 1px solid var(--hd-line-soft);
 }
 
-.hdReviewSaidItem:first-child {
+.hdReviewRow:first-child {
   border-top: 0;
-  padding-top: 2px;
 }
 
 .hdReviewSaidText {
@@ -3594,40 +3781,28 @@
   cursor: not-allowed;
 }
 
-.hdReviewSaidMeta {
+.hdReviewRowMeta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  font-size: 11px;
+  color: var(--hd-muted);
 }
 
-.hdReviewSaidMeta .hdGraphTag {
+.hdReviewRowMeta .hdGraphTag {
   align-self: center;
 }
 
-/* 相似卡 */
-.hdReviewSimilarList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
 .hdReviewSimilar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--hd-line);
+  margin: 0 -8px;
+  padding: 9px 8px;
   border-radius: 8px;
-  background: #fff;
 }
 
 .hdReviewSimilarOn {
-  border-color: var(--hd-blue);
-  box-shadow: 0 0 0 1px var(--hd-blue);
+  background: var(--hd-blue-tint);
+  box-shadow: inset 3px 0 0 var(--hd-blue);
 }
 
 .hdReviewSimilarHead {
@@ -3667,228 +3842,78 @@
   font-variant-numeric: tabular-nums;
 }
 
-.hdReviewBar {
-  height: 4px;
-  margin-left: 28px;
-  border-radius: 2px;
-  background: var(--hd-line-soft);
-  overflow: hidden;
-}
-
-.hdReviewBar > span {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: #7aa7ff;
-}
-
-.hdReviewSimilarTags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-left: 28px;
-}
-
-.hdReviewSimilar > .hdGraphHint,
-.hdReviewExcerpt,
-.hdReviewSimilarActions {
+.hdReviewIndent,
+.hdReviewExcerpt {
   margin-left: 28px;
 }
 
 .hdReviewExcerpt {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-top: 0;
   margin-bottom: 0;
   font-size: 12px;
-  line-height: 18px;
+  line-height: 17px;
   color: var(--hd-body);
 }
 
-.hdReviewSimilarActions {
+.hdReviewRowActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-
-/* 单选项：和抽屉里的选择框一样的细边圆角 */
-.hdReviewFieldset {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.hdReviewFieldset > legend {
-  margin-bottom: 4px;
-  padding: 0;
-}
-
-.hdReviewGroup {
-  display: flex;
-  flex-direction: column;
   gap: 6px;
 }
 
-.hdReviewGroup + .hdReviewGroup {
-  margin-top: 4px;
-}
-
-.hdReviewGroupTitle {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--hd-muted);
-}
-
-.hdReviewOptions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.hdReviewOption {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 10px;
+.hdReviewMini {
+  height: 26px;
+  padding: 0 10px;
   border: 1px solid #d9e1eb;
   border-radius: 6px;
   background: #fff;
+  font: inherit;
   font-size: 12px;
   font-weight: 500;
-  line-height: 17px;
   color: #2a3d58;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.hdReviewOptionInline {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 10px;
-}
-
-.hdReviewOptionOn {
+.hdReviewMiniOn {
   border-color: var(--hd-blue);
-  background: var(--hd-blue-tint);
+  background: var(--hd-blue);
+  color: #fff;
 }
 
-.hdReviewOptionText {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.hdReviewRadio {
-  flex: 0 0 15px;
-  width: 15px;
-  height: 15px;
-  margin: 1px 0 0;
-  border: 1px solid #c7d2e1;
-  border-radius: 50%;
-  background: #fff;
-  appearance: none;
-  cursor: pointer;
-}
-
-.hdReviewOptionInline .hdReviewRadio,
-.hdReviewOptionInline .hdCheckInput {
-  margin: 0;
-}
-
-.hdReviewRadio:checked {
-  border: 4px solid #226bff;
-}
-
-.hdReviewRadio:focus-visible {
-  outline: 2px solid rgba(34, 107, 255, 0.35);
-  outline-offset: 1px;
-}
-
-.hdReviewRadio:disabled,
-.hdReviewOption:has(:disabled) {
+.hdReviewMini:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
-.hdReviewPicked {
-  margin: 0;
-  padding: 7px 10px;
-  border-radius: 6px;
-  background: var(--hd-panel);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 17px;
-  color: #233858;
-}
-
-/* 位置树 */
-.hdReviewTreeToggle {
-  align-self: flex-start;
-}
-
-.hdReviewTree,
-.hdReviewTreeList {
+/* 提问的用户 */
+.hdReviewUsers {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  gap: 18px;
 }
 
-.hdReviewTree {
-  max-height: 360px;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--hd-line);
-  border-radius: 8px;
-  background: var(--hd-panel);
-}
-
-.hdReviewTreeRoot > .hdReviewTreeList {
-  padding: 4px 0 6px 6px;
-}
-
-.hdReviewTreeSummary {
+.hdReviewUsers section {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 2px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #233858;
-  cursor: pointer;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.hdReviewTreeSummary .hdGraphTag {
-  align-self: center;
-}
-
-.hdReviewTreeGroup {
-  margin: 4px 0 2px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--hd-muted);
-}
-
-.hdReviewTreeLeaf .hdReviewOption {
-  padding: 6px 8px;
-}
-
-/* 提问用户的状态：一条堆叠条 + 图例 */
 .hdReviewStack {
   display: flex;
   height: 8px;
   border-radius: 4px;
   background: var(--hd-line-soft);
   overflow: hidden;
+}
+
+.hdReviewStackMini {
+  height: 6px;
+  border-radius: 3px;
 }
 
 .hdReviewStack > span {
@@ -3953,7 +3978,6 @@
   background: #e2e8f0;
 }
 
-/* 净收益 */
 .hdReviewStats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3988,40 +4012,433 @@
   color: #dc2626 !important;
 }
 
-/* 决定 */
-.hdReviewDecision .hdCandidateForm {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+/* ---------- 右栏：你的处理 ---------- */
+.hdReviewDecideTitle {
+  margin: 0;
+  padding: 14px 16px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #233858;
 }
 
-.hdReviewDecision .hdField {
+.hdReviewDecideBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hdReviewField {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
-.hdReviewDecision .hdField .hdFieldLabel {
+.hdReviewFieldRow {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.hdReviewFieldRow .hdReviewSelect {
+  flex: 1;
+}
+
+.hdReviewLabel {
   margin: 0;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  color: #233858;
 }
 
-.hdReviewConfirm {
-  padding: 9px 12px;
-  border: 1px dashed var(--hd-amber-line);
-  border-radius: 8px;
-  background: var(--hd-amber-bg);
+.hdReviewStar {
+  color: #dc2626;
+}
+
+.hdReviewSelect,
+.hdReviewInput {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d8e1ed;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: #344964;
+}
+
+.hdReviewSelect {
+  padding-right: 30px;
+  background: #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5' fill='none' stroke='%2370829e' stroke-width='1.1' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M.6.6 4 4.2 7.4.6'/%3E%3C/svg%3E")
+    no-repeat right 12px top 55%;
+  appearance: none;
+  cursor: pointer;
+}
+
+.hdReviewSelectStrong {
+  height: 38px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.hdReviewWill {
+  margin: 0;
   font-size: 12px;
   line-height: 18px;
-  color: var(--hd-amber-ink);
+  color: var(--hd-body);
 }
 
-.hdReviewButtons {
+.hdReviewTarget {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hdReviewTargetName {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--hd-line);
+  font-size: 12px;
+  font-weight: 500;
+  color: #233858;
+}
+
+.hdReviewTarget .hdReviewMuted {
+  flex: 1 1 160px;
+  font-size: 12px;
+}
+
+.hdReviewFieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.hdReviewChips {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hdReviewChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d9e1eb;
+  border-radius: 14px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: #2a3d58;
+  cursor: pointer;
+}
+
+.hdReviewChipOn {
+  border-color: var(--hd-blue);
+  background: var(--hd-blue-tint);
+  color: var(--hd-blue);
+}
+
+.hdReviewChipGhost {
+  border-style: dashed;
+  color: var(--hd-muted);
+}
+
+.hdReviewChipRank {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--hd-faint);
+}
+
+.hdReviewChipText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 卡片编辑 */
+.hdReviewEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #dce5f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.hdReviewEditorHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.hdReviewButtons .hdDrawerButton:disabled {
+.hdReviewSeg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--hd-line-soft);
+}
+
+.hdReviewSegItem {
+  position: relative;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--hd-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.hdReviewSegOn {
+  background: #fff;
+  color: #233858;
+  box-shadow: var(--lg-shadow-sm);
+}
+
+.hdReviewErrDot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #dc2626;
+}
+
+.hdReviewText {
+  min-height: 0;
+  max-height: none;
+  resize: vertical;
+}
+
+.hdReviewTextAnswer {
+  min-height: 132px;
+}
+
+.hdReviewText[aria-invalid='true'],
+.hdReviewSelect[aria-invalid='true'] {
+  border-color: #dc2626;
+}
+
+.hdReviewSources {
+  font-size: 12px;
+  color: var(--hd-body);
+}
+
+.hdReviewSources summary {
+  color: #1d6ef4;
+  cursor: pointer;
+}
+
+.hdReviewSource {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--hd-amber-line);
+  background: var(--hd-amber-bg);
+}
+
+.hdReviewSource p {
+  margin: 0;
+}
+
+.hdReviewFull {
+  align-self: flex-start;
+}
+
+.hdReviewPreview {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--hd-panel);
+}
+
+.hdReviewPreviewQ {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #233858;
+}
+
+.hdReviewPreviewA {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--hd-body);
+  white-space: pre-wrap;
+}
+
+/* 位置树浮层（盖在右栏上） */
+.hdReviewOverlay {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #fff;
+  box-shadow: -8px 0 20px rgba(15, 23, 42, 0.08);
+}
+
+.hdReviewOverlayHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hdReviewTree,
+.hdReviewTreeList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdReviewTree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.hdReviewTreeSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #233858;
+  cursor: pointer;
+}
+
+.hdReviewTreeSummary .hdGraphTag {
+  align-self: center;
+}
+
+.hdReviewTreeGroup {
+  margin: 4px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hd-muted);
+}
+
+.hdReviewTreeItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-right: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #2a3d58;
+  cursor: pointer;
+}
+
+.hdReviewTreeItem:hover {
+  background: #f8fbff;
+}
+
+.hdReviewTreeItemOn {
+  background: var(--hd-blue-tint);
+}
+
+.hdReviewTreeLabel {
+  flex: 1;
+  min-width: 0;
+}
+
+.hdReviewTreeMeta {
+  font-size: 11px;
+  color: var(--hd-faint);
+  white-space: nowrap;
+}
+
+.hdReviewRadio {
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1px solid #c7d2e1;
+  border-radius: 50%;
+  background: #fff;
+  appearance: none;
+  cursor: pointer;
+}
+
+.hdReviewRadio:checked {
+  border: 4px solid #226bff;
+}
+
+/* 底部按钮条：一直看得到 */
+.hdReviewFooter {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--hd-line);
+  background: #fff;
+}
+
+.hdReviewFootLeft {
+  display: flex;
+  gap: 8px;
+}
+
+.hdReviewFootMid {
+  flex: 1;
+  min-width: 0;
+}
+
+.hdReviewFootMid p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.hdReviewFootNote {
+  color: var(--hd-muted);
+}
+
+.hdReviewFootAlert {
+  color: #b91c1c;
+}
+
+.hdReviewPrimary {
+  height: 36px;
+  padding: 0 18px;
+  font-size: 13px;
+}
+
+.hdReviewFooter .hdDrawerButton:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -4036,13 +4453,257 @@
   color: #69778b;
 }
 
-/* 窄屏：右栏移到中栏下面 */
+/* 窄屏：队列变窄，右栏也收一点 */
 @media (max-width: 1360px) {
   .hdReviewLayout {
-    grid-template-columns: 248px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
   }
 
-  .hdReviewSide {
-    grid-column: 2;
+  .hdReviewBody {
+    grid-template-columns: minmax(0, 1fr) 340px;
   }
+
+  .hdReviewFacts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.hdReviewKbd {
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 18%);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.hdDrawerButton:not(.hdDrawerPrimary):not(.hdDrawerDanger) .hdReviewKbd {
+  background: var(--hd-line-soft);
+}
+
+/* ---------- FAQ 候选「卡片审核」：Material Design 3 外观（只在审核视图里，颜色沿用 HelpDesk 蓝色系；待视觉验收） ---------- */
+.hdReviewMode {
+  --m3-primary: var(--hd-blue);
+  --m3-on-primary: #fff;
+  --m3-secondary-container: #dce7ff;
+  --m3-on-secondary-container: #0b2a5c;
+  --m3-surface: #fff;
+  --m3-surface-low: #f7f9fc;
+  --m3-surface-container: #f0f4f9;
+  --m3-surface-high: #e9eef6;
+  --m3-outline: #747d8c;
+  --m3-outline-variant: #d3dae4;
+  --m3-state-hover: rgb(20 110 255 / 8%);
+  --m3-state-press: rgb(20 110 255 / 12%);
+}
+
+.hdReviewMode .hdReviewQueue,
+.hdReviewMode .hdReviewPanel {
+  border: 0;
+  border-radius: 16px;
+  background: var(--m3-surface-low);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 1px 3px 1px rgb(15 23 42 / 4%);
+}
+
+.hdReviewMode .hdReviewQueueCard {
+  width: calc(100% - 16px);
+  margin: 2px 8px;
+  border-bottom: 0;
+  border-radius: 12px;
+  transition: background-color 120ms ease;
+}
+
+.hdReviewMode .hdReviewQueueCard:hover {
+  background: var(--m3-state-hover);
+}
+
+.hdReviewMode .hdReviewQueueCardOn,
+.hdReviewMode .hdReviewQueueCardOn:hover {
+  box-shadow: none;
+  background: var(--m3-secondary-container);
+  color: var(--m3-on-secondary-container);
+}
+
+.hdReviewMode .hdReviewFacts > div,
+.hdReviewMode .hdReviewAdvice {
+  border-radius: 12px;
+  background: var(--m3-surface-container);
+}
+
+.hdReviewMode .hdReviewDecide {
+  background: var(--m3-surface);
+  border-radius: 0 16px 0 0;
+}
+
+.hdReviewMode .hdReviewEditor {
+  border: 1px solid var(--m3-outline-variant);
+  border-radius: 12px;
+  background: var(--m3-surface);
+}
+
+/* 主选项卡：下方 3px 圆头指示条 */
+.hdReviewMode .hdReviewTab {
+  position: relative;
+  padding: 0 12px;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+}
+
+.hdReviewMode .hdReviewTab:hover {
+  background: var(--m3-state-hover);
+}
+
+.hdReviewMode .hdReviewTabOn::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--m3-primary);
+}
+
+/* 描边输入框：4px 圆角，聚焦时 2px 主色 */
+.hdReviewMode .hdReviewSelect,
+.hdReviewMode .hdReviewInput,
+.hdReviewMode .hdReviewText,
+.hdReviewMode .hdReviewTargetName {
+  border: 1px solid var(--m3-outline-variant);
+  border-radius: 4px;
+  background-color: var(--m3-surface);
+}
+
+.hdReviewMode .hdReviewSelect:hover,
+.hdReviewMode .hdReviewInput:hover,
+.hdReviewMode .hdReviewText:hover {
+  border-color: var(--m3-outline);
+}
+
+.hdReviewMode .hdReviewSelect:focus-visible,
+.hdReviewMode .hdReviewInput:focus-visible,
+.hdReviewMode .hdReviewText:focus-visible {
+  border-color: var(--m3-primary);
+  outline: 1px solid var(--m3-primary);
+  outline-offset: -2px;
+}
+
+/* 筛选胶囊：8px 圆角，选中是浅色填充 + 对勾 */
+.hdReviewMode .hdReviewChip {
+  min-height: 32px;
+  border: 1px solid var(--m3-outline-variant);
+  border-radius: 8px;
+  background: var(--m3-surface);
+}
+
+.hdReviewMode .hdReviewChip:hover {
+  background: var(--m3-state-hover);
+}
+
+.hdReviewMode .hdReviewChipOn {
+  border-color: transparent;
+  background: var(--m3-secondary-container);
+  color: var(--m3-on-secondary-container);
+}
+
+.hdReviewMode .hdReviewChipOn .hdReviewChipRank::before {
+  content: '✓';
+}
+
+.hdReviewMode .hdReviewChipOn .hdReviewChipRank {
+  font-size: 0;
+}
+
+.hdReviewMode .hdReviewChipOn .hdReviewChipRank::before {
+  font-size: 11px;
+}
+
+.hdReviewMode .hdReviewChipGhost {
+  border-style: dashed;
+}
+
+/* 分段按钮：整条胶囊描边，选中段浅色填充 */
+.hdReviewMode .hdReviewSeg {
+  padding: 0;
+  border: 1px solid var(--m3-outline);
+  border-radius: 999px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.hdReviewMode .hdReviewSegItem {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 0;
+  color: var(--hd-ink);
+}
+
+.hdReviewMode .hdReviewSegItem + .hdReviewSegItem {
+  border-left: 1px solid var(--m3-outline);
+}
+
+.hdReviewMode .hdReviewSegOn {
+  background: var(--m3-secondary-container);
+  color: var(--m3-on-secondary-container);
+  box-shadow: none;
+}
+
+/* 按钮：全圆角；主按钮实心，次要按钮描边，小按钮是文字按钮 */
+.hdReviewMode .hdReviewFooter .hdDrawerButton {
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border-color: var(--m3-outline);
+  font-size: 13px;
+}
+
+.hdReviewMode .hdReviewFooter .hdDrawerPrimary {
+  border-color: var(--m3-primary);
+  background: var(--m3-primary);
+  color: var(--m3-on-primary);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 16%);
+}
+
+.hdReviewMode .hdReviewFooter .hdDrawerPrimary:hover:not(:disabled) {
+  box-shadow: 0 1px 3px 1px rgb(15 23 42 / 15%), 0 1px 2px rgb(15 23 42 / 30%);
+}
+
+.hdReviewMode .hdReviewFooter {
+  border-top: 1px solid var(--m3-outline-variant);
+  border-radius: 0 0 16px 16px;
+  background: var(--m3-surface);
+}
+
+.hdReviewMode .hdReviewMini {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--m3-primary);
+}
+
+.hdReviewMode .hdReviewMini:hover:not(:disabled) {
+  background: var(--m3-state-hover);
+}
+
+.hdReviewMode .hdReviewOverlay {
+  border-radius: 16px 0 0 0;
+  box-shadow: 0 4px 8px 3px rgb(15 23 42 / 10%), 0 1px 3px rgb(15 23 42 / 18%);
+}
+
+.hdReviewMode .hdReviewTreeItem {
+  border-radius: 999px;
+}
+
+.hdReviewMode .hdReviewTreeItemOn {
+  background: var(--m3-secondary-container);
+}
+
+.hdReviewMode .hdReviewToast {
+  border-radius: 4px;
+  background: #2f3542;
+  color: #f2f4f8;
+  box-shadow: 0 3px 6px rgb(15 23 42 / 20%);
 }

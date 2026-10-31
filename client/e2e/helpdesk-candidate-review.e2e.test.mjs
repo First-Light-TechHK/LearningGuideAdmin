@@ -1,7 +1,8 @@
-// 浏览器 E2E（真 Chromium + Vite dev server，API 全部在浏览器里假装）：FAQ 候选「卡片审核」视图。
-// 锁住：切到卡片审核（地址栏 view=cards、review=<id>）、AI 建议与四种动作、相似卡同位置在前、
-// 新卡必须选位置（建议的位置或整棵树）且接受时带 placementNodeId、标记失效要二次确认并可挪问法、
-// 驳回 / 合并 / 不改动、批准后跳到队列下一条、VIEW 角色只读、三栏在 1440 宽不横向溢出。
+// 浏览器 E2E（真 Chromium + Vite dev server，API 全部在浏览器里假装）：FAQ 候选「卡片审核」视图（第二版，一屏）。
+// 锁住：切到卡片审核（地址栏 view=cards、review=<id>）；1440×900 和 1280×800 一屏放得下、页面不滚动、主按钮看得见；
+// AI 建议一句话说清，和 AI 一样时不重复；运营在审核页里直接改卡片内容（改卡要真改过、新卡先存再批准且带 placementNodeId）；
+// 新卡必须选位置（建议的胶囊或整棵树的浮层，可搜索）；下线要二次确认并可挪说法；只加说法 / 不用改 / 驳回 / 合并；
+// 批准后跳到队列下一条；J / K 切换、Ctrl+Enter 提交；VIEW 角色只读（en-GB）；审核数据读不到时仍能看候选。
 // 运行：npm run test:e2e:helpdesk（本地跑，CI 不装浏览器）。截图：E2E_SHOTS=<目录> 时保存。
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
@@ -220,8 +221,12 @@ async function open(urlPath, { role = 'ADMIN', viewport = { width: 1440, height:
     if (m && m[2] === 'merge') return route.fulfill(ok({ source: decide(m[1], { status: 'merged', mergedInto: body.targetId }), target: null, replayed: false }))
     if (p === '/api/helpdesk/faq-map') return route.fulfill(ok(MAP))
     if (p === '/api/helpdesk/faqs' && method === 'POST') return route.fulfill(ok(FAQ_FULL(NEW_CARD, body.questionZh, body.questionEn), 201))
-    if (p === `/api/helpdesk/faqs/${F_REFUND}` && method === 'GET') return route.fulfill(ok(FAQ_FULL(F_REFUND, '退款需要多久？', 'How long does a refund take?')))
-    if (p === `/api/helpdesk/faqs/${F_REFUND}` && method === 'PUT') return route.fulfill(ok({ ...FAQ_FULL(F_REFUND, body.questionZh, body.questionEn), version: 5 }))
+    const faq = p.match(/^\/api\/helpdesk\/faqs\/([^/]+)$/)
+    if (faq && method === 'GET') {
+      const card = Object.values(SIMILAR).flat().find((s) => s.faqId === faq[1])
+      return route.fulfill(card ? ok(FAQ_FULL(card.faqId, card.questionZh, card.questionEn)) : fail(404, 'FAQ_NOT_FOUND'))
+    }
+    if (faq && method === 'PUT') return route.fulfill(ok({ ...FAQ_FULL(faq[1], body.questionZh, body.questionEn), answerZh: body.answerZh, version: 5 }))
     if (/^\/api\/helpdesk\/faqs\/[^/]+\/(edges|phrasings)$/.test(p)) return route.fulfill(ok({ parents: [], children: [], phrasings: [] }))
     if (p === '/api/helpdesk/faqs') return route.fulfill(ok({ faqs: [], total: 0, page: 1, pageSize: 10 }))
     if (p === '/api/helpdesk/flywheel/jobs/gap_mining/runs') return route.fulfill(ok({ runs: [] }))
@@ -234,191 +239,265 @@ async function open(urlPath, { role = 'ADMIN', viewport = { width: 1440, height:
 }
 
 /** 截图：内容在页面里的滚动区，临时把视口拉高到内容的高度再截。 */
+
 const shot = async (page, name) => {
-  if (!SHOTS) return
-  const size = page.viewportSize()
-  const height = await page.evaluate(() => {
-    const scroller = document.querySelector('.hdFaqs')
-    return scroller ? scroller.scrollHeight + 320 : document.documentElement.scrollHeight
-  })
-  await page.setViewportSize({ width: size.width, height: Math.max(size.height, height) })
-  await page.screenshot({ path: `${SHOTS}/${name}.png` })
-  await page.setViewportSize(size)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` })
 }
 
-test('switching to card review keeps the filters in the address bar and selects the first candidate', async () => {
-  const { page, errors } = await open('/zh-CN/help-desk?tab=candidates')
+const CARDS = '/zh-CN/help-desk?tab=candidates&view=cards'
+const sent = (calls, re) => calls.filter((call) => re.test(call.path))
+const primary = (page) => page.locator('.hdReviewPrimary')
+const waitPanel = async (page, topic) => {
+  await page.locator('.hdReviewTopic', { hasText: topic }).waitFor()
+  await page.locator('.hdReviewPanel[aria-busy="false"]').waitFor()
+}
+
+/** 一屏：页面本身不滚动，主按钮在视口里，三栏不横向溢出。 */
+async function assertOneScreen(page) {
+  const box = await page.evaluate(() => {
+    const doc = document.scrollingElement
+    const button = document.querySelector('.hdReviewPrimary')?.getBoundingClientRect()
+    const layout = document.querySelector('.hdReviewLayout')
+    return {
+      pageScroll: doc.scrollHeight - window.innerHeight,
+      pageScrollX: doc.scrollWidth - window.innerWidth,
+      layoutOverflowX: layout.scrollWidth - layout.clientWidth,
+      buttonBottom: button ? button.bottom : null,
+      viewport: window.innerHeight,
+    }
+  })
+  assert.ok(box.pageScroll <= 1, `page scrolls by ${box.pageScroll}px`)
+  assert.ok(box.pageScrollX <= 1, `page scrolls sideways by ${box.pageScrollX}px`)
+  assert.ok(box.layoutOverflowX <= 1, `layout overflows by ${box.layoutOverflowX}px`)
+  assert.ok(box.buttonBottom !== null && box.buttonBottom <= box.viewport, 'primary button is on screen')
+}
+
+test('switching to card review: address bar, first candidate, one screen at 1440×900, AI sentence said once', async () => {
+  const { page, errors } = await open('/zh-CN/help-desk?tab=candidates', { viewport: { width: 1440, height: 900 } })
   await page.locator('.hdCandidateTable tbody tr').first().waitFor()
   await page.getByRole('button', { name: '卡片审核' }).click()
-  await page.locator('.hdReviewQueueCard').first().waitFor()
+  await waitPanel(page, '退款到账时间')
   assert.equal(new URL(page.url()).searchParams.get('view'), 'cards')
   assert.equal(await page.locator('.hdReviewQueueCard').count(), 3)
-  assert.equal(await page.locator('.hdReviewQueueCard[aria-current="true"]').innerText().then((text) => text.includes('退款到账时间')), true)
-  // AI 建议、用户原话、当时给看的卡
-  const advice = page.locator('.hdReviewAdvice')
-  await advice.getByText('更新已有卡 · 改卡片内容').waitFor()
-  assert.ok(await advice.getByText('目标卡：退款需要多久？').isVisible())
-  assert.equal(await page.getByText('当时给看的卡：退款需要多久？').count(), 2)
-  assert.equal(await page.getByText('当时没给卡').count(), 1)
-  // 相似卡：同位置在前（服务端顺序被打乱也一样）
-  const questions = await page.locator('.hdReviewSimilarQuestion').allInnerTexts()
-  assert.deepEqual(questions, ['退款需要多久？', '退款一直没到账', '怎么取消试用？'])
-  assert.ok(await page.getByText('很接近：请读两张卡的答案').isVisible())
-  // 提问用户的状态与净收益
-  const states = page.locator('section', { has: page.getByRole('heading', { name: '提问用户的状态' }) })
-  const legend = await states.locator('.hdReviewLegend li').allInnerTexts()
-  assert.deepEqual(legend.map((line) => line.replace(/\s+/g, ' ').trim()), ['已付费 4 · 44%', '取消中 3 · 33%', '已结束 2 · 22%'])
-  assert.equal(await states.locator('.hdReviewLegend li').count(), 3)
-  assert.ok(await page.getByText('按第 7 版的评测，23 条用例。').isVisible())
-  // 没有横向溢出
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-  assert.ok(overflow <= 0, `page scrolls sideways by ${overflow}px`)
+  assert.match(await page.locator('.hdReviewQueueCard[aria-current="true"]').innerText(), /退款到账时间/)
+  assert.match(await page.locator('.hdReviewQueueHead').innerText(), /待审核 3 条/)
+  // 一句话的 AI 建议 + 理由；下拉框里 AI 建议的选项带标记，和 AI 一样时不再重复一句
+  await page.locator('.hdReviewAdviceText', { hasText: '改一下「退款需要多久？」的内容' }).waitFor()
+  assert.ok(await page.getByText('9 次提问像这张卡').first().isVisible())
+  const how = page.getByLabel('处理方式')
+  assert.equal(await how.inputValue(), 'update_faq')
+  assert.match(await how.locator('option[value="update_faq"]').innerText(), /AI 建议/)
+  assert.equal(await page.locator('.hdReviewWill').count(), 0)
+  // 改卡：卡片内容直接摆在右栏可以改
+  assert.equal(await page.getByLabel('答案（中文）').inputValue(), '退款会在 3 个工作日内处理。')
+  // 提问用户的状态与预计效果
+  assert.match(await page.locator('.hdReviewFacts').innerText(), /9/)
+  assert.match(await page.locator('.hdReviewFacts').innerText(), /\+?3/)
+  await assertOneScreen(page)
   await shot(page, 'review-update')
   assert.deepEqual(errors, [])
   await page.close()
 })
 
-test('update_faq: approve opens the target card in the FAQ editor and accepts it after save', async () => {
-  const { page, calls } = await open('/zh-CN/help-desk?tab=candidates&view=cards')
-  await page.locator('.hdReviewAdvice').waitFor()
-  await page.getByRole('button', { name: '批准，去改这张卡' }).click()
-  const drawer = page.getByRole('dialog', { name: '编辑常见问题' })
-  await drawer.waitFor()
-  await drawer.getByLabel('答案（中文）').fill('退款会在 3 个工作日内处理；银行入账另需 5 到 10 个工作日。')
-  await drawer.getByRole('button', { name: '保存常见问题' }).click()
-  await page.getByText('FAQ 已保存，候选已接受。').waitFor()
-  const accept = calls.find((call) => call.path.endsWith('/accept'))
-  assert.equal(accept.path, `/api/helpdesk/faq-candidates/${C_UPDATE}/accept`)
-  assert.equal(accept.body.as, 'update_faq')
-  assert.equal(accept.body.faqId, F_REFUND)
-  assert.equal(accept.body.version, 2)
-  assert.deepEqual(accept.body.phrasings, [0, 1])
-  assert.equal(accept.body.placementNodeId, undefined)
-  await page.close()
-})
-
-test('new_faq: a place is required; the suggested place goes into the accept call', async () => {
-  const { page, calls } = await open(`/zh-CN/help-desk?tab=candidates&view=cards&review=${C_NEW}`)
-  await page.locator('.hdReviewAdvice').getByText('新增 · 新建一张卡').waitFor()
-  assert.equal(await page.getByText('暂无。Portal 还没提供用户状态。').count(), 1)
-  assert.equal(await page.getByText('暂无。这张卡还没进过建版本的评测。').count(), 1)
-  await page.getByRole('button', { name: '批准，去写新卡' }).click()
-  await page.getByText('请选一个位置。').waitFor()
+test('update_faq: must actually change the card; saves the card (PUT) then accepts, then moves to the next candidate', async () => {
+  const { page, calls, errors } = await open(CARDS)
+  await waitPanel(page, '退款到账时间')
+  await primary(page).click()
+  await page.getByText('内容还没改').waitFor()
   assert.equal(calls.length, 0)
-  await shot(page, 'review-new-place-required')
-  await page.getByRole('radio', { name: /账号 › 登录/ }).check()
-  await page.getByRole('button', { name: '批准，去写新卡' }).click()
-  const drawer = page.getByRole('dialog', { name: '新增常见问题' })
-  await drawer.waitFor()
-  assert.equal(await drawer.getByLabel('问题（中文）').inputValue(), '换了新手机怎么登录原来的账号？')
-  await drawer.getByLabel('答案（英文）').fill('Sign in with the same email on the new phone.')
-  await drawer.getByLabel('答案（中文）').fill('在新手机上用原来的邮箱登录即可。')
-  await drawer.getByRole('button', { name: '保存常见问题' }).click()
-  await page.getByText('FAQ 已保存，候选已接受。').waitFor()
-  const accept = calls.find((call) => call.path.endsWith('/accept'))
-  assert.deepEqual(
-    { as: accept.body.as, faqId: accept.body.faqId, placementNodeId: accept.body.placementNodeId, phrasings: accept.body.phrasings },
-    { as: 'new_faq', faqId: NEW_CARD, placementNodeId: id(208), phrasings: [0, 1] },
-  )
-  await page.close()
-})
-
-test('the whole tree: suggested regions open by default, only steps / deviations / rule cells are selectable', async () => {
-  const { page, calls } = await open(`/zh-CN/help-desk?tab=candidates&view=cards&review=${C_NEW}`)
-  await page.locator('.hdReviewAdvice').waitFor()
-  await page.getByRole('button', { name: '在整棵树里选' }).click()
-  const tree = page.getByRole('list', { name: '流程树与规则表' })
-  await tree.waitFor()
-  const roots = tree.locator(':scope > li > details')
-  const openState = await roots.evaluateAll((all) => all.map((d) => [d.querySelector('summary span').textContent, d.open]))
-  assert.deepEqual(openState, [['账号', true], ['退款', false], ['设备规则', false]])
-  // 阶段、对象没有单选
-  assert.equal(await tree.getByRole('radio', { name: /^账号/ }).count(), 0)
-  await tree.locator('summary', { hasText: '设备规则' }).click()
-  await tree.getByRole('radio', { name: /同时登录的设备数/ }).check()
-  await shot(page, 'review-tree')
-  await page.getByRole('button', { name: '批准，去写新卡' }).click()
-  await page.getByRole('dialog', { name: '新增常见问题' }).waitFor()
-  assert.equal(calls.length, 0)
-  await page.close()
-})
-
-test('retire_faq: two-step confirm, optional move of phrasings, then the queue moves on', async () => {
-  const { page, calls } = await open(`/zh-CN/help-desk?tab=candidates&view=cards&review=${C_RETIRE}`)
-  await page.locator('.hdReviewAdvice').waitFor()
-  // 只有一个动作的类（标记失效、不改动）不重复写两遍
-  assert.equal((await page.locator('.hdReviewAdviceTitle').innerText()).replace(/\s+/g, ' ').trim(), 'AI 建议 标记失效')
-  // 把问法挪到另一张同位置的卡
-  await page.locator('.hdReviewSimilar', { hasText: '可以在几台设备上使用？' }).getByRole('checkbox', { name: '问法挪到这张' }).check()
-  await page.getByRole('button', { name: '批准下线' }).click()
-  await page.getByText('确认把「设备上限是多少？」标记失效？它会归档，不会删除。').waitFor()
-  assert.equal(calls.length, 0)
-  await shot(page, 'review-retire-confirm')
-  await page.getByRole('button', { name: '确认下线' }).click()
-  await page.getByText('卡片已标记失效（编辑区）。').waitFor()
-  assert.deepEqual(calls[0].body, { as: 'retire_faq', faqId: F_DEVICE_OLD, version: 2, moveTo: F_DEVICE })
-  // 队列刷新（只看待处理的）：这一条走了，选中的换成前一条
-  await page.waitForFunction(() => document.querySelectorAll('.hdReviewQueueCard').length === 2)
+  const answer = page.getByLabel('答案（中文）')
+  await answer.fill('退款会在 3 个工作日内处理，银行入账还要 5 到 10 个工作日。')
+  assert.match(await primary(page).innerText(), /保存修改并批准/)
+  await primary(page).click()
+  await page.locator('.hdReviewToast', { hasText: '卡片修改已存进编辑区' }).waitFor()
+  const put = sent(calls, new RegExp(`/api/helpdesk/faqs/${F_REFUND}$`))
+  assert.equal(put.length, 1)
+  assert.equal(put[0].method, 'PUT')
+  assert.equal(put[0].body.version, 4)
+  assert.match(put[0].body.answerZh, /5 到 10 个工作日/)
+  const accept = sent(calls, /\/accept$/)
+  assert.equal(accept.length, 1)
+  assert.equal(accept[0].body.as, 'update_faq')
+  assert.equal(accept[0].body.faqId, F_REFUND)
+  // 含隐藏个人信息的第 3 条说法不会被带上
+  assert.deepEqual(accept[0].body.phrasings, [0, 1])
+  assert.ok(calls.indexOf(put[0]) < calls.indexOf(accept[0]), 'card saved before the candidate is accepted')
+  // 跳到下一条
+  await waitPanel(page, '换设备登录')
   assert.equal(new URL(page.url()).searchParams.get('review'), C_NEW)
-  await page.close()
-})
-
-test('add_phrasing, no change, reject with a reason, and merge send the right calls', async () => {
-  const { page, calls } = await open('/zh-CN/help-desk?tab=candidates&view=cards')
-  await page.locator('.hdReviewAdvice').waitFor()
-  // 只加问法：同一类里换动作，目标卡保留
-  await page.getByRole('radio', { name: /只加问法/ }).check()
-  await page.getByRole('button', { name: '批准，加问法' }).click()
-  await page.getByText('问法已加进编辑区。').waitFor()
-  assert.deepEqual(calls.at(-1).body, { as: 'add_phrasing', faqId: F_REFUND, phrasings: [0, 1], version: 2 })
-
-  // 下一条（换设备登录）：不改动
-  await page.locator('.hdReviewAdvice').getByText('新增 · 新建一张卡').waitFor()
-  await page.getByRole('radio', { name: /^不改动/ }).check()
-  await page.getByRole('button', { name: '确认不改动' }).click()
-  await page.getByText('已记为不改动。').waitFor()
-  assert.deepEqual(calls.at(-1).body, { reason: 'not_a_gap', version: 2 })
-  await page.close()
-
-  const second = await open(`/zh-CN/help-desk?tab=candidates&view=cards&review=${C_NEW}`)
-  await second.page.locator('.hdReviewAdvice').waitFor()
-  await second.page.getByRole('button', { name: '驳回' }).click()
-  await second.page.getByRole('button', { name: '驳回候选' }).click()
-  await second.page.getByText('请选择原因。').waitFor()
-  await second.page.getByLabel(/^原因/).selectOption('out_of_scope')
-  await second.page.getByRole('button', { name: '驳回候选' }).click()
-  await second.page.getByText('已驳回候选。').waitFor()
-  assert.deepEqual(second.calls.at(-1).body, { reason: 'out_of_scope', version: 2 })
-  await second.page.close()
-
-  const third = await open(`/zh-CN/help-desk?tab=candidates&view=cards&review=${C_RETIRE}`)
-  await third.page.locator('.hdReviewAdvice').waitFor()
-  await third.page.getByRole('button', { name: '合并' }).click()
-  await third.page.getByLabel(/^合并到哪个候选/).selectOption(C_NEW)
-  await third.page.getByRole('button', { name: '合并' }).click()
-  await third.page.getByText('已合并候选。').waitFor()
-  assert.deepEqual(third.calls.at(-1), { method: 'POST', path: `/api/helpdesk/faq-candidates/${C_RETIRE}/merge`, body: { targetId: C_NEW, version: 2 } })
-  await third.page.close()
-})
-
-test('VIEW role sees everything but no decision controls; review data missing degrades to hints (en-GB)', async () => {
-  const { page, errors } = await open('/en-GB/help-desk?tab=candidates&view=cards', { role: 'COURSE_CREATOR', review: false })
-  await page.getByRole('heading', { name: 'Your decision' }).waitFor()
-  assert.ok(await page.getByText('Your role can only view.').isVisible())
-  assert.equal(await page.getByRole('button', { name: /Approve/ }).count(), 0)
-  assert.equal(await page.getByRole('radio').count(), 0)
-  assert.ok(await page.getByText(/Review data is not available yet/).isVisible())
-  assert.ok(await page.getByText('Not available yet. Portal does not send user state yet.').isVisible())
+  assert.equal(await page.locator('.hdReviewQueueCard').count(), 2)
   assert.deepEqual(errors, [])
   await page.close()
 })
 
-test('narrow screens: the side column moves under the main column without sideways scrolling', async () => {
-  const { page } = await open('/zh-CN/help-desk?tab=candidates&view=cards', { viewport: { width: 1280, height: 900 } })
-  await page.locator('.hdReviewAdvice').waitFor()
-  const [main, side] = await Promise.all([page.locator('.hdReviewMain').boundingBox(), page.locator('.hdReviewSide').boundingBox()])
-  assert.ok(side.y > main.y + main.height - 1, 'side column is below the main column')
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-  assert.ok(overflow <= 0, `page scrolls sideways by ${overflow}px`)
+test('new_faq: place is required; the tree overlay searches and picks; the card is created first, then accepted with the place', async () => {
+  const { page, calls, errors } = await open(`${CARDS}&review=${C_NEW}`)
+  await waitPanel(page, '换设备登录')
+  assert.equal(await page.getByLabel('问题（中文）').inputValue(), '换了新手机怎么登录原来的账号？')
+  // 建议的位置是胶囊，不预选
+  const chips = page.locator('.hdReviewChips .hdReviewChip input[type="radio"]')
+  assert.equal(await chips.count(), 2)
+  assert.equal(await page.locator('.hdReviewChips input:checked').count(), 0)
+  await primary(page).click()
+  await page.getByText('请选放在哪。').waitFor()
+  assert.equal(calls.length, 0)
+  // 整棵树：浮层 + 搜索，只有步骤 / 偏离 / 规则格能选
+  await page.getByRole('button', { name: '其他位置…' }).click()
+  const tree = page.getByRole('dialog', { name: '选位置' })
+  await tree.waitFor()
+  await shot(page, 'review-tree')
+  await tree.getByRole('searchbox').fill('换设备')
+  assert.equal(await tree.locator('input[type="radio"]').count(), 1)
+  await tree.locator('label', { hasText: '换设备' }).click()
+  await tree.waitFor({ state: 'detached' })
+  assert.match(await page.locator('.hdReviewChips').innerText(), /账号 › 换设备/)
+  // 中文答案、英文答案都要填：先只填中文，提交后跳到有错的英文
+  await page.getByLabel('答案（中文）').fill('在新手机上用原来的邮箱登录，收验证码即可。')
+  await primary(page).click()
+  await page.getByLabel('答案（英文）').waitFor()
+  assert.equal(calls.length, 0)
+  await page.getByLabel('答案（英文）').fill('Sign in on the new phone with the same email and enter the code we send.')
+  // Ctrl+Enter 提交
+  await page.getByLabel('答案（英文）').press('Control+Enter')
+  await page.locator('.hdReviewToast', { hasText: '新卡已存进编辑区' }).waitFor()
+  const post = calls.filter((call) => call.method === 'POST' && call.path === '/api/helpdesk/faqs')
+  assert.equal(post.length, 1)
+  assert.equal(post[0].body.entry, true)
+  assert.equal(post[0].body.answerZh, '在新手机上用原来的邮箱登录，收验证码即可。')
+  const accept = sent(calls, /\/accept$/)
+  assert.equal(accept.length, 1)
+  assert.deepEqual(
+    { as: accept[0].body.as, faqId: accept[0].body.faqId, placementNodeId: accept[0].body.placementNodeId },
+    { as: 'new_faq', faqId: NEW_CARD, placementNodeId: N_DEVICE },
+  )
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('retire_faq: two-step confirm, phrasings can move to another card from the similar list', async () => {
+  const { page, calls, errors } = await open(`${CARDS}&review=${C_RETIRE}`)
+  await waitPanel(page, '旧版设备上限')
+  assert.equal(await page.getByLabel('处理方式').inputValue(), 'retire_faq')
+  await page.getByRole('tab', { name: /相似的卡/ }).click()
+  const rows = page.locator('.hdReviewScroll[role="tabpanel"] .hdReviewRow')
+  assert.equal(await rows.count(), 2)
+  assert.match(await rows.nth(0).innerText(), /很接近/)
+  await rows.filter({ hasText: '可以在几台设备上使用？' }).getByRole('button', { name: '说法挪到这张' }).click()
+  assert.match(await page.locator('.hdReviewDecide').innerText(), /可以在几台设备上使用？/)
+  await primary(page).click()
+  await page.locator('.hdReviewFootAlert', { hasText: '确认把「设备上限是多少？」下线？' }).waitFor()
+  assert.equal(calls.length, 0)
+  assert.match(await primary(page).innerText(), /确认下线/)
+  await shot(page, 'review-retire')
+  await primary(page).click()
+  await page.locator('.hdReviewToast', { hasText: '卡片已下线' }).waitFor()
+  const accept = sent(calls, /\/accept$/)
+  assert.equal(accept.length, 1)
+  assert.deepEqual(
+    { as: accept[0].body.as, faqId: accept[0].body.faqId, moveTo: accept[0].body.moveTo },
+    { as: 'retire_faq', faqId: F_DEVICE_OLD, moveTo: F_DEVICE },
+  )
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('other actions: add phrasings only, reject with a reason, no change; the sentence shows when it differs from the AI', async () => {
+  const { page, calls, errors } = await open(CARDS)
+  await waitPanel(page, '退款到账时间')
+  await page.getByLabel('处理方式').selectOption('add_phrasing')
+  await page.locator('.hdReviewWill', { hasText: '把用户的 2 种说法加到「退款需要多久？」' }).waitFor()
+  // 只加说法：卡片内容只读预览，可以一键切回直接改
+  assert.equal(await page.getByLabel('答案（中文）').count(), 0)
+  assert.ok(await page.getByRole('button', { name: '直接改这张卡的内容' }).isVisible())
+  // 去掉一条说法
+  await page.locator('.hdReviewCheck input').first().uncheck()
+  assert.match(await primary(page).innerText(), /加 1 种说法/)
+  await primary(page).click()
+  await page.locator('.hdReviewToast', { hasText: '说法已加进编辑区' }).waitFor()
+  let accept = sent(calls, /\/accept$/)
+  assert.deepEqual({ as: accept[0].body.as, faqId: accept[0].body.faqId, phrasings: accept[0].body.phrasings }, { as: 'add_phrasing', faqId: F_REFUND, phrasings: [1] })
+  assert.equal(sent(calls, /\/api\/helpdesk\/faqs/).length, 0, 'adding phrasings does not touch the card itself')
+
+  // 驳回：必须选原因
+  await waitPanel(page, '换设备登录')
+  await page.getByRole('button', { name: '驳回', exact: true }).click()
+  await page.getByRole('button', { name: /驳回候选/ }).click()
+  await page.locator('.hdFieldError').first().waitFor()
+  assert.equal(sent(calls, /\/dismiss$/).length, 0)
+  await page.getByLabel('原因').selectOption('duplicate')
+  await page.getByRole('button', { name: /驳回候选/ }).click()
+  await page.locator('.hdReviewToast', { hasText: '已驳回候选' }).waitFor()
+  assert.equal(sent(calls, /\/dismiss$/)[0].body.reason, 'duplicate')
+
+  // 不用改
+  await waitPanel(page, '旧版设备上限')
+  await page.getByLabel('处理方式').selectOption('no_change')
+  await primary(page).click()
+  await page.locator('.hdReviewToast', { hasText: '已记为不用改' }).waitFor()
+  const dismiss = sent(calls, /\/dismiss$/)
+  assert.equal(dismiss.length, 2)
+  assert.equal(dismiss[1].body.reason, 'not_a_gap')
+  assert.equal(dismiss[1].path, `/api/helpdesk/faq-candidates/${C_RETIRE}/dismiss`)
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('merge into another pending candidate', async () => {
+  const { page, calls, errors } = await open(`${CARDS}&review=${C_NEW}`)
+  await waitPanel(page, '换设备登录')
+  await page.getByRole('button', { name: '合并', exact: true }).click()
+  await page.getByRole('button', { name: /^合并/ }).last().click()
+  await page.getByText('请选一个候选。').waitFor()
+  await page.getByLabel('合并到哪个候选').selectOption(C_UPDATE)
+  await page.getByRole('button', { name: /^合并/ }).last().click()
+  await page.locator('.hdReviewToast', { hasText: '已合并候选' }).waitFor()
+  const merge = sent(calls, /\/merge$/)
+  assert.equal(merge.length, 1)
+  assert.equal(merge[0].body.targetId, C_UPDATE)
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('J / K move through the queue, but not while typing', async () => {
+  const { page, errors } = await open(CARDS)
+  await waitPanel(page, '退款到账时间')
+  await page.locator('.hdReviewTopic').click()
+  await page.keyboard.press('j')
+  await waitPanel(page, '换设备登录')
+  assert.equal(new URL(page.url()).searchParams.get('review'), C_NEW)
+  await page.getByLabel('答案（中文）').focus()
+  await page.keyboard.press('j')
+  assert.equal(new URL(page.url()).searchParams.get('review'), C_NEW)
+  assert.match(await page.getByLabel('答案（中文）').inputValue(), /j$/)
+  await page.locator('.hdReviewTopic').click()
+  await page.keyboard.press('k')
+  await waitPanel(page, '退款到账时间')
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('a view-only role (COURSE_CREATOR) in en-GB is read-only, and the candidate still shows when review data is missing', async () => {
+  const { page, errors } = await open('/en-GB/help-desk?tab=candidates&view=cards', { role: 'COURSE_CREATOR', review: false })
+  await page.locator('.hdReviewTopic', { hasText: '退款到账时间' }).waitFor()
+  await page.getByText('Your role can only view.').waitFor()
+  assert.equal(await primary(page).count(), 0)
+  assert.equal(await page.getByRole('button', { name: 'Reject', exact: true }).count(), 0)
+  await page.getByRole('tab', { name: /Similar cards/ }).click()
+  await page.locator('.hdGraphHint', { hasText: /Review data|review data/ }).waitFor()
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('1280×800: still one screen, the language switch stays on one line', async () => {
+  const { page, errors } = await open(`${CARDS}&review=${C_NEW}`, { viewport: { width: 1280, height: 800 } })
+  await waitPanel(page, '换设备登录')
+  await assertOneScreen(page)
+  // 不换行，且每一段都在分段按钮里放得下
+  const fits = await page.locator('.hdReviewSegItem').evaluateAll((items) => items.map((item) => item.scrollWidth <= item.clientWidth))
+  assert.deepEqual(fits, [true, true])
+  const wraps = await page.locator('.hdReviewSegItem').evaluateAll((items) => items.map((item) => getComputedStyle(item).whiteSpace))
+  assert.deepEqual(wraps, ['nowrap', 'nowrap'], 'segment items must not wrap')
+  await shot(page, 'review-1280')
+  assert.deepEqual(errors, [])
   await page.close()
 })
