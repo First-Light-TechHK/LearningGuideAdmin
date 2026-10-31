@@ -887,6 +887,7 @@ enum ReadingType {
   BOOK
   ARTICLE
   PAPER
+  OTHER
 }
 
 enum TrialRowStatus {

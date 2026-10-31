@@ -46,12 +46,16 @@ export interface JobView {
 }
 
 /**
- * 课程包导入/导出作业（DB 队列 + FOR UPDATE SKIP LOCKED，见设计文档 §20）。
- * 上传 → 校验 → AWAITING_CONFIRM → 确认导入；导出 → READY → 下载。
+ * 课程包导�?导出作业（DB 队列 + FOR UPDATE SKIP LOCKED，见设计文档 §20）�?
+ * 上传 �?校验 �?AWAITING_CONFIRM �?确认导入；导�?�?READY �?下载�?
  */
 @Injectable()
 export class PackageJobsService {
   private readonly logger = new Logger(PackageJobsService.name);
+  // 分块上传单块大小：远小于边缘（CloudFront/App Runner）的单请求限制，保证每块都快速完整传�?
+  private static readonly RAW_CHUNK_BYTES = 5 * 1024 * 1024;
+  // 允许分块比约定略大一点点的容差（避免末端对齐误差导致误判�?
+  private static readonly RAW_CHUNK_SLACK_BYTES = 1024;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -62,6 +66,60 @@ export class PackageJobsService {
     private readonly publishing: PublishingService,
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
+
+  // ===== 原始素材分块上传的公共小工具 =====
+
+  /** 分块�?staging 中的键（�?index 块）�?*/
+  private rawChunkKey(jobId: string, index: number): string {
+    return this.storage.stagingKey(jobId, `rawchunk/${index}`);
+  }
+
+  /** 按总字节数推算应有的分块数量（至少 1 块）�?*/
+  private chunkCountFor(bytesTotal: number): number {
+    return Math.max(
+      1,
+      Math.ceil(bytesTotal / PackageJobsService.RAW_CHUNK_BYTES),
+    );
+  }
+
+  /** 读取一个仍处于上传中的作业；不存在 �?404，状态不�?�?409�?*/
+  private async requireUploadingJob(jobId: string) {
+    const job = await this.prisma.coursePackageJob.findUnique({
+      where: { id: jobId },
+    });
+    if (!job)
+      throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
+    if (job.stage !== 'UPLOADING') {
+      throw new PackageError(
+        'RAW_UPLOAD_NOT_ACTIVE',
+        409,
+        'Upload is not in progress for this job.',
+      );
+    }
+    return job;
+  }
+
+  /** 幂等键命中则返回既有作业，否�?null�?*/
+  private findJobByIdempotencyKey(idempotencyKey?: string) {
+    if (!idempotencyKey) return Promise.resolve(null);
+    return this.prisma.coursePackageJob.findUnique({
+      where: { idempotencyKey },
+    });
+  }
+
+  /** 生成未被占用的兜底课程编号：TEMP001、TEMP002…（基于现有 TEMP* 课程自增）。 */
+  private async nextTempCourseCode(): Promise<string> {
+    const rows = await this.prisma.commerceCourse.findMany({
+      where: { code: { startsWith: 'TEMP' } },
+      select: { code: true },
+    });
+    let max = 0;
+    for (const { code } of rows) {
+      const m = /^TEMP(\d+)$/i.exec(code);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    return `TEMP${String(max + 1).padStart(3, '0')}`;
+  }
 
   /** 只读诊断：确认当前存储驱动（S3 或本地）。 */
   storageInfo() {
@@ -107,30 +165,26 @@ export class PackageJobsService {
         progress: 10,
       },
     });
-    // 同步校验（P1a：包通常较小；大包改由 worker 处理）
+    // 同步校验（P1a：包通常较小；大包改�?worker 处理�?
     await this.runValidation(jobId, file.bytes);
     return this.getJob(jobId);
   }
 
   /**
-   * 原始素材导入：上传含 xlsx + 媒体（docx/mp4/png）的 ZIP，
-   * 先转换成标准课程包，再走常规「导入作业 → 校验 → 确认导入」流程。
+   * 原始素材导入：上传含 xlsx + 媒体（docx/mp4/png）的 ZIP�?
+   * 先转换成标准课程包，再走常规「导入作�?�?校验 �?确认导入」流程�?
    *
-   * 转换 + 校验是耗时的 CPU/内存重活：这里只把原始包落盘、建作业就立即返回，
-   * 真正的处理放到后台线程执行，前端轮询 import/:jobId。避免 ~150MB 素材包
-   * 在网关（CloudFront / App Runner）上因请求超时直接 5xx。
+   * 转换 + 校验是耗时�?CPU/内存重活：这里只把原始包落盘、建作业就立即返回，
+   * 真正的处理放到后台线程执行，前端轮询 import/:jobId。避�?~150MB 素材�?
+   * 在网关（CloudFront / App Runner）上因请求超时直�?5xx�?
    */
   async createRawImportJob(
     file: { name: string; bytes: Buffer },
     actorEmployeeId: string | null,
     idempotencyKey?: string,
   ) {
-    if (idempotencyKey) {
-      const existing = await this.prisma.coursePackageJob.findUnique({
-        where: { idempotencyKey },
-      });
-      if (existing) return this.getJob(existing.id);
-    }
+    const existing = await this.findJobByIdempotencyKey(idempotencyKey);
+    if (existing) return this.getJob(existing.id);
     if (file.bytes.length > this.config.packageMaxBytes) {
       throw new PackageError(
         'PACKAGE_TOO_LARGE',
@@ -155,19 +209,36 @@ export class PackageJobsService {
         progress: 5,
       },
     });
-    // 后台转换 + 校验（不阻塞上传请求）；结果写回同一个 jobId，由前端轮询。
+    // 后台转换 + 校验（不阻塞上传请求）；结果写回同一�?jobId，由前端轮询�?
     void this.processRawImport(jobId, rawKey).catch(() => undefined);
     return this.getJob(jobId);
   }
 
-  /** 后台把原始素材包转成课程包并校验，复用同一个 jobId，供前端轮询。 */
+  /** 后台把原始素材包转成课程包并校验，复用同一�?jobId，供前端轮询�?*/
   private async processRawImport(jobId: string, rawKey: string): Promise<void> {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-raw-'));
     try {
       const rawBytes = await this.storage.getStaging(rawKey);
+      await this.runRawProcessing(jobId, rawBytes);
+    } catch (error) {
+      await this.markRawFailed(jobId, error);
+    } finally {
+      await this.storage.removeStaging(rawKey).catch(() => undefined);
+    }
+  }
+
+  /** 把原始素�?ZIP 的字节转成课程包并校验（转换/校验都在 worker 线程里做）�?*/
+  private async runRawProcessing(
+    jobId: string,
+    rawBytes: Buffer,
+  ): Promise<void> {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-raw-'));
+    try {
       const rawPath = path.join(tmp, 'raw.zip');
       const outPath = path.join(tmp, 'package.zip');
       await fs.writeFile(rawPath, rawBytes);
+      // 旧模板若没有 Course ID 字段，用一个不重复的 TEMP 编号兜底（TEMP001、TEMP002…）；
+      // 若 Excel 里带了 Course ID，worker 会优先用它，忽略这里传入的兜底值。
+      const fallbackCode = await this.nextTempCourseCode();
       const built = await runImportWorker<{
         warnings: string[];
         courseCode: string;
@@ -175,7 +246,7 @@ export class PackageJobsService {
         title: string;
         lessonCount: number;
         mediaCount: number;
-      }>('raw', { rawPath, outPath });
+      }>('raw', { rawPath, outPath, courseCode: fallbackCode });
       const pkgBytes = await fs.readFile(outPath);
       const pkgKey = this.storage.stagingKey(jobId, 'package.zip');
       await this.storage.putStaging(pkgKey, pkgBytes);
@@ -191,29 +262,152 @@ export class PackageJobsService {
         },
       });
       await this.runValidation(jobId, pkgBytes);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : '原始素材解析失败';
-      await this.prisma.coursePackageJob
-        .update({
-          where: { id: jobId },
-          data: {
-            status: 'FAILED',
-            error: message,
-            progress: 100,
-            stage: 'FAILED',
-          },
-        })
-        .catch(() => undefined);
     } finally {
-      await this.storage.removeStaging(rawKey).catch(() => undefined);
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
+  private async markRawFailed(jobId: string, error: unknown): Promise<void> {
+    const message =
+      error instanceof Error ? error.message : '原始素材解析失败';
+    await this.prisma.coursePackageJob
+      .update({
+        where: { id: jobId },
+        data: { status: 'FAILED', error: message, progress: 100, stage: 'FAILED' },
+      })
+      .catch(() => undefined);
+  }
+
   /**
-   * 本地目录导入：服务端直接读取仓库内素材目录（如 docs/modeling-life），
-   * 打包为原始素材 ZIP 后走原始素材导入流程。用于规避浏览器上传超大文件中断。
+   * 分块上传会话：大素材包（�?150MB+）单�?POST 会被 CloudFront/App Runner
+   * 的回源限制中途切断。这里改成前端分块、逐块上传，每块都是小请求�?
+   * 这里只建作业，返�?jobId 与建议块大小�?
+   */
+  async createRawUploadSession(
+    file: { name: string; bytesTotal: number },
+    actorEmployeeId: string | null,
+    idempotencyKey?: string,
+  ) {
+    const existing = await this.findJobByIdempotencyKey(idempotencyKey);
+    if (existing)
+      return {
+        jobId: existing.id,
+        chunkSize: PackageJobsService.RAW_CHUNK_BYTES,
+      };
+    if (!Number.isFinite(file.bytesTotal) || file.bytesTotal <= 0) {
+      throw new PackageError(
+        'INVALID_INPUT',
+        400,
+        'bytesTotal is required for a chunked upload.',
+      );
+    }
+    if (file.bytesTotal > this.config.packageMaxBytes) {
+      throw new PackageError(
+        'PACKAGE_TOO_LARGE',
+        413,
+        'Raw materials archive exceeds size limit.',
+      );
+    }
+    const jobId = randomUUID();
+    await this.prisma.coursePackageJob.create({
+      data: {
+        id: jobId,
+        kind: 'IMPORT',
+        status: 'VALIDATING',
+        stage: 'UPLOADING',
+        actorEmployeeId,
+        idempotencyKey: idempotencyKey ?? null,
+        sourceFileName: file.name,
+        bytesTotal: file.bytesTotal,
+        bytesReceived: 0,
+        progress: 0,
+      },
+    });
+    return { jobId, chunkSize: PackageJobsService.RAW_CHUNK_BYTES };
+  }
+
+  /** 写入单个分块�?staging，更新进度。每块很小，走的是普通小请求�?*/
+  async appendRawChunk(
+    jobId: string,
+    index: number,
+    bytes: Buffer,
+  ): Promise<{ jobId: string; progress: number }> {
+    const job = await this.requireUploadingJob(jobId);
+    if (!Number.isInteger(index) || index < 0) {
+      throw new PackageError('INVALID_INPUT', 400, 'Invalid chunk index.');
+    }
+    if (
+      bytes.length >
+      PackageJobsService.RAW_CHUNK_BYTES + PackageJobsService.RAW_CHUNK_SLACK_BYTES
+    ) {
+      throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Chunk too large.');
+    }
+    await this.storage.putStaging(this.rawChunkKey(jobId, index), bytes);
+    const total = job.bytesTotal ?? 0;
+    const expected = this.chunkCountFor(total);
+    const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: {
+        bytesReceived: Math.round((total * (index + 1)) / expected),
+        progress,
+      },
+    });
+    return { jobId, progress };
+  }
+
+  /** 全部分块到达后：合并为原始素材包，后台转�?+ 校验�?*/
+  async completeRawUpload(jobId: string): Promise<JobView> {
+    const job = await this.requireUploadingJob(jobId);
+    const total = job.bytesTotal ?? 0;
+    if (!total) {
+      throw new PackageError('INVALID_INPUT', 400, 'Missing upload size.');
+    }
+    const count = this.chunkCountFor(total);
+    for (let i = 0; i < count; i++) {
+      const present = await this.storage.hasStaging(this.rawChunkKey(jobId, i));
+      if (!present) {
+        throw new PackageError(
+          'RAW_UPLOAD_INCOMPLETE',
+          400,
+          `Missing chunk ${i + 1}/${count}.`,
+        );
+      }
+    }
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: { stage: 'RAW_QUEUED', progress: 88 },
+    });
+    void this.assembleAndProcessRaw(jobId, count).catch(() => undefined);
+    return this.getJob(jobId);
+  }
+
+  private async assembleAndProcessRaw(
+    jobId: string,
+    count: number,
+  ): Promise<void> {
+    try {
+      const parts: Buffer[] = [];
+      for (let i = 0; i < count; i++) {
+        parts.push(await this.storage.getStaging(this.rawChunkKey(jobId, i)));
+      }
+      const rawBytes = Buffer.concat(parts);
+      await this.runRawProcessing(jobId, rawBytes);
+    } catch (error) {
+      await this.markRawFailed(jobId, error);
+    } finally {
+      for (let i = 0; i < count; i++) {
+        await this.storage
+          .removeStaging(this.rawChunkKey(jobId, i))
+          .catch(() => undefined);
+      }
+    }
+  }
+
+
+  /**
+   * 本地目录导入：服务端直接读取仓库内素材目录（�?docs/modeling-life），
+   * 打包为原始素�?ZIP 后走原始素材导入流程。用于规避浏览器上传超大文件中断�?
    */
   async createLocalRawImportJob(
     options: { dir?: string; courseCode?: string; slug?: string },
@@ -229,7 +423,7 @@ export class PackageJobsService {
         'Directory is outside the repository.',
       );
     }
-    // 递归收集子目录文件（flatten 到 zip 根：素材/模板可能放在嵌套文件夹里）
+    // 递归收集子目录文件（flatten �?zip 根：素材/模板可能放在嵌套文件夹里�?
     const files: { name: string; full: string }[] = [];
     const walk = async (dir: string): Promise<void> => {
       let entries: string[];
@@ -282,14 +476,14 @@ export class PackageJobsService {
     if (!job || !job.storageKey) return;
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-ins-'));
     try {
-      // 调用方手里已有同一份字节时直接复用，避免再从 staging 读回整包（少一份大缓冲）
+      // 调用方手里已有同一份字节时直接复用，避免再�?staging 读回整包（少一份大缓冲�?
       const zipBytes =
         providedBytes ?? (await this.storage.getStaging(job.storageKey));
       const packagePath = path.join(tmp, 'package.zip');
       const outDir = path.join(tmp, 'files');
       await fs.mkdir(outDir, { recursive: true });
       await fs.writeFile(packagePath, zipBytes);
-      // 解压 + 全面校验是 CPU 重活，放到 worker 线程，避免阻塞事件循环
+      // 解压 + 全面校验�?CPU 重活，放�?worker 线程，避免阻塞事件循�?
       const result = await runImportWorker<{
         manifest: PackageManifest;
         report: PackageValidationReport;
@@ -313,7 +507,7 @@ export class PackageJobsService {
               : null,
         },
       });
-      // 暂存解压内容到 staging（媒体二进制 + manifest）
+      // 暂存解压内容�?staging（媒体二进制 + manifest�?
       await this.persistExtractedFromDir(
         jobId,
         outDir,
@@ -364,7 +558,7 @@ export class PackageJobsService {
     });
     if (!job)
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    // 条件认领：只有一次确认能把任务从 AWAITING_CONFIRM 拿到 IMPORTING，
+    // 条件认领：只有一次确认能把任务从 AWAITING_CONFIRM 拿到 IMPORTING�?
     // 双击或两人同时确认不会把同一个包导入两次
     const claimed = await this.prisma.coursePackageJob.updateMany({
       where: { id: jobId, status: 'AWAITING_CONFIRM' },
@@ -406,7 +600,7 @@ export class PackageJobsService {
         data: { status: 'READY', progress: 100, courseId, stage: 'COMMITTED' },
       });
       await this.storage.clearStagingPrefix(jobId);
-      // 导入完成后在目标环境重新创建 Stripe 产品/价格（失败不阻断导入）
+      // 导入完成后在目标环境重新创建 Stripe 产品/价格（失败不阻断导入�?
       const plans = await this.prisma.coursePlan.findMany({
         where: { courseId, active: true },
         select: { id: true },
@@ -465,7 +659,7 @@ export class PackageJobsService {
     });
     if (!job)
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    // 条件取消：与"确认导入"同时发生时，已开始导入的任务不会被标成已取消、删掉暂存文件
+    // 条件取消：与"确认导入"同时发生时，已开始导入的任务不会被标成已取消、删掉暂存文�?
     const cancelled = await this.prisma.coursePackageJob.updateMany({
       where: { id: jobId, status: { notIn: ['READY', 'IMPORTING'] } },
       data: { status: 'CANCELLED', cancelRequested: true },
@@ -545,7 +739,7 @@ export class PackageJobsService {
 
   // ===== 导出 =====
   // 默认导出线上版本；versionLabel='working'/'draft' 导出当前草稿（不产生版本）；
-  // 其他值按版本号导出历史快照。
+  // 其他值按版本号导出历史快照�?
   async startExport(
     courseId: string,
     actorEmployeeId: string | null,
@@ -561,11 +755,11 @@ export class PackageJobsService {
     let sourceVersionId: string | null;
     let label: string;
     if (versionLabel === 'working' || versionLabel === 'draft') {
-      // 草稿导出：不走版本快照，由 worker 从当前工作区聚合打包
+      // 草稿导出：不走版本快照，�?worker 从当前工作区聚合打包
       sourceVersionId = null;
       label = 'draft';
     } else if (versionLabel) {
-      // 指定了版本号：直接查找对应快照
+      // 指定了版本号：直接查找对应快�?
       const v = await this.prisma.courseVersion.findFirst({
         where: { courseId, versionLabel },
         select: { id: true, versionLabel: true },
@@ -580,7 +774,7 @@ export class PackageJobsService {
       sourceVersionId = v.id;
       label = v.versionLabel;
     } else {
-      // 默认：导出线上发布版本
+      // 默认：导出线上发布版�?
       const exportable = await this.publishing.assertExportable(courseId);
       sourceVersionId = exportable.versionId;
       label = exportable.versionLabel;

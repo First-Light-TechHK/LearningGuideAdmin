@@ -10,8 +10,9 @@ import { CourseStorageService } from './storage.service';
 import { computeCompleteness } from './completeness';
 import { detailToCompletenessInput } from './version-snapshot';
 import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
+import { syncTextLearningPoints } from './course-authoring.service';
 
-/** 课程列表/详情/工作流（v2）。 */
+/** 课程列表/详情/工作流（v2）�?*/
 @Injectable()
 export class CommerceCoursesService {
   constructor(
@@ -20,7 +21,7 @@ export class CommerceCoursesService {
     private readonly publishing: PublishingService,
   ) {}
 
-  /** 读取课程封面字节（Admin 预览用）。 */
+  /** 读取课程封面字节（Admin 预览用）�?*/
   async getCoverBytes(
     id: string,
   ): Promise<{ bytes: Buffer; extension: string } | null> {
@@ -33,7 +34,7 @@ export class CommerceCoursesService {
     return { bytes, extension: course.cover.extension };
   }
 
-  /** 读取课程某媒体资产字节（Admin 预览用，仅限该课程内资产）。 */
+  /** 读取课程某媒体资产字节（Admin 预览用，仅限该课程内资产）�?*/
   async getMediaBytes(
     id: string,
     assetId: string,
@@ -184,7 +185,7 @@ export class CommerceCoursesService {
       });
   }
 
-  // ===== 编辑工作区（草稿） =====
+  // ===== 编辑工作区（草稿�?=====
   private static readonly LEARNING_MODES = [
     'VIDEO_ONLY',
     'TEXT_ONLY',
@@ -285,18 +286,24 @@ export class CommerceCoursesService {
       learningLanguages?: string[];
       subtitle?: string | null;
       level?: string | null;
+      categoryId?: string | null;
     },
   ) {
     const current = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      select: { code: true, learningMode: true, learningLanguages: true },
+      select: {
+        code: true,
+        learningMode: true,
+        learningLanguages: true,
+        categoryId: true,
+      },
     });
     if (!current)
       throw new NotFoundException({
         code: 'COURSE_NOT_FOUND',
         message: 'Course not found',
       });
-    // Course ID 与 Learning mode 创建后不可修改（PRD §22）
+    // Course ID �?Learning mode 创建后不可修改（PRD §22�?
     if (
       body.code !== undefined &&
       body.code.trim() &&
@@ -316,7 +323,7 @@ export class CommerceCoursesService {
         message: 'Learning mode cannot be changed after the course is created.',
       });
     }
-    // 学习语言只能追加（PRD §22）
+    // 学习语言只能追加（PRD §22�?
     const existingLanguages = (current.learningLanguages as string[]) ?? [];
     const requestedLanguages = body.learningLanguages;
     if (
@@ -352,6 +359,9 @@ export class CommerceCoursesService {
             : {}),
           ...(body.subtitle !== undefined ? { subtitle: body.subtitle } : {}),
           ...(body.level !== undefined ? { level: body.level } : {}),
+          ...(body.categoryId !== undefined
+            ? { categoryId: body.categoryId || null }
+            : {}),
           hasDraft: true,
           lifecycleStatus: 'WORKING',
           draftSourceType: null,
@@ -422,7 +432,7 @@ export class CommerceCoursesService {
       )?.defaultContentLanguage ||
       'en-GB';
     try {
-      // 锁住课程行再取下一个序号：同时新建两节课不会拿到同一个 sortOrder / 默认 code
+      // 锁住课程行再取下一个序号：同时新建两节课不会拿到同一�?sortOrder / 默认 code
       await this.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "CommerceCourse" WHERE id = ${id} FOR UPDATE`;
         const last = await tx.lesson.findFirst({
@@ -490,16 +500,13 @@ export class CommerceCoursesService {
         })
       )?.defaultContentLanguage ||
       'en-GB';
-    // 课时字段与本地化一起写：任何一步失败都不留下半截修改；改成重复的 code 返回 409 而不是 500
     try {
       await this.prisma.$transaction(async (tx) => {
         await tx.lesson.update({
           where: { id: lessonId },
           data: {
             ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-            ...(body.sortOrder !== undefined
-              ? { sortOrder: body.sortOrder }
-              : {}),
+            ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           },
         });
         if (
@@ -527,7 +534,20 @@ export class CommerceCoursesService {
             create: { lessonId, language, ...payload },
             update: payload,
           });
+          if (body.textHtml !== undefined) {
+            await syncTextLearningPoints(tx, lessonId, language, body.textHtml);
+          }
         }
+        await tx.commerceCourse.update({
+          where: { id },
+          data: {
+            hasDraft: true,
+            lifecycleStatus: 'WORKING',
+            draftSourceType: null,
+            draftSourceEnvironment: null,
+            draftSourceVersionLabel: null,
+          },
+        });
       });
     } catch (error) {
       if (
@@ -541,7 +561,6 @@ export class CommerceCoursesService {
       }
       throw error;
     }
-    await this.touchDraft(id);
     return this.detail(id);
   }
 
@@ -557,7 +576,7 @@ export class CommerceCoursesService {
       });
     }
     // 条件软删除：ID 不复用，Publish 后才从线上消失，学员历史保留（PRD §22）；
-    // 重复点击时第二次删不到就按 404 返回
+    // 重复点击时第二次删不到就�?404 返回
     const removed = await this.prisma.lesson.updateMany({
       where: { id: lessonId, courseId: id, archivedAt: null },
       data: { archivedAt: new Date() },
@@ -587,7 +606,7 @@ export class CommerceCoursesService {
         message: 'lessonIds must be a list of distinct lesson ids',
       });
     }
-    // 只动本课程的课时：别的课程的课时 id 或不存在的 id 整批拒绝（404），不留半截排序
+    // 只动本课程的课时：别的课程的课时 id 或不存在�?id 整批拒绝�?04），不留半截排序
     await this.prisma.$transaction(async (tx) => {
       for (const [index, lessonId] of lessonIds.entries()) {
         const moved = await tx.lesson.updateMany({
@@ -606,7 +625,7 @@ export class CommerceCoursesService {
     return this.detail(id);
   }
 
-  /** 任何内容编辑都只改草稿，并清空导入/恢复来源。 */
+  /** 任何内容编辑都只改草稿，并清空导�?恢复来源�?*/
   private async touchDraft(id: string): Promise<void> {
     await this.prisma.commerceCourse.update({
       where: { id },
