@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 import {
   METRICS_GRANULARITIES,
@@ -10,7 +10,16 @@ import {
   type MetricsSplit,
 } from '../contracts/helpdesk'
 import { getFlywheelMetrics, listJobRuns } from '../lib/helpdeskApi'
-import { CHART_METRICS, chartKind, jobPoints, metricPoints, runMarks, type ChartMetric } from '../lib/helpdeskCharts'
+import {
+  CHART_METRICS,
+  GOOD_DIRECTION,
+  chartKind,
+  formatChange,
+  jobPoints,
+  lastChange,
+  metricPoints,
+  runMarks,
+} from '../lib/helpdeskCharts'
 import {
   METRICS_RANGES,
   RATE_KEYS,
@@ -44,6 +53,9 @@ import { LineChart } from './LineChart'
 type Props = { locale: Locale; onOpenCandidate: (candidateId: string) => void }
 type State = { overall: FlywheelMetrics | null; split: FlywheelMetrics | null; error: string | null }
 type Runs = { runs: FlywheelJobRun[]; error: string | null } | null
+const LIST_PREVIEW = 5
+const TREND_TABS = [...CHART_METRICS, 'jobReceived'] as const
+type TrendKey = (typeof TREND_TABS)[number]
 
 const today = () => new Date().toISOString().slice(0, 10)
 const when = (iso: string, locale: Locale) => `${longDate(iso, locale)} ${cardTime(iso, locale)}`
@@ -61,6 +73,9 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
   const loading = settledFor !== requestKey
   const request = useRef(0)
   const [jobs, setJobs] = useState<Runs>(null)
+  const [view, setView] = useState<TrendKey>('aiSolvedRate')
+  const [list, setList] = useState<'gaps' | 'tickets'>('gaps')
+  const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -188,8 +203,54 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
     )
   }
 
-  function chartTitle(metric: ChartMetric): string {
-    return metric === 'turns' ? t(locale, 'helpDesk.data.charts.turns') : metricLabel(metric)
+  /** 一个模块：上面一排指标标签（整段时间的数），点哪个下面的大图就画哪个（参考 Google Analytics 的记分卡标签）。 */
+  function tabLabel(key: TrendKey): string {
+    if (key === 'turns') return t(locale, 'helpDesk.data.charts.turns')
+    if (key === 'jobReceived') return t(locale, 'helpDesk.data.charts.jobReceived')
+    return metricLabel(key)
+  }
+
+  function seriesFor(key: TrendKey) {
+    if (key === 'jobReceived') return jobPoints(jobs?.runs ?? [])
+    return metricPoints(overall?.series ?? [], key, parts)
+  }
+
+  function tabValue(key: TrendKey, row: MetricsRow): string {
+    if (key === 'turns') return String(row.turns)
+    if (key === 'jobReceived') {
+      const marks = runMarks(jobs?.runs ?? [])
+      return marks.length === 0 ? '—' : `${marks.filter((mark) => mark.status === 'succeeded').length}/${marks.length}`
+    }
+    return formatMetric(key, row[key])
+  }
+
+  function tabDetail(key: TrendKey, row: MetricsRow): string {
+    if (key === 'turns') return t(locale, 'helpDesk.data.charts.turnsDetail', { answers: row.answers })
+    if (key === 'jobReceived') return t(locale, 'helpDesk.data.charts.jobDetail')
+    return parts(row, key)
+  }
+
+  function changeText(key: TrendKey, delta: number): string {
+    const kind = chartKind(key)
+    const n = formatChange(kind, delta)
+    return kind === 'rate' ? t(locale, 'helpDesk.data.charts.changePoints', { n }) : t(locale, 'helpDesk.data.charts.change', { n })
+  }
+
+  function listLength(): number {
+    return list === 'gaps' ? (overall?.topGaps.length ?? 0) : (overall?.ticketFaqs.length ?? 0)
+  }
+
+  function visible<T>(rows: readonly T[]): readonly T[] {
+    return showAll ? rows : rows.slice(0, LIST_PREVIEW)
+  }
+
+  function onTabKey(event: ReactKeyboardEvent) {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+    event.preventDefault()
+    const at = TREND_TABS.indexOf(view)
+    const next = TREND_TABS[(at + (event.key === 'ArrowRight' ? 1 : TREND_TABS.length - 1)) % TREND_TABS.length]
+    setView(next)
+    document.getElementById(`${uid}-tab-${next}`)?.focus()
   }
 
   /** x 轴上的短日期：「10/31」。 */
@@ -290,53 +351,88 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
 
       {!loading && overall && totals ? (
         <>
-          <div className="hdStatGrid">
-            {RATE_KEYS.map((key) => (
-              <div key={key} className="hdStatCard" role="group" aria-labelledby={`${uid}-${key}`}>
-                <span className="hdStatLabel" id={`${uid}-${key}`}>
-                  {metricLabel(key)}
-                </span>
-                <strong className="hdStatValue">{formatMetric(key, totals[key])}</strong>
-                <span className="hdStatDetail">{parts(totals, key)}</span>
-                <span className="hdStatHint">{t(locale, `helpDesk.data.hints.${key}`)}</span>
-              </div>
-            ))}
-          </div>
-
-          <section className="hdGraphSection hdDataSection" aria-labelledby={`${uid}-charts`}>
-            <h3 className="hdGraphTitle" id={`${uid}-charts`}>
+          <section className="hdTrend" aria-labelledby={`${uid}-charts`}>
+            <h3 className="hdSrOnly" id={`${uid}-charts`}>
               {t(locale, 'helpDesk.data.charts.title')}
             </h3>
-            <div className="hdChartGrid">
-              {CHART_METRICS.map((metric) => (
-                <LineChart
-                  key={metric}
-                  title={chartTitle(metric)}
-                  hint={t(locale, `helpDesk.data.charts.group.${metric}`)}
-                  kind={chartKind(metric)}
-                  points={metricPoints(overall.series, metric, parts)}
-                  bucketLabel={bucketLabel}
-                  shortLabel={shortBucket}
-                  emptyLabel={t(locale, 'helpDesk.data.charts.empty')}
-                  partialLabel={t(locale, 'helpDesk.data.charts.partial')}
-                  latestLabel={(bucket) => t(locale, 'helpDesk.data.charts.latest', { label: bucketLabel(bucket) })}
-                />
-              ))}
+            <div className="hdTrendTabs" role="tablist" aria-label={t(locale, 'helpDesk.data.charts.title')} onKeyDown={onTabKey}>
+              {TREND_TABS.map((key) => {
+                const on = view === key
+                // 后台任务的大数字是成功天数，不配「比前一天」
+                const change = key === 'jobReceived' ? null : lastChange(seriesFor(key), GOOD_DIRECTION[key])
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    id={`${uid}-tab-${key}`}
+                    aria-selected={on}
+                    aria-controls={`${uid}-panel`}
+                    aria-labelledby={`${uid}-name-${key}`}
+                    aria-describedby={`${uid}-value-${key}`}
+                    tabIndex={on ? 0 : -1}
+                    className={`hdTrendTab${on ? ' hdTrendTabOn' : ''}`}
+                    onClick={() => setView(key)}
+                  >
+                    <span className="hdTrendName" id={`${uid}-name-${key}`}>
+                      {tabLabel(key)}
+                    </span>
+                    <strong className="hdTrendValue" id={`${uid}-value-${key}`}>
+                      {tabValue(key, totals)}
+                    </strong>
+                    <span className="hdTrendDetail">{tabDetail(key, totals)}</span>
+                    {change ? (
+                      <span className={`hdTrendChange hdTrendChange-${change.tone}`}>
+                        <span aria-hidden="true">{change.delta > 0 ? '▲' : change.delta < 0 ? '▼' : '•'}</span>
+                        {changeText(key, change.delta)}
+                      </span>
+                    ) : (
+                      <span className="hdTrendChange hdTrendChange-flat">{'\u00a0'}</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="hdTrendPanel" role="tabpanel" id={`${uid}-panel`} aria-labelledby={`${uid}-tab-${view}`}>
+              <p className="hdTrendCaption">
+                {t(locale, `helpDesk.data.charts.caption.${view}`)}
+                {view === 'jobReceived'
+                  ? null
+                  : ` · ${t(locale, granularity === 'day' ? 'helpDesk.data.charts.perDay' : 'helpDesk.data.charts.perWeek')}`}
+                {` · ${t(locale, granularity === 'week' && view !== 'jobReceived' ? 'helpDesk.data.charts.vsWeek' : 'helpDesk.data.charts.vsDay')}`}
+              </p>
               <LineChart
-                title={t(locale, 'helpDesk.data.charts.jobReceived')}
-                hint={t(locale, 'helpDesk.data.charts.group.job')}
-                kind="count"
-                points={jobPoints(jobs?.runs ?? [])}
-                bucketLabel={(bucket) => longDate(bucket, locale)}
+                label={tabLabel(view)}
+                kind={chartKind(view)}
+                points={seriesFor(view)}
+                bucketLabel={view === 'jobReceived' ? (bucket) => longDate(bucket, locale) : bucketLabel}
                 shortLabel={shortBucket}
                 emptyLabel={
-                  jobs?.error ? errorMessage(locale, jobs.error) : t(locale, jobs ? 'helpDesk.data.charts.noRuns' : 'helpDesk.data.loading')
+                  view === 'jobReceived' && jobs?.error
+                    ? errorMessage(locale, jobs.error)
+                    : t(
+                        locale,
+                        view === 'jobReceived' && !jobs
+                          ? 'helpDesk.data.loading'
+                          : view === 'jobReceived'
+                            ? 'helpDesk.data.charts.noRuns'
+                            : 'helpDesk.data.charts.empty',
+                      )
                 }
-                partialLabel=""
-                latestLabel={(bucket) => t(locale, 'helpDesk.data.charts.latest', { label: longDate(bucket, locale) })}
-                footer={runStrip()}
+                partialLabel={t(locale, 'helpDesk.data.charts.partial')}
               />
+              {view === 'jobReceived' ? runStrip() : null}
             </div>
+            <dl className="hdTrendMore">
+              {(['clarifyCoveredRate', 'guardFallbackRate'] as const).map((key) => (
+                <div key={key} role="group" aria-labelledby={`${uid}-${key}`} title={t(locale, `helpDesk.data.hints.${key}`)}>
+                  <dt id={`${uid}-${key}`}>{metricLabel(key)}</dt>
+                  <dd>
+                    <strong>{formatMetric(key, totals[key])}</strong> <span>{parts(totals, key)}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </section>
 
           {/* 趋势表是图的表格视图：默认收起，页面不拉长 */}
@@ -363,88 +459,106 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
               )
             : null}
 
-          <section className="hdGraphSection hdDataSection" aria-labelledby={`${uid}-gaps`}>
-            <h3 className="hdGraphTitle" id={`${uid}-gaps`}>
-              {t(locale, 'helpDesk.data.topGaps')}
+          {/* 缺口组与导致工单的 FAQ：同一个模块里切换，各先看前 {LIST_PREVIEW} 条（页面不拉长） */}
+          <section className="hdTrend hdDataLists" aria-labelledby={`${uid}-lists`}>
+            <h3 className="hdSrOnly" id={`${uid}-lists`}>
+              {t(locale, 'helpDesk.data.lists')}
             </h3>
-            <div className="hdFaqTableWrap hdDataTableWrap">
-              <table className="hdFaqTable hdReleaseTable hdDataTable" aria-labelledby={`${uid}-gaps`}>
-                <thead>
-                  <tr>
-                    {(['topic', 'suggestion', 'status', 'turns', 'action'] as const).map((column) => (
-                      <th key={column} scope="col">
-                        {t(locale, `helpDesk.data.columns.${column}`)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {overall.topGaps.map((gap) => (
-                    <tr key={gap.candidateId}>
-                      <th scope="row">
-                        <span className="hdReleaseResult">{gap.topic}</span>
-                        <span className="hdReleaseResult hdGraphHint">{gap.proposedQuestion}</span>
-                      </th>
-                      <td>{labelOrRaw(locale, `helpDesk.candidates.suggestion.${gap.suggestion}`, gap.suggestion)}</td>
-                      <td>{labelOrRaw(locale, `helpDesk.candidates.status.${gap.status}`, gap.status)}</td>
-                      <td className="hdDataNumber">{gap.turns}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="hdFaqPreview"
-                          aria-label={t(locale, 'helpDesk.data.openLabel', { topic: gap.topic })}
-                          onClick={() => onOpenCandidate(gap.candidateId)}
-                        >
-                          {t(locale, 'helpDesk.data.open')}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {overall.topGaps.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="hdFaqEmpty">
-                        {t(locale, 'helpDesk.data.emptyTable')}
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+            <div className="hdDataListsHead">
+              <div className="hdReviewSeg hdDataSeg" role="tablist" aria-label={t(locale, 'helpDesk.data.lists')}>
+                {(['gaps', 'tickets'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={list === key}
+                    className={`hdReviewSegItem${list === key ? ' hdReviewSegOn' : ''}`}
+                    onClick={() => (setList(key), setShowAll(false))}
+                  >
+                    {t(locale, key === 'gaps' ? 'helpDesk.data.topGaps' : 'helpDesk.data.ticketFaqs')}
+                    <span className="hdDataSegCount">{(key === 'gaps' ? overall.topGaps : overall.ticketFaqs).length}</span>
+                  </button>
+                ))}
+              </div>
+              {listLength() > LIST_PREVIEW ? (
+                <button type="button" className="hdDataSummary" aria-expanded={showAll} onClick={() => setShowAll((now) => !now)}>
+                  {showAll ? t(locale, 'helpDesk.data.showLess') : t(locale, 'helpDesk.data.showAll', { count: listLength() })}
+                </button>
+              ) : null}
             </div>
-          </section>
-
-          <section className="hdGraphSection hdDataSection" aria-labelledby={`${uid}-tickets`}>
-            <h3 className="hdGraphTitle" id={`${uid}-tickets`}>
-              {t(locale, 'helpDesk.data.ticketFaqs')}
-            </h3>
-            <div className="hdFaqTableWrap hdDataTableWrap">
-              <table className="hdFaqTable hdReleaseTable hdDataTable" aria-labelledby={`${uid}-tickets`}>
-                <thead>
-                  <tr>
-                    {(['faq', 'answers', 'ticketsAfter', 'ticketRate'] as const).map((column) => (
-                      <th key={column} scope="col">
-                        {t(locale, `helpDesk.data.columns.${column}`)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {overall.ticketFaqs.map((row) => (
-                    <tr key={row.faqId}>
-                      <th scope="row">{(zh ? row.questionZh : row.questionEn) ?? row.key ?? t(locale, 'helpDesk.data.unknownFaq')}</th>
-                      <td className="hdDataNumber">{row.answers}</td>
-                      <td className="hdDataNumber">{row.ticketsAfter}</td>
-                      <td className="hdDataNumber">{formatRate(row.ticketRate)}</td>
-                    </tr>
-                  ))}
-                  {overall.ticketFaqs.length === 0 ? (
+            <div className="hdFaqTableWrap hdDataTableWrap hdDataListBody">
+              {list === 'gaps' ? (
+                <table className="hdFaqTable hdReleaseTable hdDataTable" aria-label={t(locale, 'helpDesk.data.topGaps')}>
+                  <thead>
                     <tr>
-                      <td colSpan={4} className="hdFaqEmpty">
-                        {t(locale, 'helpDesk.data.emptyTable')}
-                      </td>
+                      {(['topic', 'suggestion', 'status', 'turns', 'action'] as const).map((column) => (
+                        <th key={column} scope="col">
+                          {t(locale, `helpDesk.data.columns.${column}`)}
+                        </th>
+                      ))}
                     </tr>
-                  ) : null}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {visible(overall.topGaps).map((gap) => (
+                      <tr key={gap.candidateId}>
+                        <th scope="row">
+                          <span className="hdReleaseResult">{gap.topic}</span>
+                          <span className="hdReleaseResult hdGraphHint">{gap.proposedQuestion}</span>
+                        </th>
+                        <td>{labelOrRaw(locale, `helpDesk.candidates.suggestion.${gap.suggestion}`, gap.suggestion)}</td>
+                        <td>{labelOrRaw(locale, `helpDesk.candidates.status.${gap.status}`, gap.status)}</td>
+                        <td className="hdDataNumber">{gap.turns}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="hdFaqPreview"
+                            aria-label={t(locale, 'helpDesk.data.openLabel', { topic: gap.topic })}
+                            onClick={() => onOpenCandidate(gap.candidateId)}
+                          >
+                            {t(locale, 'helpDesk.data.open')}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {overall.topGaps.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="hdFaqEmpty">
+                          {t(locale, 'helpDesk.data.emptyTable')}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="hdFaqTable hdReleaseTable hdDataTable" aria-label={t(locale, 'helpDesk.data.ticketFaqs')}>
+                  <thead>
+                    <tr>
+                      {(['faq', 'answers', 'ticketsAfter', 'ticketRate'] as const).map((column) => (
+                        <th key={column} scope="col">
+                          {t(locale, `helpDesk.data.columns.${column}`)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible(overall.ticketFaqs).map((row) => (
+                      <tr key={row.faqId}>
+                        <th scope="row">{(zh ? row.questionZh : row.questionEn) ?? row.key ?? t(locale, 'helpDesk.data.unknownFaq')}</th>
+                        <td className="hdDataNumber">{row.answers}</td>
+                        <td className="hdDataNumber">{row.ticketsAfter}</td>
+                        <td className="hdDataNumber">{formatRate(row.ticketRate)}</td>
+                      </tr>
+                    ))}
+                    {overall.ticketFaqs.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="hdFaqEmpty">
+                          {t(locale, 'helpDesk.data.emptyTable')}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              )}
             </div>
           </section>
         </>

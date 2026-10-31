@@ -157,10 +157,113 @@ export function latestValue(points: readonly ChartPoint[]): ChartPoint | null {
   return null
 }
 
-/** x 轴标签：头、中、尾三个（点少时去重）。 */
-export function xLabelIndexes(count: number): number[] {
+/** x 轴标签：均匀取至多 `max` 个（含头尾，点少时去重）。 */
+export function xLabelIndexes(count: number, max = 5): number[] {
   if (count <= 0) return []
-  return [...new Set([0, Math.floor((count - 1) / 2), count - 1])]
+  if (count === 1) return [0]
+  const slots = Math.min(max, count)
+  return [...new Set(Array.from({ length: slots }, (_, i) => Math.round((i * (count - 1)) / (slots - 1))))]
+}
+
+type XY = { x: number; y: number }
+
+/** 单调三次曲线（Fritsch–Carlson）：平滑但不越过数据（不会画出比真实更高或更低的峰）。 */
+function monotonePath(points: readonly XY[]): string {
+  if (points.length === 0) return ''
+  const f = (n: number) => n.toFixed(1)
+  if (points.length === 1) return `M${f(points[0].x)} ${f(points[0].y)}`
+  const n = points.length
+  const d: number[] = []
+  for (let k = 0; k < n - 1; k += 1) d.push((points[k + 1].y - points[k].y) / (points[k + 1].x - points[k].x || 1))
+  const m: number[] = points.map((_, k) => {
+    if (k === 0) return d[0]
+    if (k === n - 1) return d[n - 2]
+    return d[k - 1] * d[k] <= 0 ? 0 : (d[k - 1] + d[k]) / 2
+  })
+  for (let k = 0; k < n - 1; k += 1) {
+    if (d[k] === 0) {
+      m[k] = 0
+      m[k + 1] = 0
+      continue
+    }
+    const a = m[k] / d[k]
+    const b = m[k + 1] / d[k]
+    const s = a * a + b * b
+    if (s > 9) {
+      const t = 3 / Math.sqrt(s)
+      m[k] = t * a * d[k]
+      m[k + 1] = t * b * d[k]
+    }
+  }
+  let path = `M${f(points[0].x)} ${f(points[0].y)}`
+  for (let k = 0; k < n - 1; k += 1) {
+    const h = points[k + 1].x - points[k].x
+    path += ` C${f(points[k].x + h / 3)} ${f(points[k].y + (m[k] * h) / 3)} ${f(points[k + 1].x - h / 3)} ${f(points[k + 1].y - (m[k + 1] * h) / 3)} ${f(points[k + 1].x)} ${f(points[k + 1].y)}`
+  }
+  return path
+}
+
+/** 连续有值的几段（遇到 null 断开），每段是画布坐标。 */
+export function segments(points: readonly ChartPoint[], domain: [number, number], frame: Frame): XY[][] {
+  const out: XY[][] = []
+  let current: XY[] = []
+  points.forEach((point, index) => {
+    if (point.value === null) {
+      if (current.length > 0) out.push(current)
+      current = []
+      return
+    }
+    current.push({ x: xAt(index, points.length, frame), y: yAt(point.value, domain, frame) })
+  })
+  if (current.length > 0) out.push(current)
+  return out
+}
+
+/** 平滑的线与它下面的面积（每段各自闭合到底线）；只有一个点的段不画线（交给圆点）。 */
+export function smoothPaths(points: readonly ChartPoint[], domain: [number, number], frame: Frame): { line: string; area: string } {
+  const base = (frame.height - frame.bottom).toFixed(1)
+  const lines: string[] = []
+  const areas: string[] = []
+  for (const seg of segments(points, domain, frame)) {
+    if (seg.length < 2) continue
+    const line = monotonePath(seg)
+    lines.push(line)
+    areas.push(`${line} L${seg[seg.length - 1].x.toFixed(1)} ${base} L${seg[0].x.toFixed(1)} ${base} Z`)
+  }
+  return { line: lines.join(' '), area: areas.join(' ') }
+}
+
+/** 哪个方向算变好：提问量没有好坏。 */
+export type Direction = 'up' | 'down' | 'none'
+
+export const GOOD_DIRECTION: Record<ChartMetric | 'jobReceived', Direction> = {
+  turns: 'none',
+  aiSolvedRate: 'up',
+  noMatchRate: 'down',
+  handoverRate: 'down',
+  helpfulRate: 'up',
+  avgRating: 'up',
+  jobReceived: 'none',
+}
+
+export type Change = { delta: number; tone: 'good' | 'bad' | 'flat' | 'neutral' }
+
+/** 最近一个点比它前一个有值的点：变化量与好坏（比率按百分点）。 */
+export function lastChange(points: readonly ChartPoint[], good: Direction): Change | null {
+  const values = points.filter((point) => point.value !== null).map((point) => point.value as number)
+  if (values.length < 2) return null
+  const delta = values[values.length - 1] - values[values.length - 2]
+  if (Math.abs(delta) < 1e-9) return { delta: 0, tone: 'flat' }
+  if (good === 'none') return { delta, tone: 'neutral' }
+  return { delta, tone: delta > 0 === (good === 'up') ? 'good' : 'bad' }
+}
+
+/** 变化量的字：比率「3.2 个百分点」交给文案，这里只给数字部分。 */
+export function formatChange(kind: ChartKind, delta: number): string {
+  const size = Math.abs(delta)
+  if (kind === 'rate') return (size * 100).toFixed(size * 100 >= 10 ? 0 : 1)
+  if (kind === 'rating') return size.toFixed(2)
+  return Number.isInteger(size) ? String(size) : size.toFixed(1)
 }
 
 export function formatChartValue(kind: ChartKind, value: number | null): string {

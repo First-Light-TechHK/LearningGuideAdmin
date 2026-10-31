@@ -1404,20 +1404,23 @@
       },
       "charts": {
         "title": "Trends",
-        "turns": "Questions (turns)",
-        "jobReceived": "Background job: turns pulled each night",
-        "group": {
-          "turns": "Running",
-          "aiSolvedRate": "AI quality",
-          "noMatchRate": "Running",
-          "handoverRate": "Support",
-          "helpfulRate": "User feedback",
-          "avgRating": "User feedback",
-          "job": "Background job"
+        "turns": "Questions",
+        "jobReceived": "Background job",
+        "caption": {
+          "turns": "Questions (turns) per period",
+          "aiSolvedRate": "Share of answers with no ticket in the next 24 hours",
+          "noMatchRate": "Share of questions that matched no FAQ",
+          "handoverRate": "Share of questions handed to a person",
+          "helpfulRate": "Share of votes that were helpful or solved",
+          "avgRating": "User rating (1 to 5)",
+          "jobReceived": "Turns pulled from Portal by the nightly gap mining, with each day's result below"
         },
+        "perDay": "by day",
+        "perWeek": "by week",
+        "turnsDetail": "{answers} got an answer",
+        "jobDetail": "days that succeeded",
         "empty": "No data in this period.",
         "partial": "partial week",
-        "latest": "Latest: {label}",
         "noRuns": "No runs yet.",
         "runsOk": "All {count} recent days succeeded",
         "runsFailed": "{failed} of the last {count} days failed",
@@ -1428,8 +1431,15 @@
           "running": "Running"
         },
         "created": "{count} new candidates",
-        "showTable": "Show the trend table (numbers per period)"
-      }
+        "showTable": "Show the trend table (numbers per period)",
+        "changePoints": "{n} pts",
+        "change": "{n}",
+        "vsDay": "arrows compare with the day before",
+        "vsWeek": "arrows compare with the week before"
+      },
+      "lists": "Gaps and tickets",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer"
     },
     "review": {
       "viewLabel": "Candidate view",

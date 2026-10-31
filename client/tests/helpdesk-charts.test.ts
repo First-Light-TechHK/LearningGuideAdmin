@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 
 import type { FlywheelJobRun, MetricsRow } from '../src/backoffice/contracts/helpdesk'
 import {
+  formatChange,
   formatChartValue,
+  lastChange,
+  smoothPaths,
   formatTick,
   jobPoints,
   latestValue,
@@ -166,10 +169,43 @@ describe('helpdesk charts: scales and drawing', () => {
     assert.equal(nearestIndex(500, 5, frame), 4)
     assert.equal(nearestIndex(-40, 5, frame), 0)
     assert.equal(nearestIndex(70, 1, frame), 0)
-    assert.deepEqual(xLabelIndexes(7), [0, 3, 6])
+    assert.deepEqual(xLabelIndexes(7, 3), [0, 3, 6])
+    assert.deepEqual(xLabelIndexes(7), [0, 2, 3, 5, 6])
     assert.deepEqual(xLabelIndexes(2), [0, 1])
     assert.deepEqual(xLabelIndexes(1), [0])
     assert.deepEqual(xLabelIndexes(0), [])
+  })
+
+  test('smooth line: one curve per run of values, closed areas to the baseline, single points left to dots', () => {
+    const points = [
+      { bucket: 'a', value: 0 },
+      { bucket: 'b', value: 1 },
+      { bucket: 'c', value: 0.5 },
+      { bucket: 'd', value: null },
+      { bucket: 'e', value: 0.5 },
+    ]
+    const { line, area } = smoothPaths(points, [0, 1], frame)
+    assert.equal(line.match(/M/g)?.length, 1)
+    assert.equal(line.match(/C/g)?.length, 2)
+    assert.ok(line.startsWith('M20.0 110.0 C'))
+    assert.ok(line.endsWith('70.0 60.0'))
+    assert.ok(area.endsWith('L70.0 110.0 L20.0 110.0 Z'))
+    // 单调：峰值处切线为 0，控制点不越过峰顶（y 不小于 10）
+    const ys = [...line.matchAll(/(-?\d+\.\d) (-?\d+\.\d)/g)].map((m) => Number(m[2]))
+    assert.ok(Math.min(...ys) >= 10)
+    assert.deepEqual(smoothPaths([{ bucket: 'a', value: 1 }], [0, 1], frame), { line: '', area: '' })
+  })
+
+  test('change since the previous value, good or bad by the metric direction', () => {
+    const pts = (...values: (number | null)[]) => values.map((value, i) => ({ bucket: String(i), value }))
+    assert.deepEqual(lastChange(pts(0.5, null, 0.6), 'up'), { delta: 0.09999999999999998, tone: 'good' })
+    assert.equal(lastChange(pts(0.2, 0.3), 'down')?.tone, 'bad')
+    assert.equal(lastChange(pts(10, 7), 'none')?.tone, 'neutral')
+    assert.equal(lastChange(pts(3, 3), 'up')?.tone, 'flat')
+    assert.equal(lastChange(pts(3, null), 'up'), null)
+    assert.equal(formatChange('rate', -0.034), '3.4')
+    assert.equal(formatChange('rate', 0.12), '12')
+    assert.equal(formatChange('count', 5), '5')
   })
 
   test('value and tick formats', () => {

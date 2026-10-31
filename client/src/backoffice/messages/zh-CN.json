@@ -1403,21 +1403,24 @@
         "signal": "按信号"
       },
       "charts": {
-        "title": "趋势图",
-        "turns": "提问量（轮）",
-        "jobReceived": "后台任务：每晚拉进来的对话轮数",
-        "group": {
-          "turns": "运行",
-          "aiSolvedRate": "AI 效果",
-          "noMatchRate": "运行",
-          "handoverRate": "客服",
-          "helpfulRate": "用户反馈",
-          "avgRating": "用户反馈",
-          "job": "后台任务"
+        "title": "趋势",
+        "turns": "提问量",
+        "jobReceived": "后台任务",
+        "caption": {
+          "turns": "每个时间段的提问轮数",
+          "aiSolvedRate": "给了答案、之后 24 小时内没有工单的比例",
+          "noMatchRate": "没有匹配到任何 FAQ 的提问比例",
+          "handoverRate": "转给人工客服的提问比例",
+          "helpfulRate": "用户投「有帮助」或「已解决」的比例",
+          "avgRating": "用户评分（1 到 5）",
+          "jobReceived": "每晚缺口挖掘从 Portal 拉进来的对话轮数，下面是每天的运行结果"
         },
+        "perDay": "按日",
+        "perWeek": "按周",
+        "turnsDetail": "其中 {answers} 轮给了答案",
+        "jobDetail": "成功的天数",
         "empty": "这段时间没有数据。",
         "partial": "不完整的周",
-        "latest": "最近：{label}",
         "noRuns": "还没有运行记录。",
         "runsOk": "最近 {count} 天都跑成功了",
         "runsFailed": "最近 {count} 天里有 {failed} 天失败",
@@ -1428,8 +1431,15 @@
           "running": "进行中"
         },
         "created": "新建 {count} 个候选",
-        "showTable": "查看趋势表格（每个时间段的数字）"
-      }
+        "showTable": "查看趋势表格（每个时间段的数字）",
+        "changePoints": "{n} 个百分点",
+        "change": "{n}",
+        "vsDay": "箭头是和前一天比",
+        "vsWeek": "箭头是和前一周比"
+      },
+      "lists": "缺口与工单",
+      "showAll": "显示全部 {count} 条",
+      "showLess": "收起"
     },
     "review": {
       "viewLabel": "候选视图",
