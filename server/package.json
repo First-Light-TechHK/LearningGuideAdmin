@@ -28,7 +28,8 @@
     "eval:helpdesk": "ts-node eval/helpdesk/run.ts",
     "seed:helpdesk-faqs": "ts-node eval/helpdesk/seed-faq-library.ts",
     "seed:helpdesk-faq-map": "ts-node eval/helpdesk/seed-faq-map.ts",
-    "helpdesk:faq-vectors": "ts-node eval/helpdesk/faq-vectors.ts"
+    "helpdesk:faq-vectors": "ts-node eval/helpdesk/faq-vectors.ts",
+    "seed:helpdesk-demo": "ts-node eval/helpdesk/demo/seed-helpdesk-demo.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
