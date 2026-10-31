@@ -644,14 +644,16 @@ function slugify(text: string): string {
 
 /**
  * 旧模板（course info 表）里可选读取课程编号：兼容 "Course ID" / "课程 ID" /
- * "课程ID" / "课程编号" / "Course Code" 等写法（忽略大小写、空格、分隔符）。
- * 找不到或为空返回 undefined，交由调用方决定默认值。
+ * "Course ID/课程 ID" / "课程ID" / "课程编号" / "Course Code" 等写法。
+ * 用“包含”匹配（忽略大小写、空格、分隔符），因此也能识别一个单元格里
+ * 同时写了中英文的标签（如 "Course ID/课程 ID"）。找不到或为空返回 undefined。
  */
 function readLegacyCourseId(info: Map<string, string>): string | undefined {
   const norm = (s: string) => s.toLowerCase().replace(/[\s_\-:：/()（）]/g, "");
-  const keys = new Set(["courseid", "coursecode", "课程id", "课程编号", "课程代码"]);
+  const tokens = ["courseid", "coursecode", "课程id", "课程编号", "课程代码"];
   for (const [k, v] of info.entries()) {
-    if (!keys.has(norm(k))) continue;
+    const key = norm(k);
+    if (!tokens.some((t) => key.includes(t))) continue;
     const val = String(v ?? "").trim();
     if (val) return val;
   }
