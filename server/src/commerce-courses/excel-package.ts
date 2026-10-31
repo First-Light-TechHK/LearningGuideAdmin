@@ -352,7 +352,8 @@ function mapReadingType(value: string): PackageReading["type"] {
 }
 
 interface ExhibitRow {
-  lessonId: string;
+  refId: string;
+  lessonLabel: string;
   code: string;
   type: string;
   titleEn: string;
@@ -368,12 +369,21 @@ function parseExhibitRows(rows: unknown[][]): ExhibitRow[] {
   const out: ExhibitRow[] = [];
   for (const row of rows) {
     if (!row) continue;
-    const lessonId = cell(row[0]).toUpperCase();
-    if (!/^L\d+/i.test(lessonId)) continue;
-    const code = cell(row[2]).toUpperCase();
+    const refId = cell(row[0]).toUpperCase();
+    const codeRaw = cell(row[2]).toUpperCase();
+    // 跳过表头 / 说明行（如 "Exhibit ID / Exhibit ID"）
+    if (/^EXHIBIT\s*ID$/.test(refId) || /^EXHIBIT\s*ID$/.test(codeRaw)) continue;
+    if (!refId && !codeRaw) continue;
+    // 展品编号优先取第 3 列；没有则从第一列全 ID 末尾推导（SCI001-L01-E01 -> E01）
+    let code = codeRaw;
+    if (!code) {
+      const m = /([A-Za-z]*\d+)$/.exec(refId);
+      code = m ? m[1] : "";
+    }
     if (!code) continue;
     out.push({
-      lessonId,
+      refId,
+      lessonLabel: cell(row[1]),
       code,
       type: cell(row[3]),
       titleEn: cell(row[4]),
@@ -513,18 +523,31 @@ async function buildNewTemplatePackage(
     }
 
     // 展品
-    const lessonExhibitRows = exhibitRows.filter((r) => r.lessonId === lessonId);
+    const lessonExhibitRows = exhibitRows.filter((r) => {
+      if (r.refId.startsWith(lessonId.toUpperCase())) return true;
+      const m = /lesson\s*(\d+)/i.exec(r.lessonLabel);
+      return m ? Number(m[1]) === def.no : false;
+    });
     const usedCodes = new Set<string>();
     const exhibits: PackageExhibit[] = [];
     for (const ex of lessonExhibitRows) {
       let code = ex.code;
       if (usedCodes.has(code)) { let n = 2; while (usedCodes.has(`${ex.code}-${n}`)) n++; code = `${ex.code}-${n}`; warnings.push(`Lesson ${def.no} 展品编号 ${ex.code} 重复，已改为 ${code}`); }
       usedCodes.add(code);
-      const image = findMedia(media, (n) => (isImageName(n) || isVideoName(n) || isModelName(n)) && !/缩略图|thumb/.test(n) && baseStartsWith(n, ex.code));
-      let file: string | undefined;
-      if (image) { file = `media/exhibits/${code}${extOf(image.name)}`; pkg.add(file, image.bytes); }
-      else warnings.push(`Lesson ${def.no} 展品「${ex.titleEn || ex.code}」缺少媒体文件`);
-      const thumb = findMedia(media, (n) => isImageName(n) && /缩略图|thumb/.test(n) && baseStartsWith(n, ex.code));
+      // 媒体匹配：按“课时号 + 展品号”匹配（lesson1-exhibit-1.png / lesson1-exhibit1缩略图.png 等）
+      const exNum = Number((/\d+/.exec(ex.code) || [])[0] || 0);
+      const lessonNoRe = new RegExp(`lesson\\s*0*${def.no}(?!\\d)`, "i");
+      const exhibitRe = exNum ? new RegExp(`exhibit[\\s_-]?0*${exNum}(?!\\d)`, "i") : null;
+      const matchExhibitMedia = (n: string) => {
+        const base = (n.split("/").pop() ?? n).toLowerCase();
+        if (!lessonNoRe.test(base)) return false;
+        return exhibitRe ? exhibitRe.test(base) : /exhibit/i.test(base);
+      };
+      const image = findMedia(media, (n) => (isImageName(n) || isVideoName(n) || isModelName(n)) && !/缩略图|thumb/.test(n) && matchExhibitMedia(n));
+      if (!image) { warnings.push(`Lesson ${def.no} 展品「${ex.titleEn || ex.code}」缺少媒体文件，已跳过`); continue; }
+      const file = `media/exhibits/${code}${extOf(image.name)}`;
+      pkg.add(file, image.bytes);
+      const thumb = findMedia(media, (n) => isImageName(n) && /缩略图|thumb/.test(n) && matchExhibitMedia(n));
       let thumbnail: string | undefined;
       if (thumb) { thumbnail = `media/exhibits/${code}.thumb${extOf(thumb.name)}`; pkg.add(thumbnail, thumb.bytes); }
       const localizedEx: PackageExhibit["localized"] = {};
@@ -625,11 +648,6 @@ function defsTextPoints(points: NewLessonRow[], isZh: boolean): { code: string; 
     out.push({ code: p.code, title });
   }
   return out;
-}
-
-function baseStartsWith(name: string, code: string): boolean {
-  const base = (name.split("/").pop() ?? name).toLowerCase();
-  return base.startsWith(code.toLowerCase());
 }
 
 function extOf(name: string): string {
