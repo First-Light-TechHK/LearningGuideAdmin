@@ -11,6 +11,11 @@ import {
 } from '@nestjs/common';
 
 import {
+  HELPDESK_CARD_REWRITER,
+  noCardRewriter,
+  type CardRewriter,
+} from '../../contracts/helpdesk-card-rewrite';
+import {
   HELPDESK_GAP_LABELLER,
   noGapLabeller,
   type GapLabeller,
@@ -18,6 +23,11 @@ import {
 
 import { closePool } from '../lib/db';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
+import {
+  createFaqReviewService,
+  createPgFaqReviewRepository,
+} from '../modules/helpdesk/faqs/faqReview';
+import { createFaqRewriteService } from '../modules/helpdesk/faqs/faqRewrite';
 import { createFaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
 import { HELPDESK_FAQ_RELEASE_SOURCE } from '../modules/helpdesk/faqs/faqRelease';
 import {
@@ -77,6 +87,11 @@ import {
   HELPDESK_FAQ_SERVICE,
   HelpdeskIntegrationFaqsController,
 } from './helpdesk-faqs.controller';
+import {
+  BackofficeHelpdeskFaqReviewController,
+  HELPDESK_FAQ_REVIEW_SERVICE,
+  HELPDESK_FAQ_REWRITE_SERVICE,
+} from './helpdesk-faq-review.controller';
 
 /**
  * BackOffice Portal（PRD v1.1）：员工登录、员工账号、六角色菜单权限、语言偏好；
@@ -93,6 +108,11 @@ export type BackofficeModuleOptions = {
    * 不给 = 不问模型（代码写的标签）。
    */
   gapLabeller?: Provider;
+  /**
+   * HELPDESK_CARD_REWRITER 的提供者（AppModule 组装：Agent 的一次 DeepSeek 调用；没有 key / 测试 = 不问模型）。
+   * 不给 = 「AI 按指令改卡」回 503 REWRITE_UNAVAILABLE。
+   */
+  cardRewriter?: Provider;
 };
 
 const HELPDESK_FLYWHEEL_RUNNER = Symbol('HELPDESK_FLYWHEEL_RUNNER');
@@ -144,6 +164,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         HelpdeskIntegrationFaqReleaseController,
         BackofficeHelpdeskAgentRunsController,
         BackofficeHelpdeskFlywheelController,
+        BackofficeHelpdeskFaqReviewController,
       ],
       providers: [
         {
@@ -173,6 +194,27 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         options.gapLabeller ?? {
           provide: HELPDESK_GAP_LABELLER,
           useValue: noGapLabeller,
+        },
+        options.cardRewriter ?? {
+          provide: HELPDESK_CARD_REWRITER,
+          useValue: noCardRewriter,
+        },
+        // FAQ 逐张审核（只追加的审核记录；状态按卡的当前版本算）与改动历史
+        {
+          provide: HELPDESK_FAQ_REVIEW_SERVICE,
+          useFactory: (faqs: FaqService) =>
+            createFaqReviewService({
+              reviews: createPgFaqReviewRepository(),
+              faqs,
+            }),
+          inject: [HELPDESK_FAQ_SERVICE],
+        },
+        // AI 按指令改卡（只用 DeepSeek，不保存）
+        {
+          provide: HELPDESK_FAQ_REWRITE_SERVICE,
+          useFactory: (rewriter: CardRewriter) =>
+            createFaqRewriteService({ rewriter }),
+          inject: [HELPDESK_CARD_REWRITER],
         },
         // v5 Part G：数据飞轮（事实表 ← Portal insights；候选；运行行；指标）
         {

@@ -24,6 +24,11 @@ import {
   noGapLabeller,
 } from './contracts/helpdesk-flywheel';
 import { createModelGapLabeller } from './ai/helpdesk/flywheel/gap-labeller';
+import { createModelCardRewriter } from './ai/helpdesk/card-rewriter';
+import {
+  HELPDESK_CARD_REWRITER,
+  noCardRewriter,
+} from './contracts/helpdesk-card-rewrite';
 import { suggestModel } from './ai/helpdesk/helpdesk-suggest.service';
 import { PiStepRunner } from './ai/helpdesk/workflow/pi-step-runner';
 import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
@@ -101,6 +106,17 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
                   process.env.NODE_ENV === 'test'
                     ? noGapLabeller
                     : createModelGapLabeller({
+                        runner: new PiStepRunner(),
+                        model: suggestModel,
+                      }),
+              },
+              // 「AI 按指令改卡」：员工说怎么改，DeepSeek 改好给员工看（不保存）；没有 key 或测试里 = 不问模型
+              cardRewriter: {
+                provide: HELPDESK_CARD_REWRITER,
+                useFactory: () =>
+                  process.env.NODE_ENV === 'test'
+                    ? noCardRewriter
+                    : createModelCardRewriter({
                         runner: new PiStepRunner(),
                         model: suggestModel,
                       }),

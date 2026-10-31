@@ -154,6 +154,8 @@ export type FaqRepository = {
 const COLUMNS = `id, key, node_type, entry, category, popular, question_en, answer_en,
   question_zh, answer_zh, keywords, signals, status, version, created_by, updated_by,
   created_at, updated_at`;
+/** 员工端读卡的列（FAQ 审核队列 faqReview.ts 复用，和 toFaq 配套）。 */
+export const FAQ_COLUMNS = COLUMNS;
 
 const PATCH_COLUMNS: Record<keyof FaqPatch, string> = {
   key: 'key',
@@ -244,7 +246,7 @@ async function writeRevision(
 }
 
 /** LIKE 通配符转义（\ % _）。 */
-function likePattern(text: string): string {
+export function likePattern(text: string): string {
   return `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
