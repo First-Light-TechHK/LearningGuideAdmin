@@ -14,7 +14,10 @@ async function runRaw(payload: Record<string, unknown>) {
   const rawPath = String(payload.rawPath);
   const outPath = String(payload.outPath);
   const buf = await fs.readFile(rawPath);
-  const built = await buildPackageFromRawZip(buf);
+  const courseCode =
+    typeof payload.courseCode === 'string' ? payload.courseCode : undefined;
+  const slug = typeof payload.slug === 'string' ? payload.slug : undefined;
+  const built = await buildPackageFromRawZip(buf, { courseCode, slug });
   await fs.writeFile(outPath, built.bytes);
   return {
     warnings: built.warnings,

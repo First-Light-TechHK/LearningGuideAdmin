@@ -18,6 +18,7 @@ import { PreviewService } from './preview.service';
 import { OperationsService } from './operations.service';
 import { OperationsController } from './operations.controller';
 import { EnvironmentController } from './environment.controller';
+import { CourseAuthoringService } from './course-authoring.service';
 
 /**
  * 商品课程 v2（Commerce Course）：课程管理、课程包导入/导出、Portal v1 投影。
@@ -51,6 +52,7 @@ import { EnvironmentController } from './environment.controller';
     PackageJobsService,
     PackageWorker,
     CommerceCoursesService,
+    CourseAuthoringService,
     PortalProjectionService,
   ],
 })

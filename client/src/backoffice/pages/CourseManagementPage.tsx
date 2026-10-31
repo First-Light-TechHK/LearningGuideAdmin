@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 
 import { useEmployee } from '../ShellRoute'
 import type { CourseList } from '../contracts/course'
+import { useResizableColumns } from '../components/resizableColumns'
+import { Pagination, usePageSize } from '../components/Pagination'
 import { boRequest } from '../lib/api'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
@@ -26,10 +28,15 @@ type UploadResult<T> = { success: true; data: T } | { success: false; error: str
  * 带上传进度的文件上传（fetch 无法获取上传进度，改用 XHR 的 upload.onprogress）。
  * error 为稳定码：NETWORK_ERROR / ABORTED / 或后端信封里的错误码。
  */
-function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: number) => void): Promise<UploadResult<T>> {
+function uploadFileWithProgress<T>(
+  url: string,
+  file: Blob,
+  onProgress: (pct: number) => void,
+  opts?: { field?: string; method?: 'POST' | 'PUT' },
+): Promise<UploadResult<T>> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
+    xhr.open(opts?.method ?? 'POST', url)
     xhr.withCredentials = true
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
@@ -38,15 +45,16 @@ function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: nu
       try {
         const body = JSON.parse(xhr.responseText) as { success?: boolean; data?: T; error?: { code?: string; message?: string } | null }
         if (body?.success === true) resolve({ success: true, data: body.data as T })
-        else resolve({ success: false, error: body?.error?.code ?? 'INTERNAL_ERROR', errorMessage: body?.error?.message })
+        else resolve({ success: false, error: body?.error?.code ?? `HTTP_${xhr.status}`, errorMessage: body?.error?.message ?? `HTTP ${xhr.status}` })
       } catch {
-        resolve({ success: false, error: 'INTERNAL_ERROR' })
+        // 响应体不是 JSON 信封（多为网关 5xx/504 或单请求被边缘切断），把真实状态码带出来便于定位
+        resolve({ success: false, error: `HTTP_${xhr.status}`, errorMessage: `HTTP ${xhr.status}${xhr.statusText ? ' ' + xhr.statusText : ''}` })
       }
     }
     xhr.onerror = () => resolve({ success: false, error: 'NETWORK_ERROR' })
     xhr.onabort = () => resolve({ success: false, error: 'ABORTED' })
     const form = new FormData()
-    form.append('file', file)
+    form.append(opts?.field ?? 'file', file)
     xhr.send(form)
   })
 }
@@ -79,38 +87,65 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const canPublish = employee.role === 'ADMIN' || employee.role === 'OPERATION_ADMIN'
   const [list, setList] = useState<CourseList | null>(null)
   const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('course-list')
   const [importJob, setImportJob] = useState<JobView | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState('')
+  const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [createCategoryId, setCreateCategoryId] = useState('')
+  const [createMode, setCreateMode] = useState('VIDEO_AND_TEXT')
+  const [createLanguage, setCreateLanguage] = useState<string>(locale)
   const [exportingId, setExportingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
+  const courseTable = useResizableColumns({
+    storageKey: 'course-list',
+    defaultWidths: [92, 300, 120, 76, 84, 110, 150],
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
-    const query = new URLSearchParams({ page: '1', pageSize: '50' })
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (categoryId) query.set('categoryId', categoryId)
     const result = await boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`)
     setLoading(false)
-    if (result.success) setList(result.data)
-    else setMessage(t(locale, 'common.sessionUnavailable'))
-  }, [locale, categoryId])
+    if (!result.success) {
+      setMessage(t(locale, 'common.sessionUnavailable'))
+      return
+    }
+    // 筛选/删除后总页数变少时把越界页码拉回最后一页，避免停在空白页
+    if (result.data.pages > 0 && page > result.data.pages) {
+      setPage(result.data.pages)
+      return
+    }
+    setList(result.data)
+  }, [locale, categoryId, page, pageSize])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  useEffect(() => {
+    void (async () => {
+      const result = await boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`)
+      if (result.success) setCatalogCategories(result.data)
+    })()
+  }, [])
+
   const categories = useMemo(() => {
     const map = new Map<string, string>()
+    for (const category of catalogCategories) map.set(category.id, category.name)
+    // 当前页出现的分类即使目录接口没返回（如已停用）也保留，避免已选筛选值丢失
     for (const course of list?.courses ?? []) {
       if (course.category) map.set(course.category.id, course.category.name)
     }
     return [...map.entries()]
-  }, [list])
+  }, [catalogCategories, list])
 
   async function createCourse(form: FormData) {
     setBusy(true)
@@ -121,9 +156,11 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         code: String(form.get('code')),
         title: String(form.get('title')),
         slug: String(form.get('slug') || ''),
-        language: locale,
-        defaultContentLanguage: locale,
-        learningLanguages: [locale],
+        language: createLanguage,
+        defaultContentLanguage: createLanguage,
+        learningLanguages: [createLanguage],
+        learningMode: createMode,
+        categoryId: createCategoryId || null,
       }),
     })
     setBusy(false)
@@ -157,19 +194,52 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setBusy(true)
     setMessage(null)
     setUploadPct(0)
-    const result = await uploadFileWithProgress<JobView>(
-      `/api/backoffice/courses/import/raw`,
-      file,
-      setUploadPct,
+    // 大素材包单次 POST 会被 CloudFront/App Runner 中途切断，改为分块上传：
+    // 先开会话拿 jobId + 块大小，再把文件切成小块逐块 PUT，最后 complete。
+    const init = await boRequest<{ jobId: string; chunkSize: number }>(
+      `/api/backoffice/courses/import/raw/session`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, bytesTotal: file.size }),
+      },
     )
-    setUploadPct(null)
-    if (!result.success) {
+    if (!init.success) {
       setBusy(false)
-      setMessage(uploadErrorText(result.error, result.errorMessage))
+      setMessage(uploadErrorText(init.error, init.message))
       return
     }
-    setMessage(L('素材已上传，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
-    const job = await pollImportJob(result.data)
+    const { jobId } = init.data
+    const total = file.size
+    const size = Math.max(1, init.data.chunkSize || 5 * 1024 * 1024)
+    let sent = 0
+    for (let index = 0; sent < total; index++) {
+      const start = index * size
+      const blob = file.slice(start, Math.min(start + size, total))
+      const res = await uploadFileWithProgress<{ jobId: string; progress: number }>(
+        `/api/backoffice/courses/import/${jobId}/chunk?index=${index}`,
+        blob,
+        (pct) => setUploadPct(Math.min(99, Math.round(((sent + (blob.size * pct) / 100) / total) * 100))),
+        { field: 'chunk', method: 'PUT' },
+      )
+      if (!res.success) {
+        setBusy(false)
+        setUploadPct(null)
+        setMessage(uploadErrorText(res.error, res.errorMessage))
+        return
+      }
+      sent += blob.size
+      setUploadPct(Math.min(99, Math.round((sent / total) * 100)))
+    }
+    setUploadPct(null)
+    setMessage(L('上传完成，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
+    const comp = await boRequest<JobView>(`/api/backoffice/courses/import/${jobId}/complete`, { method: 'POST' })
+    if (!comp.success) {
+      setBusy(false)
+      setMessage(uploadErrorText(comp.error, comp.message))
+      return
+    }
+    const job = await pollImportJob(comp.data)
     setBusy(false)
     setImportJob(job)
     if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
@@ -263,7 +333,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     const result = await boRequest<{ courseId: string }>(`/api/backoffice/courses/import/${importJob.jobId}/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ onConflict, reassignCodes: true }),
+      body: JSON.stringify({ onConflict, reassignCodes: false }),
     })
     setBusy(false)
     if (result.success) {
@@ -334,7 +404,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <label style={{ fontSize: 13 }}>
           {L('分类', 'Category')}{' '}
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} style={{ padding: 7, borderRadius: 8 }}>
+          <select
+            value={categoryId}
+            onChange={(event) => {
+              setCategoryId(event.target.value)
+              setPage(1)
+            }}
+            style={{ padding: 7, borderRadius: 8 }}
+          >
             <option value="">{L('全部分类', 'All categories')}</option>
             {categories.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
@@ -369,6 +446,9 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
           <label>{L('课程标题', 'Course title')}<input name="title" required style={{ display: 'block', padding: 8 }} /></label>
           <label>{L('课程 ID', 'Course ID')}<input name="code" required style={{ display: 'block', padding: 8 }} /></label>
           <label>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', padding: 8 }} /></label>
+          <label>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="en-GB">en-GB</option><option value="zh-CN">zh-CN</option></select></label>
+          <label>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="VIDEO_ONLY">VIDEO_ONLY</option><option value="TEXT_ONLY">TEXT_ONLY</option><option value="VIDEO_AND_TEXT">VIDEO_AND_TEXT</option></select></label>
+          <label>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
           <button className="button" disabled={busy}>{L('创建并编辑', 'Create and edit')}</button>
           <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
         </form>
@@ -387,60 +467,75 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       {loading && <p className="cardBody">{t(locale, 'common.loading')}</p>}
 
       {list && (
-        <table className="table" style={{ width: '100%', marginTop: 16 }}>
-          <thead>
-            <tr>
-              <th>{L('课程 ID', 'Course ID')}</th>
-              <th>{L('课程', 'Course')}</th>
-              <th>{L('分类', 'Category')}</th>
-              <th>{L('课时', 'Lessons')}</th>
-              <th>{L('草稿', 'Draft')}</th>
-              <th>{L('在线', 'Live')}</th>
-              <th>{L('操作', 'Actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.courses.map((course) => (
-              <tr key={course.id}>
-                <td>{course.code}</td>
-                <td>
-                  <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
-                  <div style={{ opacity: 0.7, fontSize: 12 }}>
-                    {course.learningMode} · {course.learningLanguages.join(', ')}
-                  </div>
-                </td>
-                <td>{course.category?.name ?? '—'}</td>
-                <td>{course.lessonCount}</td>
-                <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
-                <td>
-                  {course.published
-                    ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
-                    : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
-                    <button
-                      className="button buttonGhost"
-                      disabled={busy || exportingId !== null}
-                      onClick={() => void exportCourse(course)}
-                    >
-                      {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {list.courses.length === 0 && (
+        <div className="tableWrap" style={{ marginTop: 16 }}>
+          <table className="table" style={courseTable.tableStyle}>
+            {courseTable.colGroup}
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
-                  {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
-                </td>
+                <th>{L('课程 ID', 'Course ID')}{courseTable.resizeHandle(0)}</th>
+                <th>{L('课程', 'Course')}{courseTable.resizeHandle(1)}</th>
+                <th>{L('分类', 'Category')}{courseTable.resizeHandle(2)}</th>
+                <th>{L('课时', 'Lessons')}{courseTable.resizeHandle(3)}</th>
+                <th>{L('草稿', 'Draft')}{courseTable.resizeHandle(4)}</th>
+                <th>{L('在线', 'Live')}{courseTable.resizeHandle(5)}</th>
+                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(6)}</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.courses.map((course) => (
+                <tr key={course.id}>
+                  <td>{course.code}</td>
+                  <td>
+                    <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>
+                      {course.learningMode} · {course.learningLanguages.join(', ')}
+                    </div>
+                  </td>
+                  <td>{course.category?.name ?? '—'}</td>
+                  <td>{course.lessonCount}</td>
+                  <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
+                  <td>
+                    {course.published
+                      ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
+                      : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
+                      <button
+                        className="button buttonGhost"
+                        disabled={busy || exportingId !== null}
+                        onClick={() => void exportCourse(course)}
+                      >
+                        {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {list.courses.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                    {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <Pagination
+        locale={locale}
+        page={list?.page ?? page}
+        pageSize={pageSize}
+        total={list ? list.total : null}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
     </section>
   )
 }
@@ -487,23 +582,17 @@ function ImportPanel({
       )}
       {job.status === 'AWAITING_CONFIRM' && (
         <div style={{ marginTop: 12 }}>
-          {codeExists && (
+          {codeExists ? (
             <p style={{ fontSize: 13, color: '#9A6B00', background: '#FFF6E5', padding: '8px 12px', borderRadius: 8 }}>
               {zh
-                ? `课程 ${job.package?.courseCode} 已存在。请点击「导入为新课程」，会生成一门新课程（Course ID 自动顺延）。`
-                : `Course ${job.package?.courseCode} already exists. Click "Import as new course" to create a new course with a new Course ID.`}
+                ? `课程 ${job.package?.courseCode} 已存在，本后台拒绝重复导入。请进入该课程，使用「导入课程包」替换草稿。`
+                : `Course ${job.package?.courseCode} already exists. This Admin refuses the import; open the existing course and use "Import package" instead.`}
             </p>
-          )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="button" disabled={busy} onClick={() => onConfirm('CREATE_NEW_COURSE')}>
-              {zh ? '导入为新课程' : 'Import as new course'}
+          ) : (
+            <button className="button" disabled={busy} onClick={() => onConfirm('ABORT')}>
+              {zh ? '导入课程' : 'Import course'}
             </button>
-            {!codeExists && (
-              <button className="button buttonGhost" disabled={busy} onClick={() => onConfirm('ABORT')}>
-                {zh ? '导入（冲突则中止）' : 'Import (abort on conflict)'}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
     </div>

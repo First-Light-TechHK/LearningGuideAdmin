@@ -25,6 +25,16 @@ export class ImportError extends Error {
   }
 }
 
+interface ImportedMediaMeta {
+  assetId: string;
+  kind: string;
+  extension: string;
+  storageKey: string;
+  mimeType: string;
+  size: number;
+  originalName: string;
+}
+
 /**
  * 把已校验的课程包写入数据库（媒体先转存再到 DB，失败回滚）。
  * 结果固定创建 Working copy / HIDDEN（跨环境状态不搬运，见 §17.2）。
@@ -52,19 +62,18 @@ export class PackageImporter {
     let targetCode = course.code;
     let targetSlug = course.slug;
     if (existing) {
-      if (options.onConflict === 'ABORT') {
+      // PRD §9.2 / §16.3：Course ID 已存在时必须拒绝导入；已有课程请使用 Import package。
+      if (
+        options.onConflict === 'ABORT' ||
+        options.onConflict === 'CREATE_NEW_COURSE'
+      ) {
         throw new ImportError(
           'PACKAGE_CONFLICT',
           409,
-          `Course ${existing.code} already exists.`,
+          `Course ${existing.code} already exists. The Course ID must not already exist in this Admin, or the import is refused.`,
         );
       }
-      if (options.onConflict === 'CREATE_NEW_COURSE') {
-        const suffix = `-imported-${Date.now().toString(36)}`;
-        targetCode = await uniqueCode(this.prisma, course.code);
-        targetSlug = `${course.slug}${suffix}`;
-      }
-      // NEW_VERSION 在 P1a 暂以“覆盖更新已有课程的工作副本”未实现，按冲突处理
+      // NEW_VERSION 暂未实现，按冲突处理
       if (options.onConflict === 'NEW_VERSION') {
         throw new ImportError(
           'PACKAGE_CONFLICT',
@@ -78,10 +87,7 @@ export class PackageImporter {
     const categoryId = await this.resolveCategory(course.category);
 
     const courseId = randomUUID();
-    const mediaKeyMap = new Map<
-      string,
-      { assetId: string; kind: string; extension: string; storageKey: string }
-    >();
+    const mediaKeyMap = new Map<string, ImportedMediaMeta>();
 
     // 1) 媒体转存
     try {
@@ -135,12 +141,11 @@ export class PackageImporter {
     }
 
     const categoryId = await this.resolveCategory(manifest.course.category);
-    const mediaKeyMap = new Map<
-      string,
-      { assetId: string; kind: string; extension: string; storageKey: string }
-    >();
+    const mediaKeyMap = new Map<string, ImportedMediaMeta>();
     try {
       await this.transferMedia(courseId, manifest, files, mediaKeyMap);
+      // 媒体资产必须先落库，applyVersionSnapshot 才能写入视频/展品外键。
+      await this.createMediaRows(courseId, mediaKeyMap);
     } catch (error) {
       await this.rollbackMedia(courseId, mediaKeyMap);
       throw error;
@@ -159,26 +164,54 @@ export class PackageImporter {
           data: {
             hasDraft: true,
             lifecycleStatus: 'WORKING',
+            trialEnabled: Boolean(manifest.course.trial?.enabled),
             draftSourceType: 'IMPORT',
             draftSourceEnvironment: manifest.source.environment ?? null,
             draftSourceVersionLabel: manifest.source.sourceVersion ?? null,
           },
         });
 
+        // applyVersionSnapshot 可能复用/重建 Lesson 与 LP 行，必须重新从数据库取实际 ID。
+        const actualLessons = await tx.lesson.findMany({
+          where: { courseId, archivedAt: null },
+          select: { id: true, code: true },
+        });
+        const lessonIdByCode = new Map(
+          actualLessons.map((lesson) => [lesson.code, lesson.id]),
+        );
+        const lessonCodeById = new Map(
+          actualLessons.map((lesson) => [lesson.id, lesson.code]),
+        );
+        const learningPoints = await tx.learningPoint.findMany({
+          where: { lesson: { courseId } },
+          select: { id: true, lessonId: true, code: true },
+        });
+        const lpIdByKey = new Map(
+          learningPoints.map((lp) => [
+            `${lessonCodeById.get(lp.lessonId) ?? ''}|${lp.code}`,
+            lp.id,
+          ]),
+        );
+        const lpIds = new Set(learningPoints.map((lp) => lp.id));
+        const resolveCutoff = (lessonCode: string, ref?: string | null) => {
+          if (!ref) return null;
+          return lpIdByKey.get(`${lessonCode}|${ref}`) ?? (lpIds.has(ref) ? ref : null);
+        };
+
         await tx.trialSetting.deleteMany({ where: { courseId } });
         if (manifest.course.trial?.enabled) {
-          const lessonByCode = new Map(
-            snapshot.course.lessons.map((lesson) => [lesson.code, lesson.id]),
-          );
           for (const row of manifest.course.trial.lessons ?? []) {
-            const lessonId = lessonByCode.get(row.lessonRef);
+            const lessonId = lessonIdByCode.get(row.lessonRef);
             if (!lessonId) continue;
             await tx.trialSetting.create({
               data: {
                 courseId,
                 lessonId,
                 videoCutoffSeconds: row.videoCutoffSeconds ?? null,
-                textCutoffLearningPointId: row.textCutoffLearningPoint ?? null,
+                textCutoffLearningPointId: resolveCutoff(
+                  row.lessonRef,
+                  row.textCutoffLearningPoint,
+                ),
                 status: (row.status ?? 'READY') as never,
               },
             });
@@ -231,7 +264,7 @@ export class PackageImporter {
   private snapshotFromPackage(
     manifest: PackageManifest,
     categoryId: string | null,
-    mediaKeyMap: Map<string, { assetId: string }>,
+    mediaKeyMap: Map<string, ImportedMediaMeta>,
   ): VersionSnapshot {
     const { course } = manifest;
     const capturedAt = new Date().toISOString();
@@ -394,10 +427,7 @@ export class PackageImporter {
     courseId: string,
     manifest: PackageManifest,
     files: Map<string, Buffer>,
-    map: Map<
-      string,
-      { assetId: string; kind: string; extension: string; storageKey: string }
-    >,
+    map: Map<string, ImportedMediaMeta>,
   ): Promise<void> {
     const { course } = manifest;
     const store = async (relPath: string) => {
@@ -433,6 +463,9 @@ export class PackageImporter {
         kind: validated.kind,
         extension: validated.extension,
         storageKey,
+        mimeType: validated.mimeType,
+        size: validated.size,
+        originalName: validated.originalName,
       });
       return { assetId, validated };
     };
@@ -449,17 +482,39 @@ export class PackageImporter {
     }
   }
 
+  /** 导入已有课程时补齐媒体资产行；新建课程在 writeCourse 的事务内创建。 */
+  private async createMediaRows(
+    courseId: string,
+    map: Map<string, ImportedMediaMeta>,
+  ): Promise<void> {
+    if (map.size === 0) return;
+    await this.prisma.courseMediaAsset.createMany({
+      data: [...map.values()].map((meta) => ({
+        id: meta.assetId,
+        courseId,
+        kind: meta.kind as never,
+        originalName: meta.originalName,
+        mimeType: meta.mimeType,
+        extension: meta.extension,
+        size: meta.size,
+        storageKey: meta.storageKey,
+      })),
+    });
+  }
+
   private async rollbackMedia(
     courseId: string,
-    map: Map<
-      string,
-      { assetId: string; kind: string; extension: string; storageKey: string }
-    >,
+    map: Map<string, ImportedMediaMeta>,
   ): Promise<void> {
+    const ids = [...map.values()].map((m) => m.assetId);
+    if (ids.length) {
+      await this.prisma.courseMediaAsset
+        .deleteMany({ where: { id: { in: ids }, courseId } })
+        .catch(() => undefined);
+    }
     await Promise.all(
       [...map.values()].map((m) => this.storage.removeMedia(m.storageKey)),
     );
-    void courseId;
   }
 
   private async writeCourse(
@@ -467,10 +522,7 @@ export class PackageImporter {
     courseId: string,
     ids: { targetCode: string; targetSlug: string; categoryId: string | null },
     manifest: PackageManifest,
-    mediaKeyMap: Map<
-      string,
-      { assetId: string; kind: string; extension: string; storageKey: string }
-    >,
+    mediaKeyMap: Map<string, ImportedMediaMeta>,
   ): Promise<void> {
     const { course } = manifest;
 
@@ -491,6 +543,7 @@ export class PackageImporter {
         lifecycleStatus: 'WORKING',
         liveStatus: 'HIDDEN',
         hasDraft: true,
+        trialEnabled: Boolean(course.trial?.enabled),
         localizations: {
           create: Object.entries(course.localized).map(([language, loc]) => ({
             language,
@@ -505,16 +558,16 @@ export class PackageImporter {
     });
 
     // 媒体资产行（须在 CommerceCourse 之后，因 courseId 外键指向它）
-    for (const [rel, meta] of mediaKeyMap) {
+    for (const meta of mediaKeyMap.values()) {
       await tx.courseMediaAsset.create({
         data: {
           id: meta.assetId,
           courseId,
           kind: meta.kind as never,
-          originalName: rel.split('/').pop() ?? rel,
-          mimeType: '',
+          originalName: meta.originalName,
+          mimeType: meta.mimeType,
           extension: meta.extension,
-          size: 0,
+          size: meta.size,
           storageKey: meta.storageKey,
         },
       });
@@ -529,6 +582,7 @@ export class PackageImporter {
 
     // 课时
     const lessonIdByCode = new Map<string, string>();
+    const lpIdByKey = new Map<string, string>();
     for (const lesson of [...(course.lessons ?? [])].sort(
       (a, b) => a.order - b.order,
     )) {
@@ -575,7 +629,7 @@ export class PackageImporter {
         const textLps = loc.text?.learningPoints ?? [];
         let order = 0;
         for (const lp of videoLps) {
-          await tx.learningPoint.create({
+          const createdLp = await tx.learningPoint.create({
             data: {
               lessonId,
               language,
@@ -586,9 +640,10 @@ export class PackageImporter {
               sortOrder: order++,
             },
           });
+          lpIdByKey.set(`${lesson.code}|${lp.code}`, createdLp.id);
         }
         for (const lp of textLps) {
-          await tx.learningPoint.create({
+          const createdLp = await tx.learningPoint.create({
             data: {
               lessonId,
               language,
@@ -599,6 +654,7 @@ export class PackageImporter {
               sortOrder: order++,
             },
           });
+          lpIdByKey.set(`${lesson.code}|${lp.code}`, createdLp.id);
         }
         for (const trigger of loc.video?.exhibitTriggers ?? []) {
           const exId = exhibitIdByCode.get(trigger.exhibitRef);
@@ -673,7 +729,11 @@ export class PackageImporter {
             courseId,
             lessonId,
             videoCutoffSeconds: row.videoCutoffSeconds ?? null,
-            textCutoffLearningPointId: row.textCutoffLearningPoint ?? null,
+            textCutoffLearningPointId: row.textCutoffLearningPoint
+              ? (lpIdByKey.get(
+                  `${row.lessonRef}|${row.textCutoffLearningPoint}`,
+                ) ?? null)
+              : null,
             status: (row.status ?? 'READY') as never,
           },
         });
@@ -717,7 +777,7 @@ export class PackageImporter {
     tx: Prisma.TransactionClient,
     lessonId: string,
     ex: PackageExhibit,
-    mediaKeyMap: Map<string, { assetId: string }>,
+    mediaKeyMap: Map<string, ImportedMediaMeta>,
   ): Promise<string> {
     const exhibitId = randomUUID();
     await tx.exhibit.create({
@@ -738,23 +798,4 @@ export class PackageImporter {
     });
     return exhibitId;
   }
-}
-
-async function uniqueCode(
-  prisma: PrismaService,
-  base: string,
-): Promise<string> {
-  const match = /^([A-Za-z]+)(\d+)$/.exec(base);
-  if (!match) return `${base}-imported`;
-  const prefix = match[1];
-  const all = await prisma.commerceCourse.findMany({
-    where: { code: { startsWith: prefix } },
-    select: { code: true },
-  });
-  let max = 0;
-  for (const row of all) {
-    const m = /^([A-Za-z]+)(\d+)$/.exec(row.code);
-    if (m && m[1] === prefix) max = Math.max(max, Number(m[2]));
-  }
-  return `${prefix}${String(max + 1).padStart(3, '0')}`;
 }

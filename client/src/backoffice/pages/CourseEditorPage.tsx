@@ -11,6 +11,7 @@ import type {
 } from '../contracts/course';
 import { providerItems, strings } from '../contracts/course';
 import { boRequest } from '../lib/api';
+import { useResizableColumns } from '../components/resizableColumns';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -63,6 +64,7 @@ export function CourseEditorPage() {
   const [plans, setPlans] = useState<CoursePlan[]>([]);
   const [versions, setVersions] = useState<CourseVersion[]>([]);
   const [history, setHistory] = useState<HistoryPage | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const [tab, setTab] = useState<Tab>('info');
   const [activeLessonId, setActiveLessonId] = useState('');
   const [contentLanguage, setContentLanguage] = useState('en-GB');
@@ -73,15 +75,26 @@ export function CourseEditorPage() {
   const [statusTarget, setStatusTarget] = useState<'ONLINE' | 'HIDDEN' | 'OFFLINE'>('ONLINE');
   const [exportJob, setExportJob] = useState<{ status: string; progress: number; fileName?: string; error?: string } | null>(null);
   const [exportVersion, setExportVersion] = useState('live');
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const nextTab = useRef<Tab | null>(null);
+  const versionsTable = useResizableColumns({
+    storageKey: 'course-editor-versions',
+    defaultWidths: [110, 170, 180, 150, 240],
+  });
+  const historyTable = useResizableColumns({
+    storageKey: 'course-editor-history',
+    defaultWidths: [160, 140, 140, 578],
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [detail, trialResult, versionsResult, historyResult] = await Promise.all([
+    const [detail, trialResult, versionsResult, historyResult, categoriesResult] = await Promise.all([
       boRequest<CourseDetail>(`/api/backoffice/courses/${courseId}`),
       boRequest<TrialSettings>(`/api/backoffice/courses/${courseId}/trial`),
       boRequest<CourseVersion[]>(`/api/backoffice/courses/${courseId}/versions`),
-      boRequest<HistoryPage>(`/api/backoffice/courses/${courseId}/history?page=1&pageSize=20`),
+      boRequest<HistoryPage>(`/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`),
+      boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`),
     ]);
     setLoading(false);
     if (!detail.success) {
@@ -91,10 +104,12 @@ export function CourseEditorPage() {
     setCourse(detail.data);
     setContentLanguage(detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB');
     setActiveLessonId((current) => current || detail.data.lessons[0]?.id || '');
+    setSelectedCategoryId(detail.data.categoryId ?? '');
     if (trialResult.success) setTrial(trialResult.data);
     if (versionsResult.success) setVersions(versionsResult.data);
     if (historyResult.success) setHistory(historyResult.data);
-  }, [courseId]);
+    if (categoriesResult.success) setCategories(categoriesResult.data);
+  }, [courseId, historyPage]);
 
   useEffect(() => {
     void load();
@@ -121,6 +136,7 @@ export function CourseEditorPage() {
         defaultContentLanguage: language,
         learningLanguages: course.learningLanguages,
         subtitle: String(form.get('subtitle') ?? '') || null,
+        categoryId: selectedCategoryId || null,
       }),
     });
     const provides = String(form.get('provides') ?? '')
@@ -177,6 +193,46 @@ export function CourseEditorPage() {
       await load();
     } else {
       setNotice(`Lesson save failed: ${result.error}`);
+    }
+  }
+
+  async function uploadCover(file: File) {
+    if (!course) return;
+    setBusy(true);
+    const form = new FormData();
+    form.append('file', file);
+    const result = await boRequest<{ id: string }>(`/api/backoffice/courses/${course.id}/cover`, { method: 'POST', body: form });
+    setBusy(false);
+    if (result.success) {
+      setNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
+      await load();
+    } else {
+      setNotice(`Cover upload failed: ${result.error}`);
+    }
+  }
+
+  async function uploadLessonVideo(file: File) {
+    if (!course || !activeLesson) return;
+    setBusy(true);
+    const form = new FormData();
+    form.append('file', file);
+    const uploaded = await boRequest<{ id: string }>(`/api/backoffice/courses/${course.id}/media`, { method: 'POST', body: form });
+    if (!uploaded.success) {
+      setBusy(false);
+      setNotice(`Video upload failed: ${uploaded.error}`);
+      return;
+    }
+    const result = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/video`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language, assetId: uploaded.data.id }),
+    });
+    setBusy(false);
+    if (result.success) {
+      setNotice(L(locale, '视频已上传。', 'Video uploaded.'));
+      await load();
+    } else {
+      setNotice(`Video assign failed: ${result.error}`);
     }
   }
 
@@ -471,8 +527,17 @@ export function CourseEditorPage() {
               <label style={labelStyle}>{L(locale, 'Course ID（不可修改）', 'Course ID (read-only)')}<input value={course.code} readOnly style={{ ...inputStyle, background: '#F5F7FA' }} /></label>
               <label style={labelStyle}>Slug<input name="slug" defaultValue={course.slug} style={inputStyle} /></label>
               <label style={labelStyle}>{L(locale, '学习模式（创建后锁定）', 'Learning mode (locked)')}<input value={course.learningMode} readOnly style={{ ...inputStyle, background: '#F5F7FA' }} /></label>
-              <label style={labelStyle}>{L(locale, '副标题', 'Subtitle')}<input name="subtitle" defaultValue={course.subtitle ?? ''} style={inputStyle} /></label>
-              <label style={labelStyle}>{L(locale, '简短描述', 'Short description')}<input name="shortDescription" defaultValue={localization?.shortDescription ?? ''} style={inputStyle} /></label>
+              <label style={labelStyle}>
+                {L(locale, '分类', 'Category')}
+                <select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} style={inputStyle}>
+                  <option value="">{L(locale, '未分类', 'Uncategorized')}</option>
+                  {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                {L(locale, '封面图片', 'Cover image')}
+                <input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadCover(file); }} style={inputStyle} />
+              </label>
             </div>
             <label style={labelStyle}>{L(locale, '课程概览', 'Overview')}<textarea name="overview" rows={4} defaultValue={localization?.overview ?? ''} style={inputStyle} /></label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -537,6 +602,13 @@ export function CourseEditorPage() {
                 <Chip>{L(locale, '知识测试', 'Knowledge')} {activeLesson.questions.length}</Chip>
                 <Chip>{L(locale, '阅读', 'Reading')} {activeLesson.readings.length}</Chip>
                 <Chip tone={activeLesson.applicationTest ? 'green' : 'grey'}>{L(locale, '应用测试', 'Application')} {activeLesson.applicationTest ? '✓' : '—'}</Chip>
+              </div>
+              <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ ...buttonStyle, display: 'inline-flex', alignItems: 'center', cursor: busy ? 'not-allowed' : 'pointer' }}>
+                  {L(locale, '上传视频', 'Upload video')}
+                  <input type="file" accept="video/*" disabled={busy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadLessonVideo(file); event.currentTarget.value = ''; }} />
+                </label>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>{L(locale, '上传后自动解析时长。', 'Duration is parsed after upload.')}</span>
               </div>
               <p style={{ fontSize: 12, opacity: 0.65, marginTop: 8 }}>
                 {L(locale, '视频 / 展品 / 测试 / 阅读来自导入的课程包；此页可编辑标题、描述与文本正文。保存只改草稿。', 'Video / exhibits / tests / reading come from the imported package; title, description and text are editable here. Saving only changes the draft.')}
@@ -664,16 +736,18 @@ export function CourseEditorPage() {
             <p style={{ fontSize: 12, opacity: 0.6, marginTop: 6 }}>
               {L(locale, 'Sandbox 编号 1.1、1.2…，导出后下一次发布进入下一整数系列；Production 为 Version 1、2、3…。版本不可删除。', 'Sandbox uses 1.1, 1.2… and starts the next series after export; Production uses Version 1, 2, 3… Versions cannot be deleted.')}
             </p>
-            <table className="table" style={{ width: '100%', marginTop: 12 }}>
-              <thead>
-                <tr>
-                  <th>{L(locale, '版本', 'Version')}</th>
-                  <th>{L(locale, '来源', 'Source')}</th>
-                  <th>{L(locale, '发布时间', 'Published')}</th>
-                  <th>{L(locale, '导出', 'Exported')}</th>
-                  <th>{L(locale, '操作', 'Actions')}</th>
-                </tr>
-              </thead>
+            <div className="tableScroll">
+              <table className="table" style={{ ...versionsTable.tableStyle, marginTop: 12 }}>
+                {versionsTable.colGroup}
+                <thead>
+                  <tr>
+                    <th>{L(locale, '版本', 'Version')}{versionsTable.resizeHandle(0)}</th>
+                    <th>{L(locale, '来源', 'Source')}{versionsTable.resizeHandle(1)}</th>
+                    <th>{L(locale, '发布时间', 'Published')}{versionsTable.resizeHandle(2)}</th>
+                    <th>{L(locale, '导出', 'Exported')}{versionsTable.resizeHandle(3)}</th>
+                    <th>{L(locale, '操作', 'Actions')}{versionsTable.resizeHandle(4)}</th>
+                  </tr>
+                </thead>
               <tbody>
                 {versions.map((version) => (
                   <tr key={version.id}>
@@ -691,25 +765,36 @@ export function CourseEditorPage() {
                 ))}
                 {versions.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 18, opacity: 0.7 }}>{L(locale, '暂无版本。', 'No versions yet.')}</td></tr>}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
 
           <div style={card}>
             <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'History', 'History')}</h2>
-            <table className="table" style={{ width: '100%', marginTop: 12 }}>
-              <thead><tr><th>{L(locale, '时间', 'Time')}</th><th>{L(locale, '操作人', 'Operator')}</th><th>{L(locale, '操作', 'Action')}</th><th style={{ textAlign: 'left' }}>{L(locale, '详情', 'Detail')}</th></tr></thead>
-              <tbody>
-                {(history?.items ?? []).map((item) => (
-                  <tr key={item.id}>
-                    <td>{formatTime(item.time)}</td>
-                    <td>{item.operator}</td>
-                    <td>{item.action}</td>
-                    <td className="cellWrap" style={{ fontSize: 12, opacity: 0.8 }} title={describeHistory(item.detail, item.versionNo)}>{describeHistory(item.detail, item.versionNo)}</td>
-                  </tr>
-                ))}
-                {(history?.items.length ?? 0) === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', padding: 18, opacity: 0.7 }}>{L(locale, '暂无记录。', 'No history yet.')}</td></tr>}
-              </tbody>
-            </table>
+            <div className="tableScroll">
+              <table className="table" style={{ ...historyTable.tableStyle, marginTop: 12 }}>
+                {historyTable.colGroup}
+                <thead><tr><th>{L(locale, '时间', 'Time')}{historyTable.resizeHandle(0)}</th><th>{L(locale, '操作人', 'Operator')}{historyTable.resizeHandle(1)}</th><th>{L(locale, '操作', 'Action')}{historyTable.resizeHandle(2)}</th><th style={{ textAlign: 'left' }}>{L(locale, '详情', 'Detail')}{historyTable.resizeHandle(3)}</th></tr></thead>
+                <tbody>
+                  {(history?.items ?? []).map((item) => (
+                    <tr key={item.id}>
+                      <td>{formatTime(item.time)}</td>
+                      <td>{item.operator}</td>
+                      <td>{item.action}</td>
+                      <td className="cellWrap" style={{ fontSize: 12, opacity: 0.8 }} title={describeHistory(item.detail, item.versionNo)}>{describeHistory(item.detail, item.versionNo)}</td>
+                    </tr>
+                  ))}
+                  {(history?.items.length ?? 0) === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', padding: 18, opacity: 0.7 }}>{L(locale, '暂无记录。', 'No history yet.')}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {history && history.pages > 1 && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
+                <button type="button" style={buttonStyle} disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>←</button>
+                <span style={{ fontSize: 13, alignSelf: 'center' }}>{history.page} / {history.pages}</span>
+                <button type="button" style={buttonStyle} disabled={historyPage >= history.pages} onClick={() => setHistoryPage((p) => Math.min(history.pages, p + 1))}>→</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -739,6 +824,14 @@ function TrialAndPricing({
   const [enabled, setEnabled] = useState(trial.enabled);
   const [rows, setRows] = useState<TrialRow[]>(trial.rows);
   const [localPlans, setLocalPlans] = useState<CoursePlan[]>(plans);
+  const trialTable = useResizableColumns({
+    storageKey: 'course-editor-trial',
+    defaultWidths: [70, 260, 110, 150, 200, 110],
+  });
+  const pricingTable = useResizableColumns({
+    storageKey: 'course-editor-pricing',
+    defaultWidths: [180, 130, 150, 200, 90, 120],
+  });
 
   useEffect(() => {
     setEnabled(trial.enabled);
@@ -868,17 +961,19 @@ function TrialAndPricing({
         </div>
 
         {enabled && (
-          <table className="table" style={{ width: '100%', marginTop: 12 }}>
-            <thead>
-              <tr>
-                <th>{locale.startsWith('zh') ? '试看' : 'In trial'}</th>
-                <th>{locale.startsWith('zh') ? '课时' : 'Lesson'}</th>
-                <th>{locale.startsWith('zh') ? '视频时长' : 'Video'}</th>
-                <th>{locale.startsWith('zh') ? '视频截止点（秒）' : 'Video cut-off (s)'}</th>
-                <th>{locale.startsWith('zh') ? '文本截止学习点' : 'Text cut-off LP'}</th>
-                <th>{locale.startsWith('zh') ? '状态' : 'Status'}</th>
-              </tr>
-            </thead>
+          <div className="tableScroll">
+            <table className="table" style={{ ...trialTable.tableStyle, marginTop: 12 }}>
+              {trialTable.colGroup}
+              <thead>
+                <tr>
+                  <th>{locale.startsWith('zh') ? '试看' : 'In trial'}{trialTable.resizeHandle(0)}</th>
+                  <th>{locale.startsWith('zh') ? '课时' : 'Lesson'}{trialTable.resizeHandle(1)}</th>
+                  <th>{locale.startsWith('zh') ? '视频时长' : 'Video'}{trialTable.resizeHandle(2)}</th>
+                  <th>{locale.startsWith('zh') ? '视频截止点（秒）' : 'Video cut-off (s)'}{trialTable.resizeHandle(3)}</th>
+                  <th>{locale.startsWith('zh') ? '文本截止学习点' : 'Text cut-off LP'}{trialTable.resizeHandle(4)}</th>
+                  <th>{locale.startsWith('zh') ? '状态' : 'Status'}{trialTable.resizeHandle(5)}</th>
+                </tr>
+              </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.lessonId}>
@@ -912,7 +1007,8 @@ function TrialAndPricing({
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         )}
         <div style={{ marginTop: 14 }}>
           <button type="button" style={primaryBtn} disabled={busy} onClick={() => void saveTrial()}>{locale.startsWith('zh') ? '保存试看' : 'Save trial'}</button>
@@ -924,17 +1020,19 @@ function TrialAndPricing({
           <h2 style={{ margin: 0, fontSize: 18 }}>{locale.startsWith('zh') ? '价格（订阅 · USD）' : 'Pricing (subscription · USD)'}</h2>
           <button type="button" style={buttonStyle} disabled={busy} onClick={addPlan}>{locale.startsWith('zh') ? '+ 添加套餐' : '+ Add plan'}</button>
         </div>
-        <table className="table" style={{ width: '100%', marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>{locale.startsWith('zh') ? '名称' : 'Name'}</th>
-              <th>{locale.startsWith('zh') ? '周期（月）' : 'Billing (months)'}</th>
-              <th>{locale.startsWith('zh') ? '金额（美分）' : 'Amount (minor)'}</th>
-              <th>{locale.startsWith('zh') ? 'Lookup key' : 'Lookup key'}</th>
-              <th>Stripe</th>
-              <th />
-            </tr>
-          </thead>
+        <div className="tableScroll">
+          <table className="table" style={{ ...pricingTable.tableStyle, marginTop: 12 }}>
+            {pricingTable.colGroup}
+            <thead>
+              <tr>
+                <th>{locale.startsWith('zh') ? '名称' : 'Name'}{pricingTable.resizeHandle(0)}</th>
+                <th>{locale.startsWith('zh') ? '周期（月）' : 'Billing (months)'}{pricingTable.resizeHandle(1)}</th>
+                <th>{locale.startsWith('zh') ? '金额（美分）' : 'Amount (minor)'}{pricingTable.resizeHandle(2)}</th>
+                <th>{locale.startsWith('zh') ? 'Lookup key' : 'Lookup key'}{pricingTable.resizeHandle(3)}</th>
+                <th>Stripe{pricingTable.resizeHandle(4)}</th>
+                <th>{pricingTable.resizeHandle(5)}</th>
+              </tr>
+            </thead>
           <tbody>
             {localPlans.map((plan) => (
               <tr key={plan.id}>
@@ -955,7 +1053,8 @@ function TrialAndPricing({
             ))}
             {localPlans.length === 0 && <tr><td colSpan={6} style={{ textAlign: 'center', padding: 18, opacity: 0.7 }}>{locale.startsWith('zh') ? '暂无套餐。' : 'No plans yet.'}</td></tr>}
           </tbody>
-        </table>
+          </table>
+        </div>
         <div style={{ marginTop: 14 }}>
           <button type="button" style={primaryBtn} disabled={busy} onClick={() => void savePlans()}>{locale.startsWith('zh') ? '保存并同步 Stripe' : 'Save & sync Stripe'}</button>
         </div>

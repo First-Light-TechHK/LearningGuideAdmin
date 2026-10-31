@@ -192,12 +192,6 @@
     },
     "neverSignedIn": "—",
     "empty": "No employee accounts match the current search and filters.",
-    "showing": "{from}–{to} of {total}",
-    "showingSingle": "{from} of {total}",
-    "showingEmpty": "0 items",
-    "pageSizeLabel": "Rows/page",
-    "pageOf": "Page {page} / {total}",
-    "pageNumber": "Page {page}",
     "actions": {
       "edit": "Edit",
       "resetPassword": "Reset Password",
@@ -221,6 +215,14 @@
       "linkReady": "One-time link generated.",
       "linkLabel": "One-time link"
     }
+  },
+  "pagination": {
+    "showing": "{from}–{to} of {total}",
+    "showingSingle": "{from} of {total}",
+    "showingEmpty": "0 items",
+    "pageSizeLabel": "Rows/page",
+    "pageOf": "Page {page} / {total}",
+    "pageNumber": "Page {page}"
   },
   "delivery": {
     "SENT": "sent",

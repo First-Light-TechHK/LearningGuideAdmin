@@ -192,12 +192,6 @@
     },
     "neverSignedIn": "—",
     "empty": "没有符合当前搜索与筛选条件的员工账号。",
-    "showing": "第 {from}–{to} 条 / 共 {total} 条",
-    "showingSingle": "第 {from} 条 / 共 {total} 条",
-    "showingEmpty": "共 0 条",
-    "pageSizeLabel": "每页",
-    "pageOf": "第 {page} / {total} 页",
-    "pageNumber": "第 {page} 页",
     "actions": {
       "edit": "编辑",
       "resetPassword": "重置密码",
@@ -221,6 +215,14 @@
       "linkReady": "一次性链接已生成。",
       "linkLabel": "一次性链接"
     }
+  },
+  "pagination": {
+    "showing": "第 {from}–{to} 条 / 共 {total} 条",
+    "showingSingle": "第 {from} 条 / 共 {total} 条",
+    "showingEmpty": "共 0 条",
+    "pageSizeLabel": "每页",
+    "pageOf": "第 {page} / {total} 页",
+    "pageNumber": "第 {page} 页"
   },
   "delivery": {
     "SENT": "成功",
