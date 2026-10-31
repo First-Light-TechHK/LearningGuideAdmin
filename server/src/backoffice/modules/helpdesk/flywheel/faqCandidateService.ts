@@ -153,7 +153,10 @@ export type CandidateServiceDeps = {
   portal: Pick<PortalHelpdeskClient, 'getTicket'>;
   nodes: () => Promise<NodeText[]>;
   /** 结构（流程树、规则表）：接受时选位置。 */
-  map: Pick<FaqMapRepository, 'nodes' | 'placements' | 'setPlacements'>;
+  map: Pick<
+    FaqMapRepository,
+    'nodes' | 'placements' | 'setPlacements' | 'revisionCount'
+  >;
   /** 更新（查卡在候选之后改过没有）与下线（归档）。 */
   faqs: Pick<FaqService, 'get' | 'archive' | 'revisions'>;
   /** 例句那一轮当时给用户看的卡（insights 事实表）。 */
@@ -646,19 +649,25 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
 
     /** 结构树（选位置用）：编辑区的全部节点，带主位置挂在那里、没归档的卡数。 */
     async faqMap() {
-      const working = await deps.graph.working();
+      const [working, version] = await Promise.all([
+        deps.graph.working(),
+        deps.map.revisionCount(),
+      ]);
       const live = new Set(working.faqs.map((f) => f.id));
       const cards = new Map<string, number>();
       for (const p of working.map.placements)
         if (p.primary && live.has(p.faqId))
           cards.set(p.nodeId, (cards.get(p.nodeId) ?? 0) + 1);
+      const keyOf = new Map(working.map.nodes.map((n) => [n.id, n.key]));
       return {
+        version,
         nodes: working.map.nodes.map((n) => ({
           id: n.id,
           key: n.key,
           kind: n.kind,
           parentId: n.parentId,
           stageId: n.stageId,
+          stageKey: n.stageId ? (keyOf.get(n.stageId) ?? null) : null,
           attribute: n.attribute,
           position: n.position,
           labelZh: n.labelZh,

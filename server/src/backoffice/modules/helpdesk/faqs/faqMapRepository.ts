@@ -173,6 +173,14 @@ export function createPgFaqMapRepository(db: SqlDb = defaultDb) {
       return rows.map(toPlacement);
     },
 
+    /** 结构的修订号：修订表只追加，所以行数只增不减（给位置选择器判断结构有没有变）。 */
+    async revisionCount(): Promise<number> {
+      const rows = await db.query(
+        'SELECT count(*)::int AS n FROM helpdesk_faq_map_revisions',
+      );
+      return Number(rows[0]?.n ?? 0);
+    },
+
     async revisions(entityId: string): Promise<MapRevision[]> {
       const rows = await db.query(
         `SELECT id, entity, entity_id, action, before, after, employee_id, at

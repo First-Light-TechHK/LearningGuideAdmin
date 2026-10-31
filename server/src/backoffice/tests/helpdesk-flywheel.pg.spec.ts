@@ -1625,6 +1625,11 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
           ['rules.plan.price', 1],
         ].sort(),
       );
+      // 修订号只增不减；挂在阶段下的对象带上阶段的 key
+      expect(tree.version).toBeGreaterThan(0);
+      const keyOf = new Map(tree.nodes.map((n) => [n.id, n.key]));
+      for (const n of tree.nodes)
+        expect(n.stageKey).toBe(n.stageId ? keyOf.get(n.stageId) : null);
     });
 
     it('dismisses with a reason (other needs a note, the note is scrubbed); later similar turns join the dismissed candidate, not the queue', async () => {

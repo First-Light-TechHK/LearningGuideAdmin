@@ -44,7 +44,7 @@ import { candidate } from './support/helpdesk-fake'
 describe('flywheel enums match the Admin server', () => {
   test('candidate statuses, suggestions, origins, dismiss reasons, source mix keys and splits', () => {
     assert.deepEqual(CANDIDATE_STATUSES, ['new', 'accepted', 'dismissed', 'merged'])
-    assert.deepEqual(CANDIDATE_SUGGESTIONS, ['new_faq', 'add_phrasing', 'follow_up'])
+    assert.deepEqual(CANDIDATE_SUGGESTIONS, ['new_faq', 'add_phrasing', 'follow_up', 'update_faq', 'retire_faq'])
     assert.deepEqual(CANDIDATE_ORIGINS, ['mining', 'ticket'])
     assert.deepEqual(DISMISS_REASONS, ['duplicate', 'not_a_gap', 'out_of_scope', 'personal_data', 'spam', 'other'])
     assert.deepEqual(SOURCE_MIX_KEYS, [
