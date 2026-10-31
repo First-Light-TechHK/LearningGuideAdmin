@@ -4707,3 +4707,216 @@
   color: #f2f4f8;
   box-shadow: 0 3px 6px rgb(15 23 42 / 20%);
 }
+
+/* ---------- 「HelpDesk 数据」趋势图（FlywheelDataView + LineChart.tsx；参考 Chatwoot 报表，Material 3 卡片外观，待视觉验收） ---------- */
+.hdChartGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.hdChart {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px 12px;
+  border-radius: 16px;
+  background: #f7f9fc;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 6%), 0 1px 3px 1px rgb(15 23 42 / 4%);
+}
+
+.hdChartHead {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  column-gap: 8px;
+  margin-bottom: 6px;
+}
+
+.hdChartTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hd-ink);
+}
+
+.hdChartValue {
+  grid-row: span 2;
+  font-size: 22px;
+  font-weight: 600;
+  color: #203250;
+  font-variant-numeric: tabular-nums;
+}
+
+.hdChartLatest,
+.hdChartHint {
+  font-size: 11px;
+  color: var(--hd-muted);
+}
+
+.hdChartHint {
+  grid-column: 1;
+}
+
+.hdChartPlot {
+  position: relative;
+  border-radius: 8px;
+  outline: none;
+}
+
+.hdChartPlot:focus-visible {
+  box-shadow: 0 0 0 2px rgb(20 110 255 / 35%);
+}
+
+.hdChartPlot svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.hdChartRule line {
+  stroke: #e6ebf2;
+  stroke-width: 1;
+}
+
+.hdChartRule text,
+.hdChartAxis {
+  font-size: 10px;
+  fill: var(--hd-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.hdChartLine {
+  fill: none;
+  stroke: var(--hd-blue);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.hdChartDot {
+  fill: var(--hd-blue);
+}
+
+.hdChartDotPartial {
+  fill: #f7f9fc;
+  stroke: var(--hd-blue);
+  stroke-width: 2;
+}
+
+.hdChartFocus line {
+  stroke: #94a3b8;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.hdChartFocus circle {
+  fill: var(--hd-blue);
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.hdChartEmpty {
+  position: absolute;
+  inset: 0 0 24px 40px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 12px;
+  color: var(--hd-muted);
+}
+
+.hdChartTip {
+  position: absolute;
+  top: -6px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 112px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #2f3542;
+  color: #f2f4f8;
+  font-size: 11px;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  box-shadow: 0 3px 6px rgb(15 23 42 / 20%);
+}
+
+.hdChartTip strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hdChartTipDate,
+.hdChartTipDetail {
+  color: #c9d1dc;
+  white-space: nowrap;
+}
+
+.hdRunStrip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e6ebf2;
+}
+
+.hdRunStripLabel {
+  font-size: 11px;
+  color: var(--hd-body);
+}
+
+.hdRunMarks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdRunMark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hdRunMark-succeeded {
+  background: #e3f4ea;
+  color: #1d6b42;
+}
+
+.hdRunMark-failed {
+  background: #fde8e8;
+  color: #b42318;
+}
+
+.hdRunMark-running {
+  background: var(--hd-line-soft);
+  color: var(--hd-muted);
+}
+
+.hdDataDetails {
+  margin-top: 16px;
+}
+
+.hdDataSummary {
+  width: fit-content;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hd-blue);
+  cursor: pointer;
+}
+
+.hdDataSummary:hover {
+  background: rgb(20 110 255 / 8%);
+}

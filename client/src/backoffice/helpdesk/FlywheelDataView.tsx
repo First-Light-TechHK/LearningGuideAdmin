@@ -3,12 +3,14 @@ import { useEffect, useId, useRef, useState } from 'react'
 import {
   METRICS_GRANULARITIES,
   METRICS_SPLITS,
+  type FlywheelJobRun,
   type FlywheelMetrics,
   type MetricsGranularity,
   type MetricsRow,
   type MetricsSplit,
 } from '../contracts/helpdesk'
-import { getFlywheelMetrics } from '../lib/helpdeskApi'
+import { getFlywheelMetrics, listJobRuns } from '../lib/helpdeskApi'
+import { CHART_METRICS, chartKind, jobPoints, metricPoints, runMarks, type ChartMetric } from '../lib/helpdeskCharts'
 import {
   METRICS_RANGES,
   RATE_KEYS,
@@ -23,6 +25,7 @@ import { contentLocaleLabel, errorMessage, faqSignalLabel } from '../lib/helpdes
 import { cardTime, longDate } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
+import { LineChart } from './LineChart'
 
 /**
  * 「HelpDesk 数据」Tab（v5 Part G6，没有 Figma 画板，沿用 FAQs Tab 的筛选行与表格样式，待视觉验收）：
@@ -32,11 +35,15 @@ import { t } from '../lib/i18n/messages'
  * - 切分（语言 / 入口 / 信号）时多一张按切分值的合计表，卡片仍是整体；
  * - 最大的缺口组（「打开」到 FAQ 候选）与最常导致工单的 FAQ；
  * - 数据来自 Portal 的 insights 每晚拉进 Admin 的事实表，SQL 视图算出（没有第二个数据源），
- *   页头写最近一次拉取的时间。客户端没有图表库：表格 + 卡片（与现有样式一致）。
+ *   页头写最近一次拉取的时间。
+ * - owner 2026-10-31：要折线图。参考 Chatwoot 报表：每个指标一张折线图（提问量、AI 解决率、没匹配率、
+ *   转人工率、有帮助率、平均评分）+ 后台任务（每晚缺口挖掘拉进来的轮数与每天的运行状态），共用上面的时间范围；
+ *   手写 SVG（LineChart.tsx），趋势表留在图下面当表格视图。客服工单没有按天的数据，暂不画。
  */
 
 type Props = { locale: Locale; onOpenCandidate: (candidateId: string) => void }
 type State = { overall: FlywheelMetrics | null; split: FlywheelMetrics | null; error: string | null }
+type Runs = { runs: FlywheelJobRun[]; error: string | null } | null
 
 const today = () => new Date().toISOString().slice(0, 10)
 const when = (iso: string, locale: Locale) => `${longDate(iso, locale)} ${cardTime(iso, locale)}`
@@ -53,6 +60,17 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
   const requestKey = `${granularity}#${range}#${split}`
   const loading = settledFor !== requestKey
   const request = useRef(0)
+  const [jobs, setJobs] = useState<Runs>(null)
+
+  useEffect(() => {
+    let live = true
+    void listJobRuns('gap_mining').then((result) => {
+      if (live) setJobs(result.ok ? { runs: result.data.runs, error: null } : { runs: [], error: result.code })
+    })
+    return () => {
+      live = false
+    }
+  }, [])
 
   useEffect(() => {
     const id = ++request.current
@@ -122,7 +140,14 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
     ))
   }
 
-  function metricsTable(id: string, title: string, firstColumn: string, rows: MetricsRow[], label: (row: MetricsRow) => string, bar: boolean) {
+  function metricsTable(
+    id: string,
+    title: string,
+    firstColumn: string,
+    rows: MetricsRow[],
+    label: (row: MetricsRow) => string,
+    bar: boolean,
+  ) {
     return (
       <section className="hdGraphSection hdDataSection" aria-labelledby={id}>
         <h3 className="hdGraphTitle" id={id}>
@@ -160,6 +185,45 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
           </table>
         </div>
       </section>
+    )
+  }
+
+  function chartTitle(metric: ChartMetric): string {
+    return metric === 'turns' ? t(locale, 'helpDesk.data.charts.turns') : metricLabel(metric)
+  }
+
+  /** x 轴上的短日期：「10/31」。 */
+  function shortBucket(bucket: string): string {
+    const [, month, day] = bucket.split('-')
+    return month && day ? `${Number(month)}/${Number(day)}` : bucket
+  }
+
+  /** 后台任务每天一格：成功 ✓、失败 ✕、进行中 …（状态色只配图标和字，不单靠颜色）。 */
+  function runStrip() {
+    const marks = runMarks(jobs?.runs ?? [])
+    if (marks.length === 0) return null
+    const failed = marks.filter((mark) => mark.status === 'failed').length
+    return (
+      <div className="hdRunStrip">
+        <span className="hdRunStripLabel">
+          {failed > 0
+            ? t(locale, 'helpDesk.data.charts.runsFailed', { count: marks.length, failed })
+            : t(locale, 'helpDesk.data.charts.runsOk', { count: marks.length })}
+        </span>
+        <ol className="hdRunMarks" aria-label={t(locale, 'helpDesk.data.charts.runsLabel')}>
+          {marks.map((mark) => {
+            const status = t(locale, `helpDesk.data.charts.status.${mark.status}`)
+            const label = `${longDate(mark.day, locale)} · ${status}${mark.errorCode ? ` · ${mark.errorCode}` : ''}${
+              mark.status === 'succeeded' ? ` · ${t(locale, 'helpDesk.data.charts.created', { count: mark.created })}` : ''
+            }`
+            return (
+              <li key={mark.day} className={`hdRunMark hdRunMark-${mark.status}`} title={label} aria-label={label}>
+                {mark.status === 'succeeded' ? '✓' : mark.status === 'failed' ? '✕' : '…'}
+              </li>
+            )
+          })}
+        </ol>
+      </div>
     )
   }
 
@@ -239,14 +303,54 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
             ))}
           </div>
 
-          {metricsTable(
-            `${uid}-trend`,
-            t(locale, 'helpDesk.data.trend'),
-            t(locale, 'helpDesk.data.columns.period'),
-            overall.series,
-            seriesLabel,
-            true,
-          )}
+          <section className="hdGraphSection hdDataSection" aria-labelledby={`${uid}-charts`}>
+            <h3 className="hdGraphTitle" id={`${uid}-charts`}>
+              {t(locale, 'helpDesk.data.charts.title')}
+            </h3>
+            <div className="hdChartGrid">
+              {CHART_METRICS.map((metric) => (
+                <LineChart
+                  key={metric}
+                  title={chartTitle(metric)}
+                  hint={t(locale, `helpDesk.data.charts.group.${metric}`)}
+                  kind={chartKind(metric)}
+                  points={metricPoints(overall.series, metric, parts)}
+                  bucketLabel={bucketLabel}
+                  shortLabel={shortBucket}
+                  emptyLabel={t(locale, 'helpDesk.data.charts.empty')}
+                  partialLabel={t(locale, 'helpDesk.data.charts.partial')}
+                  latestLabel={(bucket) => t(locale, 'helpDesk.data.charts.latest', { label: bucketLabel(bucket) })}
+                />
+              ))}
+              <LineChart
+                title={t(locale, 'helpDesk.data.charts.jobReceived')}
+                hint={t(locale, 'helpDesk.data.charts.group.job')}
+                kind="count"
+                points={jobPoints(jobs?.runs ?? [])}
+                bucketLabel={(bucket) => longDate(bucket, locale)}
+                shortLabel={shortBucket}
+                emptyLabel={
+                  jobs?.error ? errorMessage(locale, jobs.error) : t(locale, jobs ? 'helpDesk.data.charts.noRuns' : 'helpDesk.data.loading')
+                }
+                partialLabel=""
+                latestLabel={(bucket) => t(locale, 'helpDesk.data.charts.latest', { label: longDate(bucket, locale) })}
+                footer={runStrip()}
+              />
+            </div>
+          </section>
+
+          {/* 趋势表是图的表格视图：默认收起，页面不拉长 */}
+          <details className="hdDataDetails">
+            <summary className="hdDataSummary">{t(locale, 'helpDesk.data.charts.showTable')}</summary>
+            {metricsTable(
+              `${uid}-trend`,
+              t(locale, 'helpDesk.data.trend'),
+              t(locale, 'helpDesk.data.columns.period'),
+              overall.series,
+              seriesLabel,
+              true,
+            )}
+          </details>
 
           {split !== 'none' && state.split
             ? metricsTable(

@@ -1401,6 +1401,34 @@
         "locale": "按语言",
         "entry": "按渠道",
         "signal": "按信号"
+      },
+      "charts": {
+        "title": "趋势图",
+        "turns": "提问量（轮）",
+        "jobReceived": "后台任务：每晚拉进来的对话轮数",
+        "group": {
+          "turns": "运行",
+          "aiSolvedRate": "AI 效果",
+          "noMatchRate": "运行",
+          "handoverRate": "客服",
+          "helpfulRate": "用户反馈",
+          "avgRating": "用户反馈",
+          "job": "后台任务"
+        },
+        "empty": "这段时间没有数据。",
+        "partial": "不完整的周",
+        "latest": "最近：{label}",
+        "noRuns": "还没有运行记录。",
+        "runsOk": "最近 {count} 天都跑成功了",
+        "runsFailed": "最近 {count} 天里有 {failed} 天失败",
+        "runsLabel": "每天的运行状态",
+        "status": {
+          "succeeded": "成功",
+          "failed": "失败",
+          "running": "进行中"
+        },
+        "created": "新建 {count} 个候选",
+        "showTable": "查看趋势表格（每个时间段的数字）"
       }
     },
     "review": {

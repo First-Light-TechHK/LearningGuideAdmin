@@ -1401,6 +1401,34 @@
         "locale": "By locale",
         "entry": "By channel",
         "signal": "By signal"
+      },
+      "charts": {
+        "title": "Trends",
+        "turns": "Questions (turns)",
+        "jobReceived": "Background job: turns pulled each night",
+        "group": {
+          "turns": "Running",
+          "aiSolvedRate": "AI quality",
+          "noMatchRate": "Running",
+          "handoverRate": "Support",
+          "helpfulRate": "User feedback",
+          "avgRating": "User feedback",
+          "job": "Background job"
+        },
+        "empty": "No data in this period.",
+        "partial": "partial week",
+        "latest": "Latest: {label}",
+        "noRuns": "No runs yet.",
+        "runsOk": "All {count} recent days succeeded",
+        "runsFailed": "{failed} of the last {count} days failed",
+        "runsLabel": "Run status per day",
+        "status": {
+          "succeeded": "Succeeded",
+          "failed": "Failed",
+          "running": "Running"
+        },
+        "created": "{count} new candidates",
+        "showTable": "Show the trend table (numbers per period)"
       }
     },
     "review": {
