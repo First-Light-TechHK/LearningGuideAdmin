@@ -3,7 +3,6 @@ import {
   Controller,
   Delete,
   Get,
-  Headers,
   HttpCode,
   Param,
   Post,
@@ -420,7 +419,7 @@ export class CommerceCoursesController {
   @UseInterceptors(FileInterceptor('chunk'))
   uploadRawChunk(
     @Param('jobId') jobId: string,
-    @Headers('x-chunk-index') chunkIndex: string | undefined,
+    @Query('index') chunkIndex: string | undefined,
     @UploadedFile() file: { buffer: Buffer } | undefined,
   ) {
     if (!file?.buffer) {
