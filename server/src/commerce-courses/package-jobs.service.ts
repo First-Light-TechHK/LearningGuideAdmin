@@ -545,11 +545,21 @@ export class PackageJobsService {
     );
   }
 
+  /**
+   * 确认导入，返回三类结果：
+   * - `{ status:'READY', courseId }`：导入成功；
+   * - `{ requiresOverwrite:true, existingCourseCode }`：同 Course ID 的草稿课程已存在，等待用户确认是否覆盖；
+   * - `{ refused:'COURSE_ALREADY_LIVE', existingCourseCode }`：同 Course ID 的课程已上线，拒绝导入。
+   *
+   * 覆盖规则（PRD §16 + 新规则）：仅「草稿状态」课程（从未发布，`liveVersionId` 为空）允许被覆盖，
+   * 且只替换其沙盒草稿内容；已上线课程一律拒绝，绝不影响线上内容。
+   */
   async confirmImport(
     jobId: string,
     body: {
       onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
       reassignCodes?: boolean;
+      overwriteDraft?: boolean;
     },
     actorEmployeeId: string | null,
   ) {
@@ -565,21 +575,66 @@ export class PackageJobsService {
         `Job not awaiting confirm (status=${job.status}).`,
       );
     }
+
+    // 读取已校验的包清单（用于判定 Course ID 冲突）
+    let manifest: PackageManifest;
+    try {
+      const manifestBytes = await this.storage.getStaging(
+        this.storage.stagingKey(jobId, '__manifest.json'),
+      );
+      manifest = JSON.parse(manifestBytes.toString('utf8')) as PackageManifest;
+    } catch {
+      throw new PackageError(
+        'PACKAGE_MANIFEST_MISSING',
+        409,
+        'Package manifest is no longer available; please re-upload the package.',
+      );
+    }
+
+    // 目标课程：来自「导入到已有课程」（Versions 页）时直接写入该课草稿，始终允许。
+    let targetCourseId: string | null = job.courseId;
+
+    if (!targetCourseId) {
+      // 从包新建：按 Course ID（Excel 中的 Course ID 字段）判断是否已存在
+      const existing = await this.prisma.commerceCourse.findFirst({
+        where: { code: manifest.course.code },
+        select: { id: true, code: true, liveVersionId: true },
+      });
+      if (existing) {
+        if (existing.liveVersionId) {
+          // 已上线课程：拒绝，避免影响线上内容（保持作业可取消，不置为 FAILED）
+          return {
+            jobId,
+            status: job.status,
+            refused: 'COURSE_ALREADY_LIVE' as const,
+            existingCourseCode: existing.code,
+            message: `Course ${existing.code} is already live. The import is refused: only draft courses (never published) can be overwritten, so live content is never affected.`,
+          };
+        }
+        if (!body.overwriteDraft) {
+          // 草稿课程：询问是否覆盖（不改动作业状态，等待用户确认）
+          return {
+            jobId,
+            status: job.status,
+            requiresOverwrite: true as const,
+            existingCourseId: existing.id,
+            existingCourseCode: existing.code,
+          };
+        }
+        // 用户确认覆盖 → 替换该草稿课程的沙盒草稿内容
+        targetCourseId = existing.id;
+      }
+    }
+
+    const files = await this.loadStagingFiles(jobId, manifest);
     await this.prisma.coursePackageJob.update({
       where: { id: jobId },
       data: { status: 'IMPORTING', progress: 0 },
     });
     try {
-      const manifestBytes = await this.storage.getStaging(
-        this.storage.stagingKey(jobId, '__manifest.json'),
-      );
-      const manifest = JSON.parse(
-        manifestBytes.toString('utf8'),
-      ) as PackageManifest;
-      const files = await this.loadStagingFiles(jobId, manifest);
-      const { courseId } = job.courseId
+      const { courseId } = targetCourseId
         ? await this.importer.importIntoExistingCourse(
-            job.courseId,
+            targetCourseId,
             manifest,
             files,
             actorEmployeeId,
