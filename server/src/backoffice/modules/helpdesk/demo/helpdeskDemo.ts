@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { SqlDb } from '../../../src/backoffice/modules/helpdesk/faqs/faqRepository';
+import type { SqlDb } from '../faqs/faqRepository';
 
 /**
  * Helpdesk 演示数据（owner 2026-10-31：「做一些测试数据，方便测试和产品观瞻全部效果」）。

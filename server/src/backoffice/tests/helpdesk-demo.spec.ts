@@ -2,11 +2,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Pool } from 'pg';
 
-import type { HelpdeskFaq } from '../../../src/backoffice/modules/helpdesk/faqs/faqContracts';
+import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
 import {
   createPgFaqRepository,
   type SqlDb,
-} from '../../../src/backoffice/modules/helpdesk/faqs/faqRepository';
+} from '../modules/helpdesk/faqs/faqRepository';
 import {
   DEMO_CANDIDATES,
   DEMO_PREFIX,
@@ -16,7 +16,8 @@ import {
   removeDemoRows,
   reviewTime,
   seedDemoRows,
-} from './helpdeskDemo';
+} from '../modules/helpdesk/demo/helpdeskDemo';
+import { shouldAutoSeedDemo } from '../modules/helpdesk/demo/helpdeskDemoSeed';
 
 /**
  * 演示数据：id 规则、只连本机库、审核时间在卡改动之后；PostgreSQL 实测灌两次不重复、一键删只删演示行、
@@ -269,5 +270,36 @@ describeDb('helpdesk demo data (PostgreSQL)', () => {
     await expect(
       pool.query('DELETE FROM helpdesk_faq_reviews'),
     ).rejects.toThrow();
+  });
+});
+
+describe('helpdesk demo data: auto seed only on deployed DEV', () => {
+  it('seeds on deployed DEV only', () => {
+    expect(shouldAutoSeedDemo({ APP_ENV: 'DEV', NODE_ENV: 'production' })).toBe(
+      true,
+    );
+    expect(
+      shouldAutoSeedDemo({ APP_ENV: ' dev ', NODE_ENV: 'production' }),
+    ).toBe(true);
+  });
+
+  it('never seeds SIT, UAT, PROD, a missing APP_ENV, local runs or when turned off', () => {
+    for (const APP_ENV of ['SIT', 'UAT', 'PPE', 'PROD', '', undefined])
+      expect(shouldAutoSeedDemo({ APP_ENV, NODE_ENV: 'production' })).toBe(
+        false,
+      );
+    expect(
+      shouldAutoSeedDemo({ APP_ENV: 'DEV', NODE_ENV: 'development' }),
+    ).toBe(false);
+    expect(shouldAutoSeedDemo({ APP_ENV: 'DEV', NODE_ENV: 'test' })).toBe(
+      false,
+    );
+    expect(
+      shouldAutoSeedDemo({
+        APP_ENV: 'DEV',
+        NODE_ENV: 'production',
+        HELPDESK_DEMO_DATA: 'off',
+      }),
+    ).toBe(false);
   });
 });

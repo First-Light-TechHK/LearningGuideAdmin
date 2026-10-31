@@ -58,6 +58,10 @@ import {
 } from '../modules/helpdesk/flywheel/flywheelService';
 import { createPgInsightRepository } from '../modules/helpdesk/flywheel/insightRepository';
 import { createPortalHelpdeskClient } from '../modules/helpdesk/portalHelpdeskClient';
+import {
+  autoSeedDemoOnce,
+  shouldAutoSeedDemo,
+} from '../modules/helpdesk/demo/helpdeskDemoSeed';
 import { tryRecordAuditEvent } from '../repositories/auditRepository';
 import {
   bootstrapAdminFromEnv,
@@ -141,6 +145,19 @@ export class HelpdeskFlywheelScheduler
 
   onApplicationShutdown(): void {
     this.scheduler?.stop();
+  }
+}
+
+/**
+ * 部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后在后台灌一次 Helpdesk 演示数据和 FAQ 卡片库 v3.1，
+ * 方便测试和产品演示；灌过就不再灌（删除用 npm run seed:helpdesk-demo -- --remove）。其它环境什么都不做。
+ */
+@Injectable()
+export class HelpdeskDemoBoot implements OnApplicationBootstrap {
+  onApplicationBootstrap(): void {
+    if (!shouldAutoSeedDemo(process.env)) return;
+    // 不 await：不阻塞启动和健康检查
+    void autoSeedDemoOnce();
   }
 }
 
@@ -278,6 +295,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
             }),
         },
         HelpdeskFlywheelScheduler,
+        HelpdeskDemoBoot,
       ],
     };
   }
