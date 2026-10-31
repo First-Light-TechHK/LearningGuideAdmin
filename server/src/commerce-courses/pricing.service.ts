@@ -53,6 +53,8 @@ export function stripeLookupKey(
 @Injectable()
 export class PricingService {
   private readonly logger = new Logger(PricingService.name);
+  // 同一进程内串行化“为一门课创建 Stripe Product”，避免首次保存多套餐时并发创建多个 Product。
+  private readonly productLocks = new Map<string, Promise<string>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -172,8 +174,10 @@ export class PricingService {
     }
 
     try {
-      const productId =
-        plan.stripeProductId ?? (await this.ensureProduct(course));
+      const productId = await this.ensureCourseProduct(
+        course,
+        plan.stripeProductId,
+      );
       let priceId = plan.stripePriceId;
       const recurring = stripeRecurring(plan.termMonths);
       const lookupKey =
@@ -239,16 +243,64 @@ export class PricingService {
     return course;
   }
 
-  private async ensureProduct(course: {
-    id: string;
-    code: string;
-  }): Promise<string> {
-    const product = await this.stripe('POST', '/v1/products', {
-      name: course.code,
-      'metadata[course_id]': course.id,
-      'metadata[course_code]': course.code,
+  /**
+   * 每门课只允许一个 Stripe Product（PRD §14.2）。
+   * 优先复用课程下任一套餐已有的 product id；没有则创建一次，并挂到所有尚未同步的套餐上。
+   */
+  private async ensureCourseProduct(
+    course: { id: string; code: string },
+    preferred?: string | null,
+  ): Promise<string> {
+    if (preferred) return preferred;
+
+    const existing = await this.prisma.coursePlan.findFirst({
+      where: {
+        courseId: course.id,
+        active: true,
+        stripeProductId: { not: null },
+      },
+      select: { stripeProductId: true },
     });
-    return String(product.id);
+    if (existing?.stripeProductId) return existing.stripeProductId;
+
+    const inflight = this.productLocks.get(course.id);
+    if (inflight) return inflight;
+
+    const task = (async () => {
+      // 锁内再查一次，覆盖并发请求在等待期间已完成创建的情况。
+      const again = await this.prisma.coursePlan.findFirst({
+        where: {
+          courseId: course.id,
+          active: true,
+          stripeProductId: { not: null },
+        },
+        select: { stripeProductId: true },
+      });
+      if (again?.stripeProductId) return again.stripeProductId;
+
+      const product = await this.stripe('POST', '/v1/products', {
+        name: course.code,
+        'metadata[course_id]': course.id,
+        'metadata[course_code]': course.code,
+      });
+      const productId = String(product.id);
+      await this.prisma.coursePlan.updateMany({
+        where: {
+          courseId: course.id,
+          active: true,
+          stripeProductId: null,
+        },
+        data: { stripeProductId: productId },
+      });
+      return productId;
+    })();
+
+    this.productLocks.set(course.id, task);
+    try {
+      return await task;
+    } finally {
+      this.productLocks.delete(course.id);
+    }
   }
 
   private async priceChanged(

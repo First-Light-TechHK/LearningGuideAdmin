@@ -9,6 +9,7 @@ import { CourseStorageService } from './storage.service';
 import { computeCompleteness } from './completeness';
 import { detailToCompletenessInput } from './version-snapshot';
 import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
+import { syncTextLearningPoints } from './course-authoring.service';
 
 /** 课程列表/详情/工作流（v2）。 */
 @Injectable()
@@ -284,11 +285,17 @@ export class CommerceCoursesService {
       learningLanguages?: string[];
       subtitle?: string | null;
       level?: string | null;
+      categoryId?: string | null;
     },
   ) {
     const current = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      select: { code: true, learningMode: true, learningLanguages: true },
+      select: {
+        code: true,
+        learningMode: true,
+        learningLanguages: true,
+        categoryId: true,
+      },
     });
     if (!current)
       throw new NotFoundException({
@@ -351,6 +358,9 @@ export class CommerceCoursesService {
             : {}),
           ...(body.subtitle !== undefined ? { subtitle: body.subtitle } : {}),
           ...(body.level !== undefined ? { level: body.level } : {}),
+          ...(body.categoryId !== undefined
+            ? { categoryId: body.categoryId || null }
+            : {}),
           hasDraft: true,
           lifecycleStatus: 'WORKING',
           draftSourceType: null,
@@ -485,40 +495,54 @@ export class CommerceCoursesService {
         })
       )?.defaultContentLanguage ||
       'en-GB';
-    await this.prisma.lesson.update({
-      where: { id: lessonId },
-      data: {
-        ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.lesson.update({
+        where: { id: lessonId },
+        data: {
+          ...(body.code !== undefined ? { code: body.code.trim() } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+        },
+      });
+      if (
+        body.title !== undefined ||
+        body.description !== undefined ||
+        body.textHtml !== undefined
+      ) {
+        const existing = await tx.lessonLocalization.findUnique({
+          where: { lessonId_language: { lessonId, language } },
+          select: { title: true, description: true, textHtml: true },
+        });
+        const payload = {
+          title: body.title ?? existing?.title ?? 'Untitled',
+          description:
+            body.description !== undefined
+              ? body.description
+              : (existing?.description ?? null),
+          textHtml:
+            body.textHtml !== undefined
+              ? body.textHtml
+              : (existing?.textHtml ?? null),
+        };
+        await tx.lessonLocalization.upsert({
+          where: { lessonId_language: { lessonId, language } },
+          create: { lessonId, language, ...payload },
+          update: payload,
+        });
+        if (body.textHtml !== undefined) {
+          await syncTextLearningPoints(tx, lessonId, language, body.textHtml);
+        }
+      }
+      await tx.commerceCourse.update({
+        where: { id },
+        data: {
+          hasDraft: true,
+          lifecycleStatus: 'WORKING',
+          draftSourceType: null,
+          draftSourceEnvironment: null,
+          draftSourceVersionLabel: null,
+        },
+      });
     });
-    if (
-      body.title !== undefined ||
-      body.description !== undefined ||
-      body.textHtml !== undefined
-    ) {
-      const existing = await this.prisma.lessonLocalization.findUnique({
-        where: { lessonId_language: { lessonId, language } },
-        select: { title: true, description: true, textHtml: true },
-      });
-      const payload = {
-        title: body.title ?? existing?.title ?? 'Untitled',
-        description:
-          body.description !== undefined
-            ? body.description
-            : (existing?.description ?? null),
-        textHtml:
-          body.textHtml !== undefined
-            ? body.textHtml
-            : (existing?.textHtml ?? null),
-      };
-      await this.prisma.lessonLocalization.upsert({
-        where: { lessonId_language: { lessonId, language } },
-        create: { lessonId, language, ...payload },
-        update: payload,
-      });
-    }
-    await this.touchDraft(id);
     return this.detail(id);
   }
 

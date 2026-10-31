@@ -91,6 +91,10 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [showCreate, setShowCreate] = useState(false)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState('')
+  const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [createCategoryId, setCreateCategoryId] = useState('')
+  const [createMode, setCreateMode] = useState('VIDEO_AND_TEXT')
+  const [createLanguage, setCreateLanguage] = useState<string>(locale)
   const [exportingId, setExportingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
@@ -110,6 +114,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     void load()
   }, [load])
 
+  useEffect(() => {
+    void (async () => {
+      const result = await boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`)
+      if (result.success) setCatalogCategories(result.data)
+    })()
+  }, [])
+
   const categories = useMemo(() => {
     const map = new Map<string, string>()
     for (const course of list?.courses ?? []) {
@@ -127,9 +138,11 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         code: String(form.get('code')),
         title: String(form.get('title')),
         slug: String(form.get('slug') || ''),
-        language: locale,
-        defaultContentLanguage: locale,
-        learningLanguages: [locale],
+        language: createLanguage,
+        defaultContentLanguage: createLanguage,
+        learningLanguages: [createLanguage],
+        learningMode: createMode,
+        categoryId: createCategoryId || null,
       }),
     })
     setBusy(false)
@@ -302,7 +315,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     const result = await boRequest<{ courseId: string }>(`/api/backoffice/courses/import/${importJob.jobId}/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ onConflict, reassignCodes: true }),
+      body: JSON.stringify({ onConflict, reassignCodes: false }),
     })
     setBusy(false)
     if (result.success) {
@@ -408,6 +421,9 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
           <label>{L('课程标题', 'Course title')}<input name="title" required style={{ display: 'block', padding: 8 }} /></label>
           <label>{L('课程 ID', 'Course ID')}<input name="code" required style={{ display: 'block', padding: 8 }} /></label>
           <label>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', padding: 8 }} /></label>
+          <label>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="en-GB">en-GB</option><option value="zh-CN">zh-CN</option></select></label>
+          <label>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="VIDEO_ONLY">VIDEO_ONLY</option><option value="TEXT_ONLY">TEXT_ONLY</option><option value="VIDEO_AND_TEXT">VIDEO_AND_TEXT</option></select></label>
+          <label>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
           <button className="button" disabled={busy}>{L('创建并编辑', 'Create and edit')}</button>
           <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
         </form>
@@ -526,23 +542,17 @@ function ImportPanel({
       )}
       {job.status === 'AWAITING_CONFIRM' && (
         <div style={{ marginTop: 12 }}>
-          {codeExists && (
+          {codeExists ? (
             <p style={{ fontSize: 13, color: '#9A6B00', background: '#FFF6E5', padding: '8px 12px', borderRadius: 8 }}>
               {zh
-                ? `课程 ${job.package?.courseCode} 已存在。请点击「导入为新课程」，会生成一门新课程（Course ID 自动顺延）。`
-                : `Course ${job.package?.courseCode} already exists. Click "Import as new course" to create a new course with a new Course ID.`}
+                ? `课程 ${job.package?.courseCode} 已存在，本后台拒绝重复导入。请进入该课程，使用「导入课程包」替换草稿。`
+                : `Course ${job.package?.courseCode} already exists. This Admin refuses the import; open the existing course and use "Import package" instead.`}
             </p>
-          )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="button" disabled={busy} onClick={() => onConfirm('CREATE_NEW_COURSE')}>
-              {zh ? '导入为新课程' : 'Import as new course'}
+          ) : (
+            <button className="button" disabled={busy} onClick={() => onConfirm('ABORT')}>
+              {zh ? '导入课程' : 'Import course'}
             </button>
-            {!codeExists && (
-              <button className="button buttonGhost" disabled={busy} onClick={() => onConfirm('ABORT')}>
-                {zh ? '导入（冲突则中止）' : 'Import (abort on conflict)'}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
     </div>
