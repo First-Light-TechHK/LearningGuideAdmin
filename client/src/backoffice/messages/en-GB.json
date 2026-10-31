@@ -705,7 +705,11 @@
       "JOB_RUN_NOT_FOUND": "This run no longer exists.",
       "PLACE_REQUIRED": "Choose a place first.",
       "INVALID_PLACE": "Cards cannot go in this place: choose a step, deviation or rule cell.",
-      "FAQ_NOT_UPDATED": "The card has not been edited yet: save your changes first, then approve."
+      "FAQ_NOT_UPDATED": "The card has not been edited yet: save your changes first, then approve.",
+      "REWRITE_UNAVAILABLE": "AI is not connected in this environment yet (no OpenRouter key). Edit by hand for now.",
+      "REWRITE_FAILED": "AI did not edit the card as asked. Try saying it another way.",
+      "REWRITE_TIMEOUT": "AI took too long this time. Try again shortly, or edit by hand.",
+      "REWRITE_RATE_LIMITED": "Too many AI edits in a minute. Wait a moment and try again."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -1671,7 +1675,105 @@
         "tooLong": "At most {max} characters.",
         "noChange": "AI made no change. Try saying it another way.",
         "changedHere": "AI changed this",
-        "changedOther": "AI also changed the other language"
+        "changedOther": "AI also changed the other language",
+        "checkThese": "Please check"
+      }
+    },
+    "faqReview": {
+      "viewLabel": "FAQ view",
+      "view": {
+        "table": "Table",
+        "review": "Review one by one"
+      },
+      "queue": "Review queue",
+      "stateLabel": "Filter by review status",
+      "filter": {
+        "unreviewed": "Not reviewed",
+        "needs_change": "Needs changes",
+        "ok": "Reviewed",
+        "all": "All"
+      },
+      "count": "{count} cards",
+      "popular": "Popular",
+      "state": {
+        "unreviewed": "Not reviewed",
+        "needs_change": "Needs changes",
+        "ok": "Reviewed",
+        "changedSince": "Edited, review again"
+      },
+      "empty": {
+        "unreviewed": "All reviewed. Check “Needs changes” for cards still to fix.",
+        "needs_change": "No cards are marked as needing changes.",
+        "ok": "No cards reviewed yet.",
+        "all": "No cards match the search or filter."
+      },
+      "card": "This card",
+      "status": "Review",
+      "never": "Nobody has reviewed this card yet.",
+      "someone": "A staff member",
+      "last": {
+        "ok": "{by} marked it fine on {when} (version {version})",
+        "needs_change": "{by} marked it as needing changes on {when} (version {version})"
+      },
+      "noteLabel": "What needs to change",
+      "notePlaceholder": "For example: the price is last year’s, use the current one",
+      "needNote": "Say what needs to change.",
+      "history": "Change log",
+      "action": {
+        "create": "created this card (version {version})",
+        "update": "edited this card (version {version})",
+        "archive": "took this card offline",
+        "review_ok": "marked it fine (version {version})",
+        "review_needs_change": "marked it as needing changes (version {version})",
+        "place_create": "placed this card at “{place}”",
+        "place_update": "changed this card’s place at “{place}”",
+        "place_delete": "removed this card from “{place}”"
+      },
+      "changed": "Changed: {fields}",
+      "fields": {
+        "questionZh": "Chinese question",
+        "answerZh": "Chinese answer",
+        "questionEn": "English question",
+        "answerEn": "English answer",
+        "category": "Category",
+        "popular": "Popular",
+        "keywords": "Keywords",
+        "signals": "User situations",
+        "key": "Card key",
+        "type": "Type",
+        "entry": "Entry point",
+        "status": "Status"
+      },
+      "needsChange": "Needs changes",
+      "archive": "Take offline",
+      "ok": "Looks fine",
+      "saveAndOk": "Save changes and mark reviewed",
+      "confirmNeedsChange": "Mark as needing changes",
+      "confirmArchive": "Users will no longer see this card; its change log is kept. Take it offline?",
+      "confirmArchiveButton": "Take offline",
+      "afterOk": "If it looks fine, press the button on the right. To change it, edit on the left or tell AI.",
+      "afterSave": "You edited this card: saving marks it reviewed and logs who changed it.",
+      "editsNotSaved": "Your edits on the left are not saved; only “needs changes” is recorded.",
+      "readOnly": "You can view only. Reviewing needs full Help Desk access.",
+      "savedNotReviewed": "Your changes are saved, but the card is not marked reviewed yet. Press “Looks fine” again.",
+      "done": {
+        "ok": "Marked fine. Next card.",
+        "saved": "Saved and marked reviewed. Next card.",
+        "needsChange": "Marked as needing changes. Next card.",
+        "archived": "Taken offline. Next card."
+      },
+      "historyEmpty": "Nothing recorded yet.",
+      "pageOf": "Page {page} of {pages}, {total} cards",
+      "changedAfter": "Version {version} was reviewed, then the card changed (now version {now}). Review it again.",
+      "warning": {
+        "number": "{field} has a number that is not in the card or the instruction: “{text}”. Please check it.",
+        "link": "{field} has a link that is not in the card or the instruction: “{text}”. Please check it.",
+        "email": "{field} has an email that is not in the card or the instruction: “{text}”. Please check it.",
+        "dropped": {
+          "empty": "AI left {field} empty, so the original is kept.",
+          "too_long": "AI made {field} too long, so the original is kept.",
+          "language": "AI changed the language of {field}, so the original is kept."
+        }
       }
     }
   }

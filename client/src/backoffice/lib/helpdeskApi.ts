@@ -10,6 +10,11 @@ import {
   type FaqMap,
   type FaqRewriteBody,
   type FaqRewriteResult,
+  type FaqHistory,
+  type FaqReviewBody,
+  type FaqReviewFilter,
+  type FaqReviewList,
+  type FaqReviewState,
   type MergeCandidateBody,
   type MergeCandidateResult,
   type DismissCandidateBody,
@@ -308,6 +313,26 @@ export function runRetentionNow(idempotencyKey: string) {
 }
 
 /** AI 按指令改卡（不保存）：失败时界面保留原文，只提示。 */
+/* --------------------------- 卡片全表逐张审核（api-spec 第 8、9 节） --------------------------- */
+
+export type FaqReviewQuery = { status: FaqReviewFilter; q: string; category: string; page: number; pageSize?: number }
+
+export function listFaqReviews(query: FaqReviewQuery) {
+  const params = new URLSearchParams({ status: query.status, page: String(query.page), pageSize: String(query.pageSize ?? 50) })
+  if (query.q) params.set('q', query.q)
+  if (query.category && query.category !== 'all') params.set('category', query.category)
+  return request<FaqReviewList>(`/api/helpdesk/faq-reviews?${params.toString()}`)
+}
+
+/** 一次审核结论：没问题 / 需要改（要写为什么）；带卡的版本，重试带同一个 Idempotency-Key。 */
+export function reviewFaq(faqId: string, body: FaqReviewBody, idempotencyKey: string) {
+  return sendJson<{ review: FaqReviewState; replayed: boolean }>('POST', `${faqPath(faqId)}/review`, body, idempotencyKey)
+}
+
+export function getFaqHistory(faqId: string) {
+  return request<FaqHistory>(`${faqPath(faqId)}/history`)
+}
+
 export function rewriteFaq(body: FaqRewriteBody) {
   return sendJson<FaqRewriteResult>('POST', '/api/helpdesk/faqs/rewrite', body)
 }

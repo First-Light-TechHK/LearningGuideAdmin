@@ -47,7 +47,7 @@ import {
   textSegments,
   type DecisionKey,
 } from '../lib/helpdeskFlywheel'
-import { errorMessage, faqCategoryLabel } from '../lib/helpdeskFormat'
+import { errorMessage, faqCategoryLabel, rewriteWarningText } from '../lib/helpdeskFormat'
 import {
   REVIEW_GROUPS,
   GROUP_ACTIONS,
@@ -293,6 +293,7 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
   const [selection, setSelection] = useState<TextSelection | null>(null)
   const [assistBusy, setAssistBusy] = useState(false)
   const [assistError, setAssistError] = useState<string | null>(null)
+  const [assistWarnings, setAssistWarnings] = useState<string[]>([])
   const [editorError, setEditorError] = useState<string | null>(null)
   const [treeOpen, setTreeOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -416,6 +417,7 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
     const scope = cleanSelection(editor.draft, selection)
     setAssistBusy(true)
     setAssistError(null)
+    setAssistWarnings([])
     const result = await rewriteFaq({
       questionZh: editor.draft.questionZh,
       answerZh: editor.draft.answerZh,
@@ -442,6 +444,7 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
     }
     setEditors((all) => ({ ...all, [latest.source]: { ...latest, history: next, draft: currentVersion(next).draft } }))
     setSelection(null)
+    setAssistWarnings((result.data.warnings ?? []).map((warning) => rewriteWarningText(locale, warning)))
     const changed = currentVersion(next).changed
     if (!changed.some((field) => field.endsWith(lang === 'zh' ? 'Zh' : 'En')) && changed.some((field) => field !== 'category'))
       setLang(lang === 'zh' ? 'en' : 'zh')
@@ -1420,6 +1423,7 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
                 onClearSelection={() => setSelection(null)}
                 onSend={rewrite}
                 error={assistError}
+                warnings={assistWarnings}
               />
             </div>
           ) : null}

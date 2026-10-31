@@ -69,9 +69,11 @@ type ComposerProps = {
   onClearSelection: () => void
   onSend: (instruction: string) => Promise<boolean>
   error: string | null
+  /** AI 上一次改动的提醒（加了原卡没有的数字 / 链接，或某一栏改坏了已保留原文），请员工核实。 */
+  warnings?: readonly string[]
 }
 
-export function AiComposer({ locale, busy, disabled = false, selection, onClearSelection, onSend, error }: ComposerProps) {
+export function AiComposer({ locale, busy, disabled = false, selection, onClearSelection, onSend, error, warnings = [] }: ComposerProps) {
   const uid = useId()
   const [text, setText] = useState('')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -158,6 +160,13 @@ export function AiComposer({ locale, busy, disabled = false, selection, onClearS
           </button>
         </div>
       </div>
+      {warnings.length > 0 && !error && !tooLong ? (
+        <ul className="hdComposerWarnings" role="status" aria-label={t(locale, 'helpDesk.review.assist.checkThese')}>
+          {warnings.map((text) => (
+            <li key={text}>{text}</li>
+          ))}
+        </ul>
+      ) : null}
       {error || tooLong ? (
         <p className="hdFieldError" id={`${uid}-err`} role="alert">
           {tooLong ? t(locale, 'helpDesk.review.assist.tooLong', { max: INSTRUCTION_MAX }) : error}

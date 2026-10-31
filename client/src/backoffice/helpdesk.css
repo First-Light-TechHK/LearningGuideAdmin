@@ -5500,3 +5500,259 @@
     animation: none !important;
   }
 }
+
+/* ---------- 常见问题：逐张审核（FaqCardReview.tsx，待视觉验收） ---------- */
+.hdFaqsReview {
+  padding-top: 16px;
+  padding-bottom: 16px;
+  overflow: hidden;
+}
+
+.hdFaqsReview .hdReviewLayout {
+  flex: 1 1 auto;
+}
+
+/* 卡片占满中间一栏：编辑器自己滚动，AI 输入框固定在底部 */
+.hdFaqReviewPanel .hdReviewEvidence {
+  padding: 12px;
+  gap: 10px;
+}
+
+.hdFaqReviewEditor {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.hdFaqReviewEditor .hdReviewEditorHead {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hd-line-soft);
+}
+
+.hdFaqReviewEditor .hdReviewScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hdFaqReviewPanel .hdReviewAssistDock {
+  padding: 0;
+  border-top: 0;
+  background: transparent;
+}
+
+.hdFaqReviewPopular {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #233858;
+  white-space: nowrap;
+}
+
+/* 队列顶上的状态筛选：M3 风格的过滤 chip，带张数 */
+.hdFaqReviewStates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 10px 4px;
+}
+
+.hdFaqReviewStateBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--m3-outline-variant, #d3dae4);
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: #233858;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.hdFaqReviewStateBtn:hover {
+  background: var(--m3-state-hover, rgb(20 110 255 / 8%));
+}
+
+.hdFaqReviewStateBtn:focus-visible {
+  outline: 2px solid rgba(34, 107, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.hdFaqReviewStateOn,
+.hdFaqReviewStateOn:hover {
+  border-color: transparent;
+  background: var(--m3-secondary-container, #dce7ff);
+  color: var(--m3-on-secondary-container, #0b2a5c);
+  font-weight: 600;
+}
+
+.hdFaqReviewStateCount {
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* 状态标签：颜色之外都有文字 */
+.hdFaqReviewTag-unreviewed {
+  background: #eef2f7;
+  color: #475569;
+}
+
+.hdFaqReviewTag-needs_change {
+  background: #fff1e0;
+  color: #8a4b00;
+}
+
+.hdFaqReviewTag-ok {
+  background: #e6f6ec;
+  color: #1d6b42;
+}
+
+.hdFaqReviewNow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--m3-outline-variant, #d3dae4);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 12px;
+  color: #233858;
+}
+
+.hdFaqReviewQuote {
+  display: block;
+  padding-left: 8px;
+  border-left: 3px solid #f2c48d;
+  font-size: 12px;
+  color: #5b4a36;
+  quotes: none;
+  white-space: pre-wrap;
+}
+
+.hdFaqReviewHistoryTitle {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #233858;
+}
+
+.hdFaqHistory {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdFaqHistoryItem {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 12px 18px;
+  font-size: 12px;
+  color: #233858;
+}
+
+/* 竖线把记录串起来 */
+.hdFaqHistoryItem::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--hd-line);
+}
+
+.hdFaqHistoryItem:last-child::before {
+  display: none;
+}
+
+.hdFaqHistoryDot {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #9fb0c6;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.hdFaqHistory-review_ok .hdFaqHistoryDot {
+  border-color: #2f9e62;
+  background: #2f9e62;
+}
+
+.hdFaqHistory-review_needs_change .hdFaqHistoryDot {
+  border-color: #d9822b;
+  background: #d9822b;
+}
+
+.hdFaqHistory-archive .hdFaqHistoryDot {
+  border-color: #c0392b;
+}
+
+.hdFaqHistoryWhen,
+.hdFaqHistoryFields {
+  font-size: 11px;
+  color: var(--hd-faint);
+}
+
+.hdFaqReviewArchive {
+  color: #b42318;
+}
+
+/* 逐张审核：卡片是主角，右栏只放状态和记录，窄一点；编辑区的头不吸顶（编辑区自己滚动） */
+.hdFaqReviewPanel .hdReviewBody {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+}
+
+.hdReviewMode .hdFaqReviewEditor .hdReviewEditorHead {
+  position: static;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px 12px 0 0;
+}
+
+.hdFaqReviewEditor .hdReviewEditorHead .hdFaqPreview {
+  margin-left: auto;
+}
+
+.hdFaqsReview .hdReviewQueueMeta {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.hdFaqsReview .hdReviewQueueTag {
+  white-space: nowrap;
+}
+
+/* AI 改卡的提醒：请员工核实（数字、链接、邮箱，或某一栏保留了原文） */
+.hdComposerWarnings {
+  margin: 6px 0 0;
+  padding: 6px 10px 6px 26px;
+  border-radius: 10px;
+  background: #fff7e8;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #7a4a00;
+}
+
+.hdFaqReviewPager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 0 8px;
+  border-top: 1px solid var(--hd-line-soft);
+  font-size: 12px;
+  color: var(--hd-muted);
+}

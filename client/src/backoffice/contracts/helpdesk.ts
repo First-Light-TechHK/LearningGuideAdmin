@@ -872,4 +872,60 @@ export type FaqRewriteResult = {
   changed: string[];
   model: string;
   costUsd: number | null;
+  /** 老的后端没有这个字段。 */
+  warnings?: FaqRewriteWarning[];
 };
+
+/* ------------- 卡片全表逐张审核与改动历史（Admin server faqReview.ts；api-spec 第 8、9 节） ------------- */
+
+export const FAQ_REVIEW_FILTERS = ["unreviewed", "needs_change", "ok", "all"] as const;
+export type FaqReviewFilter = (typeof FAQ_REVIEW_FILTERS)[number];
+export type FaqReviewStatus = "ok" | "needs_change";
+
+export type HelpdeskPerson = { id: string; name: string };
+
+/** 当前版本上最近的一次审核；faqVersion 小于卡的 version = 审过、后来改过（status 是 unreviewed）。 */
+export type FaqReviewState = {
+  status: "unreviewed" | FaqReviewStatus;
+  faqVersion: number | null;
+  note: string | null;
+  by: HelpdeskPerson | null;
+  at: string | null;
+};
+
+export type FaqReviewList = {
+  faqs: HelpdeskFaq[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: Record<"unreviewed" | FaqReviewStatus, number>;
+  reviews: Record<string, FaqReviewState>;
+};
+
+export type FaqReviewBody = { status: FaqReviewStatus; version: number; note?: string };
+
+export type FaqHistoryEntry =
+  | {
+      kind: "card";
+      at: string;
+      by: HelpdeskPerson | null;
+      action: string;
+      version: number;
+      changes: { field: string; before: unknown; after: unknown }[];
+    }
+  | {
+      kind: "placement";
+      at: string;
+      by: HelpdeskPerson | null;
+      action: "create" | "update" | "delete";
+      nodeKey: string | null;
+      primary: { before: boolean | null; after: boolean | null };
+    }
+  | { kind: "review"; at: string; by: HelpdeskPerson | null; action: FaqReviewStatus; version: number; note: string | null };
+
+export type FaqHistory = { faqId: string; version: number; review: FaqReviewState; history: FaqHistoryEntry[] };
+
+/** AI 改卡的提醒（api-spec 第 10 节）：加了原卡和指令里都没有的数字 / 链接 / 邮箱，或者某一栏改坏了已保留原文。 */
+export type FaqRewriteWarning =
+  | { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; kind: "number" | "link" | "email"; text: string }
+  | { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; kind: "dropped"; reason: "empty" | "too_long" | "language" };

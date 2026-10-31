@@ -1,3 +1,4 @@
+import type { FaqRewriteWarning } from '../contracts/helpdesk'
 import type { Locale } from './i18n/config'
 import { t } from './i18n/messages'
 
@@ -67,4 +68,12 @@ export function formatOrderAmount(locale: Locale, amount: number | null | undefi
   } catch {
     return `${(amount / 100).toFixed(2)} ${code}`
   }
+}
+
+/** AI 改卡的提醒（api-spec 第 10 节），一条一句：加了原卡和指令里都没有的数字 / 链接 / 邮箱，或者某一栏改坏了、已保留原文。 */
+export function rewriteWarningText(locale: Locale, warning: FaqRewriteWarning): string {
+  const field = t(locale, `helpDesk.faqReview.fields.${warning.field}`)
+  return warning.kind === 'dropped'
+    ? t(locale, `helpDesk.faqReview.warning.dropped.${warning.reason}`, { field })
+    : t(locale, `helpDesk.faqReview.warning.${warning.kind}`, { field, text: warning.text })
 }

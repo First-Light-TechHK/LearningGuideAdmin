@@ -705,7 +705,11 @@
       "JOB_RUN_NOT_FOUND": "这次运行已不存在。",
       "PLACE_REQUIRED": "请先选一个位置。",
       "INVALID_PLACE": "这个位置不能放卡，请选步骤、偏离或规则格。",
-      "FAQ_NOT_UPDATED": "这张卡还没改过：请先保存改动，再批准。"
+      "FAQ_NOT_UPDATED": "这张卡还没改过：请先保存改动，再批准。",
+      "REWRITE_UNAVAILABLE": "这个环境还没接上 AI（缺 OpenRouter 的 key），先手动改。",
+      "REWRITE_FAILED": "AI 这次没按要求改，换个说法再试。",
+      "REWRITE_TIMEOUT": "AI 这次太慢没回来，过一会儿再试，或者先手动改。",
+      "REWRITE_RATE_LIMITED": "一分钟内让 AI 改太多次了，稍等一下再试。"
     },
     "addFaq": "新增常见问题",
     "actions": {
@@ -1671,7 +1675,105 @@
         "tooLong": "最多 {max} 字。",
         "noChange": "AI 没有改动，换个说法试试。",
         "changedHere": "AI 改了这里",
-        "changedOther": "另一种语言也被 AI 改了"
+        "changedOther": "另一种语言也被 AI 改了",
+        "checkThese": "请核实"
+      }
+    },
+    "faqReview": {
+      "viewLabel": "常见问题的视图",
+      "view": {
+        "table": "表格",
+        "review": "逐张审核"
+      },
+      "queue": "审核队列",
+      "stateLabel": "按审核状态筛选",
+      "filter": {
+        "unreviewed": "未审核",
+        "needs_change": "需要改",
+        "ok": "已审核",
+        "all": "全部"
+      },
+      "count": "共 {count} 张",
+      "popular": "热门",
+      "state": {
+        "unreviewed": "未审核",
+        "needs_change": "需要改",
+        "ok": "已审核",
+        "changedSince": "改过，待复核"
+      },
+      "empty": {
+        "unreviewed": "都审完了。可以切到「需要改」看看还有哪些要处理。",
+        "needs_change": "没有标记为需要改的卡。",
+        "ok": "还没有审核过的卡。",
+        "all": "没有符合搜索或筛选条件的卡。"
+      },
+      "card": "这张卡",
+      "status": "审核",
+      "never": "还没有人审核过这张卡。",
+      "someone": "员工",
+      "last": {
+        "ok": "{by} 在 {when} 标为没问题（第 {version} 版）",
+        "needs_change": "{by} 在 {when} 标为需要改（第 {version} 版）"
+      },
+      "noteLabel": "哪里要改",
+      "notePlaceholder": "比如：价格写的是去年的，要换成现在的",
+      "needNote": "写一句哪里要改。",
+      "history": "改动记录",
+      "action": {
+        "create": "建了这张卡（第 {version} 版）",
+        "update": "改了这张卡（第 {version} 版）",
+        "archive": "下线了这张卡",
+        "review_ok": "标为没问题（第 {version} 版）",
+        "review_needs_change": "标为需要改（第 {version} 版）",
+        "place_create": "把这张卡挂到了「{place}」",
+        "place_update": "改了这张卡在「{place}」的位置",
+        "place_delete": "把这张卡从「{place}」取下"
+      },
+      "changed": "改了：{fields}",
+      "fields": {
+        "questionZh": "中文问题",
+        "answerZh": "中文答案",
+        "questionEn": "英文问题",
+        "answerEn": "英文答案",
+        "category": "分类",
+        "popular": "热门",
+        "keywords": "关键词",
+        "signals": "用户情境",
+        "key": "卡片 key",
+        "type": "类型",
+        "entry": "是否入口",
+        "status": "状态"
+      },
+      "needsChange": "需要改",
+      "archive": "下线",
+      "ok": "没问题",
+      "saveAndOk": "保存修改并标为已审",
+      "confirmNeedsChange": "标为需要改",
+      "confirmArchive": "下线后用户就看不到这张卡了，改动记录会保留。确定吗？",
+      "confirmArchiveButton": "确定下线",
+      "afterOk": "看过没问题就点右边；要改直接在左边改，或者跟 AI 说。",
+      "afterSave": "你改了这张卡：保存后标为已审，记下是谁改的。",
+      "editsNotSaved": "你在左边改的内容不会保存，只记「需要改」。",
+      "readOnly": "你只能查看，审核要有 Help Desk 的完整权限。",
+      "savedNotReviewed": "修改已保存，但没标上已审核。再点一次「没问题」。",
+      "done": {
+        "ok": "已标为没问题，下一张。",
+        "saved": "已保存修改并标为已审，下一张。",
+        "needsChange": "已标为需要改，下一张。",
+        "archived": "已下线，下一张。"
+      },
+      "historyEmpty": "还没有记录。",
+      "pageOf": "第 {page} / {pages} 页，共 {total} 张",
+      "changedAfter": "审过第 {version} 版，之后改过（现在第 {now} 版），要再审一次。",
+      "warning": {
+        "number": "{field}里出现了原卡和指令里都没有的数字「{text}」，请核实。",
+        "link": "{field}里出现了原卡和指令里都没有的链接「{text}」，请核实。",
+        "email": "{field}里出现了原卡和指令里都没有的邮箱「{text}」，请核实。",
+        "dropped": {
+          "empty": "AI 把{field}改成了空的，已保留原文。",
+          "too_long": "AI 把{field}改得太长，已保留原文。",
+          "language": "AI 把{field}改成了别的语言，已保留原文。"
+        }
       }
     }
   }
