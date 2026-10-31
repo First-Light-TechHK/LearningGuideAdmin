@@ -33,6 +33,12 @@ export const FAQ_VECTOR_LIMITS = {
   queryCharsMax: 600,
   /** 检索时等向量这一路至多这么久，过了就只用字词检索。 */
   queryTimeoutMs: 1_200,
+  /**
+   * 算问题向量的请求这么久还没回 → 再发一次，谁先回用谁（对冲请求）。慢的是对方的服务：2026-10-31
+   * 实测 bge-m3 单次中位数 0.37–0.54 秒，忙的时候 95 分位 2.1 秒、17% 超过 queryTimeoutMs；
+   * OpenRouter 上这个模型有两家提供方，第二次请求常落到另一家。
+   */
+  hedgeAfterMs: 500,
   /** 发布后算一整版向量的期限（650 张卡约 6,000 条文本，100 次请求）。 */
   indexTimeoutMs: 120_000,
   /** 学员问题的向量缓存条数（同一句话再问不再调模型）。 */
@@ -292,8 +298,9 @@ export function createPgFaqVectorStore(db: SqlDb = defaultDb): FaqVectorStore {
     },
 
     async load(release, model) {
+      // to_json：驱动按 JSON.parse 解析，比解析 REAL[] 的文本快约 4 倍（6,700 条向量 3.5 秒 → 0.8 秒）
       const rows = await db.query(
-        `SELECT v.node_id, e.embedding, n.node_type, n.entry, n.category, n.popular
+        `SELECT v.node_id, to_json(e.embedding) AS embedding, n.node_type, n.entry, n.category, n.popular
            FROM helpdesk_faq_release_vectors v
            JOIN helpdesk_faq_embeddings e
              ON e.model = v.model AND e.text_hash = v.text_hash
@@ -397,20 +404,91 @@ export type FaqVectorSearch = {
     text: string,
     signal?: AbortSignal,
   ): Promise<FaqVectorHit[] | null>;
+  /** 先把这一版的向量读进内存（启动时调；不算问题向量）。没有模型 → 什么都不做。 */
+  warm?(release: number): Promise<void>;
 };
+
+/**
+ * 对冲请求：先发一次；afterMs 内没回、或者先失败了，再发第二次（至多两次）。谁先成功用谁，
+ * 另一个取消；两次都失败 → 第二次的错误；外面取消 → 两个都取消。
+ */
+export function hedgedCall<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  afterMs: number,
+  outer?: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const controllers: AbortController[] = [];
+    let settled = false;
+    let failures = 0;
+    const stop = () => {
+      settled = true;
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', onAbort);
+      for (const controller of controllers) controller.abort();
+    };
+    function onAbort() {
+      if (settled) return;
+      stop();
+      reject(outer?.reason as Error);
+    }
+    function start() {
+      if (settled || controllers.length === 2) return;
+      const controller = new AbortController();
+      controllers.push(controller);
+      run(controller.signal).then(
+        (value) => {
+          if (settled) return;
+          stop();
+          resolve(value);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          failures += 1;
+          if (failures === 2) {
+            stop();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          } else start();
+        },
+      );
+    }
+    if (outer?.aborted) {
+      reject(outer.reason as Error);
+      return;
+    }
+    outer?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(start, afterMs);
+    timer.unref?.();
+    start();
+  });
+}
 
 export function createFaqVectorSearch(deps: {
   store: FaqVectorStore;
   embedder: () => FaqEmbedder | null;
   now?: () => number;
+  hedgeAfterMs?: number;
 }): FaqVectorSearch {
   const now = deps.now ?? (() => Date.now());
+  const hedgeAfterMs = deps.hedgeAfterMs ?? FAQ_VECTOR_LIMITS.hedgeAfterMs;
   type Loaded = {
     nodes: ({ id: string; vectors: Float32Array[] } & FaqVectorNodeMeta)[];
     at: number;
   };
   const indexes = new Map<string, Promise<Loaded>>();
+  /** 已经读完的版本，用来在调模型之前同步判断「这一版还没有向量」。 */
+  const ready = new Map<string, Loaded>();
   const queries = new Map<string, Float32Array>();
+
+  /** 这一版刚读过、确实没有向量（还没到再看的时候）。 */
+  function knownEmpty(release: number, model: string): boolean {
+    const loaded = ready.get(`${release}\n${model}`);
+    return (
+      loaded !== undefined &&
+      loaded.nodes.length === 0 &&
+      now() - loaded.at < FAQ_VECTOR_LIMITS.emptyRecheckMs
+    );
+  }
 
   async function index(release: number, model: string): Promise<Loaded> {
     const key = `${release}\n${model}`;
@@ -441,7 +519,10 @@ export function createFaqVectorSearch(deps: {
       return { nodes: [...byNode.values()], at: now() };
     });
     indexes.set(key, loading);
-    loading.catch(() => indexes.delete(key));
+    loading.then(
+      (loaded) => ready.set(key, loaded),
+      () => indexes.delete(key),
+    );
     return loading;
   }
 
@@ -453,7 +534,11 @@ export function createFaqVectorSearch(deps: {
     const key = `${embedder.model}\n${text}`;
     const cached = queries.get(key);
     if (cached) return cached;
-    const [vector] = await embedder.embed([text], signal);
+    const [vector] = await hedgedCall(
+      (attempt) => embedder.embed([text], attempt),
+      hedgeAfterMs,
+      signal,
+    );
     const value = unit(vector);
     if (queries.size >= FAQ_VECTOR_LIMITS.queryCacheMax)
       queries.delete(queries.keys().next().value as string);
@@ -465,16 +550,25 @@ export function createFaqVectorSearch(deps: {
     async rank(release, raw, signal) {
       const embedder = deps.embedder();
       const text = clean(raw).slice(0, FAQ_VECTOR_LIMITS.queryCharsMax);
-      if (!embedder || text === '') return null;
-      const loaded = await index(release, embedder.model);
+      if (!embedder || text === '' || knownEmpty(release, embedder.model))
+        return null;
+      // 读这一版的向量与算问题向量同时做（刚启动或刚发布时，读一版约 1 秒）
+      const loading = index(release, embedder.model);
+      const embedding = queryVector(embedder, text, signal);
+      embedding.catch(() => undefined); // 这一版没有向量就先返回了，别留下没处理的失败
+      const loaded = await loading;
       if (loaded.nodes.length === 0) return null;
-      const query = await queryVector(embedder, text, signal);
+      const query = await embedding;
       return loaded.nodes
         .map(({ vectors, ...node }) => ({
           ...node,
           similarity: Math.max(...vectors.map((v) => dot(query, v))),
         }))
         .sort((a, b) => b.similarity - a.similarity || (a.id < b.id ? -1 : 1));
+    },
+    async warm(release) {
+      const embedder = deps.embedder();
+      if (embedder) await index(release, embedder.model);
     },
   };
 }
@@ -612,6 +706,21 @@ export function logFaqVectorSearchError(error: unknown): void {
   logger.warn(
     `helpdesk faq vectors: search fell back to lexical: ${vectorErrorMessage(error)}`,
   );
+}
+
+/** 启动时把上线版本的向量读进内存；失败只记一行（之后第一次检索会再读）。 */
+export async function warmFaqVectors(
+  vectors: FaqVectorSearch,
+  release: () => Promise<number | null>,
+): Promise<void> {
+  try {
+    const version = await release();
+    if (version !== null) await vectors.warm?.(version);
+  } catch (error) {
+    logger.warn(
+      `helpdesk faq vectors: warm-up failed: ${vectorErrorMessage(error)}`,
+    );
+  }
 }
 
 /** 生产组装：每次现读环境变量的向量检索（没有模型 = 不检索向量）。 */

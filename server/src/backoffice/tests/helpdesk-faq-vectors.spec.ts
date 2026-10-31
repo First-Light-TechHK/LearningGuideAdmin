@@ -8,11 +8,13 @@ import {
   FAQ_VECTOR_LIMITS,
   createFaqVectorSearch,
   faqVectorTexts,
+  hedgedCall,
   indexFaqRelease,
   openRouterFaqEmbedder,
   reciprocalRankFusion,
   retrievalMode,
   textHash,
+  warmFaqVectors,
   withFaqVectorSearch,
   type FaqEmbedder,
   type FaqVectorHit,
@@ -500,6 +502,16 @@ describe('createFaqVectorSearch', () => {
     expect(await vectors.rank(RELEASE + 9, 'x')).toBeNull();
   });
 
+  it('does not call the model again for a release it just found empty', async () => {
+    const store = memoryStore(nodes);
+    const embedder = fakeEmbedder(table);
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    expect(await vectors.rank(RELEASE, '退款')).toBeNull();
+    const before = embedder.calls.length;
+    expect(await vectors.rank(RELEASE, '退钱')).toBeNull();
+    expect(embedder.calls.length).toBe(before);
+  });
+
   it('looks again for vectors of a release that had none after emptyRecheckMs', async () => {
     const store = memoryStore(nodes);
     const embedder = fakeEmbedder(table);
@@ -515,6 +527,175 @@ describe('createFaqVectorSearch', () => {
     expect(await vectors.rank(RELEASE, '退款')).toBeNull();
     clock = FAQ_VECTOR_LIMITS.emptyRecheckMs + 1;
     expect(await vectors.rank(RELEASE, '退款')).not.toBeNull();
+  });
+});
+
+describe('createFaqVectorSearch: speed', () => {
+  const nodes = [
+    {
+      id: 'refund',
+      questionEn: 'Refund?',
+      questionZh: '退款？',
+      phrasings: [],
+    },
+  ];
+  const table = { 'Refund?': [1, 0], '退款？': [1, 0.1], 退钱: [0.9, 0.1] };
+
+  /** 计数的仓库：load 被调了几次。 */
+  async function counted() {
+    const store = memoryStore(nodes);
+    await indexFaqRelease({
+      store,
+      embedder: fakeEmbedder(table),
+      release: RELEASE,
+    });
+    let loads = 0;
+    const load = store.load.bind(store);
+    store.load = (release, model) => {
+      loads += 1;
+      return load(release, model);
+    };
+    return { store, loads: () => loads };
+  }
+
+  it('warm reads the release once, before any question, without calling the model', async () => {
+    const { store, loads } = await counted();
+    const embedder = fakeEmbedder(table);
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    await vectors.warm?.(RELEASE);
+    expect(loads()).toBe(1);
+    expect(embedder.calls).toEqual([]);
+    expect((await vectors.rank(RELEASE, '退钱'))?.[0].id).toBe('refund');
+    expect(loads()).toBe(1);
+  });
+
+  it('warmFaqVectors warms the live release, skips when none is live and only logs a failure', async () => {
+    const warmed: number[] = [];
+    const vectors: FaqVectorSearch = {
+      rank: () => Promise.resolve(null),
+      warm: (release) => {
+        warmed.push(release);
+        return Promise.resolve();
+      },
+    };
+    await warmFaqVectors(vectors, () => Promise.resolve(RELEASE));
+    await warmFaqVectors(vectors, () => Promise.resolve(null));
+    await expect(
+      warmFaqVectors(vectors, () => Promise.reject(new Error('db down'))),
+    ).resolves.toBeUndefined();
+    expect(warmed).toEqual([RELEASE]);
+  });
+
+  it('asks for the question vector while the release is still loading', async () => {
+    const { store } = await counted();
+    const order: string[] = [];
+    const load = store.load.bind(store);
+    store.load = async (release, model) => {
+      order.push('load start');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      order.push('load end');
+      return load(release, model);
+    };
+    const base = fakeEmbedder(table);
+    const embedder: FaqEmbedder = {
+      model: base.model,
+      embed(texts, signal) {
+        order.push('embed');
+        return base.embed(texts, signal);
+      },
+    };
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    expect((await vectors.rank(RELEASE, '退钱'))?.[0].id).toBe('refund');
+    expect(order).toEqual(['load start', 'embed', 'load end']);
+  });
+
+  it('sends a second request when the model is slow and uses whichever answers first', async () => {
+    const { store } = await counted();
+    const signals: AbortSignal[] = [];
+    let calls = 0;
+    const embedder: FaqEmbedder = {
+      model: 'test/embed',
+      embed(texts, signal) {
+        calls += 1;
+        signals.push(signal as AbortSignal);
+        // 第一次一直不回（直到被取消），第二次马上回
+        if (calls === 1)
+          return new Promise((_, reject) =>
+            signal?.addEventListener('abort', () =>
+              reject(new Error('aborted')),
+            ),
+          );
+        return Promise.resolve(
+          texts.map((text) => table[text as keyof typeof table] ?? [0, 1]),
+        );
+      },
+    };
+    const vectors = createFaqVectorSearch({
+      store,
+      embedder: () => embedder,
+      hedgeAfterMs: 10,
+    });
+    expect((await vectors.rank(RELEASE, '退钱'))?.[0].id).toBe('refund');
+    expect(calls).toBe(2);
+    expect(signals[0].aborted).toBe(true);
+  });
+});
+
+describe('hedgedCall', () => {
+  const later = <T>(ms: number, value: T, signal: AbortSignal) =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(value), ms);
+      signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('aborted'));
+      });
+    });
+
+  it('makes one request when the first answers in time', async () => {
+    let calls = 0;
+    const value = await hedgedCall((signal) => {
+      calls += 1;
+      return later(1, 'first', signal);
+    }, 50);
+    expect(value).toBe('first');
+    expect(calls).toBe(1);
+  });
+
+  it('retries at once after a failure and gives up after two', async () => {
+    let calls = 0;
+    await expect(
+      hedgedCall(() => {
+        calls += 1;
+        return Promise.reject(new Error(`fail ${calls}`));
+      }, 10_000),
+    ).rejects.toThrow('fail 2');
+    expect(calls).toBe(2);
+    calls = 0;
+    const value = await hedgedCall(() => {
+      calls += 1;
+      return calls === 1
+        ? Promise.reject(new Error('fail'))
+        : Promise.resolve('second');
+    }, 10_000);
+    expect(value).toBe('second');
+  });
+
+  it('stops both requests when the caller gives up', async () => {
+    const outer = new AbortController();
+    const signals: AbortSignal[] = [];
+    const pending = hedgedCall(
+      (signal) => {
+        signals.push(signal);
+        return later(10_000, 'never', signal);
+      },
+      5,
+      outer.signal,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    outer.abort(new Error('timeout'));
+    await expect(pending).rejects.toThrow('timeout');
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });
 

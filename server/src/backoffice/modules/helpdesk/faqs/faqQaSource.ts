@@ -22,6 +22,7 @@ import {
   createEnvFaqVectorSearch,
   logFaqVectorSearchError,
   retrievalMode,
+  warmFaqVectors,
   withFaqVectorSearch,
   type FaqVectorSearch,
 } from './faqVectors';
@@ -370,7 +371,7 @@ export function createPgHelpdeskQaSource(
   vectors: FaqVectorSearch = createEnvFaqVectorSearch(db),
 ): HelpdeskQaSource {
   const graph = createPgFaqGraphRepository(db);
-  return createHelpdeskQaSource({
+  const source = createHelpdeskQaSource({
     // 候选检索按 HELPDESK_RETRIEVAL（每次现读，缺省 lexical = 和以前一样只走字词）
     repository: withFaqVectorSearch(repository ?? createPgFaqRepository(db), {
       vectors,
@@ -381,4 +382,11 @@ export function createPgHelpdeskQaSource(
     liveEdges: () => graph.allEdges(),
     locator: () => locatorMode(process.env),
   });
+  // 向量检索开着时，启动就把上线版本的向量读进内存（约 1 秒），免得最先几个提问等不到、退回字词检索
+  if (retrievalMode(process.env) !== 'lexical')
+    void warmFaqVectors(
+      vectors,
+      () => source.releaseVersion?.() ?? Promise.resolve(null),
+    );
+  return source;
 }
