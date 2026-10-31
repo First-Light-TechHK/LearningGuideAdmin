@@ -73,7 +73,7 @@ export function isEditing(): boolean {
 }
 
 export interface VersionWatchOptions {
-  /** 本次页面加载的构建标识；默认取服务端注入的 meta。null 表示不看守。 */
+  /** 本次页面加载的构建标识；默认取服务端注入的 meta。 */
   currentVersion?: string | null;
   fetchVersion?: () => Promise<string | null>;
   reload?: () => void;
@@ -107,9 +107,7 @@ async function defaultFetchVersion(): Promise<string | null> {
  * 任何异常都吞掉：版本检查出错绝不能影响 BackOffice 本身。
  */
 export function startVersionWatch(options: VersionWatchOptions = {}): () => void {
-  const current = options.currentVersion ?? readBuildMeta();
-  // 没有构建标识（本地 dev、纯 API 角色）就不看守：否则会把"未知"当成版本变化。
-  if (!current) return () => undefined;
+  const declared = options.currentVersion ?? readBuildMeta();
 
   const fetchVersion = options.fetchVersion ?? defaultFetchVersion;
   const reload = options.reload ?? (() => window.location.reload());
@@ -119,7 +117,9 @@ export function startVersionWatch(options: VersionWatchOptions = {}): () => void
   const storage = options.storage ?? (typeof sessionStorage === 'undefined' ? null : sessionStorage);
 
   const saved = storage?.getItem(RELOADED_KEY) ?? null;
-  const state = initialVersionState(current, saved === '' ? null : saved);
+  // 没有 meta（旧的入口文档、被中间层重写、或纯 API 角色）时退化为"首轮轮询取基线"：
+  // 这样即使 HTML 注入没到达浏览器，只要 /version.json 通，自动换新依然生效。
+  const state = initialVersionState(declared, saved === '' ? null : saved);
   let stopped = false;
 
   async function observe(): Promise<void> {
@@ -131,6 +131,11 @@ export function startVersionWatch(options: VersionWatchOptions = {}): () => void
       return;
     }
     if (stopped || !observed) return;
+    // 首轮取到基线（仅在文档里没有构建标识时使用）。
+    if (!state.current) {
+      state.current = observed;
+      return;
+    }
     const decision = decideVersionPoll(state, observed);
     options.onDecision?.(decision, state);
     if (decision !== 'reload') return;

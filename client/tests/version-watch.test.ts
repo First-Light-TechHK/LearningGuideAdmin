@@ -59,17 +59,45 @@ test('the version already reloaded for is not reloaded again', () => {
   assert.equal(decideVersionPoll(state, 'v3'), 'reload')
 })
 
-test('a page with no build identity does not watch at all', () => {
-  let fetches = 0
+test('without a meta tag the first poll becomes the baseline, so the watcher still works', async () => {
+  // Some intermediaries may rewrite the entry document; the /version.json path
+  // must keep auto-refresh working even then.
+  let version = 'v1'
+  let reloads = 0
   const stop = startVersionWatch({
     currentVersion: null,
-    fetchVersion: async () => {
-      fetches += 1
-      return 'v2'
+    fetchVersion: async () => version,
+    reload: () => {
+      reloads += 1
     },
+    isHidden: () => true,
+    storage: fakeStorage(),
+    pollMs: 5,
   })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.equal(reloads, 0, 'the first observation is adopted as the baseline, not a change')
+
+  version = 'v2'
+  await new Promise(resolve => setTimeout(resolve, 40))
   stop()
-  assert.equal(fetches, 0, 'local dev has no meta tag and must not poll')
+  assert.equal(reloads, 1, 'a later change is still detected without the meta tag')
+})
+
+test('a service with no version endpoint at all never reloads', async () => {
+  let reloads = 0
+  const stop = startVersionWatch({
+    currentVersion: null,
+    fetchVersion: async () => null,
+    reload: () => {
+      reloads += 1
+    },
+    isHidden: () => true,
+    storage: fakeStorage(),
+    pollMs: 5,
+  })
+  await new Promise(resolve => setTimeout(resolve, 30))
+  stop()
+  assert.equal(reloads, 0)
 })
 
 test('a hidden tab reloads as soon as a new build is confirmed', async () => {
