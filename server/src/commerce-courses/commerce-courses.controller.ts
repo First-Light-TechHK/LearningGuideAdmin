@@ -25,6 +25,7 @@ import { PublishingService } from './publishing.service';
 import { TrialService } from './trial.service';
 import { PricingService } from './pricing.service';
 import { PreviewService } from './preview.service';
+import { CourseAuthoringService } from './course-authoring.service';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
@@ -79,6 +80,7 @@ export class CommerceCoursesController {
     private readonly trial: TrialService,
     private readonly pricing: PricingService,
     private readonly preview: PreviewService,
+    private readonly authoring: CourseAuthoringService,
   ) {}
 
   @Get()
@@ -118,6 +120,11 @@ export class CommerceCoursesController {
     @Req() request: BackofficeRequest,
   ) {
     return this.courses.createCourse(body, actor(request));
+  }
+
+  @Get('categories')
+  categories() {
+    return this.authoring.listCategories();
   }
 
   // 只读诊断：确认媒体存储驱动（S3 桶/前缀 或 本地路径），便于核对 S3 是否生效。需声明在 :id 之前。
@@ -200,6 +207,7 @@ export class CommerceCoursesController {
       learningLanguages?: string[];
       subtitle?: string | null;
       level?: string | null;
+      categoryId?: string | null;
     },
   ) {
     return this.courses.updateCourse(id, body);
@@ -262,6 +270,225 @@ export class CommerceCoursesController {
   @HttpCode(200)
   deleteLesson(@Param('id') id: string, @Param('lessonId') lessonId: string) {
     return this.courses.deleteLesson(id, lessonId);
+  }
+
+  // ===== 课程内容创作（CM05–CM07）=====
+  @Post(':id/media')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadMedia(
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.uploadMedia(id, file);
+  }
+
+  @Post(':id/cover')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadCover(
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.uploadCover(id, file);
+  }
+
+  @Delete(':id/cover')
+  @HttpCode(200)
+  deleteCover(@Param('id') id: string) {
+    return this.authoring.deleteCover(id);
+  }
+
+  @Put(':id/lessons/:lessonId/video')
+  @HttpCode(200)
+  setLessonVideo(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: { language: string; assetId: string },
+  ) {
+    return this.authoring.setLessonVideo(
+      id,
+      lessonId,
+      body.language,
+      body.assetId,
+    );
+  }
+
+  @Put(':id/lessons/:lessonId/learning-points')
+  @HttpCode(200)
+  saveLearningPoints(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      language: string;
+      points: Array<{ code?: string; title: string; timeSeconds: number }>;
+    },
+  ) {
+    return this.authoring.saveVideoLearningPoints(
+      id,
+      lessonId,
+      body.language,
+      body.points ?? [],
+    );
+  }
+
+  @Put(':id/lessons/:lessonId/triggers')
+  @HttpCode(200)
+  saveTriggers(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      language: string;
+      triggers: Array<{ exhibitId: string; timeSeconds: number }>;
+    },
+  ) {
+    return this.authoring.saveTriggers(
+      id,
+      lessonId,
+      body.language,
+      body.triggers ?? [],
+    );
+  }
+
+  @Post(':id/lessons/:lessonId/exhibits')
+  @HttpCode(201)
+  createExhibit(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      code?: string;
+      type: string;
+      mediaAssetId?: string | null;
+      thumbnailAssetId?: string | null;
+      sourceText?: string | null;
+      localized?: unknown;
+    },
+  ) {
+    return this.authoring.createExhibit(id, lessonId, body);
+  }
+
+  @Put(':id/lessons/:lessonId/exhibits/:exhibitId')
+  @HttpCode(200)
+  updateExhibit(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Param('exhibitId') exhibitId: string,
+    @Body()
+    body: {
+      type?: string;
+      mediaAssetId?: string | null;
+      thumbnailAssetId?: string | null;
+      sourceText?: string | null;
+      localized?: unknown;
+    },
+  ) {
+    return this.authoring.updateExhibit(id, lessonId, exhibitId, body);
+  }
+
+  @Delete(':id/lessons/:lessonId/exhibits/:exhibitId')
+  @HttpCode(200)
+  deleteExhibit(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Param('exhibitId') exhibitId: string,
+  ) {
+    return this.authoring.deleteExhibit(id, lessonId, exhibitId);
+  }
+
+  @Put(':id/lessons/:lessonId/readings')
+  @HttpCode(200)
+  saveReadings(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      language: string;
+      readings: Array<{
+        type: string;
+        title: string;
+        author: string;
+        whyRecommended: string;
+      }>;
+    },
+  ) {
+    return this.authoring.saveReadings(
+      id,
+      lessonId,
+      body.language,
+      body.readings ?? [],
+    );
+  }
+
+  @Post(':id/readings/import')
+  @UseInterceptors(FileInterceptor('file'))
+  importReadings(
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.importReadings(id, file);
+  }
+
+  @Put(':id/lessons/:lessonId/knowledge-test')
+  @HttpCode(200)
+  saveKnowledgeTest(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      enabled: boolean;
+      questions: Array<{
+        code?: string;
+        question: string;
+        referenceAnswer: string;
+      }>;
+    },
+  ) {
+    return this.authoring.saveKnowledgeTest(
+      id,
+      lessonId,
+      Boolean(body.enabled),
+      body.questions ?? [],
+    );
+  }
+
+  @Put(':id/lessons/:lessonId/application-test')
+  @HttpCode(200)
+  saveApplicationTest(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: { enabled: boolean; scenario?: string; referenceAnswer?: string },
+  ) {
+    return this.authoring.saveApplicationTest(id, lessonId, body);
+  }
+
+  @Post(':id/understanding/import')
+  @UseInterceptors(FileInterceptor('file'))
+  importUnderstanding(
+    @Param('id') id: string,
+    @Body() body: { language?: string; lessonId?: string },
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.importUnderstanding(
+      id,
+      body.language || 'en-GB',
+      file,
+      body.lessonId,
+    );
+  }
+
+  @Get(':id/understanding/template')
+  async understandingTemplate(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const csv = await this.authoring.downloadUnderstandingTemplate(id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="understanding-template.csv"',
+    );
+    res.send(csv);
   }
 
   // ===== 草稿 / 发布 / 版本（PRD §15）=====

@@ -268,13 +268,32 @@ export async function buildCoursePackageFromSnapshot(
   const codeByLessonId = new Map(
     snapshot.course.lessons.map((lesson) => [lesson.id, lesson.code]),
   );
+  // 课程包里的 Trial 截止点必须用稳定的 LP code，而不是本环境数据库 ID。
+  const cutoffIds = [
+    ...new Set(
+      course.trialRows
+        .map((row) => row.textCutoffLearningPointId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const cutoffRows = cutoffIds.length
+    ? await prisma.learningPoint.findMany({
+        where: { id: { in: cutoffIds } },
+        select: { id: true, code: true },
+      })
+    : [];
+  const lpCodeById = new Map(
+    cutoffRows.map((row) => [row.id, row.code]),
+  );
   const trial = {
     enabled: course.trialEnabled,
     lessons: course.trialRows
       .map((row) => ({
         lessonRef: codeByLessonId.get(row.lessonId) ?? '',
         videoCutoffSeconds: row.videoCutoffSeconds,
-        textCutoffLearningPoint: row.textCutoffLearningPointId,
+        textCutoffLearningPoint: row.textCutoffLearningPointId
+          ? (lpCodeById.get(row.textCutoffLearningPointId) ?? null)
+          : null,
         status: row.status,
       }))
       .filter((row) => lessonCodes.has(row.lessonRef)),

@@ -63,6 +63,7 @@ export function CourseEditorPage() {
   const [plans, setPlans] = useState<CoursePlan[]>([]);
   const [versions, setVersions] = useState<CourseVersion[]>([]);
   const [history, setHistory] = useState<HistoryPage | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const [tab, setTab] = useState<Tab>('info');
   const [activeLessonId, setActiveLessonId] = useState('');
   const [contentLanguage, setContentLanguage] = useState('en-GB');
@@ -73,15 +74,18 @@ export function CourseEditorPage() {
   const [statusTarget, setStatusTarget] = useState<'ONLINE' | 'HIDDEN' | 'OFFLINE'>('ONLINE');
   const [exportJob, setExportJob] = useState<{ status: string; progress: number; fileName?: string; error?: string } | null>(null);
   const [exportVersion, setExportVersion] = useState('live');
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const nextTab = useRef<Tab | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [detail, trialResult, versionsResult, historyResult] = await Promise.all([
+    const [detail, trialResult, versionsResult, historyResult, categoriesResult] = await Promise.all([
       boRequest<CourseDetail>(`/api/backoffice/courses/${courseId}`),
       boRequest<TrialSettings>(`/api/backoffice/courses/${courseId}/trial`),
       boRequest<CourseVersion[]>(`/api/backoffice/courses/${courseId}/versions`),
-      boRequest<HistoryPage>(`/api/backoffice/courses/${courseId}/history?page=1&pageSize=20`),
+      boRequest<HistoryPage>(`/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`),
+      boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`),
     ]);
     setLoading(false);
     if (!detail.success) {
@@ -91,10 +95,12 @@ export function CourseEditorPage() {
     setCourse(detail.data);
     setContentLanguage(detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB');
     setActiveLessonId((current) => current || detail.data.lessons[0]?.id || '');
+    setSelectedCategoryId(detail.data.categoryId ?? '');
     if (trialResult.success) setTrial(trialResult.data);
     if (versionsResult.success) setVersions(versionsResult.data);
     if (historyResult.success) setHistory(historyResult.data);
-  }, [courseId]);
+    if (categoriesResult.success) setCategories(categoriesResult.data);
+  }, [courseId, historyPage]);
 
   useEffect(() => {
     void load();
@@ -121,6 +127,7 @@ export function CourseEditorPage() {
         defaultContentLanguage: language,
         learningLanguages: course.learningLanguages,
         subtitle: String(form.get('subtitle') ?? '') || null,
+        categoryId: selectedCategoryId || null,
       }),
     });
     const provides = String(form.get('provides') ?? '')
@@ -177,6 +184,46 @@ export function CourseEditorPage() {
       await load();
     } else {
       setNotice(`Lesson save failed: ${result.error}`);
+    }
+  }
+
+  async function uploadCover(file: File) {
+    if (!course) return;
+    setBusy(true);
+    const form = new FormData();
+    form.append('file', file);
+    const result = await boRequest<{ id: string }>(`/api/backoffice/courses/${course.id}/cover`, { method: 'POST', body: form });
+    setBusy(false);
+    if (result.success) {
+      setNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
+      await load();
+    } else {
+      setNotice(`Cover upload failed: ${result.error}`);
+    }
+  }
+
+  async function uploadLessonVideo(file: File) {
+    if (!course || !activeLesson) return;
+    setBusy(true);
+    const form = new FormData();
+    form.append('file', file);
+    const uploaded = await boRequest<{ id: string }>(`/api/backoffice/courses/${course.id}/media`, { method: 'POST', body: form });
+    if (!uploaded.success) {
+      setBusy(false);
+      setNotice(`Video upload failed: ${uploaded.error}`);
+      return;
+    }
+    const result = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/video`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language, assetId: uploaded.data.id }),
+    });
+    setBusy(false);
+    if (result.success) {
+      setNotice(L(locale, '视频已上传。', 'Video uploaded.'));
+      await load();
+    } else {
+      setNotice(`Video assign failed: ${result.error}`);
     }
   }
 
@@ -471,8 +518,17 @@ export function CourseEditorPage() {
               <label style={labelStyle}>{L(locale, 'Course ID（不可修改）', 'Course ID (read-only)')}<input value={course.code} readOnly style={{ ...inputStyle, background: '#F5F7FA' }} /></label>
               <label style={labelStyle}>Slug<input name="slug" defaultValue={course.slug} style={inputStyle} /></label>
               <label style={labelStyle}>{L(locale, '学习模式（创建后锁定）', 'Learning mode (locked)')}<input value={course.learningMode} readOnly style={{ ...inputStyle, background: '#F5F7FA' }} /></label>
-              <label style={labelStyle}>{L(locale, '副标题', 'Subtitle')}<input name="subtitle" defaultValue={course.subtitle ?? ''} style={inputStyle} /></label>
-              <label style={labelStyle}>{L(locale, '简短描述', 'Short description')}<input name="shortDescription" defaultValue={localization?.shortDescription ?? ''} style={inputStyle} /></label>
+              <label style={labelStyle}>
+                {L(locale, '分类', 'Category')}
+                <select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} style={inputStyle}>
+                  <option value="">{L(locale, '未分类', 'Uncategorized')}</option>
+                  {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                {L(locale, '封面图片', 'Cover image')}
+                <input type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadCover(file); }} style={inputStyle} />
+              </label>
             </div>
             <label style={labelStyle}>{L(locale, '课程概览', 'Overview')}<textarea name="overview" rows={4} defaultValue={localization?.overview ?? ''} style={inputStyle} /></label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -537,6 +593,13 @@ export function CourseEditorPage() {
                 <Chip>{L(locale, '知识测试', 'Knowledge')} {activeLesson.questions.length}</Chip>
                 <Chip>{L(locale, '阅读', 'Reading')} {activeLesson.readings.length}</Chip>
                 <Chip tone={activeLesson.applicationTest ? 'green' : 'grey'}>{L(locale, '应用测试', 'Application')} {activeLesson.applicationTest ? '✓' : '—'}</Chip>
+              </div>
+              <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ ...buttonStyle, display: 'inline-flex', alignItems: 'center', cursor: busy ? 'not-allowed' : 'pointer' }}>
+                  {L(locale, '上传视频', 'Upload video')}
+                  <input type="file" accept="video/*" disabled={busy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadLessonVideo(file); event.currentTarget.value = ''; }} />
+                </label>
+                <span style={{ fontSize: 12, opacity: 0.65 }}>{L(locale, '上传后自动解析时长。', 'Duration is parsed after upload.')}</span>
               </div>
               <p style={{ fontSize: 12, opacity: 0.65, marginTop: 8 }}>
                 {L(locale, '视频 / 展品 / 测试 / 阅读来自导入的课程包；此页可编辑标题、描述与文本正文。保存只改草稿。', 'Video / exhibits / tests / reading come from the imported package; title, description and text are editable here. Saving only changes the draft.')}
@@ -710,6 +773,13 @@ export function CourseEditorPage() {
                 {(history?.items.length ?? 0) === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', padding: 18, opacity: 0.7 }}>{L(locale, '暂无记录。', 'No history yet.')}</td></tr>}
               </tbody>
             </table>
+            {history && history.pages > 1 && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
+                <button type="button" style={buttonStyle} disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}>←</button>
+                <span style={{ fontSize: 13, alignSelf: 'center' }}>{history.page} / {history.pages}</span>
+                <button type="button" style={buttonStyle} disabled={historyPage >= history.pages} onClick={() => setHistoryPage((p) => Math.min(history.pages, p + 1))}>→</button>
+              </div>
+            )}
           </div>
         </div>
       )}
