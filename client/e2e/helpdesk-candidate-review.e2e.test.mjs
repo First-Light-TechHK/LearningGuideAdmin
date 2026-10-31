@@ -227,6 +227,17 @@ async function open(urlPath, { role = 'ADMIN', viewport = { width: 1440, height:
       return route.fulfill(card ? ok(FAQ_FULL(card.faqId, card.questionZh, card.questionEn)) : fail(404, 'FAQ_NOT_FOUND'))
     }
     if (faq && method === 'PUT') return route.fulfill(ok({ ...FAQ_FULL(faq[1], body.questionZh, body.questionEn), answerZh: body.answerZh, version: 5 }))
+    if (p === '/api/helpdesk/faqs/rewrite' && method === 'POST') {
+      if (body.instruction.includes('失败')) return route.fulfill(fail(503, 'MODEL_UNAVAILABLE'))
+      if (body.instruction.includes('不用改')) return route.fulfill(ok({ draft: { ...body, instruction: undefined }, changed: [], model: 'deepseek', costUsd: 0 }))
+      const draft = { questionZh: body.questionZh, answerZh: body.answerZh, questionEn: body.questionEn, answerEn: body.answerEn, category: body.category }
+      if (body.selection) {
+        const text = draft[body.selection.field]
+        draft[body.selection.field] = `${text.slice(0, body.selection.start)}【改】${text.slice(body.selection.end)}`
+      } else if (body.lang === 'zh') draft.answerZh = `（AI 改写）${body.answerZh}`
+      else draft.answerEn = `(AI) ${body.answerEn}`
+      return route.fulfill(ok({ draft, changed: ['answerZh'], model: 'deepseek', costUsd: 0.0001 }))
+    }
     if (/^\/api\/helpdesk\/faqs\/[^/]+\/(edges|phrasings)$/.test(p)) return route.fulfill(ok({ parents: [], children: [], phrasings: [] }))
     if (p === '/api/helpdesk/faqs') return route.fulfill(ok({ faqs: [], total: 0, page: 1, pageSize: 10 }))
     if (p === '/api/helpdesk/flywheel/jobs/gap_mining/runs') return route.fulfill(ok({ runs: [] }))
@@ -498,6 +509,67 @@ test('1280×800: still one screen, the language switch stays on one line', async
   const wraps = await page.locator('.hdReviewSegItem').evaluateAll((items) => items.map((item) => getComputedStyle(item).whiteSpace))
   assert.deepEqual(wraps, ['nowrap', 'nowrap'], 'segment items must not wrap')
   await shot(page, 'review-1280')
+  assert.deepEqual(errors, [])
+  await page.close()
+})
+
+test('artifact-style editing: tell AI how to change the card, versions switch back and forth, the saved card is the current version', async () => {
+  const { page, calls, errors } = await open(CARDS, { viewport: { width: 1440, height: 900 } })
+  await waitPanel(page, '退款到账时间')
+  const answer = page.getByLabel('答案（中文）')
+  const original = await answer.inputValue()
+  assert.match(await page.locator('.hdVersionCount').innerText(), /版本 1 \/ 1/)
+  assert.match(await page.locator('.hdVersionNote').innerText(), /现在的卡/)
+  // 跟 AI 说怎么改（Enter 发送）
+  const ask = page.getByLabel('告诉 AI 怎么改这张卡')
+  await ask.fill('答案短一点')
+  await ask.press('Enter')
+  await page.locator('.hdVersionCount', { hasText: '版本 2 / 2' }).waitFor()
+  assert.match(await page.locator('.hdVersionNote').innerText(), /AI 按「答案短一点」改/)
+  assert.equal(await answer.inputValue(), `（AI 改写）${original}`)
+  assert.match(await answer.getAttribute('class'), /hdReviewTextChanged/)
+  assert.equal(await ask.inputValue(), '')
+  const rewrite = calls.filter((call) => call.path === '/api/helpdesk/faqs/rewrite')
+  assert.equal(rewrite.length, 1)
+  assert.deepEqual([rewrite[0].body.instruction, rewrite[0].body.lang, rewrite[0].body.selection], ['答案短一点', 'zh', undefined])
+  await shot(page, 'review-assist')
+  // 切回版本 1，再切回来
+  await page.getByRole('button', { name: '上一个版本' }).click()
+  assert.equal(await answer.inputValue(), original)
+  await page.getByRole('button', { name: '下一个版本' }).click()
+  assert.equal(await answer.inputValue(), `（AI 改写）${original}`)
+  // 选中一段只改那一段
+  await answer.evaluate((node) => {
+    node.focus()
+    node.setSelectionRange(6, 6)
+  })
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press('Shift+ArrowRight')
+  await page.locator('.hdComposerScope').waitFor()
+  await page.getByRole('button', { name: '短一点' }).click()
+  await page.locator('.hdVersionCount', { hasText: '版本 3 / 3' }).waitFor()
+  const scoped = calls.filter((call) => call.path === '/api/helpdesk/faqs/rewrite')[1].body
+  assert.deepEqual(scoped.selection, { field: 'answerZh', start: 6, end: 10 })
+  assert.match(await answer.inputValue(), /【改】/)
+  // AI 失败：原文不动、提示；AI 没改：不加版本
+  await ask.fill('这次会失败')
+  await ask.press('Enter')
+  await page.locator('.hdComposerWrap [role="alert"]').waitFor()
+  assert.match(await page.locator('.hdVersionCount').innerText(), /版本 3 \/ 3/)
+  await ask.fill('不用改')
+  await ask.press('Enter')
+  await page.getByText('AI 没有改动').waitFor()
+  assert.match(await page.locator('.hdVersionCount').innerText(), /版本 3 \/ 3/)
+  // 人手改：新版本「你改的」，连续输入只算一个
+  await answer.fill(`${await answer.inputValue()}。`)
+  await answer.press('End')
+  await answer.type('好')
+  assert.match(await page.locator('.hdVersionCount').innerText(), /版本 4 \/ 4/)
+  assert.match(await page.locator('.hdVersionNote').innerText(), /你改的/)
+  const final = await answer.inputValue()
+  await primary(page).click()
+  await page.locator('.hdReviewToast', { hasText: '卡片修改已存进编辑区' }).waitFor()
+  const put = calls.find((call) => call.method === 'PUT')
+  assert.equal(put.body.answerZh, final)
   assert.deepEqual(errors, [])
   await page.close()
 })

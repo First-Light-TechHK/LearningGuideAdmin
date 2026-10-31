@@ -851,3 +851,25 @@ export type FlywheelMetrics = {
   topGaps: GapGroupRow[];
   ticketFaqs: TicketFaqRow[];
 };
+
+/**
+ * 「AI 按指令改卡」（像 Claude Artifact，只用 DeepSeek；接口待后端确认）：不保存，只回一份改好的草稿。
+ * selection：只改这一段（字段 + 字符位置）。
+ */
+export type FaqRewriteBody = {
+  questionZh: string;
+  answerZh: string;
+  questionEn: string;
+  answerEn: string;
+  category: string | null;
+  instruction: string;
+  lang: "zh" | "en";
+  selection?: { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; start: number; end: number };
+};
+
+export type FaqRewriteResult = {
+  draft: { questionZh: string; answerZh: string; questionEn: string; answerEn: string; category: string | null };
+  changed: string[];
+  model: string;
+  costUsd: number | null;
+};

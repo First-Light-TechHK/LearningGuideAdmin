@@ -8,6 +8,8 @@ import {
   type CandidateList,
   type CandidateReview,
   type FaqMap,
+  type FaqRewriteBody,
+  type FaqRewriteResult,
   type MergeCandidateBody,
   type MergeCandidateResult,
   type DismissCandidateBody,
@@ -303,6 +305,11 @@ export function listRetentionRuns() {
 
 export function runRetentionNow(idempotencyKey: string) {
   return sendJson<PortalJobRunResult>('POST', '/api/helpdesk/jobs/assist-retention/run', {}, idempotencyKey)
+}
+
+/** AI 按指令改卡（不保存）：失败时界面保留原文，只提示。 */
+export function rewriteFaq(body: FaqRewriteBody) {
+  return sendJson<FaqRewriteResult>('POST', '/api/helpdesk/faqs/rewrite', body)
 }
 
 export function getFlywheelMetrics(input: { granularity: MetricsGranularity; from: string; to: string; split: MetricsSplit }) {

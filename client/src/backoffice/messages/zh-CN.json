@@ -1638,7 +1638,41 @@
           "cell": "规则格"
         }
       },
-      "shortcut": "Ctrl ↵"
+      "shortcut": "Ctrl ↵",
+      "assist": {
+        "versions": "版本",
+        "previous": "上一个版本",
+        "next": "下一个版本",
+        "versionOf": "版本 {n} / {total}",
+        "startDraft": "AI 初稿",
+        "startCard": "现在的卡",
+        "manual": "你改的",
+        "byAi": "AI 按「{instruction}」改",
+        "label": "告诉 AI 怎么改这张卡",
+        "placeholder": "告诉 AI 怎么改这张卡…",
+        "working": "AI 正在改…",
+        "send": "发送",
+        "quick": "常用指令",
+        "quickLabel": {
+          "shorter": "短一点",
+          "friendlier": "更客气",
+          "steps": "改成步骤",
+          "translate": "补齐另一种语言"
+        },
+        "quickText": {
+          "shorter": "把答案改短一点，先说结论，去掉重复的话",
+          "friendlier": "语气更客气、更有耐心，但不要加没有的承诺",
+          "steps": "把答案改成 1、2、3 的操作步骤",
+          "translate": "按现在这一种语言的内容，补齐或更新另一种语言，意思保持一致"
+        },
+        "onlySelection": "只改选中的：「{text}」",
+        "wholeCard": "改整张卡",
+        "hint": "Enter 发送 · 每次 AI 改动都是一个新版本，可以切回去",
+        "tooLong": "最多 {max} 字。",
+        "noChange": "AI 没有改动，换个说法试试。",
+        "changedHere": "AI 改了这里",
+        "changedOther": "另一种语言也被 AI 改了"
+      }
     }
   }
 }

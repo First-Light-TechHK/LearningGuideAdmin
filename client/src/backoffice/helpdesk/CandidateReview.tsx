@@ -24,6 +24,7 @@ import {
   getFaq,
   mergeCandidate,
   newIdempotencyKey,
+  rewriteFaq,
   updateFaq,
 } from '../lib/helpdeskApi'
 import {
@@ -65,11 +66,23 @@ import {
   type ReviewChoice,
 } from '../lib/helpdeskReview'
 import { longDate } from '../lib/helpdeskView'
+import {
+  aiHistory,
+  cleanSelection,
+  currentVersion,
+  editHistory,
+  goTo,
+  rebase,
+  startHistory,
+  type CardHistory,
+  type TextSelection,
+} from '../lib/helpdeskVersions'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import type { Compose } from './CandidateDrawer'
 import { FaqPicker } from './FaqPicker'
 import { PlaceChips, PlaceTreePanel } from './PlacePicker'
+import { AiComposer, VersionBar } from './CardAssist'
 
 /**
  * 「FAQ 候选」Tab 的卡片审核视图（?tab=candidates&view=cards，选中 &review=<id>）。
@@ -89,7 +102,7 @@ type Lang = 'zh' | 'en'
 type Alert = { tone: 'alert' | 'status'; text: string } | null
 
 /** 编辑区：新卡 / 追问用候选的预填，改卡用那张卡当前的内容。 */
-type Editor = { source: string; draft: FaqDraft; original: FaqDraft; base: HelpdeskFaq | null; sources: string[] }
+type Editor = { source: string; draft: FaqDraft; original: FaqDraft; base: HelpdeskFaq | null; sources: string[]; history: CardHistory }
 
 const EDITS: ReviewAction[] = ['new_faq', 'follow_up', 'update_faq']
 
@@ -275,6 +288,11 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
   const [tab, setTab] = useState<Tab>('said')
   const [lang, setLang] = useState<Lang>(zh ? 'zh' : 'en')
   const [editors, setEditors] = useState<Record<string, Editor>>({})
+  const editorsRef = useRef(editors)
+  editorsRef.current = editors
+  const [selection, setSelection] = useState<TextSelection | null>(null)
+  const [assistBusy, setAssistBusy] = useState(false)
+  const [assistError, setAssistError] = useState<string | null>(null)
   const [editorError, setEditorError] = useState<string | null>(null)
   const [treeOpen, setTreeOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -332,13 +350,13 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
       void getCandidateDraft(candidateId).then((result) => {
         if (!result.ok) return live && setEditorError(result.code)
         const draft = faqDraftFromCandidate(result.data, 'new_faq')
-        done({ source, draft, original: draft, base: null, sources: result.data.answerDraft?.sources ?? [] })
+        done({ source, draft, original: draft, base: null, sources: result.data.answerDraft?.sources ?? [], history: startHistory(draft) })
       })
     else
       void getFaq(source.slice(4)).then((result) => {
         if (!result.ok) return live && setEditorError(result.code)
         const draft = draftFromFaq(result.data)
-        done({ source, draft, original: draft, base: result.data, sources: [] })
+        done({ source, draft, original: draft, base: result.data, sources: [], history: startHistory(draft) })
         if (live) setNames((all) => ({ ...all, [result.data.id]: { en: result.data.questionEn, zh: result.data.questionZh } }))
       })
     return () => {
@@ -375,8 +393,59 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
   }
 
   function edit(field: FaqField, value: string) {
+    patchDraft({ [field]: value })
+  }
+
+  /** 人手改：草稿和版本一起更新（连续输入并成一个版本）。 */
+  function patchDraft(patch: Partial<FaqDraft>) {
     if (!editor) return
-    setEditors((all) => ({ ...all, [editor.source]: { ...editor, draft: { ...editor.draft, [field]: value } } }))
+    const history = editHistory(editor.history, patch)
+    setEditors((all) => ({ ...all, [editor.source]: { ...editor, history, draft: currentVersion(history).draft } }))
+  }
+
+  function goToVersion(index: number) {
+    if (!editor) return
+    const history = goTo(editor.history, index)
+    setEditors((all) => ({ ...all, [editor.source]: { ...editor, history, draft: currentVersion(history).draft } }))
+    setSelection(null)
+  }
+
+  /** 跟 AI 说怎么改：AI 回一份草稿，成了新版本（没改动就提示）；失败时原文不动。 */
+  async function rewrite(instruction: string): Promise<boolean> {
+    if (!editor || assistBusy) return false
+    const scope = cleanSelection(editor.draft, selection)
+    setAssistBusy(true)
+    setAssistError(null)
+    const result = await rewriteFaq({
+      questionZh: editor.draft.questionZh,
+      answerZh: editor.draft.answerZh,
+      questionEn: editor.draft.questionEn,
+      answerEn: editor.draft.answerEn,
+      category: editor.draft.category,
+      instruction,
+      lang,
+      ...(scope ? { selection: scope } : {}),
+    })
+    if (!mounted.current) return false
+    setAssistBusy(false)
+    if (!result.ok) {
+      setAssistError(errorMessage(locale, result.code))
+      return false
+    }
+    const latest = editorsRef.current[editor.source] ?? editor
+    const { category, ...texts } = result.data.draft
+    const known = (FAQ_CATEGORIES as readonly string[]).includes(category ?? '') ? (category as FaqCategory) : latest.draft.category
+    const next = aiHistory(latest.history, { ...texts, category: known }, instruction)
+    if (!next) {
+      setAssistError(t(locale, 'helpDesk.review.assist.noChange'))
+      return true
+    }
+    setEditors((all) => ({ ...all, [latest.source]: { ...latest, history: next, draft: currentVersion(next).draft } }))
+    setSelection(null)
+    const changed = currentVersion(next).changed
+    if (!changed.some((field) => field.endsWith(lang === 'zh' ? 'Zh' : 'En')) && changed.some((field) => field !== 'category'))
+      setLang(lang === 'zh' ? 'en' : 'zh')
+    return true
   }
 
   /** 一个决定（接受、驳回、合并）：重试沿用 key；别人先改了 → 重新载入并提示；成功 → 交给队列。 */
@@ -463,7 +532,12 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
               if (latest.ok && mounted.current)
                 setEditors((all) => ({
                   ...all,
-                  [(editor as Editor).source]: { ...(editor as Editor), base: latest.data, original: draftFromFaq(latest.data) },
+                  [(editor as Editor).source]: {
+                    ...(editor as Editor),
+                    base: latest.data,
+                    original: draftFromFaq(latest.data),
+                    history: rebase((editor as Editor).history, draftFromFaq(latest.data)),
+                  },
                 }))
             }
             return setAlert({ tone: 'alert', text: errorMessage(locale, saved.code) })
@@ -880,7 +954,7 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
         </label>
         <textarea
           id={`${uid}-${field}`}
-          className={`hdTextarea hdReviewText${rows > 2 ? ' hdReviewTextAnswer' : ''}`}
+          className={`hdTextarea hdReviewText${rows > 2 ? ' hdReviewTextAnswer' : ''}${aiChanged(field) ? ' hdReviewTextChanged' : ''}`}
           rows={rows}
           value={editor.draft[field] as string}
           readOnly={!decidable}
@@ -888,11 +962,36 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
           aria-invalid={invalid}
           aria-describedby={invalid ? `${uid}-${field}-error` : undefined}
           onChange={(event) => edit(field, event.target.value)}
+          onSelect={(event) => {
+            if (field === 'keywords' || field === 'category') return
+            const { selectionStart, selectionEnd } = event.currentTarget
+            setSelection(selectionEnd - selectionStart >= 2 ? { field, start: selectionStart, end: selectionEnd } : null)
+          }}
         />
+        {aiChanged(field) ? <p className="hdReviewChangedNote">{t(locale, 'helpDesk.review.assist.changedHere')}</p> : null}
         {fieldError(field)}
       </div>
     )
   }
+
+  /** 当前版本是 AI 改的、而且改了这个字段：高亮。 */
+  const aiChanged = (field: FaqField) => {
+    if (!editor) return false
+    const version = currentVersion(editor.history)
+    return version.origin === 'ai' && (version.changed as string[]).includes(field)
+  }
+
+  const langChanged = (value: Lang) =>
+    value === 'zh' ? aiChanged('questionZh') || aiChanged('answerZh') : aiChanged('questionEn') || aiChanged('answerEn')
+
+  const selectionText =
+    editor && cleanSelection(editor.draft, selection)
+      ? (() => {
+          const scope = cleanSelection(editor.draft, selection) as TextSelection
+          const text = (editor.draft[scope.field] ?? '').slice(scope.start, scope.end)
+          return text.length > 40 ? `${text.slice(0, 40)}…` : text
+        })()
+      : null
 
   const langHasError = (value: Lang) =>
     submitted && (value === 'zh' ? draftErrors.questionZh || draftErrors.answerZh : draftErrors.questionEn || draftErrors.answerEn)
@@ -904,6 +1003,13 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
           <p className="hdReviewLabel">
             {t(locale, action === 'update_faq' ? 'helpDesk.review.editor.titleUpdate' : 'helpDesk.review.editor.title')}
           </p>
+          <VersionBar
+            locale={locale}
+            history={editor.history}
+            startKey={action === 'update_faq' ? 'helpDesk.review.assist.startCard' : 'helpDesk.review.assist.startDraft'}
+            onGoTo={goToVersion}
+            disabled={busy || assistBusy}
+          />
           <div className="hdReviewSeg" role="group" aria-label={t(locale, 'helpDesk.review.editor.language')}>
             {(['zh', 'en'] as const).map((value) => (
               <button
@@ -914,7 +1020,11 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
                 onClick={() => setLang(value)}
               >
                 {t(locale, `helpDesk.review.editor.${value}`)}
-                {langHasError(value) ? <span className="hdReviewErrDot" aria-label={t(locale, 'helpDesk.review.editor.hasError')} /> : null}
+                {langHasError(value) ? (
+                  <span className="hdReviewErrDot" aria-label={t(locale, 'helpDesk.review.editor.hasError')} />
+                ) : langChanged(value) && lang !== value ? (
+                  <span className="hdReviewChangedDot" aria-label={t(locale, 'helpDesk.review.assist.changedOther')} />
+                ) : null}
               </button>
             ))}
           </div>
@@ -941,12 +1051,7 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
             value={editor.draft.category ?? ''}
             disabled={!decidable || busy}
             aria-invalid={submitted && Boolean(draftErrors.category)}
-            onChange={(event) =>
-              setEditors((all) => ({
-                ...all,
-                [editor.source]: { ...editor, draft: { ...editor.draft, category: (event.target.value || null) as FaqCategory | null } },
-              }))
-            }
+            onChange={(event) => patchDraft({ category: (event.target.value || null) as FaqCategory | null })}
           >
             <option value="" disabled>
               {t(locale, 'helpDesk.drawer.categoryPlaceholder')}
@@ -1304,6 +1409,20 @@ function ReviewWorkspace({ locale, candidateId, canWrite, map, mapError, mergeTa
           <div className="hdReviewScroll hdReviewDecideBody">
             {mode === 'reject' ? rejectPane : mode === 'merge' ? mergePane : decidePane}
           </div>
+          {/* 跟 AI 说怎么改：固定在右栏底部，像 Claude Artifact 旁边的对话框 */}
+          {decidable && mode !== 'reject' && mode !== 'merge' && editing && editor ? (
+            <div className="hdReviewAssistDock">
+              <AiComposer
+                locale={locale}
+                busy={assistBusy}
+                disabled={busy}
+                selection={selectionText}
+                onClearSelection={() => setSelection(null)}
+                onSend={rewrite}
+                error={assistError}
+              />
+            </div>
+          ) : null}
           {treeOpen && choice ? (
             <PlaceTreePanel
               locale={locale}

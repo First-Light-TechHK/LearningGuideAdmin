@@ -1046,6 +1046,7 @@
 }
 
 .hdComposerHint {
+  display: none;
   margin: 0;
   font-size: 11px;
   color: #73849a;
@@ -3549,7 +3550,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
 }
 
 .hdReviewEvidence,
@@ -4547,7 +4548,8 @@
 /* 主选项卡：下方 3px 圆头指示条 */
 .hdReviewMode .hdReviewTab {
   position: relative;
-  padding: 0 12px;
+  padding: 0 10px;
+  white-space: nowrap;
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
 }
@@ -5162,4 +5164,339 @@
 .hdDataListBody {
   border: 0;
   border-radius: 0;
+}
+
+/* ---------- 卡片像 Claude Artifact 一样改：版本切换 + 跟 AI 说怎么改（输入框照 Gemini；CardAssist.tsx）。待视觉验收 ---------- */
+.hdReviewEditorHead {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.hdVersionBar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--hd-muted);
+}
+
+.hdVersionStep {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--hd-body);
+  cursor: pointer;
+}
+
+.hdVersionStep:hover:not(:disabled) {
+  background: rgb(20 110 255 / 8%);
+}
+
+.hdVersionStep:disabled {
+  color: #c4ccd8;
+  cursor: default;
+}
+
+.hdVersionCount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hdVersionNote {
+  flex-basis: 100%;
+  order: 9;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdVersionNote-ai {
+  color: #6d3fd1;
+}
+
+.hdSpark {
+  margin-right: 4px;
+  background: linear-gradient(90deg, #2563eb, #8b5cf6 50%, #ea6a8a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hdReviewTextChanged {
+  border-color: #b9a6f2 !important;
+  background: linear-gradient(0deg, rgb(139 92 246 / 5%), rgb(139 92 246 / 5%)), #fff !important;
+  animation: hdChangedPulse 1200ms ease-out 1;
+}
+
+@keyframes hdChangedPulse {
+  from {
+    box-shadow: 0 0 0 4px rgb(139 92 246 / 25%);
+  }
+  to {
+    box-shadow: 0 0 0 0 rgb(139 92 246 / 0%);
+  }
+}
+
+.hdReviewChangedNote {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #6d3fd1;
+}
+
+.hdReviewChangedDot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #8b5cf6;
+}
+
+/* 输入框：Gemini 式胶囊，固定在右栏底部 */
+.hdReviewAssistDock {
+  flex-shrink: 0;
+  padding: 8px 16px 10px;
+  border-top: 1px solid #eef1f5;
+  background: #fff;
+}
+
+.hdComposerWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 卡片面板的头（标题、版本、语言）滚动时停在顶上 */
+.hdReviewMode .hdReviewEditorHead {
+  position: sticky;
+  top: -1px;
+  z-index: 2;
+  margin: -12px -12px 0;
+  padding: 10px 12px 8px;
+  border-radius: 12px 12px 0 0;
+  background: #fff;
+}
+
+.hdComposerQuick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hdComposerChip {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hd-body);
+  cursor: pointer;
+  transition: background-color 150ms cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.hdComposerChip:hover:not(:disabled) {
+  background: #f0f4f9;
+}
+
+.hdComposerChip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@property --hd-ring-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.hdComposer {
+  position: relative;
+  border-radius: 24px;
+  background: #f0f4f9;
+  transition:
+    background-color 200ms cubic-bezier(0.05, 0.7, 0.1, 1),
+    box-shadow 200ms cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.hdComposer:hover {
+  background: #e7edf6;
+}
+
+.hdComposer:focus-within,
+.hdComposerBusy .hdComposer {
+  background: #fff;
+  box-shadow:
+    0 1px 3px rgb(15 23 42 / 8%),
+    0 8px 24px -8px rgb(37 52 99 / 22%);
+}
+
+.hdComposer:focus-within::before,
+.hdComposerBusy .hdComposer::before {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  z-index: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--hd-ring-angle), #2563eb, #8b5cf6, #ea6a8a, #f2a65a, #2563eb);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: hdRingSpin 6s linear infinite;
+  pointer-events: none;
+}
+
+.hdComposerBusy .hdComposer::before {
+  animation-duration: 1.6s;
+}
+
+@keyframes hdRingSpin {
+  to {
+    --hd-ring-angle: 360deg;
+  }
+}
+
+.hdComposerScope {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 12px 0;
+  padding: 4px 6px 4px 10px;
+  border-radius: 8px;
+  background: rgb(139 92 246 / 10%);
+  font-size: 11px;
+  color: #5b34b8;
+}
+
+.hdComposerScopeText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdComposerScopeClear {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+.hdComposerRow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 4px 6px 4px 4px;
+}
+
+.hdComposerInput {
+  flex: 1;
+  min-height: 36px;
+  max-height: 132px;
+  padding: 8px 6px 8px 14px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: #1b1c1e;
+  resize: none;
+  box-shadow: none !important;
+}
+
+.hdComposerInput::placeholder {
+  color: #5c6470;
+}
+
+.hdComposerSend {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: #9aa5b5;
+  cursor: default;
+  transition:
+    background-color 200ms cubic-bezier(0.05, 0.7, 0.1, 1),
+    transform 200ms cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.hdComposerSendReady {
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+  animation: hdSendPop 240ms cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+.hdComposerSendReady:hover {
+  transform: scale(1.06);
+}
+
+@keyframes hdSendPop {
+  from {
+    transform: scale(0.7);
+  }
+}
+
+.hdComposerSpinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c7d2fe;
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: hdSpin 800ms linear infinite;
+}
+
+@keyframes hdSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hdComposerHint {
+  display: none;
+  margin: 0;
+  font-size: 11px;
+  color: var(--hd-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hdComposer::before,
+  .hdComposerSendReady,
+  .hdReviewTextChanged,
+  .hdComposerSpinner {
+    animation: none !important;
+  }
 }

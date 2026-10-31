@@ -1638,7 +1638,41 @@
           "cell": "Rule cell"
         }
       },
-      "shortcut": "Ctrl ↵"
+      "shortcut": "Ctrl ↵",
+      "assist": {
+        "versions": "Versions",
+        "previous": "Previous version",
+        "next": "Next version",
+        "versionOf": "Version {n} of {total}",
+        "startDraft": "AI draft",
+        "startCard": "Current card",
+        "manual": "Your edit",
+        "byAi": "AI: “{instruction}”",
+        "label": "Tell AI how to change this card",
+        "placeholder": "Tell AI how to change this card…",
+        "working": "AI is editing…",
+        "send": "Send",
+        "quick": "Quick instructions",
+        "quickLabel": {
+          "shorter": "Shorter",
+          "friendlier": "Friendlier",
+          "steps": "As steps",
+          "translate": "Fill the other language"
+        },
+        "quickText": {
+          "shorter": "Make the answer shorter, answer first, remove repetition",
+          "friendlier": "Make the tone friendlier and more patient, without adding promises",
+          "steps": "Rewrite the answer as numbered steps",
+          "translate": "Fill in or update the other language from this one, keeping the meaning the same"
+        },
+        "onlySelection": "Only the selection: “{text}”",
+        "wholeCard": "Change the whole card",
+        "hint": "Enter to send · each AI change is a new version you can switch back from",
+        "tooLong": "At most {max} characters.",
+        "noChange": "AI made no change. Try saying it another way.",
+        "changedHere": "AI changed this",
+        "changedOther": "AI also changed the other language"
+      }
     }
   }
 }
