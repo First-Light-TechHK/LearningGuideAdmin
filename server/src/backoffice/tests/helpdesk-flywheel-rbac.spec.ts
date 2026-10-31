@@ -66,6 +66,7 @@ const runs = {
 };
 const metrics = {
   metrics: jest.fn(() => Promise.resolve({ series: [], totals: [] })),
+  ticketStats: jest.fn(() => Promise.resolve({ days: [] })),
 };
 
 function employeeFor(role: EmployeeRole): SessionEmployee {
@@ -111,6 +112,7 @@ const READS = [
   '/api/helpdesk/flywheel/jobs/gap_mining/runs',
   `/api/helpdesk/flywheel/jobs/gap_mining/runs/${RID}`,
   '/api/helpdesk/flywheel/metrics?granularity=week&split=entry',
+  '/api/helpdesk/flywheel/ticket-stats?from=2026-10-01&to=2026-10-31',
   '/api/helpdesk/jobs/assist-retention',
 ];
 

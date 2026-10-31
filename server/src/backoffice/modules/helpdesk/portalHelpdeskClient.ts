@@ -43,6 +43,8 @@ import {
   type PortalJobRun,
   type PortalJobRunResult,
   type PortalJobRuns,
+  type TicketDay,
+  type TicketStats,
 } from './contracts';
 import { SITUATION_SIGNALS } from '../../../contracts/helpdesk-qa';
 
@@ -82,6 +84,54 @@ export function notConnected(): HelpdeskError {
     'HELPDESK_NOT_CONNECTED',
     'HelpDesk is not connected yet',
   );
+}
+
+function minutesOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+/** Portal 的工单每日数字 → 契约形状；缺天、不是数字 → 502。 */
+export function normaliseTicketStats(value: unknown): TicketStats {
+  if (!isRecord(value) || !Array.isArray(value.days) || !isRecord(value.totals))
+    throw unavailable();
+  const count = (v: unknown) => {
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0)
+      throw unavailable();
+    return v;
+  };
+  const days = value.days.map((raw): TicketDay => {
+    if (!isRecord(raw) || typeof raw.day !== 'string') throw unavailable();
+    return {
+      day: raw.day,
+      created: count(raw.created),
+      resolved: count(raw.resolved),
+      cancelled: count(raw.cancelled),
+      openAtEnd: count(raw.openAtEnd),
+      firstReplies: count(raw.firstReplies),
+      firstReplyMedianMinutes: minutesOrNull(raw.firstReplyMedianMinutes),
+      firstReplyP90Minutes: minutesOrNull(raw.firstReplyP90Minutes),
+    };
+  });
+  const t = value.totals;
+  return {
+    from: typeof value.from === 'string' ? value.from : (days[0]?.day ?? ''),
+    to:
+      typeof value.to === 'string'
+        ? value.to
+        : (days[days.length - 1]?.day ?? ''),
+    timeZone: 'UTC',
+    days,
+    totals: {
+      created: count(t.created),
+      resolved: count(t.resolved),
+      cancelled: count(t.cancelled),
+      firstReplies: count(t.firstReplies),
+      firstReplyMedianMinutes: minutesOrNull(t.firstReplyMedianMinutes),
+      firstReplyP90Minutes: minutesOrNull(t.firstReplyP90Minutes),
+    },
+  };
 }
 
 function unavailable(status = 502): HelpdeskError {
@@ -159,6 +209,8 @@ export type PortalHelpdeskClient = {
    * （窗口的结束时间在游标里）。只读、幂等；回包不是契约形状 → 502 HELPDESK_UNAVAILABLE。
    */
   insights: (query: InsightsQuery) => Promise<InsightsPage>;
+  /** 工单每日数字（UTC 天，只读）；回包不是契约形状 → 502 HELPDESK_UNAVAILABLE。 */
+  ticketStats: (query: { from: string; to: string }) => Promise<TicketStats>;
   /** v7：Portal 180 天原文清理任务最近的运行。 */
   assistRetentionRuns: () => Promise<PortalJobRuns>;
   /** v7：立即运行 Portal 的清理任务（执行人 = 当前员工；同一个 key 回同一次运行）。 */
@@ -949,6 +1001,15 @@ export function createPortalHelpdeskClient(
         notFoundCode: 'HELPDESK_NOT_CONNECTED',
       });
       return normaliseInsightsPage(await readJson(response));
+    },
+
+    async ticketStats(query) {
+      const params = new URLSearchParams({ from: query.from, to: query.to });
+      const response = await send('GET', `/ticket-stats?${params.toString()}`, {
+        timeout: timeoutMs * 2,
+        notFoundCode: 'HELPDESK_NOT_CONNECTED',
+      });
+      return normaliseTicketStats(await readJson(response));
     },
 
     async assistRetentionRuns() {
