@@ -1419,7 +1419,8 @@
           "handoverRate": "Share of questions handed to a person",
           "helpfulRate": "Share of votes that were helpful or solved",
           "avgRating": "User rating (1 to 5)",
-          "jobReceived": "Turns pulled from Portal by the nightly gap mining, with each day's result below"
+          "jobReceived": "Turns pulled from Portal by the nightly gap mining, with each day's result below",
+          "tickets": "Tickets created in each period (from Portal, by UTC day)"
         },
         "perDay": "by day",
         "perWeek": "by week",
@@ -1441,7 +1442,29 @@
         "changePoints": "{n} pts",
         "change": "{n}",
         "vsDay": "arrows compare with the day before",
-        "vsWeek": "arrows compare with the week before"
+        "vsWeek": "arrows compare with the week before",
+        "tickets": "Daily tickets",
+        "ticketsPoint": "Resolved {resolved} · cancelled {cancelled}",
+        "ticketsDetail": "Resolved {resolved}",
+        "ticketsOff": "Portal not connected yet",
+        "ticketsClipped": "tickets show at most 92 days, so this is the last 92 days",
+        "minutes": "{n} min",
+        "hours": "{n} h",
+        "ticketFacts": {
+          "resolved": "Resolved",
+          "cancelled": "Cancelled",
+          "openAtEnd": "Open at the end of the last day",
+          "firstReplyMedian": "First reply (median)",
+          "firstReplyP90": "First reply (P90)",
+          "replies": "{n} replied"
+        },
+        "ticketHints": {
+          "resolved": "Tickets closed in this period, not counting cancelled ones",
+          "cancelled": "Tickets closed as cancelled in this period",
+          "openAtEnd": "Tickets still open when the last day of the period ended",
+          "firstReplyMedian": "For tickets created in this period: time from creation to the first public staff reply; half were faster",
+          "firstReplyP90": "Nine in ten tickets got their first public reply within this time"
+        }
       },
       "lists": "Gaps and tickets",
       "showAll": "Show all {count}",

@@ -8,17 +8,21 @@ import {
   type MetricsGranularity,
   type MetricsRow,
   type MetricsSplit,
+  type TicketStats,
 } from '../contracts/helpdesk'
-import { getFlywheelMetrics, listJobRuns } from '../lib/helpdeskApi'
+import { getFlywheelMetrics, getTicketStats, listJobRuns } from '../lib/helpdeskApi'
 import {
   CHART_METRICS,
   GOOD_DIRECTION,
   chartKind,
   formatChange,
+  formatMinutes,
   jobPoints,
   lastChange,
   metricPoints,
   runMarks,
+  ticketPoints,
+  ticketWindow,
 } from '../lib/helpdeskCharts'
 import {
   METRICS_RANGES,
@@ -47,14 +51,17 @@ import { LineChart } from './LineChart'
  *   页头写最近一次拉取的时间。
  * - owner 2026-10-31：要折线图。参考 Chatwoot 报表：每个指标一张折线图（提问量、AI 解决率、没匹配率、
  *   转人工率、有帮助率、平均评分）+ 后台任务（每晚缺口挖掘拉进来的轮数与每天的运行状态），共用上面的时间范围；
- *   手写 SVG（LineChart.tsx），趋势表留在图下面当表格视图。客服工单没有按天的数据，暂不画。
+ *   手写 SVG（LineChart.tsx），趋势表留在图下面当表格视图。
+ * - 工单（api-spec §11，Portal 算）：同一个模块里多一个「工单」标签，图是每天（或每周）新建的工单数，
+ *   下面一行是已解决、取消、首次回复用时；没接上 Portal 时标签写 —，图里写「HelpDesk 尚未接通」。
  */
 
 type Props = { locale: Locale; onOpenCandidate: (candidateId: string) => void }
 type State = { overall: FlywheelMetrics | null; split: FlywheelMetrics | null; error: string | null }
 type Runs = { runs: FlywheelJobRun[]; error: string | null } | null
+type Tickets = { stats: TicketStats | null; error: string | null; key: string } | null
 const LIST_PREVIEW = 5
-const TREND_TABS = [...CHART_METRICS, 'jobReceived'] as const
+const TREND_TABS = [...CHART_METRICS, 'tickets', 'jobReceived'] as const
 type TrendKey = (typeof TREND_TABS)[number]
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -73,6 +80,10 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
   const loading = settledFor !== requestKey
   const request = useRef(0)
   const [jobs, setJobs] = useState<Runs>(null)
+  const [tickets, setTickets] = useState<Tickets>(null)
+  const ticketSpan = ticketWindow(metricsWindow(granularity, range, today()))
+  const ticketKey = `${ticketSpan.from}#${ticketSpan.to}`
+  const ticketsReady = tickets !== null && tickets.key === ticketKey
   const [view, setView] = useState<TrendKey>('aiSolvedRate')
   const [list, setList] = useState<'gaps' | 'tickets'>('gaps')
   const [showAll, setShowAll] = useState(false)
@@ -86,6 +97,18 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
       live = false
     }
   }, [])
+
+  useEffect(() => {
+    let live = true
+    const [from, to] = ticketKey.split('#')
+    void getTicketStats({ from, to }).then((result) => {
+      if (live)
+        setTickets(result.ok ? { stats: result.data, error: null, key: ticketKey } : { stats: null, error: result.code, key: ticketKey })
+    })
+    return () => {
+      live = false
+    }
+  }, [ticketKey])
 
   useEffect(() => {
     const id = ++request.current
@@ -207,11 +230,16 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
   function tabLabel(key: TrendKey): string {
     if (key === 'turns') return t(locale, 'helpDesk.data.charts.turns')
     if (key === 'jobReceived') return t(locale, 'helpDesk.data.charts.jobReceived')
+    if (key === 'tickets') return t(locale, 'helpDesk.data.charts.tickets')
     return metricLabel(key)
   }
 
   function seriesFor(key: TrendKey) {
     if (key === 'jobReceived') return jobPoints(jobs?.runs ?? [])
+    if (key === 'tickets')
+      return ticketsReady && tickets.stats
+        ? ticketPoints(tickets.stats.days, granularity, (sum) => t(locale, 'helpDesk.data.charts.ticketsPoint', sum))
+        : []
     return metricPoints(overall?.series ?? [], key, parts)
   }
 
@@ -221,12 +249,56 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
       const marks = runMarks(jobs?.runs ?? [])
       return marks.length === 0 ? '—' : `${marks.filter((mark) => mark.status === 'succeeded').length}/${marks.length}`
     }
+    if (key === 'tickets') return ticketsReady && tickets.stats ? String(tickets.stats.totals.created) : '—'
     return formatMetric(key, row[key])
+  }
+
+  const minutes = (value: number | null) =>
+    formatMinutes(value, {
+      minutes: (n) => t(locale, 'helpDesk.data.charts.minutes', { n }),
+      hours: (n) => t(locale, 'helpDesk.data.charts.hours', { n }),
+    })
+
+  /** 工单标签下的小字与图下的一行数字。 */
+  function ticketDetail(): string {
+    if (!ticketsReady) return t(locale, 'helpDesk.data.loading')
+    if (!tickets.stats)
+      return tickets.error === 'HELPDESK_NOT_CONNECTED'
+        ? t(locale, 'helpDesk.data.charts.ticketsOff')
+        : errorMessage(locale, tickets.error ?? '')
+    return t(locale, 'helpDesk.data.charts.ticketsDetail', { resolved: tickets.stats.totals.resolved })
+  }
+
+  function ticketFacts() {
+    const stats = ticketsReady ? tickets.stats : null
+    if (!stats) return null
+    const last = stats.days[stats.days.length - 1]
+    const facts: [string, string, string?][] = [
+      ['resolved', String(stats.totals.resolved)],
+      ['cancelled', String(stats.totals.cancelled)],
+      ['openAtEnd', last ? String(last.openAtEnd) : '—'],
+      [
+        'firstReplyMedian',
+        minutes(stats.totals.firstReplyMedianMinutes),
+        t(locale, 'helpDesk.data.charts.ticketFacts.replies', { n: stats.totals.firstReplies }),
+      ],
+      ['firstReplyP90', minutes(stats.totals.firstReplyP90Minutes)],
+    ]
+    return facts.map(([key, value, extra]) => (
+      <div key={key} role="group" aria-labelledby={`${uid}-t-${key}`} title={t(locale, `helpDesk.data.charts.ticketHints.${key}`)}>
+        <dt id={`${uid}-t-${key}`}>{t(locale, `helpDesk.data.charts.ticketFacts.${key}`)}</dt>
+        <dd>
+          <strong>{value}</strong>
+          {extra ? <span> {extra}</span> : null}
+        </dd>
+      </div>
+    ))
   }
 
   function tabDetail(key: TrendKey, row: MetricsRow): string {
     if (key === 'turns') return t(locale, 'helpDesk.data.charts.turnsDetail', { answers: row.answers })
     if (key === 'jobReceived') return t(locale, 'helpDesk.data.charts.jobDetail')
+    if (key === 'tickets') return ticketDetail()
     return parts(row, key)
   }
 
@@ -396,6 +468,7 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
             <div className="hdTrendPanel" role="tabpanel" id={`${uid}-panel`} aria-labelledby={`${uid}-tab-${view}`}>
               <p className="hdTrendCaption">
                 {t(locale, `helpDesk.data.charts.caption.${view}`)}
+                {view === 'tickets' && ticketSpan.clipped ? ` · ${t(locale, 'helpDesk.data.charts.ticketsClipped')}` : null}
                 {view === 'jobReceived'
                   ? null
                   : ` · ${t(locale, granularity === 'day' ? 'helpDesk.data.charts.perDay' : 'helpDesk.data.charts.perWeek')}`}
@@ -408,30 +481,36 @@ export function FlywheelDataView({ locale, onOpenCandidate }: Props) {
                 bucketLabel={view === 'jobReceived' ? (bucket) => longDate(bucket, locale) : bucketLabel}
                 shortLabel={shortBucket}
                 emptyLabel={
-                  view === 'jobReceived' && jobs?.error
-                    ? errorMessage(locale, jobs.error)
-                    : t(
-                        locale,
-                        view === 'jobReceived' && !jobs
-                          ? 'helpDesk.data.loading'
-                          : view === 'jobReceived'
-                            ? 'helpDesk.data.charts.noRuns'
-                            : 'helpDesk.data.charts.empty',
-                      )
+                  view === 'tickets'
+                    ? ticketsReady && tickets.stats
+                      ? t(locale, 'helpDesk.data.charts.empty')
+                      : ticketDetail()
+                    : view === 'jobReceived' && jobs?.error
+                      ? errorMessage(locale, jobs.error)
+                      : t(
+                          locale,
+                          view === 'jobReceived' && !jobs
+                            ? 'helpDesk.data.loading'
+                            : view === 'jobReceived'
+                              ? 'helpDesk.data.charts.noRuns'
+                              : 'helpDesk.data.charts.empty',
+                        )
                 }
                 partialLabel={t(locale, 'helpDesk.data.charts.partial')}
               />
               {view === 'jobReceived' ? runStrip() : null}
             </div>
             <dl className="hdTrendMore">
-              {(['clarifyCoveredRate', 'guardFallbackRate'] as const).map((key) => (
-                <div key={key} role="group" aria-labelledby={`${uid}-${key}`} title={t(locale, `helpDesk.data.hints.${key}`)}>
-                  <dt id={`${uid}-${key}`}>{metricLabel(key)}</dt>
-                  <dd>
-                    <strong>{formatMetric(key, totals[key])}</strong> <span>{parts(totals, key)}</span>
-                  </dd>
-                </div>
-              ))}
+              {view === 'tickets'
+                ? ticketFacts()
+                : (['clarifyCoveredRate', 'guardFallbackRate'] as const).map((key) => (
+                    <div key={key} role="group" aria-labelledby={`${uid}-${key}`} title={t(locale, `helpDesk.data.hints.${key}`)}>
+                      <dt id={`${uid}-${key}`}>{metricLabel(key)}</dt>
+                      <dd>
+                        <strong>{formatMetric(key, totals[key])}</strong> <span>{parts(totals, key)}</span>
+                      </dd>
+                    </div>
+                  ))}
             </dl>
           </section>
 

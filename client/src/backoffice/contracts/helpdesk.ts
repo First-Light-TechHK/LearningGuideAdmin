@@ -929,3 +929,30 @@ export type FaqHistory = { faqId: string; version: number; review: FaqReviewStat
 export type FaqRewriteWarning =
   | { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; kind: "number" | "link" | "email"; text: string }
   | { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; kind: "dropped"; reason: "empty" | "too_long" | "language" };
+
+/** 工单每日数字（api-spec §11，Portal 算，Admin 转一层）：按 UTC 日，没有工单的天也在，用时没有是 null。 */
+export type TicketStatsDay = {
+  day: string;
+  created: number;
+  resolved: number;
+  cancelled: number;
+  openAtEnd: number;
+  firstReplies: number;
+  firstReplyMedianMinutes: number | null;
+  firstReplyP90Minutes: number | null;
+};
+
+export type TicketStats = {
+  from: string;
+  to: string;
+  timeZone: "UTC";
+  days: TicketStatsDay[];
+  totals: {
+    created: number;
+    resolved: number;
+    cancelled: number;
+    firstReplies: number;
+    firstReplyMedianMinutes: number | null;
+    firstReplyP90Minutes: number | null;
+  };
+};

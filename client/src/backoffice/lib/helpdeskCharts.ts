@@ -1,4 +1,4 @@
-import type { FlywheelJobRun, MetricsRow } from '../contracts/helpdesk'
+import type { FlywheelJobRun, MetricsGranularity, MetricsRow, TicketStatsDay } from '../contracts/helpdesk'
 import { miningRunSummary, type RateKey } from './helpdeskFlywheel'
 
 /**
@@ -29,8 +29,8 @@ export type ChartSpec = {
 export const CHART_METRICS = ['turns', 'aiSolvedRate', 'noMatchRate', 'handoverRate', 'helpfulRate', 'avgRating'] as const
 export type ChartMetric = (typeof CHART_METRICS)[number]
 
-export function chartKind(metric: ChartMetric | 'jobReceived'): ChartKind {
-  if (metric === 'turns' || metric === 'jobReceived') return 'count'
+export function chartKind(metric: ChartMetric | 'jobReceived' | 'tickets'): ChartKind {
+  if (metric === 'turns' || metric === 'jobReceived' || metric === 'tickets') return 'count'
   return metric === 'avgRating' ? 'rating' : 'rate'
 }
 
@@ -69,6 +69,48 @@ export function jobPoints(runs: readonly FlywheelJobRun[]): ChartPoint[] {
       bucket: run.day.slice(0, 10),
       value: run.status === 'succeeded' ? miningRunSummary(run.stats).received : null,
     }))
+}
+
+/** 工单接口一次至多 92 天：时间窗比这长时取最近 92 天。 */
+export const TICKET_MAX_DAYS = 92
+
+export function ticketWindow(window: { from: string; to: string }): { from: string; to: string; clipped: boolean } {
+  const earliest = new Date(Date.parse(`${window.to}T00:00:00Z`) - (TICKET_MAX_DAYS - 1) * 86_400_000).toISOString().slice(0, 10)
+  return window.from < earliest ? { from: earliest, to: window.to, clipped: true } : { ...window, clipped: false }
+}
+
+/** 那一天所在周的周一（与趋势的按周时间桶一致）。 */
+function weekStart(day: string): string {
+  const time = Date.parse(`${day}T00:00:00Z`)
+  const weekday = (new Date(time).getUTCDay() + 6) % 7
+  return new Date(time - weekday * 86_400_000).toISOString().slice(0, 10)
+}
+
+/** 每天（或每周合计）新建的工单数；提示里的小字由调用方给（已解决、取消）。 */
+export function ticketPoints(
+  days: readonly TicketStatsDay[],
+  granularity: MetricsGranularity,
+  detail?: (sum: { resolved: number; cancelled: number }) => string,
+): ChartPoint[] {
+  const buckets = new Map<string, { created: number; resolved: number; cancelled: number }>()
+  for (const day of days) {
+    const bucket = granularity === 'week' ? weekStart(day.day) : day.day.slice(0, 10)
+    const sum = buckets.get(bucket) ?? { created: 0, resolved: 0, cancelled: 0 }
+    sum.created += day.created
+    sum.resolved += day.resolved
+    sum.cancelled += day.cancelled
+    buckets.set(bucket, sum)
+  }
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([bucket, sum]) => ({ bucket, value: sum.created, detail: detail?.(sum) }))
+}
+
+/** 用时：不到一小时写分钟，否则写小时（一位小数）；没有 → —。 */
+export function formatMinutes(minutes: number | null, units: { minutes: (n: string) => string; hours: (n: string) => string }): string {
+  if (minutes === null || !Number.isFinite(minutes)) return '—'
+  if (minutes < 60) return units.minutes(Number.isInteger(minutes) ? String(minutes) : minutes.toFixed(1))
+  return units.hours((minutes / 60).toFixed(1))
 }
 
 export type RunMark = { day: string; status: FlywheelJobRun['status']; errorCode: string | null; created: number }
@@ -236,7 +278,7 @@ export function smoothPaths(points: readonly ChartPoint[], domain: [number, numb
 /** 哪个方向算变好：提问量没有好坏。 */
 export type Direction = 'up' | 'down' | 'none'
 
-export const GOOD_DIRECTION: Record<ChartMetric | 'jobReceived', Direction> = {
+export const GOOD_DIRECTION: Record<ChartMetric | 'jobReceived' | 'tickets', Direction> = {
   turns: 'none',
   aiSolvedRate: 'up',
   noMatchRate: 'down',
@@ -244,6 +286,7 @@ export const GOOD_DIRECTION: Record<ChartMetric | 'jobReceived', Direction> = {
   helpfulRate: 'up',
   avgRating: 'up',
   jobReceived: 'none',
+  tickets: 'none',
 }
 
 export type Change = { delta: number; tone: 'good' | 'bad' | 'flat' | 'neutral' }

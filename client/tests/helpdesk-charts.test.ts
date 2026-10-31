@@ -1,9 +1,12 @@
 import test, { describe } from 'node:test'
 import assert from 'node:assert/strict'
 
-import type { FlywheelJobRun, MetricsRow } from '../src/backoffice/contracts/helpdesk'
+import type { FlywheelJobRun, MetricsRow, TicketStatsDay } from '../src/backoffice/contracts/helpdesk'
 import {
   formatChange,
+  formatMinutes,
+  ticketPoints,
+  ticketWindow,
   formatChartValue,
   lastChange,
   smoothPaths,
@@ -218,5 +221,53 @@ describe('helpdesk charts: scales and drawing', () => {
     assert.equal(formatTick('rate', 0.5), '50%')
     assert.equal(formatTick('count', 2500), '2.5k')
     assert.equal(formatTick('rating', 3), '3')
+  })
+})
+
+describe('ticket stats (api-spec §11)', () => {
+  const day = (d: string, created: number, resolved = 0, cancelled = 0): TicketStatsDay => ({
+    day: d,
+    created,
+    resolved,
+    cancelled,
+    openAtEnd: 0,
+    firstReplies: 0,
+    firstReplyMedianMinutes: null,
+    firstReplyP90Minutes: null,
+  })
+
+  test('one point per day, sorted, with the detail text', () => {
+    const points = ticketPoints([day('2026-10-02', 3, 1), day('2026-10-01', 0)], 'day', (sum) => `r${sum.resolved} c${sum.cancelled}`)
+    assert.deepEqual(points, [
+      { bucket: '2026-10-01', value: 0, detail: 'r0 c0' },
+      { bucket: '2026-10-02', value: 3, detail: 'r1 c0' },
+    ])
+  })
+
+  test('weekly buckets sum the days into the Monday of their week', () => {
+    // 2026-10-25 is a Sunday, 2026-10-26 a Monday
+    const points = ticketPoints([day('2026-10-24', 1, 1), day('2026-10-25', 2, 0, 1), day('2026-10-26', 4)], 'week')
+    assert.deepEqual(
+      points.map((p) => [p.bucket, p.value]),
+      [
+        ['2026-10-19', 3],
+        ['2026-10-26', 4],
+      ],
+    )
+  })
+
+  test('the window is cut to the last 92 days and says so', () => {
+    assert.deepEqual(ticketWindow({ from: '2026-10-04', to: '2026-10-31' }), { from: '2026-10-04', to: '2026-10-31', clipped: false })
+    const cut = ticketWindow({ from: '2026-05-03', to: '2026-10-31' })
+    assert.equal(cut.clipped, true)
+    assert.equal((Date.parse(cut.to) - Date.parse(cut.from)) / 86_400_000, 91)
+  })
+
+  test('minutes under an hour, hours above, dash when missing', () => {
+    const units = { minutes: (n: string) => `${n}m`, hours: (n: string) => `${n}h` }
+    assert.equal(formatMinutes(null, units), '—')
+    assert.equal(formatMinutes(42.5, units), '42.5m')
+    assert.equal(formatMinutes(30, units), '30m')
+    assert.equal(formatMinutes(185, units), '3.1h')
   })
 })

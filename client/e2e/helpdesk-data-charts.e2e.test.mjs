@@ -2,6 +2,7 @@
 // 锁住（owner 2026-10-31：一个模块、可选着看、页面不拉长）：一排 7 个指标标签 + 一张大图，点哪个画哪个，跟着时间范围走；
 // 没数据的桶断开不画成 0；悬停与键盘左右键出提示（日期、数值、分子 / 分母）；后台任务每天一格、失败标 ✕；
 // 趋势表默认收起；缺口组与导致工单的 FAQ 在一个模块里切换、各先看 5 条；en-GB 文案；指标读不到时不崩。
+// 工单（api-spec §11）：同一模块里的「工单」标签，每天新建数、按周合计、已解决 / 取消 / 首次回复用时，没接上 Portal 时不崩。
 // 运行：npm run test:e2e:helpdesk（本地跑，CI 不装浏览器）。截图：E2E_SHOTS=<目录> 时保存。
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
@@ -67,6 +68,18 @@ function totalsOf(rows) {
   }
 }
 
+function ticketStats(from, to) {
+  const list = days(from, to).map((day, index) => ({
+    day, created: 3 + (index % 4), resolved: 2 + (index % 3), cancelled: index % 5 === 0 ? 1 : 0, openAtEnd: 5 + (index % 3),
+    firstReplies: index === 2 ? 0 : 2, firstReplyMedianMinutes: index === 2 ? null : 30 + index, firstReplyP90Minutes: index === 2 ? null : 120 + index,
+  }))
+  const sum = (key) => list.reduce((acc, d) => acc + d[key], 0)
+  return {
+    from, to, timeZone: 'UTC', days: list,
+    totals: { created: sum('created'), resolved: sum('resolved'), cancelled: sum('cancelled'), firstReplies: sum('firstReplies'), firstReplyMedianMinutes: 42.5, firstReplyP90Minutes: 185 },
+  }
+}
+
 function runs() {
   const today = new Date().toISOString().slice(0, 10)
   return days(new Date(Date.now() - 9 * DAY).toISOString().slice(0, 10), today).map((day, index) => ({
@@ -87,10 +100,11 @@ function session() {
   return { employee: { employeeId: 'e1', loginEmail: 'jack@example.com', role: 'ADMIN', displayName: 'Jack', accountStatus: 'ACTIVE', emailVerification: 'VERIFIED', displayStatus: 'Active', isBootstrapAdmin: false }, sidebarState: 'expanded' }
 }
 
-async function open(urlPath, { viewport = { width: 1440, height: 1000 }, metricsDown = false } = {}) {
+async function open(urlPath, { viewport = { width: 1440, height: 1000 }, metricsDown = false, ticketsDown = false } = {}) {
   const page = await browser.newPage({ viewport })
   const errors = []
   const asked = []
+  const ticketAsks = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
     const url = new URL(route.request().url())
@@ -106,12 +120,18 @@ async function open(urlPath, { viewport = { width: 1440, height: 1000 }, metrics
         timezone: 'UTC', weekStartsOn: 'monday', series, totals: [totalsOf(series)], topGaps: GAPS, ticketFaqs: TICKET_FAQS,
       }))
     }
+    if (p === '/api/helpdesk/flywheel/ticket-stats') {
+      if (ticketsDown) return route.fulfill(fail(503, 'HELPDESK_NOT_CONNECTED'))
+      const q = Object.fromEntries(url.searchParams)
+      ticketAsks.push(q)
+      return route.fulfill(ok(ticketStats(q.from, q.to)))
+    }
     if (p === '/api/helpdesk/flywheel/jobs/gap_mining/runs') return route.fulfill(ok({ runs: runs() }))
     if (p === '/api/helpdesk/tickets') return route.fulfill(ok({ tickets: [], nextCursor: null, counts: {} }))
     return route.fulfill(ok({}))
   })
   await page.goto(`${base}${urlPath}`)
-  return { page, errors, asked }
+  return { page, errors, asked, ticketAsks }
 }
 
 const shot = async (page, name) => {
@@ -123,7 +143,7 @@ test('one trend module: metric tabs on top, one big chart below that follows the
   const tabs = page.locator('.hdTrendTabs [role="tab"]')
   await tabs.first().waitFor()
   await page.locator('path.hdChartLine').waitFor()
-  assert.deepEqual(await page.locator('.hdTrendName').allInnerTexts(), ['提问量', 'AI 解决率', '没有匹配率', '转人工率', '有帮助率', '平均评分', '后台任务'])
+  assert.deepEqual(await page.locator('.hdTrendName').allInnerTexts(), ['提问量', 'AI 解决率', '没有匹配率', '转人工率', '有帮助率', '平均评分', '每日工单', '后台任务'])
   // 只有一张图；默认是 AI 解决率
   assert.equal(await page.locator('.hdChartPlot').count(), 1)
   assert.equal(await page.getByRole('tab', { name: 'AI 解决率' }).getAttribute('aria-selected'), 'true')
@@ -143,6 +163,8 @@ test('one trend module: metric tabs on top, one big chart below that follows the
   // 键盘：左右键在标签之间移动
   await page.getByRole('tab', { name: '平均评分' }).focus()
   await page.keyboard.press('ArrowRight')
+  assert.equal(await page.getByRole('tab', { name: '每日工单' }).getAttribute('aria-selected'), 'true')
+  await page.keyboard.press('ArrowRight')
   assert.equal(await page.getByRole('tab', { name: '后台任务' }).getAttribute('aria-selected'), 'true')
   // 页面不拉长：趋势表默认收起，缺口和工单在同一个模块里切换，各先看 5 条
   assert.equal(await page.getByRole('table', { name: '趋势' }).isVisible(), false)
@@ -158,7 +180,7 @@ test('one trend module: metric tabs on top, one big chart below that follows the
   assert.equal(await page.getByRole('table', { name: '最大的缺口组' }).count(), 0)
   // 按周：重新取数
   await page.getByLabel('周期').selectOption('week')
-  await page.waitForFunction(() => document.querySelectorAll('.hdTrendTabs [role="tab"]').length === 7)
+  await page.waitForFunction(() => document.querySelectorAll('.hdTrendTabs [role="tab"]').length === 8)
   await page.waitForTimeout(200)
   assert.equal(asked.at(-1).granularity, 'week')
   const scroller = await page.evaluate(() => {
@@ -208,7 +230,7 @@ test('hover and arrow keys show the bucket, value and parts; background job tab 
   await page.close()
 })
 
-test('en-GB at 1280: labels, seven tabs in one row without overflow; the page survives when metrics cannot be read', async () => {
+test('en-GB at 1280: labels, eight tabs in one row without overflow; the page survives when metrics cannot be read', async () => {
   const { page, errors } = await open('/en-GB/help-desk?tab=data', { metricsDown: true })
   await page.locator('.hdFaqError').waitFor()
   assert.equal(await page.locator('.hdTrend').count(), 0)
@@ -218,7 +240,7 @@ test('en-GB at 1280: labels, seven tabs in one row without overflow; the page su
   assert.equal(await second.page.locator('.hdTrendName').first().innerText(), 'Questions')
   assert.match(await second.page.locator('.hdTrendChange').nth(1).innerText(), /pts/)
   assert.match(await second.page.locator('.hdTrendCaption').innerText(), /compare with the day before/)
-  // 1280 宽：7 个标签仍是一行
+  // 1280 宽：8 个标签仍是一行
   const tops = await second.page
     .locator('.hdTrendTabs [role="tab"]')
     .evaluateAll((tabs) => new Set(tabs.map((tab) => Math.round(tab.getBoundingClientRect().top))).size)
@@ -232,4 +254,53 @@ test('en-GB at 1280: labels, seven tabs in one row without overflow; the page su
   await shot(second.page, 'data-trend-1280-en')
   assert.deepEqual([...errors, ...second.errors], [])
   await second.page.close()
+})
+
+test('daily tickets tab: tickets created per day from Portal, resolved / cancelled / first reply below, weekly sums, and a calm state when Portal is not connected', async () => {
+  const { page, errors, ticketAsks } = await open('/zh-CN/help-desk?tab=data', { viewport: { width: 1440, height: 900 } })
+  await page.locator('path.hdChartLine').waitFor()
+  const tab = page.getByRole('tab', { name: '每日工单' })
+  await tab.click()
+  // 默认最近 28 天：28 个点，总数 = 每天新建之和
+  const expected = ticketStats(ticketAsks.at(-1).from, ticketAsks.at(-1).to)
+  assert.equal(expected.days.length, 28)
+  assert.equal(await tab.locator('.hdTrendValue').innerText(), String(expected.totals.created))
+  assert.match(await tab.locator('.hdTrendDetail').innerText(), new RegExp(`已解决 ${expected.totals.resolved}`))
+  assert.match(await page.locator('.hdTrendCaption').innerText(), /新建的工单数/)
+  assert.equal(await page.locator('.hdChartPlot').count(), 1)
+  const facts = await page.locator('.hdTrendMore').innerText()
+  assert.match(facts, new RegExp(`已解决\\s*${expected.totals.resolved}`))
+  assert.match(facts, new RegExp(`取消\\s*${expected.totals.cancelled}`))
+  assert.match(facts, /最后一天结束时还开着/)
+  assert.match(facts, /42\.5 分钟/)
+  assert.match(facts, /3\.1 小时/)
+  // 悬停：日期、数值、已解决 / 取消
+  const box = await page.locator('.hdChartPlot').boundingBox()
+  await page.mouse.move(box.x + box.width - 30, box.y + box.height / 2)
+  const tip = page.locator('.hdChartTip')
+  await tip.waitFor()
+  assert.match(await tip.innerText(), /已解决 \d+ · 取消 \d+/)
+  await page.mouse.move(0, 0)
+  await page.waitForTimeout(600)
+  await shot(page, 'data-trend-tickets')
+  // 按周 26 周：超过 92 天只取最近 92 天，并在说明里写出来；点按周合计
+  await page.getByLabel('周期').selectOption('week')
+  await page.getByLabel('时间范围').selectOption('26')
+  await page.waitForFunction(() => /92 天/.test(document.querySelector('.hdTrendCaption')?.textContent ?? ''))
+  const last = ticketAsks.at(-1)
+  assert.equal((Date.parse(last.to) - Date.parse(last.from)) / 86_400_000, 91)
+  assert.deepEqual(errors, [])
+  await page.close()
+
+  // 没接上 Portal：标签写 —，图里写「HelpDesk 尚未接通」，其它指标照常
+  const down = await open('/zh-CN/help-desk?tab=data', { ticketsDown: true })
+  await down.page.locator('path.hdChartLine').waitFor()
+  const offTab = down.page.getByRole('tab', { name: '每日工单' })
+  assert.equal(await offTab.locator('.hdTrendValue').innerText(), '—')
+  assert.match(await offTab.locator('.hdTrendDetail').innerText(), /还没接上 Portal/)
+  await offTab.click()
+  assert.match(await down.page.locator('.hdTrendPanel').innerText(), /还没接上 Portal/)
+  assert.equal(await down.page.locator('.hdTrendMore dt').count(), 0)
+  assert.deepEqual(down.errors, [])
+  await down.page.close()
 })

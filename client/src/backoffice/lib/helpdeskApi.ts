@@ -45,6 +45,7 @@ import {
   type PhrasingLocale,
   type PortalJobRunResult,
   type PortalJobRuns,
+  type TicketStats,
 } from '../contracts/helpdesk'
 import { faqQuery, type FaqFilters } from './helpdeskFaqs'
 import { candidateQuery, metricsQuery, type CandidateFilters } from './helpdeskFlywheel'
@@ -335,6 +336,11 @@ export function getFaqHistory(faqId: string) {
 
 export function rewriteFaq(body: FaqRewriteBody) {
   return sendJson<FaqRewriteResult>('POST', '/api/helpdesk/faqs/rewrite', body)
+}
+
+/** 工单每日数字：Portal 没接上或是旧版本 → 503 HELPDESK_NOT_CONNECTED。一次至多 92 天。 */
+export function getTicketStats(input: { from: string; to: string }) {
+  return request<TicketStats>(`/api/helpdesk/flywheel/ticket-stats?${new URLSearchParams(input).toString()}`)
 }
 
 export function getFlywheelMetrics(input: { granularity: MetricsGranularity; from: string; to: string; split: MetricsSplit }) {

@@ -1419,7 +1419,8 @@
           "handoverRate": "转给人工客服的提问比例",
           "helpfulRate": "用户投「有帮助」或「已解决」的比例",
           "avgRating": "用户评分（1 到 5）",
-          "jobReceived": "每晚缺口挖掘从 Portal 拉进来的对话轮数，下面是每天的运行结果"
+          "jobReceived": "每晚缺口挖掘从 Portal 拉进来的对话轮数，下面是每天的运行结果",
+          "tickets": "每个时间段新建的工单数（来自 Portal，按 UTC 日）"
         },
         "perDay": "按日",
         "perWeek": "按周",
@@ -1441,7 +1442,29 @@
         "changePoints": "{n} 个百分点",
         "change": "{n}",
         "vsDay": "箭头是和前一天比",
-        "vsWeek": "箭头是和前一周比"
+        "vsWeek": "箭头是和前一周比",
+        "tickets": "每日工单",
+        "ticketsPoint": "已解决 {resolved} · 取消 {cancelled}",
+        "ticketsDetail": "已解决 {resolved}",
+        "ticketsOff": "还没接上 Portal",
+        "ticketsClipped": "工单一次最多看 92 天，这里是最近 92 天",
+        "minutes": "{n} 分钟",
+        "hours": "{n} 小时",
+        "ticketFacts": {
+          "resolved": "已解决",
+          "cancelled": "取消",
+          "openAtEnd": "最后一天结束时还开着",
+          "firstReplyMedian": "首次回复用时（中位数）",
+          "firstReplyP90": "首次回复用时（P90）",
+          "replies": "{n} 单已回复"
+        },
+        "ticketHints": {
+          "resolved": "这段时间关闭、且不是取消的工单",
+          "cancelled": "这段时间以「取消」关闭的工单",
+          "openAtEnd": "时间段最后一天结束时仍未关闭的工单",
+          "firstReplyMedian": "这段时间新建的工单里，员工第一条公开回复距建单的时间，一半的单比它快",
+          "firstReplyP90": "九成的单在这个时间内收到第一条公开回复"
+        }
       },
       "lists": "缺口与工单",
       "showAll": "显示全部 {count} 条",
