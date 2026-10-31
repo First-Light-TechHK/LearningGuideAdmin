@@ -6,6 +6,10 @@ import {
   type AgentRun,
   type CandidateDetail,
   type CandidateList,
+  type CandidateReview,
+  type FaqMap,
+  type MergeCandidateBody,
+  type MergeCandidateResult,
   type DismissCandidateBody,
   type EnquiryDetail,
   type EnquiryList,
@@ -261,6 +265,20 @@ export function dismissCandidate(candidateId: string, body: DismissCandidateBody
 }
 
 /** 「转成 FAQ 候选」：201 新建，200 这张工单已经转过（那一个）。 */
+/** 审核数据：相似卡、建议位置、提问用户的状态、净值（只读，不调模型）。 */
+export function getCandidateReview(candidateId: string) {
+  return request<CandidateReview>(`${candidatePath(candidateId)}/review`)
+}
+
+/** 编辑区里的流程树和规则表（选位置用）。 */
+export function getFaqMap() {
+  return request<FaqMap>('/api/helpdesk/faq-map')
+}
+
+export function mergeCandidate(candidateId: string, body: MergeCandidateBody, idempotencyKey: string) {
+  return sendJson<MergeCandidateResult>('POST', `${candidatePath(candidateId)}/merge`, body, idempotencyKey)
+}
+
 export function ticketToCandidate(ticketId: string) {
   return sendJson<FromTicketResult>('POST', `${ticketPath(ticketId)}/faq-candidate`, {})
 }

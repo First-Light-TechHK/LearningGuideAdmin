@@ -702,7 +702,10 @@
       "JOB_ALREADY_RUNNING": "This job is already running. Try again when it has finished.",
       "JOB_START_FAILED": "The job could not be started. Try again in a moment.",
       "JOB_NOT_FOUND": "This job does not exist.",
-      "JOB_RUN_NOT_FOUND": "This run no longer exists."
+      "JOB_RUN_NOT_FOUND": "This run no longer exists.",
+      "PLACE_REQUIRED": "Choose a place first.",
+      "INVALID_PLACE": "Cards cannot go in this place: choose a step, deviation or rule cell.",
+      "FAQ_NOT_UPDATED": "The card has not been edited yet: save your changes first, then approve."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -1174,7 +1177,9 @@
       "suggestion": {
         "new_faq": "New FAQ",
         "add_phrasing": "Add phrasing",
-        "follow_up": "Follow-up"
+        "follow_up": "Follow-up",
+        "update_faq": "Update card",
+        "retire_faq": "Mark obsolete"
       },
       "origin": {
         "mining": "Nightly mining",
@@ -1396,6 +1401,170 @@
         "locale": "By locale",
         "entry": "By channel",
         "signal": "By signal"
+      }
+    },
+    "review": {
+      "viewLabel": "Candidate view",
+      "view": {
+        "table": "Table",
+        "cards": "Card review"
+      },
+      "queue": "Candidate queue",
+      "asks": "{count} asks",
+      "lastSeen": "Last {when}",
+      "pickOne": "Pick a candidate on the left to start reviewing.",
+      "side": "State and decision",
+      "aiTag": "AI suggests",
+      "advice": "{group} · {action}",
+      "adviceTarget": "Target card: {question}",
+      "adviceParent": "Under this card: {question}",
+      "adviceHint": "The AI only suggests. Staff decide after reading the details below.",
+      "group": {
+        "add": "Add",
+        "update": "Update a card",
+        "retire": "Mark obsolete",
+        "none": "No change"
+      },
+      "action": {
+        "new_faq": "New card",
+        "follow_up": "As a follow-up",
+        "update_faq": "Edit the card",
+        "add_phrasing": "Add phrasings only",
+        "retire_faq": "Mark obsolete",
+        "no_change": "No change"
+      },
+      "actionHint": {
+        "new_faq": "Write a new card. Staff write the answer.",
+        "follow_up": "Add a follow-up question under a card.",
+        "update_faq": "The card is outdated or missing detail: open it and edit.",
+        "add_phrasing": "The card exists but was not found: add the user's wording as phrasings.",
+        "retire_faq": "Archive the card, never delete. Old releases keep it.",
+        "no_change": "The existing cards already cover this."
+      },
+      "decided": {
+        "accepted": "Approved: {as} · {when}",
+        "dismissed": "Rejected: {reason} · {when}",
+        "merged": "Merged into another candidate · {when}"
+      },
+      "said": "What users said and how the AI handled it",
+      "saidHint": "Each line is the user's own wording, redacted by Portal.",
+      "saidPickHint": "Ticked lines become phrasings and eval cases. Lines with hidden personal details cannot be ticked.",
+      "locale": {
+        "en-GB": "English",
+        "zh-CN": "Simplified",
+        "zh-TW": "Traditional"
+      },
+      "shownCard": "Card shown then: {question}",
+      "unknownCard": "(card no longer in the working copy)",
+      "noCardShown": "No card was shown",
+      "similar": "Similar existing cards ({count})",
+      "similarHint": "Same place first, then by similarity: the closest line among the card's question and phrasings.",
+      "source": {
+        "text": "Text similarity",
+        "vectors": "Vector similarity"
+      },
+      "reviewMissing": "Review data is not available yet: {error}",
+      "noSimilar": "No similar existing cards.",
+      "scoreTitle": "Similarity",
+      "samePlace": "Same place",
+      "closeMatch": "Very close: read both answers",
+      "closeMatchHint": "Same place and a very similar question: may be a duplicate, a contradiction, or a different question in another situation.",
+      "wasShown": "Shown then",
+      "aiTarget": "AI's target",
+      "followUpCard": "Follow-up card",
+      "pick": {
+        "target": "Use as target",
+        "parent": "Add under this",
+        "moveTo": "Move phrasings here"
+      },
+      "states": {
+        "title": "State of the users who asked",
+        "total": "{total} users",
+        "share": "{count} · {percent}%",
+        "none": "Not available yet. Portal does not send user state yet.",
+        "bucket": {
+          "paid_active": "Paid",
+          "trial_active": "On trial",
+          "cancelling": "Cancelling",
+          "payment_failed": "Payment failed",
+          "ended": "Ended",
+          "never_had_plan": "Registered only",
+          "unknown": "Unknown"
+        }
+      },
+      "net": {
+        "title": "Expected net value",
+        "gains": "Gained",
+        "steals": "Taken from other cards",
+        "net": "Net",
+        "basis": "From the eval of release {version}, {cases} cases.",
+        "negative": "Negative net value: this card would take more hits from other cards than it adds.",
+        "none": "Not available yet. This card has not been through a release build."
+      },
+      "decision": "Your decision",
+      "readOnly": "Your role can only view.",
+      "alreadyDecided": "This candidate has already been handled.",
+      "chooseAction": "Choose what to do",
+      "targetLabel": "Target card",
+      "parentLabel": "Parent question",
+      "noTarget": "None yet. Pick one of the similar cards, or search.",
+      "needTarget": "Choose a card.",
+      "searchOther": "Search all cards",
+      "hideSearch": "Hide search",
+      "needPlace": "Choose a place.",
+      "mapMissing": "The process map could not be loaded: {error}",
+      "moveToLabel": "Move phrasings to (optional)",
+      "noMoveTo": "Not moving. You can tick one of the similar cards.",
+      "moveToSelf": "Cannot move phrasings to the card being retired.",
+      "note": "Note (optional)",
+      "noteHint": "Do not paste personal details: notes are redacted. Up to 500 characters.",
+      "confirmRetire": "Mark \"{question}\" obsolete? It will be archived, not deleted.",
+      "approve": {
+        "new_faq": "Approve and write the card",
+        "follow_up": "Approve and write the follow-up",
+        "update_faq": "Approve and edit the card",
+        "add_phrasing": "Approve and add phrasings",
+        "retire_faq": "Approve retiring",
+        "no_change": "Confirm no change",
+        "confirmRetire": "Confirm retiring"
+      },
+      "reject": "Reject",
+      "merge": "Merge",
+      "noMergeTargets": "No other open candidates in the queue.",
+      "afterApprove": "Approved changes go to the working copy and must pass the eval gate in the next release before going live.",
+      "confirmReject": "Reject candidate",
+      "mergeInto": "Merge into",
+      "mergePlaceholder": "Choose a candidate",
+      "mergeHint": "Merge when both candidates are about the same thing: this one's wording joins the other.",
+      "needMerge": "Choose a candidate.",
+      "confirmMerge": "Merge",
+      "done": {
+        "no_change": "Recorded as no change.",
+        "add_phrasing": "Phrasings added to the working copy.",
+        "retire_faq": "Card marked obsolete (working copy).",
+        "rejected": "Candidate rejected.",
+        "merged": "Candidate merged."
+      },
+      "place": {
+        "legendRequired": "Where it goes (primary place)",
+        "legendOptional": "Change place (optional)",
+        "hint": "The AI's places are hints only; check and pick one. Only steps, deviations and rule cells hold cards.",
+        "suggested": "Suggested places",
+        "rank": "Suggestion {rank}",
+        "noSuggestion": "No suggested place: pick one in the tree.",
+        "picked": "Picked: {path}",
+        "showTree": "Pick from the whole tree",
+        "hideTree": "Hide tree",
+        "tree": "Process tree and rule table",
+        "suggestedRegion": "Suggested area",
+        "cards": "{count} cards",
+        "kind": {
+          "stage": "Stage",
+          "step": "Step",
+          "deviation": "Deviation",
+          "object": "Object",
+          "cell": "Rule cell"
+        }
       }
     }
   }

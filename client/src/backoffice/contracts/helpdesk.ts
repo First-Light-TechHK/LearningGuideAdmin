@@ -502,7 +502,8 @@ export type FaqGraphPreview = {
  */
 export const CANDIDATE_STATUSES = ["new", "accepted", "dismissed", "merged"] as const;
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
-export const CANDIDATE_SUGGESTIONS = ["new_faq", "add_phrasing", "follow_up"] as const;
+/** update_faq：已有卡过时或缺细节；retire_faq：卡标记失效（归档，不删除）。见 candidate-review/api-spec.md §1。 */
+export const CANDIDATE_SUGGESTIONS = ["new_faq", "add_phrasing", "follow_up", "update_faq", "retire_faq"] as const;
 export type CandidateSuggestion = (typeof CANDIDATE_SUGGESTIONS)[number];
 export const CANDIDATE_ORIGINS = ["mining", "ticket"] as const;
 export type CandidateOrigin = (typeof CANDIDATE_ORIGINS)[number];
@@ -621,6 +622,12 @@ export type AcceptCandidateBody = {
   /** 选作问法的例句序号；不带 = 所有不含占位符的。 */
   phrasings?: number[];
   version: number;
+  /** 主位置（step / deviation / cell）：new_faq / follow_up 在结构不为空时必填；update_faq 可选（换位置）。 */
+  placementNodeId?: string;
+  /** retire_faq 可选：把 X 的问法挪到这张卡。 */
+  moveTo?: string;
+  /** retire_faq 可选：为什么下线（至多 500 字，服务端脱敏）。 */
+  note?: string;
 };
 
 export type AcceptCandidateResult = {
@@ -631,6 +638,95 @@ export type AcceptCandidateResult = {
   evalCasesAdded: number;
   edgeId: string | null;
 };
+
+/* ---------------- FAQ 候选审核（candidate-review/api-spec.md §2、§3、§5、§6） ---------------- */
+
+/** 路径上的一级（流程阶段、步骤、对象、规则格）。 */
+export type MapPathItem = { key: string; labelZh: string; labelEn: string };
+
+export const FAQ_MAP_KINDS = ["stage", "step", "deviation", "object", "cell"] as const;
+export type FaqMapKind = (typeof FAQ_MAP_KINDS)[number];
+/** 只有这三种能挂卡（数据库触发器保证）。 */
+export const PLACEABLE_KINDS = ["step", "deviation", "cell"] as const;
+export type PlaceableKind = (typeof PLACEABLE_KINDS)[number];
+
+export type ReviewHandling = {
+  exampleIndex: number;
+  shownFaqId: string | null;
+  outcome: SourceMixKey;
+  /** 固定 null：AI 的回答就是卡片原文。 */
+  reply: string | null;
+};
+
+export type ReviewSimilar = {
+  faqId: string;
+  key: string;
+  questionEn: string;
+  questionZh: string;
+  answerExcerptEn: string;
+  answerExcerptZh: string;
+  entry: boolean;
+  score: number;
+  samePlace: boolean;
+  placePath: MapPathItem[];
+  /** 同位置且问题向量相似度 ≥ 0.88：要员工读两张卡的答案再判断（可能重复、矛盾或不同情境）。 */
+  closeMatch: boolean;
+};
+
+export type ReviewPlace = { nodeId: string; kind: PlaceableKind; path: MapPathItem[]; score: number };
+export type ReviewRegion = { key: string; kind: "stage" | "object"; labelZh: string; labelEn: string; score: number };
+
+export const USER_STATE_BUCKETS = [
+  "paid_active",
+  "trial_active",
+  "cancelling",
+  "payment_failed",
+  "ended",
+  "never_had_plan",
+  "unknown",
+] as const;
+export type UserStateBucket = (typeof USER_STATE_BUCKETS)[number];
+export type ReviewUserStates = { total: number; buckets: Partial<Record<UserStateBucket, number>> };
+export type ReviewNetValue = { releaseVersion: number; gains: number; steals: number; net: number; evalCases: number };
+
+export type CandidateReview = {
+  candidateId: string;
+  version: number;
+  recommendation: {
+    action: CandidateSuggestion;
+    faqId: string | null;
+    rationale: string;
+    rationaleZh?: string;
+    rationaleEn?: string;
+    confidence: number | null;
+  };
+  handling: ReviewHandling[];
+  similaritySource: "text" | "vectors";
+  similar: ReviewSimilar[];
+  places: ReviewPlace[];
+  regions: ReviewRegion[];
+  /** 第 3 阶段之前为 null。 */
+  userStates: ReviewUserStates | null;
+  /** 第 2 阶段之前、或这张卡还没进过建版本时为 null。 */
+  netValue: ReviewNetValue | null;
+};
+
+export type FaqMapNode = {
+  id: string;
+  key: string;
+  kind: FaqMapKind;
+  parentId: string | null;
+  labelZh: string;
+  labelEn: string;
+  position?: number;
+  stageKey?: string;
+  attribute?: string;
+  cards: number;
+};
+export type FaqMap = { version: number; nodes: FaqMapNode[] };
+
+export type MergeCandidateBody = { targetId: string; version: number };
+export type MergeCandidateResult = { source: FaqCandidate; target: FaqCandidate | null; replayed: boolean };
 
 export type DismissCandidateBody = { reason: DismissReason; note?: string | null; version: number };
 

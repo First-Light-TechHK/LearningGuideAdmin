@@ -10,8 +10,9 @@ import {
   type CandidateOrigin,
   type CandidateStatus,
   type CandidateSuggestion,
+  type FaqMap,
 } from '../contracts/helpdesk'
-import { listCandidates } from '../lib/helpdeskApi'
+import { getFaqMap, listCandidates } from '../lib/helpdeskApi'
 import { showingRange } from '../lib/helpdeskFaqs'
 import {
   CANDIDATE_PAGE_SIZE,
@@ -25,6 +26,8 @@ import { errorMessage } from '../lib/helpdeskFormat'
 import { longDate, resyncQuery } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
+import type { Compose } from './CandidateDrawer'
+import { CandidateReview } from './CandidateReview'
 import { FlywheelJobs } from './FlywheelJobs'
 import { HdSearchIcon } from './icons'
 
@@ -34,6 +37,8 @@ import { HdSearchIcon } from './icons'
  * - 队列按条数从多到少（服务端排序），筛选状态（缺省待处理）/ 建议 / 来源与文字，都在地址栏；
  * - 每行：话题与提议的问题、建议、AI 没解决的原因构成、条数、最近出现、「查看」（打开详情抽屉，
  *   ?candidate=<id>，所有角色都能看；动作只给 FULL）。
+ * - 「卡片审核」视图（?view=cards，选中 &review=<id>）：同一份筛选与分页，队列卡片 + 审核卡片
+ *  （CandidateReview.tsx，待视觉验收）。表格仍是缺省视图，没有改动。
  */
 
 type Props = {
@@ -43,9 +48,13 @@ type Props = {
   refreshKey: number
   onOpen: (candidateId: string) => void
   onRefresh: () => void
+  /** 卡片审核里批准新卡 / 追问 / 改卡：交给页面打开 FAQ 编辑器（保存后页面接受候选）。 */
+  onCompose: (compose: Compose) => void
 }
 
-export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh }: Props) {
+type View = 'table' | 'cards'
+
+export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh, onCompose }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = readCandidateFilters(searchParams)
   const filterKey = JSON.stringify(filters)
@@ -53,6 +62,9 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
   const [loaded, setLoaded] = useState<CandidateList | null>(null)
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const [settledFor, setSettledFor] = useState<string | null>(null)
+  const view: View = searchParams.get('view') === 'cards' ? 'cards' : 'table'
+  const reviewId = searchParams.get('review')
+  const [map, setMap] = useState<{ data: FaqMap | null; error: string | null }>({ data: null, error: null })
   const requestKey = `${filterKey}#${refreshKey}`
   const loading = settledFor !== requestKey
   const request = useRef(0)
@@ -74,6 +86,18 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
     })
   }, [filterKey, refreshKey])
 
+  // 选位置用的结构树：卡片审核打开时读（队列刷新时也重读，别人可能改过结构）
+  useEffect(() => {
+    if (view !== 'cards') return
+    let live = true
+    void getFaqMap().then((result) => {
+      if (live) setMap(result.ok ? { data: result.data, error: null } : { data: null, error: result.code })
+    })
+    return () => {
+      live = false
+    }
+  }, [view, refreshKey])
+
   useEffect(() => {
     setSearch((current) => resyncQuery(current, filters.q, searchTimer.current !== null, CANDIDATE_LIMITS.qMax))
   }, [filters.q])
@@ -89,6 +113,26 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
     const next = writeCandidateFilters(latestParams.current, 'page' in patch ? patch : { ...patch, page: 1 })
     latestParams.current = next
     setSearchParams(next, { replace })
+  }
+
+  /** 视图与选中的候选在地址栏：切视图不丢筛选；切回表格时去掉 review。 */
+  function setView(next: View) {
+    if (next === view) return
+    const params = new URLSearchParams(latestParams.current)
+    if (next === 'cards') params.set('view', 'cards')
+    else {
+      params.delete('view')
+      params.delete('review')
+    }
+    latestParams.current = params
+    setSearchParams(params)
+  }
+
+  function selectReview(id: string, replace = false) {
+    const params = new URLSearchParams(latestParams.current)
+    params.set('review', id)
+    latestParams.current = params
+    setSearchParams(params, { replace })
   }
 
   function onSearch(value: string) {
@@ -113,7 +157,11 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
   const range = showingRange(filters.page, CANDIDATE_PAGE_SIZE, total)
   const filtered =
     filters.q !== '' || filters.suggestion !== 'all' || filters.origin !== 'all' || filters.status !== DEFAULT_CANDIDATE_FILTERS.status
-  const emptyKey = !filtered ? 'empty' : filters.status === 'all' && filters.q === '' && filters.suggestion === 'all' && filters.origin === 'all' ? 'emptyAll' : 'emptyFiltered'
+  const emptyKey = !filtered
+    ? 'empty'
+    : filters.status === 'all' && filters.q === '' && filters.suggestion === 'all' && filters.origin === 'all'
+      ? 'emptyAll'
+      : 'emptyFiltered'
 
   return (
     <div className="hdFaqs hdCandidates">
@@ -148,7 +196,11 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
           className="hdFaqSelect hdFaqSelectPopular"
           aria-label={t(locale, 'helpDesk.candidates.suggestionLabel')}
           value={filters.suggestion}
-          onChange={(event) => update({ suggestion: event.target.value as CandidateSuggestion | 'all' })}
+          onChange={(event) =>
+            update({
+              suggestion: event.target.value as CandidateSuggestion | 'all',
+            })
+          }
         >
           <option value="all">{t(locale, 'helpDesk.candidates.allSuggestions')}</option>
           {CANDIDATE_SUGGESTIONS.map((suggestion) => (
@@ -175,6 +227,19 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
             {t(locale, 'helpDesk.candidates.counts', loaded.counts)}
           </span>
         ) : null}
+        <div className="hdReviewViews" role="group" aria-label={t(locale, 'helpDesk.review.viewLabel')}>
+          {(['table', 'cards'] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={`hdReviewView${view === key ? ' hdReviewViewOn' : ''}`}
+              aria-pressed={view === key}
+              onClick={() => setView(key)}
+            >
+              {t(locale, `helpDesk.review.view.${key}`)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {errorCode ? (
@@ -183,86 +248,116 @@ export function CandidatesView({ locale, canWrite, refreshKey, onOpen, onRefresh
         </div>
       ) : null}
 
-      <div className="hdFaqTableWrap" aria-busy={loading}>
-        <table className="hdFaqTable hdCandidateTable">
-          <colgroup>
-            <col className="hdCandidateColTopic" />
-            <col className="hdCandidateColSuggestion" />
-            <col className="hdCandidateColMix" />
-            <col className="hdCandidateColCount" />
-            <col className="hdCandidateColSeen" />
-            <col className="hdCandidateColAction" />
-          </colgroup>
-          <thead>
-            <tr>
-              {(['topic', 'suggestion', 'mix', 'count', 'lastSeen', 'action'] as const).map((column) => (
-                <th key={column} scope="col">
-                  {t(locale, `helpDesk.candidates.columns.${column}`)}
-                </th>
+      {view === 'cards' ? (
+        loaded && rows.length === 0 && !errorCode && !pastEnd && !reviewId ? (
+          <div className="hdReviewEmpty">{t(locale, `helpDesk.candidates.${emptyKey}`)}</div>
+        ) : (
+          <CandidateReview
+            locale={locale}
+            canWrite={canWrite}
+            rows={rows}
+            loading={loading}
+            selectedId={reviewId}
+            map={map.data}
+            mapError={map.error}
+            onSelect={selectReview}
+            onChanged={onRefresh}
+            onCompose={onCompose}
+          />
+        )
+      ) : (
+        <div className="hdFaqTableWrap" aria-busy={loading}>
+          <table className="hdFaqTable hdCandidateTable">
+            <colgroup>
+              <col className="hdCandidateColTopic" />
+              <col className="hdCandidateColSuggestion" />
+              <col className="hdCandidateColMix" />
+              <col className="hdCandidateColCount" />
+              <col className="hdCandidateColSeen" />
+              <col className="hdCandidateColAction" />
+            </colgroup>
+            <thead>
+              <tr>
+                {(['topic', 'suggestion', 'mix', 'count', 'lastSeen', 'action'] as const).map((column) => (
+                  <th key={column} scope="col">
+                    {t(locale, `helpDesk.candidates.columns.${column}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <div className="hdFaqQuestion">
+                      {row.topic}
+                      {row.status !== 'new' ? (
+                        <span className="hdGraphTag hdFaqNodeTag">{t(locale, `helpDesk.candidates.status.${row.status}`)}</span>
+                      ) : null}
+                    </div>
+                    <div className="hdFaqSummary">{row.proposedQuestion}</div>
+                  </td>
+                  <td>
+                    <span className={`hdFaqChip hdCandidateSuggestion hdCandidateSuggestion-${row.suggestion}`}>
+                      {t(locale, `helpDesk.candidates.suggestion.${row.suggestion}`)}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="hdCandidateMix">
+                      {sourceMixEntries(row.sourceMix).map(([key, count]) => (
+                        <span key={key} className="hdGraphTag">
+                          {t(locale, 'helpDesk.candidates.mixItem', {
+                            label: t(locale, `helpDesk.candidates.mix.${key}`),
+                            count,
+                          })}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="hdCandidateCount">{row.turnCount}</td>
+                  <td className="hdFaqDate">{longDate(row.lastSeenAt, locale)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="hdFaqPreview"
+                      aria-label={t(locale, 'helpDesk.candidates.reviewLabel', {
+                        topic: row.topic,
+                      })}
+                      onClick={() => onOpen(row.id)}
+                    >
+                      {t(locale, 'helpDesk.candidates.review')}
+                    </button>
+                  </td>
+                </tr>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <div className="hdFaqQuestion">
-                    {row.topic}
-                    {row.status !== 'new' ? (
-                      <span className="hdGraphTag hdFaqNodeTag">{t(locale, `helpDesk.candidates.status.${row.status}`)}</span>
-                    ) : null}
-                  </div>
-                  <div className="hdFaqSummary">{row.proposedQuestion}</div>
-                </td>
-                <td>
-                  <span className={`hdFaqChip hdCandidateSuggestion hdCandidateSuggestion-${row.suggestion}`}>
-                    {t(locale, `helpDesk.candidates.suggestion.${row.suggestion}`)}
-                  </span>
-                </td>
-                <td>
-                  <div className="hdCandidateMix">
-                    {sourceMixEntries(row.sourceMix).map(([key, count]) => (
-                      <span key={key} className="hdGraphTag">
-                        {t(locale, 'helpDesk.candidates.mixItem', { label: t(locale, `helpDesk.candidates.mix.${key}`), count })}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="hdCandidateCount">{row.turnCount}</td>
-                <td className="hdFaqDate">{longDate(row.lastSeenAt, locale)}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="hdFaqPreview"
-                    aria-label={t(locale, 'helpDesk.candidates.reviewLabel', { topic: row.topic })}
-                    onClick={() => onOpen(row.id)}
-                  >
-                    {t(locale, 'helpDesk.candidates.review')}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {loaded && rows.length === 0 && !errorCode && !pastEnd ? (
-              <tr>
-                <td colSpan={6} className="hdFaqEmpty">
-                  {t(locale, `helpDesk.candidates.${emptyKey}`)}
-                </td>
-              </tr>
-            ) : null}
-            {!loaded && loading ? (
-              <tr>
-                <td colSpan={6} className="hdFaqEmpty">
-                  {t(locale, 'helpDesk.candidates.loading')}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+              {loaded && rows.length === 0 && !errorCode && !pastEnd ? (
+                <tr>
+                  <td colSpan={6} className="hdFaqEmpty">
+                    {t(locale, `helpDesk.candidates.${emptyKey}`)}
+                  </td>
+                </tr>
+              ) : null}
+              {!loaded && loading ? (
+                <tr>
+                  <td colSpan={6} className="hdFaqEmpty">
+                    {t(locale, 'helpDesk.candidates.loading')}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {total > CANDIDATE_PAGE_SIZE || filters.page > 1 ? (
         <footer className="hdFaqFooter">
-          <span>{t(locale, 'helpDesk.candidates.showing', { from: range.from, to: range.to, total })}</span>
+          <span>
+            {t(locale, 'helpDesk.candidates.showing', {
+              from: range.from,
+              to: range.to,
+              total,
+            })}
+          </span>
           <nav className="hdFaqPages" aria-label={t(locale, 'helpDesk.candidates.pagination')}>
             <button
               type="button"
