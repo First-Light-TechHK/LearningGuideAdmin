@@ -10,6 +10,7 @@ import type {
   PopularCourses,
 } from '../contracts/course';
 import { boRequest } from '../lib/api';
+import { useResizableColumns } from '../components/resizableColumns';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -34,6 +35,10 @@ export function OperationsPage() {
   const [bannerLanguage, setBannerLanguage] = useState<'en-GB' | 'zh-CN'>('en-GB');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const popularTable = useResizableColumns({
+    storageKey: 'operations-popular-courses',
+    defaultWidths: [50, 320, 150, 120, 240],
+  });
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -190,8 +195,10 @@ export function OperationsPage() {
               <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish('popular')}>{L(locale, 'Publish', 'Publish')}</button>
             </div>
           </div>
-          <table className="table" style={{ width: '100%', marginTop: 14 }}>
-            <thead><tr><th>#</th><th>{L(locale, '课程', 'Course')}</th><th>{L(locale, '分类', 'Category')}</th><th>{L(locale, '状态', 'Status')}</th><th /></tr></thead>
+          <div className="tableScroll" style={{ marginTop: 14 }}>
+            <table className="table" style={popularTable.tableStyle}>
+              {popularTable.colGroup}
+              <thead><tr><th>#{popularTable.resizeHandle(0)}</th><th>{L(locale, '课程', 'Course')}{popularTable.resizeHandle(1)}</th><th>{L(locale, '分类', 'Category')}{popularTable.resizeHandle(2)}</th><th>{L(locale, '状态', 'Status')}{popularTable.resizeHandle(3)}</th><th>{popularTable.resizeHandle(4)}</th></tr></thead>
             <tbody>
               {popular.items.map((item, index) => (
                 <tr key={item.courseId} style={item.invalid ? { background: '#FFF7F7' } : undefined}>
@@ -220,7 +227,8 @@ export function OperationsPage() {
               ))}
               {popular.items.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 20, opacity: 0.7 }}>{L(locale, '尚未配置。', 'Nothing configured yet.')}</td></tr>}
             </tbody>
-          </table>
+            </table>
+          </div>
           <p style={{ fontSize: 12, opacity: 0.65, marginTop: 12 }}>
             {L(locale, '最近发布', 'Last published')}: {popular.publishedAt ? new Date(popular.publishedAt).toLocaleString() : '—'}
           </p>

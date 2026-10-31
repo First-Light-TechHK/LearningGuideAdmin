@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { useEmployee } from '../ShellRoute'
 import type { CourseList } from '../contracts/course'
+import { useResizableColumns } from '../components/resizableColumns'
 import { boRequest } from '../lib/api'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
@@ -99,6 +100,10 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
+  const courseTable = useResizableColumns({
+    storageKey: 'course-list',
+    defaultWidths: [92, 300, 120, 76, 84, 110, 150],
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -442,59 +447,62 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       {loading && <p className="cardBody">{t(locale, 'common.loading')}</p>}
 
       {list && (
-        <table className="table" style={{ width: '100%', marginTop: 16 }}>
-          <thead>
-            <tr>
-              <th>{L('课程 ID', 'Course ID')}</th>
-              <th>{L('课程', 'Course')}</th>
-              <th>{L('分类', 'Category')}</th>
-              <th>{L('课时', 'Lessons')}</th>
-              <th>{L('草稿', 'Draft')}</th>
-              <th>{L('在线', 'Live')}</th>
-              <th>{L('操作', 'Actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.courses.map((course) => (
-              <tr key={course.id}>
-                <td>{course.code}</td>
-                <td>
-                  <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
-                  <div style={{ opacity: 0.7, fontSize: 12 }}>
-                    {course.learningMode} · {course.learningLanguages.join(', ')}
-                  </div>
-                </td>
-                <td>{course.category?.name ?? '—'}</td>
-                <td>{course.lessonCount}</td>
-                <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
-                <td>
-                  {course.published
-                    ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
-                    : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
-                    <button
-                      className="button buttonGhost"
-                      disabled={busy || exportingId !== null}
-                      onClick={() => void exportCourse(course)}
-                    >
-                      {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {list.courses.length === 0 && (
+        <div className="tableScroll" style={{ marginTop: 16 }}>
+          <table className="table" style={courseTable.tableStyle}>
+            {courseTable.colGroup}
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
-                  {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
-                </td>
+                <th>{L('课程 ID', 'Course ID')}{courseTable.resizeHandle(0)}</th>
+                <th>{L('课程', 'Course')}{courseTable.resizeHandle(1)}</th>
+                <th>{L('分类', 'Category')}{courseTable.resizeHandle(2)}</th>
+                <th>{L('课时', 'Lessons')}{courseTable.resizeHandle(3)}</th>
+                <th>{L('草稿', 'Draft')}{courseTable.resizeHandle(4)}</th>
+                <th>{L('在线', 'Live')}{courseTable.resizeHandle(5)}</th>
+                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(6)}</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.courses.map((course) => (
+                <tr key={course.id}>
+                  <td>{course.code}</td>
+                  <td>
+                    <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>
+                      {course.learningMode} · {course.learningLanguages.join(', ')}
+                    </div>
+                  </td>
+                  <td>{course.category?.name ?? '—'}</td>
+                  <td>{course.lessonCount}</td>
+                  <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
+                  <td>
+                    {course.published
+                      ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
+                      : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
+                      <button
+                        className="button buttonGhost"
+                        disabled={busy || exportingId !== null}
+                        onClick={() => void exportCourse(course)}
+                      >
+                        {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {list.courses.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                    {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   )

@@ -21,6 +21,7 @@ import {
 import type { Locale } from "../lib/i18n/config";
 import { t } from "../lib/i18n/messages";
 import { boFetch } from "../lib/api";
+import { useResizableColumns } from "../components/resizableColumns";
 
 /** 设计稿默认一页 8 行；服务端上限 100（EMPLOYEE_PAGE_SIZE_MAX）。 */
 const DEFAULT_PAGE_SIZE = 8;
@@ -107,6 +108,10 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const employeeTable = useResizableColumns({
+    storageKey: "employee-list",
+    defaultWidths: [300, 180, 140, 240, 158],
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -445,22 +450,15 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       ) : null}
 
       <div className="tableWrap" onScroll={() => setOpenMenu(null)}>
-        <table className="table">
-          <colgroup>
-            {/* 设计稿列宽：300 / 180 / 140 / 240 / 158（内容宽 1018） */}
-            <col style={{ width: "29.5%" }} />
-            <col style={{ width: "17.7%" }} />
-            <col style={{ width: "13.8%" }} />
-            <col style={{ width: "23.6%" }} />
-            <col style={{ width: "15.4%" }} />
-          </colgroup>
+        <table className="table" style={employeeTable.tableStyle}>
+          {employeeTable.colGroup}
           <thead>
             <tr>
-              <th>{t(locale, "employees.columns.email")}</th>
-              <th>{t(locale, "employees.columns.role")}</th>
-              <th>{t(locale, "employees.columns.status")}</th>
-              <th>{t(locale, "employees.columns.lastLogin")}</th>
-              <th>{t(locale, "employees.columns.actions")}</th>
+              <th>{t(locale, "employees.columns.email")}{employeeTable.resizeHandle(0)}</th>
+              <th>{t(locale, "employees.columns.role")}{employeeTable.resizeHandle(1)}</th>
+              <th>{t(locale, "employees.columns.status")}{employeeTable.resizeHandle(2)}</th>
+              <th>{t(locale, "employees.columns.lastLogin")}{employeeTable.resizeHandle(3)}</th>
+              <th>{t(locale, "employees.columns.actions")}{employeeTable.resizeHandle(4)}</th>
             </tr>
           </thead>
           <tbody>

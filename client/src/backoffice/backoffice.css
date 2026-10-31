@@ -882,6 +882,65 @@ body {
   background: #fafcff;
 }
 
+/* 列宽拖拽：分隔条挂在 th 内部（th 为 sticky 定位元素，可作绝对定位基准），
+   不影响表头吸顶，也不占用单元格内容空间。 */
+.tableColResizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 100%;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.tableColResizer::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  right: 4px;
+  width: 2px;
+  height: 50%;
+  border-radius: 1px;
+  background: #cbd5e1;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.tableColResizer:hover::after,
+.tableColResizer:active::after {
+  background: var(--lg-blue, #1d6bff);
+  opacity: 1;
+}
+
+body.tableColResizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* 可调整列宽的表格需要横向滚动：列宽总和可能超出卡片宽度 */
+.tableScroll {
+  width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.tableScroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tableScroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.tableScroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 .statusPill {
   display: inline-flex;
   align-items: center;
