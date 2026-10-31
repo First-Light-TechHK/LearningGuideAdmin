@@ -56,6 +56,18 @@ export class BackofficeHelpdeskFlywheelController {
     return run(() => this.candidates.get(candidateId));
   }
 
+  /** 审核数据：建议与理由、AI 当时怎么处理的、相似卡、建议的位置（只读，不调模型）。 */
+  @Get('faq-candidates/:candidateId/review')
+  review(@Param('candidateId') candidateId: string) {
+    return run(() => this.candidates.review(candidateId));
+  }
+
+  /** 结构树（流程树与规则表），审核页选位置用。 */
+  @Get('faq-map')
+  faqMap() {
+    return run(() => this.candidates.faqMap());
+  }
+
   /** 新 FAQ / 追问的预填（答案留空；草稿只来自已解决工单里人写的回复，标「草稿 待核实」）。 */
   @Get('faq-candidates/:candidateId/draft')
   draft(@Param('candidateId') candidateId: string) {

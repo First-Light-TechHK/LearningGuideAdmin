@@ -9,7 +9,8 @@ import type { TextSimilarity } from './textSimilarity';
  *    （TextSimilarity：现在是现有检索的 OpenCC + n-gram，以后可以换向量）；单独一轮的留到之后的夜里；
  * 3. 每组挑至多 5 个不重复的脱敏例句（越靠近中心越先，带占位符的往后）、原因构成、至多 3 条
  *    客服（人）解决工单时的回复（草稿来源）；
- * 4. 和已发布的节点去重：和某个节点（问题或问法）足够像 → 「加问法到 X」；否则学员多半卡在同一个
+ * 4. 和已发布的节点去重：和某个节点（问题或问法）足够像 → 当时给用户看的多半就是 X 却没解决 →
+ *    「更新 X」（X 本身不够），否则「加问法到 X」（X 没被找到）；不像任何节点而用户多半卡在同一个
  *    节点上（打字时屏幕上的那张卡）→ 「在那个节点下加追问」；否则「新 FAQ」。
  * 话题与提议的问题由服务层问模型（GapLabeller），这里给代码兜底的那一份（codeLabel）。
  * 纯函数（embed 是异步的，所以 planMining 是 async），同样的输入给同样的计划。
@@ -157,7 +158,8 @@ export type CandidateExample = {
 
 export type NodeText = { nodeId: string; text: string };
 export type OpenCandidate = { id: string; examples: readonly string[] };
-export type Suggestion = 'new_faq' | 'add_phrasing' | 'follow_up';
+export type Suggestion =
+  'new_faq' | 'add_phrasing' | 'follow_up' | 'update_faq' | 'retire_faq';
 
 export type PlannedGroup = {
   members: MiningTurn[];
@@ -466,8 +468,11 @@ export async function planMining<V>(input: {
       sourceMix: sourceMixOf(members),
       answerSources: answerSourcesOf(members),
       locale: majorityLocale(members),
+      // 像卡 X：当时给用户看的就是 X 还没解决 → X 本身不够（更新 X）；没给看 → X 没被找到（加问法）
       suggestion: related
-        ? 'add_phrasing'
+        ? shownNodeId === related.nodeId
+          ? 'update_faq'
+          : 'add_phrasing'
         : parentNodeId
           ? 'follow_up'
           : 'new_faq',

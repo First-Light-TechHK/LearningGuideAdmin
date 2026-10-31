@@ -11,6 +11,10 @@ import type {
   FaqNodeSummary,
 } from '../faqs/faqGraphRepository';
 import type { FaqGraphService } from '../faqs/faqGraphService';
+import { isPlaceable, type FaqMapNode } from '../faqs/faqMap';
+import type { FaqMapRepository } from '../faqs/faqMapRepository';
+import type { FaqService } from '../faqs/faqService';
+import type { FaqVectorSearch } from '../faqs/faqVectors';
 import {
   HelpdeskError,
   type PortalHelpdeskClient,
@@ -33,6 +37,11 @@ import {
   type PhrasingLocale,
 } from './flywheelMining';
 import { scrubPii } from './piiScrubber';
+import {
+  buildCandidateReview,
+  textScores,
+  type CandidateReview,
+} from './candidateReview';
 import { createNgramSimilarity, type TextSimilarity } from './textSimilarity';
 
 /**
@@ -136,14 +145,33 @@ function clip(text: string, max: number): string {
 
 export type CandidateServiceDeps = {
   candidates: CandidateRepository;
-  graph: Pick<FaqGraphRepository, 'summaries'>;
-  graphService: Pick<FaqGraphService, 'addPhrasing' | 'createEdge'>;
+  graph: Pick<FaqGraphRepository, 'summaries' | 'working'>;
+  graphService: Pick<
+    FaqGraphService,
+    'addPhrasing' | 'createEdge' | 'phrasings'
+  >;
   portal: Pick<PortalHelpdeskClient, 'getTicket'>;
   nodes: () => Promise<NodeText[]>;
+  /** 结构（流程树、规则表）：接受时选位置。 */
+  map: Pick<FaqMapRepository, 'nodes' | 'placements' | 'setPlacements'>;
+  /** 更新（查卡在候选之后改过没有）与下线（归档）。 */
+  faqs: Pick<FaqService, 'get' | 'archive' | 'revisions'>;
+  /** 例句那一轮当时给用户看的卡（insights 事实表）。 */
+  shownCards: (
+    turnIds: readonly string[],
+  ) => Promise<Map<string, string | null>>;
+  /** 审核页的相似卡：发布版有向量时用向量（没有 → 文字相似度）。 */
+  vectors?: {
+    search: FaqVectorSearch;
+    release: () => Promise<number | null>;
+  };
   labeller?: GapLabeller;
   similarity?: TextSimilarity<unknown>;
   now?: () => Date;
 };
+
+/** 审核页算向量相似度至多等这么久，过了就用文字相似度。 */
+export const REVIEW_VECTOR_TIMEOUT_MS = 3_000;
 
 export type AcceptResult = {
   candidate: FaqCandidate;
@@ -152,7 +180,15 @@ export type AcceptResult = {
   phrasingsSkipped: number;
   evalCasesAdded: number;
   edgeId: string | null;
+  /** 下线时挪到 moveTo 那张卡的问法（含被下线那张卡的问题）条数。 */
+  phrasingsMoved: number;
+  /** 这次接受把卡归档了（下线）。 */
+  archived: boolean;
+  /** 这次接受写了位置（主位置改了或新挂上）。 */
+  placed: boolean;
 };
+
+const NEW_CARD: ReadonlySet<string> = new Set(['new_faq', 'follow_up']);
 
 export function createFaqCandidateService(deps: CandidateServiceDeps) {
   const labeller = deps.labeller ?? noGapLabeller;
@@ -227,6 +263,122 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
       : null;
   }
 
+  /**
+   * 接受时的主位置：结构不为空、新卡（新 FAQ、追问）又还没有主位置 → 必须选；选的必须是步骤、岔子或
+   * 格子。没给、也不需要 → null。
+   */
+  async function placeFor(
+    as: FaqCandidate['suggestion'],
+    faqId: string,
+    raw: unknown,
+  ): Promise<FaqMapNode | null> {
+    if (raw === undefined || raw === null || raw === '') {
+      if (!NEW_CARD.has(as)) return null;
+      const nodes = await deps.map.nodes();
+      if (nodes.length === 0) return null;
+      const placed = await deps.map.placements(faqId);
+      if (placed.some((p) => p.primary)) return null;
+      throw new HelpdeskError(
+        400,
+        'PLACE_REQUIRED',
+        'Choose where this card goes in the map',
+      );
+    }
+    if (as === 'retire_faq')
+      throw invalid('A retired card does not take a place');
+    const id = uuid(raw, 'placementNodeId');
+    const node = (await deps.map.nodes()).find((n) => n.id === id);
+    if (!node || !isPlaceable(node.kind))
+      throw new HelpdeskError(
+        400,
+        'INVALID_PLACE',
+        'A card goes on a step, a deviation or a cell',
+      );
+    return node;
+  }
+
+  /** 把 node 设成这张卡的主位置：原来的主位置去掉，别的副位置不动。已经是 → 什么都不写。 */
+  async function placeCard(
+    actor: FaqActor,
+    faqId: string,
+    node: FaqMapNode,
+  ): Promise<boolean> {
+    const [current, nodes] = await Promise.all([
+      deps.map.placements(faqId),
+      deps.map.nodes(),
+    ]);
+    const keyOf = new Map(nodes.map((n) => [n.id, n.key]));
+    const wanted = [
+      ...current
+        .filter((p) => !p.primary && p.nodeId !== node.id)
+        .map((p) => ({ nodeKey: keyOf.get(p.nodeId)!, primary: false })),
+      { nodeKey: node.key, primary: true },
+    ];
+    const { changed } = await deps.map.setPlacements(faqId, wanted, actor);
+    return changed > 0;
+  }
+
+  /** 更新：这张卡在候选建好之后必须改过（员工先在 FAQ 编辑里改，再接受）。 */
+  async function requireUpdatedSince(faqId: string, since: string) {
+    const { revisions } = await deps.faqs.revisions(faqId);
+    const after = Date.parse(since);
+    if (
+      !revisions.some((r) => r.action === 'update' && Date.parse(r.at) > after)
+    )
+      throw new HelpdeskError(
+        409,
+        'FAQ_NOT_UPDATED',
+        'Edit the card first, then accept the update',
+      );
+  }
+
+  /**
+   * 下线：先把这张卡的问题与问法挪到 moveTo（幂等：已有的不重复加，满了的跳过），再归档。
+   * 已经归档的（上一次做到一半）不再挪、不再归档。
+   */
+  async function retire(
+    actor: FaqActor,
+    faqId: string,
+    moveTo: string | null,
+  ): Promise<{ moved: number; skipped: number; archived: boolean }> {
+    const current = await deps.faqs.get(faqId).catch((error: unknown) => {
+      if (error instanceof HelpdeskError && error.status === 404) return null;
+      throw error;
+    });
+    if (!current) return { moved: 0, skipped: 0, archived: false };
+    let moved = 0;
+    let skipped = 0;
+    if (moveTo) {
+      const { phrasings } = await deps.graphService.phrasings(faqId);
+      const texts: { locale: PhrasingLocale; text: string }[] = [
+        { locale: 'en-GB', text: current.questionEn },
+        { locale: 'zh-CN', text: current.questionZh },
+        ...phrasings.map((p) => ({ locale: p.locale, text: p.text })),
+      ];
+      for (const item of texts) {
+        try {
+          const { created } = await deps.graphService.addPhrasing(
+            actor,
+            moveTo,
+            item,
+            'flywheel',
+          );
+          if (created) moved += 1;
+        } catch (error) {
+          if (
+            error instanceof HelpdeskError &&
+            (error.code === 'FAQ_TOO_MANY_PHRASINGS' ||
+              error.code === 'INVALID_INPUT')
+          )
+            skipped += 1;
+          else throw error;
+        }
+      }
+    }
+    await deps.faqs.archive(actor, faqId, { version: current.version });
+    return { moved, skipped, archived: true };
+  }
+
   async function acceptLocked(
     actor: FaqActor,
     id: string,
@@ -246,6 +398,9 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
       phrasingsSkipped: 0,
       evalCasesAdded: 0,
       edgeId: null,
+      phrasingsMoved: 0,
+      archived: false,
+      placed: false,
     };
     if (candidate.status !== 'new' || candidate.version !== expected)
       return {
@@ -253,10 +408,32 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
         replayed: true,
         ...nothing,
       };
-    const node = await liveNode(faqId);
-    if (node.type !== 'answer')
-      throw invalid('A candidate can only be accepted onto an answer');
-    const picks = examplePicks(candidate, body.phrasings);
+    const retiring = as === 'retire_faq';
+    let moveTo: string | null = null;
+    if (retiring) {
+      if (faqId !== candidate.relatedNodeId)
+        throw invalid('Retire the card this candidate is about');
+      const [node] = await deps.graph.summaries([faqId]);
+      if (!node) throw new HelpdeskError(404, 'FAQ_NOT_FOUND', 'FAQ not found');
+      if (node.type !== 'answer')
+        throw invalid('A candidate can only be accepted onto an answer');
+      if (body.moveTo !== undefined && body.moveTo !== null) {
+        moveTo = uuid(body.moveTo, 'moveTo');
+        if (moveTo === faqId)
+          throw invalid('Move the phrasings to another card');
+        const target = await liveNode(moveTo);
+        if (target.type !== 'answer')
+          throw invalid('Phrasings can only move to an answer');
+      }
+    } else {
+      const node = await liveNode(faqId);
+      if (node.type !== 'answer')
+        throw invalid('A candidate can only be accepted onto an answer');
+    }
+    if (as === 'update_faq')
+      await requireUpdatedSince(faqId, candidate.createdAt);
+    const place = await placeFor(as, faqId, body.placementNodeId);
+    const picks = retiring ? [] : examplePicks(candidate, body.phrasings);
     let parentId: string | null = null;
     let edgeId: string | null = null;
     if (as === 'follow_up') {
@@ -294,6 +471,10 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
         else throw error;
       }
     }
+    const placed = place ? await placeCard(actor, faqId, place) : false;
+    const retired = retiring
+      ? await retire(actor, faqId, moveTo)
+      : { moved: 0, skipped: 0, archived: false };
     // 只有员工勾选的例句当回归用例（没勾的可能说的是别的事，或者还留着个人信息；带占位符的不能勾）
     const evalCasesAdded = await deps.candidates.insertEvalCases(
       picks.map((e) => ({
@@ -312,6 +493,7 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
         acceptedAs: as,
         acceptedFaqId: faqId,
         parentNodeId: parentId,
+        acceptedPlaceId: place?.id ?? null,
       },
       actor.employeeId ?? '',
       key,
@@ -328,9 +510,50 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
       candidate: decided.candidate,
       replayed: false,
       phrasingsAdded,
-      phrasingsSkipped,
+      phrasingsSkipped: phrasingsSkipped + retired.skipped,
       evalCasesAdded,
       edgeId,
+      phrasingsMoved: retired.moved,
+      archived: retired.archived,
+      placed,
+    };
+  }
+
+  /** 审核页的相似度：发布版有向量 → 向量（每张卡取最像的一句）；否则或超时 → 文字。 */
+  async function similarityScores(
+    candidate: FaqCandidate,
+    cards: readonly NodeText[],
+  ): Promise<{ scores: Map<string, number>; source: 'text' | 'vectors' }> {
+    const queries = [
+      candidate.proposedQuestion,
+      ...candidate.examples.map((e) => e.text),
+    ].filter((q, i, all) => q.trim() !== '' && all.indexOf(q) === i);
+    if (deps.vectors) {
+      try {
+        const release = await deps.vectors.release();
+        if (release !== null) {
+          const signal = AbortSignal.timeout(REVIEW_VECTOR_TIMEOUT_MS);
+          const lists = await Promise.all(
+            queries.map((q) => deps.vectors!.search.rank(release, q, signal)),
+          );
+          if (lists.length > 0 && lists.every((list) => list !== null)) {
+            const scores = new Map<string, number>();
+            for (const list of lists)
+              for (const hit of list)
+                scores.set(
+                  hit.id,
+                  Math.max(scores.get(hit.id) ?? 0, hit.similarity),
+                );
+            return { scores, source: 'vectors' };
+          }
+        }
+      } catch {
+        // 向量这一路出错或超时：用文字相似度，审核页照样能看
+      }
+    }
+    return {
+      scores: await textScores(queries, cards, similarity),
+      source: 'text',
     };
   }
 
@@ -383,6 +606,66 @@ export function createFaqCandidateService(deps: CandidateServiceDeps) {
         ),
       ]);
       return { candidate, revisions, nodes };
+    },
+
+    /** 审核数据（只读、不调模型；见 candidateReview.ts 与接口说明第 2 节）。 */
+    async review(rawId: string): Promise<CandidateReview> {
+      const candidate = await load(rawId);
+      const working = await deps.graph.working();
+      const answers = new Set(
+        working.faqs.filter((f) => f.type === 'answer').map((f) => f.id),
+      );
+      const cards: NodeText[] = [
+        ...working.faqs
+          .filter((f) => answers.has(f.id))
+          .flatMap((f) => [
+            { nodeId: f.id, text: f.questionEn },
+            { nodeId: f.id, text: f.questionZh },
+          ]),
+        ...working.phrasings
+          .filter((p) => answers.has(p.faqId))
+          .map((p) => ({ nodeId: p.faqId, text: p.text })),
+      ];
+      const turnIds = candidate.examples.flatMap((e) =>
+        e.turnId ? [e.turnId] : [],
+      );
+      const [{ scores, source }, shownByTurn] = await Promise.all([
+        similarityScores(candidate, cards),
+        turnIds.length > 0
+          ? deps.shownCards(turnIds)
+          : Promise.resolve(new Map<string, string | null>()),
+      ]);
+      return buildCandidateReview({
+        candidate,
+        working,
+        shownByTurn,
+        scores,
+        source,
+      });
+    },
+
+    /** 结构树（选位置用）：编辑区的全部节点，带主位置挂在那里、没归档的卡数。 */
+    async faqMap() {
+      const working = await deps.graph.working();
+      const live = new Set(working.faqs.map((f) => f.id));
+      const cards = new Map<string, number>();
+      for (const p of working.map.placements)
+        if (p.primary && live.has(p.faqId))
+          cards.set(p.nodeId, (cards.get(p.nodeId) ?? 0) + 1);
+      return {
+        nodes: working.map.nodes.map((n) => ({
+          id: n.id,
+          key: n.key,
+          kind: n.kind,
+          parentId: n.parentId,
+          stageId: n.stageId,
+          attribute: n.attribute,
+          position: n.position,
+          labelZh: n.labelZh,
+          labelEn: n.labelEn,
+          cards: cards.get(n.id) ?? 0,
+        })),
+      };
     },
 
     /**

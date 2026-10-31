@@ -20,6 +20,7 @@ import type { FaqReleaseSource, FaqSnapshotNode } from './faqRelease';
 import { createPgFaqReleaseSource } from './faqReleaseService';
 import {
   createEnvFaqVectorSearch,
+  sharedFaqVectorSearch,
   logFaqVectorSearchError,
   retrievalMode,
   warmFaqVectors,
@@ -368,7 +369,9 @@ export function createHelpdeskQaSource(
 export function createPgHelpdeskQaSource(
   repository?: FaqRepository,
   db?: SqlDb,
-  vectors: FaqVectorSearch = createEnvFaqVectorSearch(db),
+  vectors: FaqVectorSearch = db
+    ? createEnvFaqVectorSearch(db)
+    : sharedFaqVectorSearch(),
 ): HelpdeskQaSource {
   const graph = createPgFaqGraphRepository(db);
   const source = createHelpdeskQaSource({

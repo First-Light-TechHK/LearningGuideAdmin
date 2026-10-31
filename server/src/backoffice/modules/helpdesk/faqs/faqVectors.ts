@@ -734,6 +734,17 @@ export function createEnvFaqVectorSearch(
   });
 }
 
+let shared: FaqVectorSearch | null = null;
+
+/**
+ * 进程里共用的一份（默认库、现读环境变量）：线上检索与后台审核页读同一份内存索引，
+ * 一版向量约 6,700 条 × 1,024 维，不要各读一份。
+ */
+export function sharedFaqVectorSearch(): FaqVectorSearch {
+  shared ??= createEnvFaqVectorSearch();
+  return shared;
+}
+
 /**
  * 发布后给新版本算向量（不等它、不影响发布结果）。没有模型 = 什么都不做；失败只记日志，
  * 下一次发布或手动跑 npm run helpdesk:faq-vectors 会补上（幂等）。

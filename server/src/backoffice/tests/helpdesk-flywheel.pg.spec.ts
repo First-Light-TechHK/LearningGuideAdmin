@@ -16,6 +16,10 @@ import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
 import { createFaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
 import {
+  createPgFaqMapRepository,
+  type MapNodeInput,
+} from '../modules/helpdesk/faqs/faqMapRepository';
+import {
   createPgFaqRepository,
   type SqlDb,
 } from '../modules/helpdesk/faqs/faqRepository';
@@ -189,7 +193,9 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
                 helpdesk_faq_candidate_turns, helpdesk_faq_candidates, helpdesk_insight_turns,
                 helpdesk_faq_release_vectors, helpdesk_faq_embeddings,
                 helpdesk_faq_release_nodes, helpdesk_faq_releases, helpdesk_faq_edge_revisions,
-                helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions, helpdesk_faqs CASCADE`,
+                helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_revisions,
+                helpdesk_faq_map_revisions, helpdesk_faq_placements, helpdesk_faq_map_nodes,
+                helpdesk_faqs CASCADE`,
     );
   });
 
@@ -861,6 +867,12 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
       }),
     };
 
+    const faqService = () =>
+      createFaqService({
+        repository: createPgFaqRepository(db),
+        liveParents: (id) => graph().liveParents(id),
+      });
+
     function candidateService(gap?: GapLabeller) {
       return createFaqCandidateService({
         candidates: candidates(),
@@ -868,9 +880,48 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
         graphService: createFaqGraphService({ graph: graph() }),
         portal,
         nodes: () => workingNodeTexts(graph()),
+        map: createPgFaqMapRepository(db),
+        faqs: faqService(),
+        shownCards: (ids) => insights().shownCards(ids),
         labeller: gap,
         now: () => NOW,
       });
+    }
+
+    const mapNode = (
+      key: string,
+      kind: MapNodeInput['kind'],
+      parentKey: string | null,
+      extra: Partial<MapNodeInput> = {},
+    ): MapNodeInput => ({
+      key,
+      kind,
+      parentKey,
+      stageKey: null,
+      attribute: null,
+      position: 0,
+      labelEn: `${key} (en)`,
+      labelZh: `${key}（中）`,
+      ...extra,
+    });
+
+    /** 一个阶段两步一个岔子，一个对象一格。 */
+    async function seedMap() {
+      const map = createPgFaqMapRepository(db);
+      for (const input of [
+        mapNode('purchase', 'stage', null),
+        mapNode('purchase.pay', 'step', 'purchase'),
+        mapNode('purchase.activate', 'step', 'purchase'),
+        mapNode('purchase.activate.delayed', 'deviation', 'purchase.activate'),
+        mapNode('rules.plan', 'object', null, { stageKey: 'purchase' }),
+        mapNode('rules.plan.price', 'cell', 'rules.plan', {
+          attribute: 'price',
+        }),
+      ])
+        await map.upsertNode(input, staff);
+      const nodes = await map.nodes();
+      const id = (key: string) => nodes.find((n) => n.key === key)!.id;
+      return { map, id };
     }
 
     async function mined(
@@ -1286,6 +1337,294 @@ describeDb('Helpdesk data flywheel (PostgreSQL)', () => {
         acceptedAs: 'follow_up',
         parentNodeId: parent.id,
       });
+    });
+
+    it('a new card needs a place once the map has nodes; the chosen step becomes its primary place and the decision keeps it', async () => {
+      const { map, id } = await seedMap();
+      const card = await faq({ questionZh: '付款后多久能开通课程？' });
+      const candidate = await mined();
+      const service = candidateService();
+      await rejects(
+        service.accept(staff, candidate.id, {
+          as: 'new_faq',
+          faqId: card.id,
+          version: candidate.version,
+        }),
+        400,
+        'PLACE_REQUIRED',
+      );
+      await rejects(
+        service.accept(staff, candidate.id, {
+          as: 'new_faq',
+          faqId: card.id,
+          version: candidate.version,
+          placementNodeId: id('purchase'),
+        }),
+        400,
+        'INVALID_PLACE',
+      );
+      const result = await service.accept(
+        staff,
+        candidate.id,
+        {
+          as: 'new_faq',
+          faqId: card.id,
+          version: candidate.version,
+          placementNodeId: id('purchase.activate'),
+        },
+        KEY(7),
+      );
+      expect(result).toMatchObject({
+        placed: true,
+        candidate: {
+          status: 'accepted',
+          acceptedPlaceId: id('purchase.activate'),
+        },
+      });
+      expect(
+        (await map.placements(card.id)).map((p) => [p.nodeId, p.primary]),
+      ).toEqual([[id('purchase.activate'), true]]);
+      // 写位置也留了结构的修订（谁、什么时候）
+      const placement = (await map.placements(card.id))[0];
+      expect(
+        (await map.revisions(placement.id)).map((r) => [
+          r.action,
+          r.employeeId,
+        ]),
+      ).toEqual([['create', EMP]]);
+    });
+
+    it('accepts an update only after the card was edited; a new place replaces the old primary and keeps the other places', async () => {
+      const { map, id } = await seedMap();
+      const card = await faq({ questionZh: '付款后课程没有开通怎么办？' });
+      await map.setPlacements(
+        card.id,
+        [
+          { nodeKey: 'purchase.pay', primary: true },
+          { nodeKey: 'rules.plan.price', primary: false },
+        ],
+        staff,
+      );
+      const candidate = await mined(PAID, {
+        kind: 'answer',
+        vote: 'not_helpful',
+        nodeId: card.id,
+      });
+      await pool.query(
+        'UPDATE helpdesk_faq_candidates SET suggestion = $2, related_node_id = $3 WHERE id = $1',
+        [candidate.id, 'update_faq', card.id],
+      );
+      const service = candidateService();
+      const body = {
+        as: 'update_faq',
+        faqId: card.id,
+        version: candidate.version,
+        placementNodeId: id('purchase.activate'),
+      };
+      await rejects(
+        service.accept(staff, candidate.id, body),
+        409,
+        'FAQ_NOT_UPDATED',
+      );
+      await faqService().update(staff, card.id, {
+        version: card.version,
+        category: card.category,
+        popular: card.popular,
+        questionEn: card.questionEn,
+        answerEn: card.answerEn,
+        questionZh: card.questionZh,
+        answerZh: '付款后 5 分钟内开通；超过 30 分钟请点「重新同步」。',
+        keywords: card.keywords,
+      });
+      const result = await service.accept(staff, candidate.id, body, KEY(8));
+      expect(result).toMatchObject({
+        placed: true,
+        phrasingsAdded: 4,
+        evalCasesAdded: 4,
+        candidate: { acceptedAs: 'update_faq', acceptedFaqId: card.id },
+      });
+      expect(
+        (await map.placements(card.id))
+          .map((p) => [p.nodeId, p.primary])
+          .sort(),
+      ).toEqual(
+        [
+          [id('purchase.activate'), true],
+          [id('rules.plan.price'), false],
+        ].sort(),
+      );
+    });
+
+    it('retiring archives the card and moves its questions and phrasings to the kept card; a retry does nothing twice', async () => {
+      const kept = await faq({ questionZh: '如何退出登录？' });
+      const retired = await faq({
+        questionEn: 'Where is the sign-out button?',
+        questionZh: '退出登录的按钮在哪里？',
+      });
+      await createFaqGraphService({ graph: graph() }).addPhrasing(
+        staff,
+        retired.id,
+        { locale: 'zh-CN', text: '找不到登出按钮' },
+      );
+      const candidate = await mined(['退出登录在哪', '怎么登出']);
+      await pool.query(
+        'UPDATE helpdesk_faq_candidates SET suggestion = $2, related_node_id = $3 WHERE id = $1',
+        [candidate.id, 'retire_faq', retired.id],
+      );
+      const service = candidateService();
+      await rejects(
+        service.accept(staff, candidate.id, {
+          as: 'retire_faq',
+          faqId: kept.id,
+          version: candidate.version,
+        }),
+        400,
+        'INVALID_INPUT',
+      );
+      const result = await service.accept(
+        staff,
+        candidate.id,
+        {
+          as: 'retire_faq',
+          faqId: retired.id,
+          version: candidate.version,
+          moveTo: kept.id,
+        },
+        KEY(9),
+      );
+      expect(result).toMatchObject({
+        archived: true,
+        phrasingsMoved: 3,
+        phrasingsAdded: 0,
+        evalCasesAdded: 0,
+        candidate: { acceptedAs: 'retire_faq', acceptedFaqId: retired.id },
+      });
+      expect((await createPgFaqRepository(db).get(retired.id))!.status).toBe(
+        'archived',
+      );
+      expect(
+        (await graph().phrasingsOf(kept.id)).map((p) => p.text).sort(),
+      ).toEqual(
+        [
+          'Where is the sign-out button?',
+          '找不到登出按钮',
+          '退出登录的按钮在哪里？',
+        ].sort(),
+      );
+      const again = await service.accept(
+        staff,
+        candidate.id,
+        {
+          as: 'retire_faq',
+          faqId: retired.id,
+          version: candidate.version,
+          moveTo: kept.id,
+        },
+        KEY(9),
+      );
+      expect(again.replayed).toBe(true);
+      expect(await graph().phrasingsOf(kept.id)).toHaveLength(3);
+    });
+
+    it('review: similar cards same place first, places by vote, and how the AI handled each example', async () => {
+      const { map, id } = await seedMap();
+      const shown = await faq({
+        questionEn: 'My payment went through but the course is not open',
+        questionZh: '付款成功了课程为什么还没开通？',
+      });
+      const near = await faq({
+        questionEn: 'How long until my course opens after paying?',
+        questionZh: '付款后多久课程会开通？',
+      });
+      const far = await faq({
+        questionEn: 'How do I change my password?',
+        questionZh: '怎么修改密码？',
+      });
+      await map.setPlacements(
+        shown.id,
+        [{ nodeKey: 'purchase.activate', primary: true }],
+        staff,
+      );
+      await map.setPlacements(
+        near.id,
+        [{ nodeKey: 'purchase.activate.delayed', primary: true }],
+        staff,
+      );
+      await map.setPlacements(
+        far.id,
+        [{ nodeKey: 'rules.plan.price', primary: true }],
+        staff,
+      );
+      const candidate = await mined(PAID, {
+        kind: 'answer',
+        vote: 'not_helpful',
+        nodeId: shown.id,
+      });
+      await pool.query(
+        'UPDATE helpdesk_faq_candidates SET suggestion = $2, related_node_id = $3, related_score = 0.8 WHERE id = $1',
+        [candidate.id, 'update_faq', shown.id],
+      );
+      const review = await candidateService().review(candidate.id);
+      expect(review).toMatchObject({
+        candidateId: candidate.id,
+        similaritySource: 'text',
+        recommendation: {
+          action: 'update_faq',
+          faqId: shown.id,
+          confidence: null,
+        },
+        userStates: null,
+        netValue: null,
+      });
+      expect(review.recommendation.rationaleZh).toContain(
+        '当时给用户看的就是这张卡',
+      );
+      expect(review.recommendation.rationale).toBe(
+        review.recommendation.rationaleZh,
+      );
+      expect(review.handling.map((h) => [h.shownFaqId, h.outcome])).toEqual(
+        candidate.examples.map(() => [shown.id, 'no_match']),
+      );
+      expect(review.similar[0]).toMatchObject({
+        faqId: shown.id,
+        samePlace: true,
+        closeMatch: false,
+        placePath: [
+          {
+            key: 'purchase',
+            labelZh: 'purchase（中）',
+            labelEn: 'purchase (en)',
+          },
+          {
+            key: 'purchase.activate',
+            labelZh: 'purchase.activate（中）',
+            labelEn: 'purchase.activate (en)',
+          },
+        ],
+      });
+      expect(review.similar.map((s) => s.faqId)).toContain(near.id);
+      expect(review.places[0]).toMatchObject({
+        nodeId: id('purchase.activate'),
+        kind: 'step',
+      });
+      expect(review.regions[0]).toMatchObject({
+        key: 'purchase',
+        kind: 'stage',
+      });
+      // 结构树：卡数只算主位置、没归档的
+      const tree = await candidateService().faqMap();
+      expect(
+        tree.nodes
+          .filter((n) => n.cards > 0)
+          .map((n) => [n.key, n.cards])
+          .sort(),
+      ).toEqual(
+        [
+          ['purchase.activate', 1],
+          ['purchase.activate.delayed', 1],
+          ['rules.plan.price', 1],
+        ].sort(),
+      );
     });
 
     it('dismisses with a reason (other needs a note, the note is scrubbed); later similar turns join the dismissed candidate, not the queue', async () => {

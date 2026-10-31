@@ -412,6 +412,23 @@ export function createPgInsightRepository(db: SqlDb = defaultDb) {
       }));
     },
 
+    /** 这些轮当时给用户看的卡（审核页「AI 当时怎么处理的」）；不在表里的轮不出现在结果里。 */
+    async shownCards(
+      turnIds: readonly string[],
+    ): Promise<Map<string, string | null>> {
+      if (turnIds.length === 0) return new Map();
+      const rows = await db.query(
+        'SELECT id, node_id FROM helpdesk_insight_turns WHERE id = ANY($1::uuid[])',
+        [[...turnIds]],
+      );
+      return new Map(
+        rows.map((row) => [
+          row.id as string,
+          (row.node_id as string | null) ?? null,
+        ]),
+      );
+    },
+
     /** 最常在答案之后（24 小时内）还建了工单的 FAQ（只看已满 24 小时的答案）。 */
     async ticketFaqs(
       q: Pick<MetricsQuery, 'from' | 'to'>,

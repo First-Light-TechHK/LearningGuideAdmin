@@ -24,7 +24,12 @@ import {
   createFaqReleaseService,
   createPgFaqReleaseSource,
 } from '../modules/helpdesk/faqs/faqReleaseService';
-import { createFaqService } from '../modules/helpdesk/faqs/faqService';
+import { createPgFaqMapRepository } from '../modules/helpdesk/faqs/faqMapRepository';
+import {
+  createFaqService,
+  type FaqService,
+} from '../modules/helpdesk/faqs/faqService';
+import { sharedFaqVectorSearch } from '../modules/helpdesk/faqs/faqVectors';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
 import { createPgCandidateRepository } from '../modules/helpdesk/flywheel/candidateRepository';
 import { createFaqCandidateService } from '../modules/helpdesk/flywheel/faqCandidateService';
@@ -190,16 +195,26 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         },
         {
           provide: HELPDESK_FAQ_CANDIDATE_SERVICE,
-          useFactory: (labeller: GapLabeller) =>
-            createFaqCandidateService({
+          useFactory: (labeller: GapLabeller, faqs: FaqService) => {
+            const insights = createPgInsightRepository();
+            return createFaqCandidateService({
               candidates: createPgCandidateRepository(),
               graph,
               graphService: createFaqGraphService({ graph }),
               portal: createPortalHelpdeskClient(),
               nodes: () => workingNodeTexts(graph),
+              map: createPgFaqMapRepository(),
+              faqs,
+              shownCards: (turnIds) => insights.shownCards(turnIds),
+              // 审核页的相似卡：和线上检索同一份向量索引（没配向量模型 → 文字相似度）
+              vectors: {
+                search: sharedFaqVectorSearch(),
+                release: () => releaseSource.publishedVersion(),
+              },
               labeller,
-            }),
-          inject: [HELPDESK_GAP_LABELLER],
+            });
+          },
+          inject: [HELPDESK_GAP_LABELLER, HELPDESK_FAQ_SERVICE],
         },
         {
           provide: HELPDESK_FLYWHEEL_RUNS_SERVICE,

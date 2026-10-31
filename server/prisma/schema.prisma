@@ -755,6 +755,8 @@ model HelpdeskFaqCandidate {
   reasonNote       String?   @map("reason_note")
   acceptedAs       String?   @map("accepted_as")
   acceptedFaqId    String?   @map("accepted_faq_id") @db.Uuid
+  /// 接受时员工选的主位置（结构节点 id；不建外键）。
+  acceptedPlaceId  String?   @map("accepted_place_id") @db.Uuid
   mergedInto       String?   @map("merged_into") @db.Uuid
   decidedBy        String?   @map("decided_by") @db.Uuid
   decidedAt        DateTime? @map("decided_at") @db.Timestamptz(6)
