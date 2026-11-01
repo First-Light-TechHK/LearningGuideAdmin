@@ -8,6 +8,7 @@ import type {
   TrialSettings,
 } from '../contracts/course';
 import { boRequest } from '../lib/api';
+import { categoryLabel } from '../lib/categoryLabel';
 
 import { CourseInfoSection } from './course-editor/CourseInfoSection';
 import { CourseContentSection } from './course-editor/CourseContentSection';
@@ -70,6 +71,10 @@ export function CourseEditorPage() {
   }, [load]);
 
   const liveVersion = useMemo(() => versions.find((version) => version.isLive), [versions]);
+  const localizedCategories = useMemo(
+    () => categories.map((category) => ({ ...category, name: categoryLabel(locale, category.name) })),
+    [categories, locale],
+  );
   const stepLabel = (complete: boolean) => L(locale, complete ? '已完成' : '未完成', complete ? 'Complete' : 'Incomplete');
 
   if (loading || !course) {
@@ -84,7 +89,7 @@ export function CourseEditorPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title ?? course.code}</h1>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>
-              {course.code} · {course.category?.name ?? L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
+              {course.code} · {course.category ? categoryLabel(locale, course.category.name) : L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
             </div>
           </div>
         </div>
@@ -144,7 +149,7 @@ export function CourseEditorPage() {
       {notice && <p role="status" style={{ padding: 10, background: /fail|error|invalid/i.test(notice) ? '#FDECEC' : '#F3F7FF', borderRadius: 8, marginTop: 14 }}>{notice}</p>}
 
       <div style={{ marginTop: 16 }}>
-        {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={categories} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} onNext={() => setTab('content')} />}
+        {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} onNext={() => setTab('content')} />}
         {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
         {tab === 'trial' && trial && <CourseTrialSection locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} contentLanguage={contentLanguage} />}
         {tab === 'versions' && <CourseVersionsSection locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}

@@ -6,6 +6,7 @@ import type { CourseList } from '../contracts/course'
 import { useResizableColumns } from '../components/resizableColumns'
 import { Pagination, usePageSize } from '../components/Pagination'
 import { boRequest } from '../lib/api'
+import { categoryLabel } from '../lib/categoryLabel'
 import { uploadFileWithProgress } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
@@ -131,13 +132,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
 
   const categories = useMemo(() => {
     const map = new Map<string, string>()
-    for (const category of catalogCategories) map.set(category.id, category.name)
+    for (const category of catalogCategories) map.set(category.id, categoryLabel(locale, category.name))
     // 当前页出现的分类即使目录接口没返回（如已停用）也保留，避免已选筛选值丢失
     for (const course of list?.courses ?? []) {
-      if (course.category) map.set(course.category.id, course.category.name)
+      if (course.category) map.set(course.category.id, categoryLabel(locale, course.category.name))
     }
     return [...map.entries()]
-  }, [catalogCategories, list])
+  }, [catalogCategories, list, locale])
 
   async function createCourse(form: FormData) {
     setBusy(true)
@@ -499,7 +500,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="en-GB">English (en-GB)</option><option value="zh-CN">简体中文 (zh-CN)</option></select></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
               <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
@@ -644,7 +645,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                     </div>
                   </td>
                   <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{course.code}</td>
-                  <td>{course.category?.name ?? '—'}</td>
+                  <td>{course.category ? categoryLabel(locale, course.category.name) : '—'}</td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <span style={{ fontWeight: 600 }}>{course.liveVersionLabel ?? '—'}</span>

@@ -10,6 +10,7 @@ import type {
   PopularCourses,
 } from '../contracts/course';
 import { boRequest } from '../lib/api';
+import { categoryLabel } from '../lib/categoryLabel';
 import { useResizableColumns } from '../components/resizableColumns';
 import { liveStatusLabel } from './course-editor/shared';
 
@@ -213,7 +214,7 @@ export function OperationsPage() {
                       </div>
                     </div>
                   </td>
-                  <td>{item.category ?? '—'}</td>
+                  <td>{item.category ? categoryLabel(locale, item.category) : '—'}</td>
                   <td style={{ color: item.invalid ? '#b42318' : '#1E7A3C', fontWeight: 600 }}>
                     {liveStatusLabel(locale, item.liveStatus)}{item.invalid ? ` · ${L(locale, '需替换', 'replace')}` : ''}
                   </td>
