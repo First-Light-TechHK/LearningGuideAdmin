@@ -10,6 +10,7 @@ import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
 import { MenuGuard } from './ModulePages'
+import { languageLabel, learningModeLabel } from './course-editor/shared'
 
 type JobView = {
   jobId: string
@@ -609,7 +610,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                   <td>
                     <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
                     <div style={{ opacity: 0.7, fontSize: 12 }}>
-                      {course.learningMode} · {course.learningLanguages.join(', ')}
+                      {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')}
                       {course.trialEnabled ? ` · ${L('含试看', 'trial')}` : ''}
                     </div>
                   </td>

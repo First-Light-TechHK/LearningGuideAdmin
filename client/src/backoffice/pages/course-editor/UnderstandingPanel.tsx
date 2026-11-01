@@ -9,6 +9,7 @@ import {
   buttonStyle,
   card,
   inputStyle,
+  languageLabel,
   primaryBtn,
 } from './shared';
 
@@ -75,7 +76,7 @@ export function UnderstandingPanel({
     });
     setBusy(false);
     if (result.success) {
-      onNotice(L(locale, 'Knowledge Test 已保存。', 'Knowledge Test saved.'));
+      onNotice(L(locale, '知识测试已保存。', 'Knowledge Test saved.'));
       await onSaved();
     } else {
       onNotice(`${L(locale, '保存失败', 'Save failed')}: ${result.message ?? result.error}`);
@@ -95,7 +96,7 @@ export function UnderstandingPanel({
     });
     setBusy(false);
     if (result.success) {
-      onNotice(L(locale, 'Application Test 已保存。', 'Application Test saved.'));
+      onNotice(L(locale, '应用测试已保存。', 'Application Test saved.'));
       await onSaved();
     } else {
       onNotice(`${L(locale, '保存失败', 'Save failed')}: ${result.message ?? result.error}`);
@@ -144,11 +145,11 @@ export function UnderstandingPanel({
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>Knowledge Test</h2>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '知识测试', 'Knowledge Test')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '按添加顺序排列；新题加在末尾；不支持调整顺序。', 'Questions stay in add order; new questions go to the end; order cannot be changed.')}</p>
           </div>
           <label style={{ fontSize: 14 }}>
-            <input type="checkbox" checked={knowledgeEnabled} onChange={(event) => setKnowledgeEnabled(event.target.checked)} /> {L(locale, 'Enabled', 'Enabled')}
+            <input type="checkbox" checked={knowledgeEnabled} onChange={(event) => setKnowledgeEnabled(event.target.checked)} /> {L(locale, '启用', 'Enabled')}
           </label>
         </div>
 
@@ -156,8 +157,8 @@ export function UnderstandingPanel({
           <>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
               <button type="button" style={primaryBtn} onClick={addQuestion}>+ {L(locale, '添加题目', 'Add question')}</button>
-              <button type="button" style={buttonStyle} onClick={() => setSingleImportOpen(true)}>{L(locale, 'Import from sheet', 'Import from sheet')}</button>
-              <button type="button" style={buttonStyle} onClick={downloadTemplate}>{L(locale, 'Download template', 'Download template')}</button>
+              <button type="button" style={buttonStyle} onClick={() => setSingleImportOpen(true)}>{L(locale, '从表格导入', 'Import from sheet')}</button>
+              <button type="button" style={buttonStyle} onClick={downloadTemplate}>{L(locale, '下载模板', 'Download template')}</button>
             </div>
 
             <div style={{ marginTop: 12 }}>
@@ -169,56 +170,56 @@ export function UnderstandingPanel({
                       {L(locale, '删除', 'Delete question')}
                     </button>
                   </div>
-                  <Field label={L(locale, 'Question *', 'Question *')} hint={`${question.question.length} / 200`}>
+                  <Field label={L(locale, '题目 *', 'Question *')} hint={`${question.question.length} / 200`}>
                     <input data-new-question={index === questions.length - 1 ? 'true' : 'false'} value={question.question} onChange={(event) => setQuestions((current) => current.map((item, i) => i === index ? { ...item, question: event.target.value } : item))} style={inputStyle} />
                   </Field>
-                  <Field label={L(locale, 'Reference answer *', 'Reference answer *')} hint={`${question.referenceAnswer.length} / 600`}>
+                  <Field label={L(locale, '参考答案 *', 'Reference answer *')} hint={`${question.referenceAnswer.length} / 600`}>
                     <textarea rows={4} value={question.referenceAnswer} onChange={(event) => setQuestions((current) => current.map((item, i) => i === index ? { ...item, referenceAnswer: event.target.value } : item))} style={inputStyle} />
                   </Field>
                 </div>
               ))}
               {questions.length === 0 && <p style={{ opacity: 0.7, marginTop: 10 }}>{L(locale, '暂无题目。', 'No questions yet.')}</p>}
             </div>
-            <button type="button" style={{ ...primaryBtn, marginTop: 12 }} disabled={busy} onClick={() => void saveKnowledge()}>{L(locale, '保存 Knowledge Test', 'Save Knowledge Test')}</button>
+            <button type="button" style={{ ...primaryBtn, marginTop: 12 }} disabled={busy} onClick={() => void saveKnowledge()}>{L(locale, '保存知识测试', 'Save Knowledge Test')}</button>
           </>
         )}
       </div>
 
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Application Test</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '应用测试', 'Application Test')}</h2>
           <label style={{ fontSize: 14 }}>
-            <input type="checkbox" checked={applicationEnabled} onChange={(event) => setApplicationEnabled(event.target.checked)} /> {L(locale, 'Enabled', 'Enabled')}
+            <input type="checkbox" checked={applicationEnabled} onChange={(event) => setApplicationEnabled(event.target.checked)} /> {L(locale, '启用', 'Enabled')}
           </label>
         </div>
         {applicationEnabled && (
           <>
-            <Field label={L(locale, 'Question *', 'Question *')}>
+            <Field label={L(locale, '题目 *', 'Question *')}>
               <textarea rows={7} value={applicationScenario} onChange={(event) => setApplicationScenario(event.target.value)} style={inputStyle} />
             </Field>
-            <Field label={L(locale, 'Reference answer *', 'Reference answer *')} hint={L(locale, '学员提交且 AI 评估完成后展示给学员。', 'Shown to learners after AI review.')}>
+            <Field label={L(locale, '参考答案 *', 'Reference answer *')} hint={L(locale, '学员提交且 AI 评估完成后展示给学员。', 'Shown to learners after AI review.')}>
               <textarea rows={7} value={applicationAnswer} onChange={(event) => setApplicationAnswer(event.target.value)} style={inputStyle} />
             </Field>
-            <button type="button" style={{ ...primaryBtn, marginTop: 12 }} disabled={busy} onClick={() => void saveApplication()}>{L(locale, '保存 Application Test', 'Save Application Test')}</button>
+            <button type="button" style={{ ...primaryBtn, marginTop: 12 }} disabled={busy} onClick={() => void saveApplication()}>{L(locale, '保存应用测试', 'Save Application Test')}</button>
           </>
         )}
       </div>
 
       {singleImportOpen && (
-        <Modal title={L(locale, 'Import questions', 'Import questions')} onClose={() => { setSingleImportOpen(false); setSingleFile(null); setSingleResult(null); }}>
-          <p style={{ fontSize: 13, color: '#5A6577' }}>{L(locale, 'Lesson', 'Lesson')} {lesson.sortOrder} · {lesson.localizations[0]?.title ?? lesson.code} · {language === 'zh-CN' ? '中文' : 'English'}</p>
+        <Modal title={L(locale, '导入题目', 'Import questions')} onClose={() => { setSingleImportOpen(false); setSingleFile(null); setSingleResult(null); }}>
+          <p style={{ fontSize: 13, color: '#5A6577' }}>{L(locale, '课时', 'Lesson')} {lesson.sortOrder} · {lesson.localizations[0]?.title ?? lesson.code} · {languageLabel(locale, language)}</p>
           <Field label={L(locale, '上传 .xlsx 或 .csv', 'Upload .xlsx or .csv')}>
             <input type="file" accept=".xlsx,.csv" onChange={(event) => { setSingleFile(event.target.files?.[0] ?? null); setSingleResult(null); }} />
           </Field>
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <button type="button" style={primaryBtn} disabled={!singleFile || singleBusy} onClick={() => void runSingleImport()}>{singleBusy ? L(locale, '导入中…', 'Importing…') : L(locale, '导入', 'Import')}</button>
-            <button type="button" style={buttonStyle} onClick={() => window.open(`/api/backoffice/courses/${courseId}/understanding/template`, '_blank')}>{L(locale, 'Download template', 'Download template')}</button>
+            <button type="button" style={buttonStyle} onClick={() => window.open(`/api/backoffice/courses/${courseId}/understanding/template`, '_blank')}>{L(locale, '下载模板', 'Download template')}</button>
           </div>
           {singleResult && (
             <div style={{ marginTop: 12, fontSize: 13 }}>
               <p style={{ fontWeight: 600 }}>{L(locale, '已导入', 'Imported')} {singleResult.added} {L(locale, '题', 'questions')}</p>
               {singleResult.errors.map((error, index) => (
-                <p key={index} style={{ color: '#b42318' }}>{error.row ? `Row ${error.row} · ` : ''}{error.message}</p>
+                <p key={index} style={{ color: '#b42318' }}>{error.row ? `${L(locale, '第', 'Row')} ${error.row} · ` : ''}{error.message}</p>
               ))}
             </div>
           )}

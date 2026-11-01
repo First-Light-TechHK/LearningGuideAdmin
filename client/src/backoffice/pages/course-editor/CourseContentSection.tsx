@@ -13,11 +13,14 @@ import {
   buttonStyle,
   card,
   dangerBtn,
+  exhibitTypeLabel,
   inputStyle,
   labelStyle,
+  languageLabel,
   fmtDuration,
   parseTime,
   primaryBtn,
+  readingTypeLabel,
 } from './shared';
 
 
@@ -217,7 +220,7 @@ export function CourseContentSection({
     });
     setBusy(false);
     if (readingResult.success) {
-      onNotice(L(locale, 'Study & Exploration 已保存。', 'Study & Exploration saved.'));
+      onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
       await onReload();
     } else {
       onNotice(`${L(locale, '阅读保存失败', 'Reading save failed')}: ${readingResult.message ?? readingResult.error}`);
@@ -266,7 +269,7 @@ export function CourseContentSection({
       });
     }
     setBusy(false);
-    onNotice(L(locale, '展品已上传，点击 Complete 补全信息。', 'Exhibits uploaded; click Complete to finish details.'));
+    onNotice(L(locale, '展品已上传，点击「补全」填写信息。', 'Exhibits uploaded; click Complete to finish details.'));
     await onReload();
   }
 
@@ -362,7 +365,7 @@ export function CourseContentSection({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 15 }}>{L(locale, '课时', 'Lessons')}</h3>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => setImportMenuOpen((value) => !value)}>{L(locale, 'Import', 'Import')}</button>
+            <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => setImportMenuOpen((value) => !value)}>{L(locale, '导入', 'Import')}</button>
             <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => void addLesson()}>+ {L(locale, '添加', 'Add')}</button>
           </div>
         </div>
@@ -376,8 +379,8 @@ export function CourseContentSection({
           const completeness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === lesson.id);
           const title = loc(lesson, contentLanguage)?.title ?? lesson.code;
           const meta = part === 'study'
-            ? `${loc(lesson, contentLanguage)?.videoDurationSeconds ? `${Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} LPs · ${lesson.exhibits.length} exhibits`
-            : `${lesson.questions.length} questions · ${lesson.applicationTest ? 'App test' : 'no App test'}`;
+            ? `${loc(lesson, contentLanguage)?.videoDurationSeconds ? `${Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} ${L(locale, '学习点', 'LPs')} · ${lesson.exhibits.length} ${L(locale, '个展品', 'exhibits')}`
+            : `${lesson.questions.length} ${L(locale, '题', 'questions')} · ${lesson.applicationTest ? L(locale, '有应用测试', 'App test') : L(locale, '无应用测试', 'no App test')}`;
           return (
             <button key={lesson.id} type="button" onClick={() => setActiveLessonId(lesson.id)} style={{ ...buttonStyle, display: 'block', width: '100%', textAlign: 'left', marginBottom: 6, borderColor: activeLessonId === lesson.id ? '#2B58C8' : '#E8EDF5', background: activeLessonId === lesson.id ? '#F5F8FF' : '#fff' }}>
               <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -400,8 +403,8 @@ export function CourseContentSection({
                 <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{activeLesson.code} · {activeLesson.id}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button type="button" style={{ ...buttonStyle, borderColor: part === 'study' ? '#2B58C8' : '#d9e0ea', color: part === 'study' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('study')}>Study & Exploration {lessonCompleteness?.studyComplete ? '✓' : '!'}</button>
-                <button type="button" style={{ ...buttonStyle, borderColor: part === 'understanding' ? '#2B58C8' : '#d9e0ea', color: part === 'understanding' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('understanding')}>Understanding {lessonCompleteness?.understandingComplete ? '✓' : '!'}</button>
+                <button type="button" style={{ ...buttonStyle, borderColor: part === 'study' ? '#2B58C8' : '#d9e0ea', color: part === 'study' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('study')}>{L(locale, '学习与探索', 'Study & Exploration')} {lessonCompleteness?.studyComplete ? '✓' : '!'}</button>
+                <button type="button" style={{ ...buttonStyle, borderColor: part === 'understanding' ? '#2B58C8' : '#d9e0ea', color: part === 'understanding' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('understanding')}>{L(locale, '理解', 'Understanding')} {lessonCompleteness?.understandingComplete ? '✓' : '!'}</button>
               </div>
             </div>
 
@@ -466,10 +469,10 @@ export function CourseContentSection({
                           {exhibit.thumbnail ? <img src={`/api/backoffice/courses/${course.id}/media/${exhibit.thumbnail.id}`} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }} /> : <div style={{ width: 44, height: 44, borderRadius: 6, background: '#EEF1F6' }} />}
                           <div>
                             <strong>{title}</strong>
-                            <div style={{ fontSize: 11, color: '#5A6577' }}>{exhibit.code} · {exhibit.type}</div>
+                            <div style={{ fontSize: 11, color: '#5A6577' }}>{exhibit.code} · {exhibitTypeLabel(locale, exhibit.type)}</div>
                           </div>
                         </div>
-                        <button type="button" style={buttonStyle} onClick={() => setExhibitDrawer(exhibit.id)}>{complete ? L(locale, 'Edit', 'Edit') : L(locale, 'Complete', 'Complete')}</button>
+                        <button type="button" style={buttonStyle} onClick={() => setExhibitDrawer(exhibit.id)}>{complete ? L(locale, '编辑', 'Edit') : L(locale, '补全', 'Complete')}</button>
                       </div>
                     );
                   })}
@@ -480,10 +483,10 @@ export function CourseContentSection({
               <div style={{ ...card, marginTop: 14, padding: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', gap: 6 }}>
-                    {hasVideo && <button type="button" style={{ ...buttonStyle, borderColor: studyTab === 'video' ? '#2B58C8' : '#d9e0ea', color: studyTab === 'video' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setStudyTab('video')}>Video</button>}
-                    {hasText && <button type="button" style={{ ...buttonStyle, borderColor: studyTab === 'text' ? '#2B58C8' : '#d9e0ea', color: studyTab === 'text' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setStudyTab('text')}>Text</button>}
+                    {hasVideo && <button type="button" style={{ ...buttonStyle, borderColor: studyTab === 'video' ? '#2B58C8' : '#d9e0ea', color: studyTab === 'video' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setStudyTab('video')}>{L(locale, '视频', 'Video')}</button>}
+                    {hasText && <button type="button" style={{ ...buttonStyle, borderColor: studyTab === 'text' ? '#2B58C8' : '#d9e0ea', color: studyTab === 'text' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setStudyTab('text')}>{L(locale, '文字', 'Text')}</button>}
                   </div>
-                  <div style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')} {contentLanguage === 'zh-CN' ? '中文' : 'English'}</div>
+                  <div style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')} {languageLabel(locale, contentLanguage)}</div>
                 </div>
 
                 {studyTab === 'video' && hasVideo && (
@@ -497,7 +500,7 @@ export function CourseContentSection({
                     </div>
                     <div style={{ marginTop: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <strong style={{ fontSize: 14 }}>{L(locale, 'Learning points', 'Learning points')}</strong>
+                        <strong style={{ fontSize: 14 }}>{L(locale, '学习点', 'Learning points')}</strong>
                         <button type="button" style={buttonStyle} onClick={() => setVideoLps((rows) => [...rows, { code: `V${rows.length + 1}`, title: '', timeSeconds: 0 }])}>+ {L(locale, '添加学习点', 'Add learning point')}</button>
                       </div>
                       <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{L(locale, '时间（mm:ss）+ 标题', 'Time (mm:ss) + title')}</div>
@@ -517,7 +520,7 @@ export function CourseContentSection({
 
                     <div style={{ marginTop: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <strong style={{ fontSize: 14 }}>{L(locale, 'Exhibit triggers', 'Exhibit triggers')}</strong>
+                        <strong style={{ fontSize: 14 }}>{L(locale, '展品触发点', 'Exhibit triggers')}</strong>
                         <button type="button" style={buttonStyle} onClick={() => setTriggerRows((rows) => [...rows, { exhibitId: exhibits[0]?.id ?? '', timeSeconds: 0 }])}>+ {L(locale, '添加触发点', 'Add trigger')}</button>
                       </div>
                       {triggerRows.map((trigger, index) => (
@@ -546,15 +549,15 @@ export function CourseContentSection({
                       onNotice={onNotice}
                     />
                     <div style={{ marginTop: 12, fontSize: 13 }}>
-                      <strong>{L(locale, 'Learning points 识别区', 'Learning points')}</strong>
+                      <strong>{L(locale, '学习点识别区', 'Learning points')}</strong>
                       <p style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{L(locale, '仅 Heading 1 识别为 LP；H1 文本即 LP 标题。', 'Only Heading 1 becomes a learning point; its text is the title.')}</p>
                       {textLps.length === 0 ? (
-                        <p style={{ color: '#b42318', marginTop: 6 }}>{L(locale, 'No learning points found. Set each learning point title as Heading 1 (H1).', 'No learning points found. Set each learning point title as Heading 1 (H1).')}</p>
+                        <p style={{ color: '#b42318', marginTop: 6 }}>{L(locale, '未识别到学习点。请把每个学习点标题设置为一级标题（H1）。', 'No learning points found. Set each learning point title as Heading 1 (H1).')}</p>
                       ) : (
                         textLps.map((point, index) => (
                           <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', border: `1px solid ${point.heading && point.hasBody ? '#E8EDF5' : '#F5C7A8'}`, borderRadius: 6, marginTop: 6 }}>
-                            <span style={{ fontSize: 12 }}>{activeLesson.sortOrder}.{index + 1} {point.heading || L(locale, 'Heading text', 'Heading text')}</span>
-                            <span style={{ fontSize: 11, color: point.hasBody ? '#1E7A3C' : '#b42318' }}>{point.hasBody ? 'OK' : L(locale, 'No text under this heading', 'No text under this heading')}</span>
+                            <span style={{ fontSize: 12 }}>{activeLesson.sortOrder}.{index + 1} {point.heading || L(locale, '标题文本', 'Heading text')}</span>
+                            <span style={{ fontSize: 11, color: point.hasBody ? '#1E7A3C' : '#b42318' }}>{point.hasBody ? L(locale, '正常', 'OK') : L(locale, '该标题下没有正文', 'No text under this heading')}</span>
                           </div>
                         ))
                       )}
@@ -566,7 +569,7 @@ export function CourseContentSection({
               <div style={{ ...card, marginTop: 14, padding: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, 'Recommended reading', 'Recommended reading')}</h3>
+                    <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, '推荐阅读', 'Recommended reading')}</h3>
                     <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '只有英文一份列表；所有学员看到同一份。', 'One English list only; all learners see the same list.')}</p>
                   </div>
                   <button type="button" style={buttonStyle} onClick={() => setReadingRows((rows) => [...rows, { type: 'BOOK', title: '', author: '', whyRecommended: '' }])}>+ {L(locale, '添加阅读', 'Add reading')}</button>
@@ -574,14 +577,14 @@ export function CourseContentSection({
                 {readingRows.map((reading, index) => (
                   <div key={index} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1.4fr 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                     <select value={reading.type} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, type: event.target.value } : item))} style={inputStyle}>
-                      <option value="BOOK">Book</option>
-                      <option value="ARTICLE">Article</option>
-                      <option value="PAPER">Paper</option>
-                      <option value="OTHER">Other</option>
+                      <option value="BOOK">{readingTypeLabel(locale, 'BOOK')}</option>
+                      <option value="ARTICLE">{readingTypeLabel(locale, 'ARTICLE')}</option>
+                      <option value="PAPER">{readingTypeLabel(locale, 'PAPER')}</option>
+                      <option value="OTHER">{readingTypeLabel(locale, 'OTHER')}</option>
                     </select>
-                    <input value={reading.title} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, 'Title', 'Title')} style={inputStyle} />
-                    <input value={reading.author} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, author: event.target.value } : item))} placeholder={L(locale, 'Author', 'Author')} style={inputStyle} />
-                    <input value={reading.whyRecommended} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, whyRecommended: event.target.value } : item))} placeholder={L(locale, 'Why we recommend it', 'Why we recommend it')} style={inputStyle} />
+                    <input value={reading.title} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '标题', 'Title')} style={inputStyle} />
+                    <input value={reading.author} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, author: event.target.value } : item))} placeholder={L(locale, '作者', 'Author')} style={inputStyle} />
+                    <input value={reading.whyRecommended} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, whyRecommended: event.target.value } : item))} placeholder={L(locale, '推荐理由', 'Why we recommend it')} style={inputStyle} />
                     <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setReadingRows((rows) => rows.filter((_, i) => i !== index))}>×</button>
                   </div>
                 ))}
@@ -626,11 +629,11 @@ export function CourseContentSection({
       )}
 
       {allUnderstandingOpen && (
-        <Modal title={L(locale, 'Import Understanding', 'Import Understanding')} onClose={() => { setAllUnderstandingOpen(false); setAllImportFile(null); setAllImportResult(null); }}>
-          <p style={{ fontSize: 13, color: '#5A6577' }}>{L(locale, 'All lessons ·', 'All lessons ·')} {allImportLanguage === 'zh-CN' ? '中文' : 'English'}</p>
+        <Modal title={L(locale, '导入理解题', 'Import Understanding')} onClose={() => { setAllUnderstandingOpen(false); setAllImportFile(null); setAllImportResult(null); }}>
+          <p style={{ fontSize: 13, color: '#5A6577' }}>{L(locale, '全部课时 ·', 'All lessons ·')} {languageLabel(locale, allImportLanguage)}</p>
           <Field label={L(locale, '语言', 'Language')}>
             <select value={allImportLanguage} onChange={(event) => setAllImportLanguage(event.target.value)} style={inputStyle}>
-              {course.learningLanguages.map((language) => <option key={language} value={language}>{language === 'zh-CN' ? '中文' : 'English'}</option>)}
+              {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
             </select>
           </Field>
           <Field label={L(locale, '上传 .xlsx 或 .csv', 'Upload .xlsx or .csv')}>
@@ -638,7 +641,7 @@ export function CourseContentSection({
           </Field>
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <button type="button" style={primaryBtn} disabled={!allImportFile || importBusy} onClick={() => void runAllUnderstandingImport()}>{importBusy ? L(locale, '导入中…', 'Importing…') : L(locale, '导入', 'Import')}</button>
-            <button type="button" style={buttonStyle} onClick={() => window.open(`/api/backoffice/courses/${course.id}/understanding/template`, '_blank')}>{L(locale, 'Download template', 'Download template')}</button>
+            <button type="button" style={buttonStyle} onClick={() => window.open(`/api/backoffice/courses/${course.id}/understanding/template`, '_blank')}>{L(locale, '下载模板', 'Download template')}</button>
           </div>
           {allImportResult && (
             <div style={{ marginTop: 12, fontSize: 13 }}>
@@ -647,7 +650,7 @@ export function CourseContentSection({
                 <p key={lessonCode}>{lessonCode} · Knowledge Test +{count}</p>
               ))}
               {allImportResult.errors.map((error, index) => (
-                <p key={index} style={{ color: '#b42318' }}>Row {error.row} · {error.message}</p>
+                <p key={index} style={{ color: '#b42318' }}>{L(locale, '第', 'Row')} {error.row} · {error.message}</p>
               ))}
               <button type="button" style={primaryBtn} onClick={() => { setAllUnderstandingOpen(false); setAllImportFile(null); setAllImportResult(null); }} disabled={allImportResult.added === 0}>
                 {L(locale, `导入 ${allImportResult.added} 题`, `Import ${allImportResult.added} questions`)}
@@ -658,7 +661,7 @@ export function CourseContentSection({
       )}
 
       {allReadingsOpen && (
-        <Modal title={L(locale, 'Import recommended reading', 'Import recommended reading')} onClose={() => { setAllReadingsOpen(false); setReadingImportFile(null); setReadingImportResult(null); }}>
+        <Modal title={L(locale, '导入推荐阅读', 'Import recommended reading')} onClose={() => { setAllReadingsOpen(false); setReadingImportFile(null); setReadingImportResult(null); }}>
           <Field label={L(locale, '上传 .xlsx 或 .csv', 'Upload .xlsx or .csv')}>
             <input type="file" accept=".xlsx,.csv" onChange={(event) => { setReadingImportFile(event.target.files?.[0] ?? null); setReadingImportResult(null); }} />
           </Field>

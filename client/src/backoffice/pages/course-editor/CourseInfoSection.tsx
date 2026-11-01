@@ -12,6 +12,8 @@ import {
   dangerBtn,
   inputStyle,
   labelStyle,
+  languageLabel,
+  learningModeLabel,
   primaryBtn,
 } from './shared';
 
@@ -195,14 +197,15 @@ export function CourseInfoSection({
   }
 
   async function readCover(file: File): Promise<{ ok: boolean; message?: string }> {
+    const invalidMessage = L(locale, '请使用 400 × 185 px 或同比例更大的 JPG 或 PNG。', 'Use a JPG or PNG at 400 × 185 px or larger, same ratio');
     if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      return { ok: false, message: 'Use a JPG or PNG at 400 × 185 px or larger, same ratio' };
+      return { ok: false, message: invalidMessage };
     }
     const bitmap = await createImageBitmap(file);
     const ratio = 400 / 185;
     const close = Math.abs(bitmap.width / bitmap.height - ratio) < 0.03;
     if (bitmap.width < 400 || bitmap.height < 185 || !close) {
-      return { ok: false, message: 'Use a JPG or PNG at 400 × 185 px or larger, same ratio' };
+      return { ok: false, message: invalidMessage };
     }
     return { ok: true };
   }
@@ -210,7 +213,7 @@ export function CourseInfoSection({
   async function uploadCover(file: File) {
     const valid = await readCover(file);
     if (!valid.ok) {
-      setCoverError(valid.message ?? 'Use a JPG or PNG at 400 × 185 px or larger, same ratio');
+      setCoverError(valid.message ?? L(locale, '请使用 400 × 185 px 或同比例更大的 JPG 或 PNG。', 'Use a JPG or PNG at 400 × 185 px or larger, same ratio'));
       return;
     }
     setCoverBusy(true);
@@ -332,7 +335,7 @@ export function CourseInfoSection({
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Chip tone={incompleteLearn || incompleteProvides || !titleEn.trim() || !titleZh.trim() ? 'amber' : 'green'}>
-              {incompleteLearn || incompleteProvides || !titleEn.trim() || !titleZh.trim() ? 'Incomplete' : 'Complete'}
+              {incompleteLearn || incompleteProvides || !titleEn.trim() || !titleZh.trim() ? L(locale, '未完成', 'Incomplete') : L(locale, '已完成', 'Complete')}
             </Chip>
           </div>
         </div>
@@ -379,8 +382,8 @@ export function CourseInfoSection({
         </div>
 
         <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: '#F7F9FC', display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
-          <span><strong>{L(locale, '学习模式', 'Learning mode')}:</strong> {course.learningMode}</span>
-          <span><strong>{L(locale, '学习语言', 'Learning languages')}:</strong> {course.learningLanguages.map((language) => language === 'zh-CN' ? '中文' : 'English').join(', ')}</span>
+          <span><strong>{L(locale, '学习模式', 'Learning mode')}:</strong> {learningModeLabel(locale, course.learningMode)}</span>
+          <span><strong>{L(locale, '学习语言', 'Learning languages')}:</strong> {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')}</span>
           <span style={{ opacity: 0.65 }}>{L(locale, '— 创建后锁定', '— locked at creation')}</span>
           {languageOptions.length > 0 && (
             <button type="button" style={buttonStyle} onClick={() => { setNewLanguage(languageOptions[0]); setLanguageOpen(true); }}>
@@ -427,11 +430,11 @@ export function CourseInfoSection({
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, "What you'll learn", "What you'll learn")}</h2>
-            <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '6 条推荐 · 至少 4 条 · 可排序', '6 recommended · minimum 4 · drag to reorder')}</p>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '你将学到什么', "What you'll learn")}</h2>
+            <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '推荐 6 条 · 至少 4 条 · 可排序', '6 recommended · minimum 4 · drag to reorder')}</p>
           </div>
           <Chip tone={learnRows.length < 4 || incompleteLearn ? 'amber' : 'green'}>
-            {learnRows.length} {L(locale, '条', 'items')} · {learnRows.length < 4 ? L(locale, '至少 4 条', 'minimum 4') : learnRows.length < 6 ? '6 recommended' : L(locale, '已足够', 'ready')}
+            {learnRows.length} {L(locale, '条', 'items')} · {learnRows.length < 4 ? L(locale, '至少 4 条', 'minimum 4') : learnRows.length < 6 ? L(locale, '推荐 6 条', '6 recommended') : L(locale, '已足够', 'ready')}
           </Chip>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '46px 1fr 1fr 92px', gap: 8, marginTop: 12, fontSize: 12, fontWeight: 600, color: '#5A6577' }}>
@@ -455,11 +458,11 @@ export function CourseInfoSection({
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'This course provides', 'This course provides')}</h2>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '本课程提供', 'This course provides')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '最多 6 条 · 6 条推荐 · 可排序', 'Up to 6 · 6 recommended · drag to reorder')}</p>
           </div>
           <Chip tone={providesRows.length < 4 || incompleteProvides ? 'amber' : 'green'}>
-            {providesRows.length} / 6 · {providesRows.length < 4 ? L(locale, '至少 4 条', 'minimum 4') : providesRows.length < 6 ? '6 recommended' : '6 / 6'}
+            {providesRows.length} / 6 · {providesRows.length < 4 ? L(locale, '至少 4 条', 'minimum 4') : providesRows.length < 6 ? L(locale, '推荐 6 条', '6 recommended') : '6 / 6'}
           </Chip>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '46px 1fr 1fr 92px', gap: 8, marginTop: 12, fontSize: 12, fontWeight: 600, color: '#5A6577' }}>
@@ -472,7 +475,7 @@ export function CourseInfoSection({
               <span style={{ fontSize: 13 }}>{index + 1}</span>
               <div>
                 <input value={row.en} readOnly={row.type === 'preset'} onChange={(event) => setProvidesRows((rows) => rows.map((item, i) => i === index ? { ...item, en: event.target.value } : item))} style={{ ...inputStyle, background: row.type === 'preset' ? '#F5F7FA' : '#fff' }} />
-                {preset && <div style={{ fontSize: 11, color: '#5A6577', marginTop: 2 }}>Preset</div>}
+                {preset && <div style={{ fontSize: 11, color: '#5A6577', marginTop: 2 }}>{L(locale, '预设', 'Preset')}</div>}
               </div>
               <input value={row.zh} readOnly={row.type === 'preset'} onChange={(event) => setProvidesRows((rows) => rows.map((item, i) => i === index ? { ...item, zh: event.target.value } : item))} style={{ ...inputStyle, background: row.type === 'preset' ? '#F5F7FA' : '#fff' }} />
               <div style={{ display: 'flex', gap: 4 }}>
@@ -538,7 +541,7 @@ export function CourseInfoSection({
           </p>
           <Field label={L(locale, '要添加的语言', 'Language to add')}>
             <select value={newLanguage} onChange={(event) => setNewLanguage(event.target.value)} style={inputStyle}>
-              {languageOptions.map((language) => <option key={language} value={language}>{language === 'zh-CN' ? '中文' : 'English'}</option>)}
+              {languageOptions.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
             </select>
           </Field>
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>

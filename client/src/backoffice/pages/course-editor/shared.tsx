@@ -3,6 +3,64 @@ import { useCallback, useState } from 'react';
 export const L = (locale: string, zh: string, en: string) =>
   locale.startsWith('zh') ? zh : en;
 
+/** 学习语言代码 → 展示名。 */
+export function languageLabel(_locale: string, code: string): string {
+  if (code === 'zh-CN') return '中文';
+  if (code === 'en-GB' || code === 'en') return 'English';
+  return code;
+}
+
+/** 学习模式枚举 → 展示名。 */
+export function learningModeLabel(locale: string, mode: string): string {
+  switch (mode) {
+    case 'VIDEO_ONLY': return L(locale, '仅视频', 'Video only');
+    case 'TEXT_ONLY': return L(locale, '仅文字', 'Text only');
+    case 'VIDEO_AND_TEXT': return L(locale, '视频与文字', 'Video & text');
+    default: return mode;
+  }
+}
+
+/** 线上状态枚举 → 展示名。 */
+export function liveStatusLabel(locale: string, status: string): string {
+  switch (status) {
+    case 'ONLINE': return L(locale, '在线', 'Online');
+    case 'HIDDEN': return L(locale, '已隐藏', 'Hidden');
+    case 'OFFLINE': return L(locale, '已下线', 'Offline');
+    default: return status;
+  }
+}
+
+/** 试看行状态枚举 → 展示名。 */
+export function trialStatusLabel(locale: string, status: string): string {
+  switch (status) {
+    case 'READY': return L(locale, '就绪', 'Ready');
+    case 'RE_CONFIRM': return L(locale, '需重新确认', 'Re-confirm');
+    case 'LOCKED': return L(locale, '未选入', 'Locked');
+    default: return status;
+  }
+}
+
+/** 展品类型枚举 → 展示名。 */
+export function exhibitTypeLabel(locale: string, type: string): string {
+  switch (type) {
+    case 'IMAGE': return L(locale, '图片', 'Image');
+    case 'VIDEO': return L(locale, '视频', 'Video');
+    case 'MODEL3D': return L(locale, '3D 模型', '3D');
+    default: return type;
+  }
+}
+
+/** 阅读类型枚举 → 展示名。 */
+export function readingTypeLabel(locale: string, type: string): string {
+  switch (type) {
+    case 'BOOK': return L(locale, '图书', 'Book');
+    case 'ARTICLE': return L(locale, '文章', 'Article');
+    case 'PAPER': return L(locale, '论文', 'Paper');
+    case 'OTHER': return L(locale, '其他', 'Other');
+    default: return type;
+  }
+}
+
 export const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: 10,

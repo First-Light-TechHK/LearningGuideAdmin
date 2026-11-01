@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Exhibit } from '../../contracts/course';
-import { L, Modal, buttonStyle, inputStyle } from './shared';
+import { L, Modal, buttonStyle, exhibitTypeLabel, inputStyle } from './shared';
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => {
@@ -58,7 +58,7 @@ export function TextEditor({
   function insertExhibit(exhibit: Exhibit) {
     const title = exhibit.localized?.[language]?.title ?? exhibit.localized?.['en-GB']?.title ?? exhibit.code;
     const description = exhibit.localized?.[language]?.description ?? exhibit.localized?.['en-GB']?.description ?? '';
-    const html = `<figure data-exhibit-code="${escapeHtml(exhibit.code)}" data-exhibit-id="${exhibit.id}" class="course-exhibit-card" contenteditable="false" style="border:1px solid #E8EDF5;border-radius:10px;padding:12px;margin:14px 0;display:flex;gap:12px;align-items:center;background:#F9FBFE"><div style="flex:1"><strong>${escapeHtml(title)}</strong><div style="font-size:12px;color:#5A6577;margin-top:4px">${escapeHtml(exhibit.type)} · ${escapeHtml(exhibit.code)}</div><div style="font-size:13px;margin-top:6px">${escapeHtml(description)}</div></div><span style="font-size:12px;color:#2B58C8">Exhibit</span></figure><p><br/></p>`;
+    const html = `<figure data-exhibit-code="${escapeHtml(exhibit.code)}" data-exhibit-id="${exhibit.id}" class="course-exhibit-card" contenteditable="false" style="border:1px solid #E8EDF5;border-radius:10px;padding:12px;margin:14px 0;display:flex;gap:12px;align-items:center;background:#F9FBFE"><div style="flex:1"><strong>${escapeHtml(title)}</strong><div style="font-size:12px;color:#5A6577;margin-top:4px">${escapeHtml(exhibit.type)} · ${escapeHtml(exhibit.code)}</div><div style="font-size:13px;margin-top:6px">${escapeHtml(description)}</div></div><span style="font-size:12px;color:#2B58C8">${escapeHtml(L(locale, '展品', 'Exhibit'))}</span></figure><p><br/></p>`;
     setPickerOpen(false);
     setTimeout(() => {
       editorRef.current?.focus();
@@ -129,7 +129,7 @@ export function TextEditor({
               return (
                 <button key={exhibit.id} type="button" onClick={() => insertExhibit(exhibit)} style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: 10, border: '1px solid #E8EDF5', borderRadius: 8, background: '#fff', marginBottom: 8, cursor: 'pointer', textAlign: 'left' }}>
                   <span>{title}<div style={{ fontSize: 11, color: '#5A6577' }}>{exhibit.code}</div></span>
-                  <span style={{ fontSize: 12, color: '#5A6577' }}>{exhibit.type}</span>
+                  <span style={{ fontSize: 12, color: '#5A6577' }}>{exhibitTypeLabel(locale, exhibit.type)}</span>
                 </button>
               );
             })}

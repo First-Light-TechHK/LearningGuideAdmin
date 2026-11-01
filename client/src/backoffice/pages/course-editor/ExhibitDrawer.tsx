@@ -9,7 +9,9 @@ import {
   Modal,
   buttonStyle,
   dangerBtn,
+  exhibitTypeLabel,
   inputStyle,
+  languageLabel,
   primaryBtn,
 } from './shared';
 
@@ -150,9 +152,9 @@ export function ExhibitDrawer({
           </Field>
           <Field label={L(locale, '媒体类型 *', 'Media type *')}>
             <select value={type} onChange={(event) => setType(event.target.value)} style={inputStyle}>
-              <option value="IMAGE">Image</option>
-              <option value="VIDEO">Video</option>
-              <option value="MODEL3D">3D</option>
+              <option value="IMAGE">{exhibitTypeLabel(locale, 'IMAGE')}</option>
+              <option value="VIDEO">{exhibitTypeLabel(locale, 'VIDEO')}</option>
+              <option value="MODEL3D">{exhibitTypeLabel(locale, 'MODEL3D')}</option>
             </select>
           </Field>
         </div>
@@ -180,7 +182,7 @@ export function ExhibitDrawer({
 
         {learningLanguages.map((language) => (
           <div key={language} style={{ borderTop: '1px solid #EEF1F6', marginTop: 12, paddingTop: 4 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8 }}>{language === 'zh-CN' ? '中文' : 'English'}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, marginTop: 8 }}>{languageLabel(locale, language)}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <Field label={L(locale, '标题 *', 'Title *')}>
                 <input value={localized[language]?.title ?? ''} onChange={(event) => setLocalized((current) => ({ ...current, [language]: { ...current[language], title: event.target.value } }))} style={inputStyle} />
@@ -212,7 +214,7 @@ export function ExhibitDrawer({
             <Chip tone="blue">{L(locale, '后台预览 · 学员不可见', 'Back office preview · not visible to learners')}</Chip>
             {learningLanguages.map((language) => (
               <button key={language} type="button" style={{ ...buttonStyle, borderColor: previewLanguage === language ? '#2B58C8' : '#d9e0ea' }} onClick={() => setPreviewLanguage(language)}>
-                {language === 'zh-CN' ? '中文' : 'EN'}
+                {languageLabel(locale, language)}
               </button>
             ))}
           </div>

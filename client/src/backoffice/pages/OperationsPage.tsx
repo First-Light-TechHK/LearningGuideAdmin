@@ -11,6 +11,7 @@ import type {
 } from '../contracts/course';
 import { boRequest } from '../lib/api';
 import { useResizableColumns } from '../components/resizableColumns';
+import { liveStatusLabel } from './course-editor/shared';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -163,14 +164,14 @@ export function OperationsPage() {
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course`)}>← {L(locale, '课程列表', 'Course Overview')}</button>
-          <h1 style={{ margin: '10px 0 0', fontSize: 24 }}>Operations</h1>
+          <h1 style={{ margin: '10px 0 0', fontSize: 24 }}>{L(locale, '运营位', 'Operations')}</h1>
           <p style={{ margin: '6px 0 0', opacity: 0.7, fontSize: 13 }}>
             {L(locale, '运营位不设草稿；Publish 后立即生效，不生成课程版本。两套环境各自配置。', 'Operations has no draft; Publish takes effect immediately and creates no course version. Each environment is configured separately.')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" style={{ ...buttonStyle, fontWeight: 600, borderColor: tab === 'popular' ? '#2B58C8' : '#d9e0ea', color: tab === 'popular' ? '#2B58C8' : '#25314C' }} onClick={() => setTab('popular')}>Popular Courses</button>
-          <button type="button" style={{ ...buttonStyle, fontWeight: 600, borderColor: tab === 'banner' ? '#2B58C8' : '#d9e0ea', color: tab === 'banner' ? '#2B58C8' : '#25314C' }} onClick={() => setTab('banner')}>Discovery Banner</button>
+          <button type="button" style={{ ...buttonStyle, fontWeight: 600, borderColor: tab === 'popular' ? '#2B58C8' : '#d9e0ea', color: tab === 'popular' ? '#2B58C8' : '#25314C' }} onClick={() => setTab('popular')}>{L(locale, '热门课程', 'Popular Courses')}</button>
+          <button type="button" style={{ ...buttonStyle, fontWeight: 600, borderColor: tab === 'banner' ? '#2B58C8' : '#d9e0ea', color: tab === 'banner' ? '#2B58C8' : '#25314C' }} onClick={() => setTab('banner')}>{L(locale, '发现横幅', 'Discovery Banner')}</button>
         </div>
       </header>
 
@@ -192,7 +193,7 @@ export function OperationsPage() {
               </select>
               <button type="button" style={buttonStyle} disabled={!addCourseId || popular.items.length >= 6 || busy} onClick={addCourse}>{L(locale, '+ 添加', '+ Add course')}</button>
               <button type="button" style={primaryBtn} disabled={busy} onClick={() => void savePopular()}>{L(locale, '保存', 'Save')}</button>
-              <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish('popular')}>{L(locale, 'Publish', 'Publish')}</button>
+              <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish('popular')}>{L(locale, '发布', 'Publish')}</button>
             </div>
           </div>
           <div className="tableScroll" style={{ marginTop: 14 }}>
@@ -214,7 +215,7 @@ export function OperationsPage() {
                   </td>
                   <td>{item.category ?? '—'}</td>
                   <td style={{ color: item.invalid ? '#b42318' : '#1E7A3C', fontWeight: 600 }}>
-                    {item.liveStatus}{item.invalid ? ` · ${L(locale, '需替换', 'replace')}` : ''}
+                    {liveStatusLabel(locale, item.liveStatus)}{item.invalid ? ` · ${L(locale, '需替换', 'replace')}` : ''}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -239,13 +240,13 @@ export function OperationsPage() {
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: 18 }}>Discovery Banner</h2>
+              <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '发现横幅', 'Discovery Banner')}</h2>
               <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
                 {L(locale, '单例、不轮播；featured course 必须 Online 且 Trial 开启；中英文文案均必填。', 'Single instance, no carousel; the featured course must be Online with Trial enabled; EN and ZH copy are required.')}
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <label style={{ fontSize: 14 }}><input type="checkbox" checked={banner.enabled} onChange={(event) => setBanner({ ...banner, enabled: event.target.checked })} /> {L(locale, 'Show banner', 'Show banner')}</label>
+              <label style={{ fontSize: 14 }}><input type="checkbox" checked={banner.enabled} onChange={(event) => setBanner({ ...banner, enabled: event.target.checked })} /> {L(locale, '显示横幅', 'Show banner')}</label>
               <button type="button" style={buttonStyle} disabled={busy} onClick={() => void saveBanner()}>{L(locale, '保存', 'Save')}</button>
               <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish('banner')}>{L(locale, 'Publish', 'Publish')}</button>
             </div>
@@ -271,9 +272,9 @@ export function OperationsPage() {
                 <button type="button" style={{ ...buttonStyle, fontWeight: bannerLanguage === 'en-GB' ? 700 : 400 }} onClick={() => setBannerLanguage('en-GB')}>EN</button>
                 <button type="button" style={{ ...buttonStyle, fontWeight: bannerLanguage === 'zh-CN' ? 700 : 400 }} onClick={() => setBannerLanguage('zh-CN')}>中文</button>
               </div>
-              <label style={labelStyle}>Headline<input value={localizedEntry.headline ?? ''} onChange={(event) => updateLocalized('headline', event.target.value)} style={inputStyle} /></label>
-              <label style={labelStyle}>Subheading<input value={localizedEntry.subheading ?? ''} onChange={(event) => updateLocalized('subheading', event.target.value)} style={inputStyle} /></label>
-              <label style={labelStyle}>Button label<input value={localizedEntry.buttonLabel ?? ''} onChange={(event) => updateLocalized('buttonLabel', event.target.value)} style={inputStyle} /></label>
+              <label style={labelStyle}>{L(locale, '主标题', 'Headline')}<input value={localizedEntry.headline ?? ''} onChange={(event) => updateLocalized('headline', event.target.value)} style={inputStyle} /></label>
+              <label style={labelStyle}>{L(locale, '副标题', 'Subheading')}<input value={localizedEntry.subheading ?? ''} onChange={(event) => updateLocalized('subheading', event.target.value)} style={inputStyle} /></label>
+              <label style={labelStyle}>{L(locale, '按钮文案', 'Button label')}<input value={localizedEntry.buttonLabel ?? ''} onChange={(event) => updateLocalized('buttonLabel', event.target.value)} style={inputStyle} /></label>
             </div>
             <div>
               <h3 style={{ marginTop: 0, fontSize: 15 }}>{L(locale, 'Banner 预览', 'Banner preview')}</h3>
@@ -290,10 +291,10 @@ export function OperationsPage() {
                   gap: 10,
                 }}
               >
-                <div style={{ fontSize: 26, fontWeight: 700 }}>{localizedEntry.headline || L(locale, 'Headline', 'Headline')}</div>
-                <div style={{ fontSize: 15, opacity: 0.9 }}>{localizedEntry.subheading || L(locale, 'Subheading', 'Subheading')}</div>
+                <div style={{ fontSize: 26, fontWeight: 700 }}>{localizedEntry.headline || L(locale, '主标题', 'Headline')}</div>
+                <div style={{ fontSize: 15, opacity: 0.9 }}>{localizedEntry.subheading || L(locale, '副标题', 'Subheading')}</div>
                 <div style={{ alignSelf: 'flex-start', marginTop: 6, padding: '8px 16px', borderRadius: 999, background: '#fff', color: '#1D2B50', fontWeight: 700, fontSize: 13 }}>
-                  {localizedEntry.buttonLabel || L(locale, 'Start trial', 'Start trial')}
+                  {localizedEntry.buttonLabel || L(locale, '开始试看', 'Start trial')}
                 </div>
                 {featureCourse && <div style={{ fontSize: 12, opacity: 0.8 }}>{featureCourse.code} · {featureCourse.title}</div>}
               </div>

@@ -7,7 +7,9 @@ import {
   L,
   buttonStyle,
   card,
+  languageLabel,
   primaryBtn,
+  trialStatusLabel,
 } from './shared';
 
 function parseTime(value: string): number | null {
@@ -183,7 +185,7 @@ export function CourseTrialSection({
       const failed = result.data.sync.filter((entry) => entry.status === 'FAILED' || entry.status === 'NOT_CONFIGURED');
       onNotice(
         failed.length
-          ? `Plans saved. Stripe sync: ${failed.map((entry) => entry.error ?? entry.status).join('; ')}`
+          ? `${L(locale, '套餐已保存。Stripe 同步：', 'Plans saved. Stripe sync: ')}${failed.map((entry) => entry.error ?? entry.status).join('; ')}`
           : L(locale, '套餐已保存，Stripe 价格已同步。', 'Plans saved and Stripe prices synced.'),
       );
       await onReload();
@@ -196,7 +198,7 @@ export function CourseTrialSection({
     setBusy(true);
     const result = await boRequest<{ status: string; error?: string }>(`/api/backoffice/courses/${courseId}/plans/${planId}/sync-stripe`, { method: 'POST' });
     setBusy(false);
-    onNotice(result.success ? `Stripe sync: ${result.data.status}${result.data.error ? ` — ${result.data.error}` : ''}` : `${L(locale, '同步失败', 'Sync failed')}: ${result.error}`);
+    onNotice(result.success ? `${L(locale, 'Stripe 同步：', 'Stripe sync: ')}${result.data.status}${result.data.error ? ` — ${result.data.error}` : ''}` : `${L(locale, '同步失败', 'Sync failed')}: ${result.error}`);
     await onReload();
   }
 
@@ -232,7 +234,7 @@ export function CourseTrialSection({
                     cursor: 'pointer',
                   }}
                 >
-                  {language}{language === contentLanguage ? ` · ${L(locale, '内容语言', 'content')}` : ''}
+                  {languageLabel(locale, language)}{language === contentLanguage ? ` · ${L(locale, '内容语言', 'content')}` : ''}
                 </button>
               ))}
             </div>
@@ -264,7 +266,7 @@ export function CourseTrialSection({
                       </select>
                     </td>
                     <td>
-                      <Chip tone={row.status === 'READY' ? 'green' : row.status === 'RE_CONFIRM' ? 'amber' : 'grey'}>{row.inTrial ? row.status : 'LOCKED'}</Chip>
+                      <Chip tone={row.status === 'READY' ? 'green' : row.status === 'RE_CONFIRM' ? 'amber' : 'grey'}>{trialStatusLabel(locale, row.inTrial ? row.status : 'LOCKED')}</Chip>
                       {row.inTrial && row.status === 'RE_CONFIRM' && (
                         <div style={{ fontSize: 11, color: '#9A6B00', marginTop: 4, maxWidth: 220 }}>
                           {L(locale, '视频已更换，请检查并重新确认截止点。', 'Video changed. Check and re-confirm the cut-off.')}
@@ -326,7 +328,7 @@ export function CourseTrialSection({
                   <td><input type="number" min={0} step="0.01" value={(plan.amountMinor / 100).toFixed(2)} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, amountMinor: Math.round(Number(event.target.value) * 100) } : item))} style={{ padding: 6, width: 120 }} /></td>
                   <td style={{ fontSize: 12 }}>{plan.stripeLookupKey ?? '—'}</td>
                   <td style={{ fontSize: 12 }}>
-                    {plan.syncError ? <span style={{ color: '#b42318' }}>Failed</span> : plan.lastSyncedAt ? <span style={{ color: '#1E7A3C' }}>Created</span> : '—'}
+                    {plan.syncError ? <span style={{ color: '#b42318' }}>{L(locale, '同步失败', 'Failed')}</span> : plan.lastSyncedAt ? <span style={{ color: '#1E7A3C' }}>{L(locale, '已创建', 'Created')}</span> : '—'}
                     {plan.syncError && <div style={{ opacity: 0.75 }}>{plan.syncError}</div>}
                   </td>
                   <td>

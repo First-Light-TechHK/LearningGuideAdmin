@@ -18,6 +18,9 @@ import {
   buttonStyle,
   fmtDate,
   inputStyle,
+  languageLabel,
+  learningModeLabel,
+  liveStatusLabel,
   primaryBtn,
 } from './course-editor/shared';
 
@@ -67,7 +70,7 @@ export function CourseEditorPage() {
   }, [load]);
 
   const liveVersion = useMemo(() => versions.find((version) => version.isLive), [versions]);
-  const stepLabel = (complete: boolean) => (complete ? 'Complete' : 'Incomplete');
+  const stepLabel = (complete: boolean) => L(locale, complete ? '已完成' : '未完成', complete ? 'Complete' : 'Incomplete');
 
   if (loading || !course) {
     return <section className="card cardGrow"><p style={{ margin: 0, opacity: 0.7 }}>{L(locale, '加载中…', 'Loading…')}</p>{notice && <p style={{ color: '#b42318' }}>{notice}</p>}</section>;
@@ -81,40 +84,40 @@ export function CourseEditorPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title ?? course.code}</h1>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>
-              {course.code} · {course.category?.name ?? L(locale, '未分类', 'Uncategorized')} · {course.learningMode} · {course.learningLanguages.map((language) => (language === 'zh-CN' ? '中文' : 'English')).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
+              {course.code} · {course.category?.name ?? L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button type="button" style={buttonStyle} onClick={() => void load()}>{L(locale, '重新加载', 'Reload')}</button>
           <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course/${course.id}/preview`)}>{L(locale, '学员视角预览', 'Preview as learner')}</button>
-          <button type="button" style={primaryBtn} onClick={() => setTab('versions')}>{L(locale, 'Versions & publishing', 'Versions & publishing')}</button>
+          <button type="button" style={primaryBtn} onClick={() => setTab('versions')}>{L(locale, '版本与发布', 'Versions & publishing')}</button>
         </div>
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 16 }}>
         <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14, background: '#FFF9F2' }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>DRAFT</div>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '草稿', 'DRAFT')}</div>
           <div style={{ fontSize: 13 }}>
             {course.hasDraft ? L(locale, '未发布', 'Not published') : L(locale, '无草稿', 'No draft')}
-            {course.hasDraft ? ` · ${course.completeness.completedSteps} of 3 steps complete` : ''}
+            {course.hasDraft ? ` · ${L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}` : ''}
           </div>
-          <div style={{ marginTop: 8 }}><button type="button" style={buttonStyle} onClick={() => setTab('versions')}>{L(locale, '前往 Versions →', 'Go to Versions →')}</button></div>
+          <div style={{ marginTop: 8 }}><button type="button" style={buttonStyle} onClick={() => setTab('versions')}>{L(locale, '前往版本 →', 'Go to Versions →')}</button></div>
         </div>
         <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14, background: '#F5F8FF' }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>LIVE</div>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
           <div style={{ fontSize: 13 }}>
-            {liveVersion ? `${liveVersion.versionLabel} · ${course.liveStatus} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
+            {liveVersion ? `${liveVersion.versionLabel} · ${liveStatusLabel(locale, course.liveStatus)} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
           </div>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16, borderBottom: '1px solid #E8EDF5', paddingBottom: 10 }}>
         {[
-          { id: 'info', label: `1 ${L(locale, 'Course Information', 'Course Information')}`, complete: course.completeness.steps.courseInformation.complete },
-          { id: 'content', label: `2 ${L(locale, 'Course Content', 'Course Content')}`, complete: course.completeness.steps.content.complete },
-          { id: 'trial', label: `3 ${L(locale, 'Trial', 'Trial')}`, complete: course.completeness.steps.trial.complete },
-          { id: 'versions', label: L(locale, 'Versions & publishing', 'Versions & publishing'), complete: true },
+          { id: 'info', label: `1 ${L(locale, '课程信息', 'Course Information')}`, complete: course.completeness.steps.courseInformation.complete },
+          { id: 'content', label: `2 ${L(locale, '课程内容', 'Course Content')}`, complete: course.completeness.steps.content.complete },
+          { id: 'trial', label: `3 ${L(locale, '试看设置', 'Trial')}`, complete: course.completeness.steps.trial.complete },
+          { id: 'versions', label: L(locale, '版本与发布', 'Versions & publishing'), complete: true },
         ].map((item) => (
           <button
             key={item.id}
@@ -131,9 +134,9 @@ export function CourseEditorPage() {
           </button>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, 'Content language', 'Content language')}</span>
+          <span style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')}</span>
           <select value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
-            {course.learningLanguages.map((language) => <option key={language} value={language}>{language === 'zh-CN' ? '中文' : 'English'}</option>)}
+            {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
           </select>
         </div>
       </div>

@@ -13,6 +13,7 @@ import {
   dangerBtn,
   fmtDate,
   inputStyle,
+  liveStatusLabel,
   primaryBtn,
 } from './shared';
 
@@ -167,7 +168,7 @@ export function CourseVersionsSection({
 
   async function changeStatus() {
     if (!statusReason.trim()) {
-      onNotice(L(locale, 'Reason is required.', 'Reason is required.'));
+      onNotice(L(locale, '请填写原因。', 'Reason is required.'));
       return;
     }
     setBusy(true);
@@ -247,11 +248,11 @@ export function CourseVersionsSection({
   }
 
   const gaps = [
-    !course.completeness.steps.courseInformation.complete ? 'Course Information' : null,
+    !course.completeness.steps.courseInformation.complete ? L(locale, '课程信息', 'Course Information') : null,
     ...course.completeness.steps.content.lessons
       .filter((lesson) => !lesson.studyComplete || !lesson.understandingComplete)
-      .map((lesson) => `Course Content: Lesson ${lesson.lessonId}`),
-    !course.completeness.steps.trial.complete ? 'Trial' : null,
+      .map((lesson) => `${L(locale, '课程内容', 'Course Content')}: ${L(locale, '课时', 'Lesson')} ${lesson.lessonId}`),
+    !course.completeness.steps.trial.complete ? L(locale, '试看设置', 'Trial') : null,
   ].filter(Boolean) as string[];
 
   return (
@@ -259,16 +260,16 @@ export function CourseVersionsSection({
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'Current', 'Current')}</h2>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '当前', 'Current')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '草稿 + 线上版本。发布和状态操作都在此页。', 'Draft and live version. Publish and status actions are on this page.')}</p>
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginTop: 14 }}>
           <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>DRAFT</div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '草稿', 'DRAFT')}</div>
             <div style={{ fontSize: 13 }}>
               {course.hasDraft ? L(locale, '未发布', 'Not published') : L(locale, '无草稿', 'No draft')}
-              {course.hasDraft ? ` · ${course.completeness.completedSteps} of 3 steps complete` : ''}
+              {course.hasDraft ? ` · ${L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}` : ''}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <button type="button" style={primaryBtn} disabled={busy || !course.hasDraft || !course.completeness.canPublish} onClick={() => setPublishOpen(true)}>
@@ -283,11 +284,11 @@ export function CourseVersionsSection({
             </div>
           </div>
           <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>LIVE</div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
             <div style={{ fontSize: 13 }}>
               {liveVersion ? `${liveVersion.versionLabel} · ${liveVersion.isLive ? L(locale, '线上', 'Live') : ''} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
             </div>
-            <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{course.liveStatus}</div>
+            <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{liveStatusLabel(locale, course.liveStatus)}</div>
             <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <button type="button" style={buttonStyle} disabled={busy || !liveVersion} onClick={() => setStatusOpen(true)}>
                 {L(locale, '更改状态', 'Change status')}
@@ -308,7 +309,7 @@ export function CourseVersionsSection({
       </div>
 
       <div style={card}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'Versions', 'Versions')}</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '版本', 'Versions')}</h2>
         <table className="table" style={{ ...versionsTable.tableStyle, marginTop: 12 }}>
           {versionsTable.colGroup}
           <thead>
@@ -322,7 +323,7 @@ export function CourseVersionsSection({
           <tbody>
             {sortedVersions.map((version) => (
               <tr key={version.id}>
-                <td>{version.versionLabel}{version.isLive ? ' · Live' : ''}</td>
+                <td>{version.versionLabel}{version.isLive ? ` · ${L(locale, '线上', 'Live')}` : ''}</td>
                 <td>{fmtDate(version.wentLiveAt ?? version.createdAt)}</td>
                 <td>{version.sourceVersionLabel ?? version.sourceEnvironment ?? '—'}</td>
                 <td>
@@ -339,7 +340,7 @@ export function CourseVersionsSection({
       </div>
 
       <div style={card}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'History', 'History')}</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '历史记录', 'History')}</h2>
         <table className="table" style={{ ...historyTable.tableStyle, marginTop: 12 }}>
           {historyTable.colGroup}
           <thead>
@@ -374,19 +375,19 @@ export function CourseVersionsSection({
       {publishOpen && (
         <Modal title={L(locale, '发布', 'Publish')} onClose={() => setPublishOpen(false)}>
           <p style={{ fontSize: 13 }}>{L(locale, '发布后，草稿在本环境网站生效并生成版本号。课程状态不改变。', 'Publishing makes the draft live on this website and creates a version. The course status does not change.')}</p>
-          <p style={{ fontSize: 12, color: '#5A6577', marginTop: 6 }}>{L(locale, '完成度', 'Content')}: {course.completeness.completedSteps} of 3 steps complete</p>
+          <p style={{ fontSize: 12, color: '#5A6577', marginTop: 6 }}>{L(locale, '完成度', 'Content')}: {L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}</p>
           {gaps.length > 0 && (
             <div style={{ marginTop: 8, background: '#FFF6E5', padding: 10, borderRadius: 8, fontSize: 12 }}>
-              <strong>{L(locale, 'Some fields are empty', 'Some fields are empty')}</strong>
+              <strong>{L(locale, '部分字段为空', 'Some fields are empty')}</strong>
               {gaps.map((gap) => <div key={gap}>{gap}</div>)}
-              <div style={{ marginTop: 4 }}>{L(locale, 'You can still publish.', 'You can still publish.')}</div>
+              <div style={{ marginTop: 4 }}>{L(locale, '仍可发布。', 'You can still publish.')}</div>
             </div>
           )}
           <label style={{ display: 'block', marginTop: 12, fontSize: 13 }}>
-            <input type="checkbox" checked={notifyLearners} onChange={(event) => setNotifyLearners(event.target.checked)} /> {L(locale, 'Notify enrolled learners', 'Notify enrolled learners')}
+            <input type="checkbox" checked={notifyLearners} onChange={(event) => setNotifyLearners(event.target.checked)} /> {L(locale, '通知已报名学员', 'Notify enrolled learners')}
           </label>
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish()}>{L(locale, 'Publish', 'Publish')}</button>
+            <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish()}>{L(locale, '发布', 'Publish')}</button>
             <button type="button" style={buttonStyle} onClick={() => setPublishOpen(false)}>{L(locale, '取消', 'Cancel')}</button>
           </div>
         </Modal>
@@ -396,7 +397,7 @@ export function CourseVersionsSection({
         <Modal title={L(locale, '删除草稿', 'Delete draft')} onClose={() => setDeleteOpen(false)}>
           <p style={{ fontSize: 13 }}>{L(locale, '草稿被删除，包括导入的课程包。网站继续使用当前线上版本。此操作不可撤销。', 'The draft is deleted, including any imported package. The website keeps the live version. This cannot be undone.')}</p>
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button type="button" style={dangerBtn} disabled={busy} onClick={() => void deleteDraft()}>{L(locale, 'Delete draft', 'Delete draft')}</button>
+            <button type="button" style={dangerBtn} disabled={busy} onClick={() => void deleteDraft()}>{L(locale, '删除草稿', 'Delete draft')}</button>
             <button type="button" style={buttonStyle} onClick={() => setDeleteOpen(false)}>{L(locale, '取消', 'Cancel')}</button>
           </div>
         </Modal>
@@ -410,7 +411,7 @@ export function CourseVersionsSection({
             <div>{L(locale, '发布为', 'Goes live as')}: {L(locale, '新版本', 'a new version')}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button type="button" style={primaryBtn} disabled={busy} onClick={() => void restore()}>{L(locale, 'Restore', 'Restore')}</button>
+            <button type="button" style={primaryBtn} disabled={busy} onClick={() => void restore()}>{L(locale, '恢复', 'Restore')}</button>
             <button type="button" style={buttonStyle} onClick={() => setRestoreVersion(null)}>{L(locale, '取消', 'Cancel')}</button>
           </div>
         </Modal>
@@ -422,7 +423,7 @@ export function CourseVersionsSection({
           <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             {(['ONLINE', 'HIDDEN', 'OFFLINE'] as const).map((status) => (
               <button key={status} type="button" onClick={() => setStatusTarget(status)} style={{ ...buttonStyle, borderColor: statusTarget === status ? '#2B58C8' : '#d9e0ea', color: statusTarget === status ? '#2B58C8' : '#25314C', fontWeight: statusTarget === status ? 700 : 400 }}>
-                {status}
+                {liveStatusLabel(locale, status)}
               </button>
             ))}
           </div>
@@ -430,7 +431,7 @@ export function CourseVersionsSection({
             <textarea rows={3} value={statusReason} onChange={(event) => setStatusReason(event.target.value)} style={inputStyle} />
           </Field>
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button type="button" style={primaryBtn} disabled={busy || !statusReason.trim()} onClick={() => void changeStatus()}>{L(locale, 'Change status', 'Change status')}</button>
+            <button type="button" style={primaryBtn} disabled={busy || !statusReason.trim()} onClick={() => void changeStatus()}>{L(locale, '更改状态', 'Change status')}</button>
             <button type="button" style={buttonStyle} onClick={() => setStatusOpen(false)}>{L(locale, '取消', 'Cancel')}</button>
           </div>
         </Modal>

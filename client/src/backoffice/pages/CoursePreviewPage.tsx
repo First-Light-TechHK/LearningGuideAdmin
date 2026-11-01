@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import type { PortalPreviewLink, PreviewCourse } from '../contracts/course';
 import { providerItems, strings } from '../contracts/course';
 import { boRequest } from '../lib/api';
+import { languageLabel, learningModeLabel } from './course-editor/shared';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -122,7 +123,7 @@ export function CoursePreviewPage() {
       {course.shortDescription && <p style={{ fontSize: 16, opacity: 0.8, margin: 0 }}>{course.shortDescription}</p>}
       <div style={{ marginTop: 10, opacity: 0.7, fontSize: 14 }}>
         {course.lessonCount} {L(locale, '节课', 'lessons')}
-        {course.totalDurationSeconds ? ` · ${fmtTotal(course.totalDurationSeconds, locale)}` : ''} · {course.learningMode} · {course.learningLanguages.join(', ')}
+        {course.totalDurationSeconds ? ` · ${fmtTotal(course.totalDurationSeconds, locale)}` : ''} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')}
         {course.trial.enabled ? ` · ${L(locale, '试看', 'Trial')} ${course.trial.available ? '✓' : L(locale, '未完成', 'incomplete')}` : ` · ${L(locale, '无试看', 'No trial')}`}
       </div>
 
