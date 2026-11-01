@@ -23,7 +23,8 @@ import {
 
 type UploadResult = { id: string; kind?: string; originalName?: string };
 
-function loc(lesson: Lesson, language: string) {
+function loc(lesson: Lesson | undefined, language: string) {
+  if (!lesson || !Array.isArray(lesson.localizations)) return undefined;
   return lesson.localizations.find((item) => item.language === language) ?? lesson.localizations[0];
 }
 
@@ -85,7 +86,7 @@ export function CourseContentSection({
   const activeLesson = sortedLessons.find((lesson) => lesson.id === activeLessonId) ?? sortedLessons[0];
   const hasVideo = course.learningMode !== 'TEXT_ONLY';
   const hasText = course.learningMode !== 'VIDEO_ONLY';
-  const lessonCompleteness = course.completeness.steps.content.lessons.find((item) => item.lessonId === activeLesson?.id);
+  const lessonCompleteness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === activeLesson?.id);
 
   useEffect(() => {
     if (!activeLesson) return;
@@ -132,7 +133,7 @@ export function CourseContentSection({
   }, [contentLanguage]);
 
   const textLps = useMemo(() => parseTextLearningPoints(textHtml), [textHtml]);
-  const videoDuration = loc(activeLesson ?? course.lessons[0], contentLanguage)?.videoDurationSeconds ?? null;
+  const videoDuration = loc(activeLesson, contentLanguage)?.videoDurationSeconds ?? null;
   const exhibits = activeLesson?.exhibits ?? [];
 
   async function importDocx(file: File): Promise<string | null> {
@@ -372,10 +373,10 @@ export function CourseContentSection({
           </div>
         )}
         {sortedLessons.map((lesson) => {
-          const completeness = course.completeness.steps.content.lessons.find((item) => item.lessonId === lesson.id);
-          const title = lesson.localizations.find((item) => item.language === contentLanguage)?.title ?? lesson.localizations[0]?.title ?? lesson.code;
+          const completeness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === lesson.id);
+          const title = loc(lesson, contentLanguage)?.title ?? lesson.code;
           const meta = part === 'study'
-            ? `${lesson.localizations.find((item) => item.language === contentLanguage)?.videoDurationSeconds ? `${Math.round((lesson.localizations.find((item) => item.language === contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((lesson.localizations.find((item) => item.language === contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} LPs · ${lesson.exhibits.length} exhibits`
+            ? `${loc(lesson, contentLanguage)?.videoDurationSeconds ? `${Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} LPs · ${lesson.exhibits.length} exhibits`
             : `${lesson.questions.length} questions · ${lesson.applicationTest ? 'App test' : 'no App test'}`;
           return (
             <button key={lesson.id} type="button" onClick={() => setActiveLessonId(lesson.id)} style={{ ...buttonStyle, display: 'block', width: '100%', textAlign: 'left', marginBottom: 6, borderColor: activeLessonId === lesson.id ? '#2B58C8' : '#E8EDF5', background: activeLessonId === lesson.id ? '#F5F8FF' : '#fff' }}>
