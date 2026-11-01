@@ -1,5 +1,4 @@
 import {
-  Inject,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -10,11 +9,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { isDeployed } from '../backoffice/lib/env';
 import { PrismaService } from '../prisma/prisma.service';
-import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 
-const DEFAULT_PORTAL_SITE = 'https://www.ilovelearningguide.com';
-const DEFAULT_PATH_TEMPLATE =
-  '/{locale}/portal/courses/{slug}/preview?token={token}';
+const DEFAULT_ADMIN_PREVIEW_PATH =
+  '/{locale}/portal-preview/{courseId}?token={token}';
 const DEFAULT_TTL_SECONDS = 10 * 60;
 
 export interface PortalPreviewLink {
@@ -38,17 +35,17 @@ export interface PortalPreviewTokenPayload {
 }
 
 /**
- * 给 Portal 的短时效预览链接。
+ * 课程预览链接（Admin 自建 Portal 风格预览页）。
  *
- * Admin 只负责签发；Portal 用同一个 PORTAL_PREVIEW_SECRET 校验 token，
- * 再把对应草稿/版本渲染成与生产页面一致的组件。
+ * Admin 签发短时效 token，并生成指向 Admin 预览路由的链接；
+ * 预览页用员工会话读取草稿/指定版本投影，按 Portal 课程页版式渲染。
+ * Portal 站点本身不需要任何改动（旧 Portal `/preview` 路由不再使用）。
  */
 @Injectable()
 export class PortalPreviewService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
 
   async createLink(
@@ -96,24 +93,25 @@ export class PortalPreviewService {
       exp: Math.floor(expiresAt.getTime() / 1000),
     });
 
+    // Admin 预览页与 API 同源：未配置 BACKOFFICE_APP_URL 时返回相对路径，
+    // 由 Back Office 页面在当前 origin 打开，避免误指向 Portal 站点。
     const base = (
-      this.config.publicSiteUrl ||
-      this.configService.get<string>('PUBLIC_SITE_URL')?.trim() ||
-      DEFAULT_PORTAL_SITE
+      this.configService.get<string>('BACKOFFICE_APP_URL')?.trim() ?? ''
     ).replace(/\/+$/, '');
     const template =
-      this.configService.get<string>('PORTAL_PREVIEW_PATH')?.trim() ||
-      DEFAULT_PATH_TEMPLATE;
+      this.configService.get<string>('ADMIN_PORTAL_PREVIEW_PATH')?.trim() ||
+      DEFAULT_ADMIN_PREVIEW_PATH;
     const resolvedLocale = (locale ?? '').toLowerCase().startsWith('zh')
       ? 'zh-CN'
       : 'en-GB';
     const path = template
       .replace('{locale}', resolvedLocale)
+      .replace('{courseId}', courseId)
       .replace('{slug}', encodeURIComponent(slug))
       .replace('{token}', encodeURIComponent(token));
 
     return {
-      url: `${base}${path.startsWith('/') ? '' : '/'}${path}`,
+      url: base ? `${base}${path.startsWith('/') ? '' : '/'}${path}` : path,
       token,
       expiresAt: expiresAt.toISOString(),
       source: versionId ? 'version' : 'draft',
@@ -179,8 +177,7 @@ export class PortalPreviewService {
       select: { snapshotData: true },
     });
     const snapshot = version?.snapshotData as
-      | { course?: { slug?: string } }
-      | undefined;
+      { course?: { slug?: string } } | undefined;
     return snapshot?.course?.slug?.trim() || course.slug;
   }
 
@@ -195,8 +192,7 @@ export class PortalPreviewService {
 
   private secret(): string {
     const configured =
-      this.configService.get<string>('PORTAL_PREVIEW_SECRET')?.trim() ??
-      '';
+      this.configService.get<string>('PORTAL_PREVIEW_SECRET')?.trim() ?? '';
     if (configured) return configured;
 
     const session =

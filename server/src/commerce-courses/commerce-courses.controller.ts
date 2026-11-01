@@ -27,6 +27,7 @@ import { PricingService } from './pricing.service';
 import { PreviewService } from './preview.service';
 import { CourseAuthoringService } from './course-authoring.service';
 import { PortalPreviewService } from './portal-preview.service';
+import { PortalProjectionService } from './portal-projection.service';
 import { contentTypeFor } from './content-type';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
@@ -59,6 +60,7 @@ export class CommerceCoursesController {
     private readonly preview: PreviewService,
     private readonly authoring: CourseAuthoringService,
     private readonly portalPreview: PortalPreviewService,
+    private readonly portalProjection: PortalProjectionService,
   ) {}
 
   @Get()
@@ -146,7 +148,7 @@ export class CommerceCoursesController {
     return this.preview.preview(id, versionId || undefined);
   }
 
-  /** 生成短时效 Portal 预览链接；Portal 侧校验签名后渲染草稿/指定版本。 */
+  /** 生成短时效课程预览链接（Admin 自建 Portal 风格预览页）。 */
   @Get(':id/portal-preview')
   portalPreviewLink(
     @Param('id') id: string,
@@ -158,6 +160,31 @@ export class CommerceCoursesController {
       versionId || undefined,
       locale || undefined,
     );
+  }
+
+  /**
+   * 预览页数据：员工会话 + 预览 token 双重要求。
+   * 返回与 Portal 投影一致的详情结构（草稿或指定版本），供 Admin 预览页渲染。
+   */
+  @Get(':id/portal-preview/content')
+  async portalPreviewContent(
+    @Param('id') id: string,
+    @Query('token') token?: string,
+  ) {
+    const payload = this.portalPreview.verifyToken(token ?? '');
+    if (payload.courseId !== id)
+      throw new PackageError(
+        'INVALID_PREVIEW_TOKEN',
+        401,
+        'Preview token does not match this course.',
+      );
+    const course = await this.portalProjection.getPreviewCourse(
+      id,
+      payload.versionId ?? undefined,
+    );
+    if (!course)
+      throw new PackageError('COURSE_NOT_FOUND', 404, 'Course not found.');
+    return course;
   }
 
   // ===== 预览媒体（Admin 课程页展示封面 / 视频 / 展品图） =====

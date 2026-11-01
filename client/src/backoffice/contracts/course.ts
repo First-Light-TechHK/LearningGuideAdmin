@@ -256,6 +256,51 @@ export type PortalPreviewLink = {
   versionId: string | null;
 };
 
+/** Admin 自建 Portal 风格预览页读取的投影详情（与 Portal v1 投影同构）。 */
+export type PortalPreviewDetail = {
+  id: string;
+  slug: string;
+  code: string;
+  title: string;
+  subtitle: string | null;
+  shortDescription: string | null;
+  description: string | null;
+  category: string | null;
+  level: string | null;
+  tags: unknown;
+  coverUrl: string | null;
+  learningMode: string | null;
+  learningLanguages: string[];
+  defaultContentLanguage: string | null;
+  whatYouLearn: unknown;
+  provides: unknown;
+  lessonCount: number;
+  totalDurationSeconds: number;
+  trial?: { enabled: boolean; lessonIds: string[] };
+  plans: Array<{
+    id: string;
+    name: string;
+    termMonths: number;
+    amountMinor: number;
+    currency: string;
+    lookupKey: string | null;
+    trialEligible: boolean;
+  }>;
+  sections: Array<{
+    id: string;
+    title: string;
+    lessons: Array<{
+      id: string;
+      title: string;
+      summary: string | null;
+      durationSeconds: number | null;
+      isPublic: boolean;
+      contents: Array<{ id: string; title?: string; type: string; mode?: string; url?: string; html?: string }>;
+    }>;
+  }>;
+  preview: { source: 'draft' | 'version'; versionLabel: string | null };
+};
+
 export type EnvironmentInfo = {
   label: string;
   publicSiteUrl: string;

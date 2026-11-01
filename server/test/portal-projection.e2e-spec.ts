@@ -397,7 +397,7 @@ describe('Portal projection contract (e2e)', () => {
       .expect(404);
   });
 
-  it('creates a short-lived signed Portal preview link for the draft', async () => {
+  it('creates a short-lived signed preview link for the draft', async () => {
     const agent = await signInAs(app, 'ADMIN');
     const res = await agent
       .get(`/api/backoffice/courses/${courseId}/portal-preview?locale=zh-CN`)
@@ -408,9 +408,11 @@ describe('Portal projection contract (e2e)', () => {
       courseId,
       versionId: null,
     });
+    // 预览页由 Admin 自己托管：链接指向 Back Office 的 Portal 风格预览路由。
     expect(res.body.data.url).toContain(
-      `/zh-CN/portal/courses/${slug}/preview?token=`,
+      `/zh-CN/portal-preview/${courseId}?token=`,
     );
+    expect(res.body.data.url).not.toContain('/portal/courses/');
     const [payload, signature] = String(res.body.data.token).split('.');
     expect(payload).toBeTruthy();
     expect(signature).toBeTruthy();
@@ -423,6 +425,40 @@ describe('Portal projection contract (e2e)', () => {
       slug,
       source: 'draft',
     });
+  });
+
+  it('serves the Admin preview page data behind employee session + token', async () => {
+    const agent = await signInAs(app, 'ADMIN');
+    const link = await agent
+      .get(`/api/backoffice/courses/${courseId}/portal-preview?locale=zh-CN`)
+      .expect(200);
+    const token = encodeURIComponent(String(link.body.data.token));
+
+    const draft = await agent
+      .get(
+        `/api/backoffice/courses/${courseId}/portal-preview/content?token=${token}`,
+      )
+      .expect(200);
+    expect(draft.body.success).toBe(true);
+    expect(draft.body.data.title).toBe('Draft title');
+    expect(draft.body.data.preview).toEqual({
+      source: 'draft',
+      versionLabel: null,
+    });
+
+    // token 只授权它签发的那门课
+    await agent
+      .get(
+        `/api/backoffice/courses/${hiddenCourseId}/portal-preview/content?token=${token}`,
+      )
+      .expect(401);
+
+    // 无员工会话一律拒绝
+    await request(app.getHttpServer())
+      .get(
+        `/api/backoffice/courses/${courseId}/portal-preview/content?token=${token}`,
+      )
+      .expect(401);
   });
 
   it('serves draft and version projection through a signed preview token', async () => {

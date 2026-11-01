@@ -19,8 +19,9 @@ Portal 页面不应直接读 Admin 的工作区草稿；草稿预览走短时效
 | `GET` | `/api/portal/v1/courses/:id` | 课程详情（来自 `liveVersionId` 快照） | `X-API-Key` |
 | `GET` | `/api/portal/v1/media/:courseId/cover` | 课程封面二进制 | `X-API-Key` |
 | `GET` | `/api/portal/v1/media/:courseId/assets/:assetId` | 课程视频 / 展品等媒体二进制 | `X-API-Key` |
-| `GET` | `/api/portal/v1/preview/course?token=...` | 用签名 token 取草稿 / 指定版本详情 | `X-API-Key` + preview token |
-| `GET` | `/api/backoffice/courses/:id/portal-preview` | Admin 生成 Portal 预览链接 | 员工会话 |
+| `GET` | `/api/portal/v1/preview/course?token=...` | 用签名 token 取草稿 / 指定版本详情（Portal 备用） | `X-API-Key` + preview token |
+| `GET` | `/api/backoffice/courses/:id/portal-preview` | Admin 生成课程预览链接（指向 Admin 预览页） | 员工会话 |
+| `GET` | `/api/backoffice/courses/:id/portal-preview/content?token=...` | Admin 预览页读取草稿 / 指定版本投影 | 员工会话 + preview token |
 
 ### 1.1 列表查询参数
 
@@ -312,12 +313,25 @@ GET /api/portal/v1/media/:courseId/assets/:assetId
 
 ---
 
-## 7. Portal 预览（草稿 / 指定版本）
+## 7. 课程预览（草稿 / 指定版本，Admin 自建 Portal 风格页面）
 
 ### 7.1 目标
 
 Admin 的「学员视角预览（草稿）」继续保留，用于内容 QA；  
-新增「在 Portal 中预览」按钮，生成短时效签名链接，由 Portal 用**生产组件**渲染草稿或指定版本，保证视觉与真实页面一致。
+「在 Portal 中预览」生成短时效签名链接，落到 **Admin 自建**的 Portal 风格课程预览页，
+按 Portal 课程详情页的版式（封面 / 概览 / 你将学到什么 / 大纲 / 本课程提供 / 订阅计划）渲染草稿或指定版本。
+
+该方案**不修改 Portal 仓库**、不要求 Portal 新增 `/preview` 路由，也不会把未发布内容暴露到公开站点：
+
+```text
+Back Office「在 Portal 中预览」
+        │  GET /api/backoffice/courses/:id/portal-preview
+        ▼
+/{locale}/portal-preview/{courseId}?token=...   （Admin 站点，员工会话）
+        │  GET /api/backoffice/courses/:id/portal-preview/content?token=...
+        ▼
+草稿 / 指定版本投影（与 Portal v1 投影同构） → 按 Portal 版式渲染
+```
 
 ### 7.2 Admin 生成链接
 
@@ -333,7 +347,7 @@ GET /api/backoffice/courses/:id/portal-preview?locale=zh-CN&versionId=<可选>
 {
   "success": true,
   "data": {
-    "url": "https://www.ilovelearningguide.com/zh-CN/portal/courses/modeling-life/preview?token=eyJ2Ijox...",
+    "url": "/zh-CN/portal-preview/4d22b6a5-c091-4fc1-90d5-1c16bf2cb1b2?token=eyJ2Ijox...",
     "token": "eyJ2Ijox...",
     "expiresAt": "2026-11-01T09:00:00.000Z",
     "source": "draft",
@@ -349,21 +363,20 @@ GET /api/backoffice/courses/:id/portal-preview?locale=zh-CN&versionId=<可选>
 
 | 环境变量 | 说明 |
 |---|---|
-| `PUBLIC_SITE_URL` | Portal 站点地址；缺省 `https://www.ilovelearningguide.com` |
-| `PORTAL_PREVIEW_SECRET` | Admin 与 Portal 共享的 HMAC 密钥；部署环境必填 |
-| `PORTAL_PREVIEW_PATH` | 路由模板，默认 `/{locale}/portal/courses/{slug}/preview?token={token}` |
+| `PORTAL_PREVIEW_SECRET` | 预览 token 的 HMAC 签名密钥；部署环境必填 |
+| `ADMIN_PORTAL_PREVIEW_PATH` | 可选；预览页路由模板，默认 `/{locale}/portal-preview/{courseId}?token={token}`，也可用 `{slug}` |
+| `BACKOFFICE_APP_URL` | 可选；预览链接站点根。留空时返回相对路径，在当前 Admin origin 打开（推荐） |
 
 本地未配置 `PORTAL_PREVIEW_SECRET` 时使用开发密钥；部署环境未配置会返回 `PORTAL_PREVIEW_NOT_CONFIGURED`。
 
-### 7.3 Portal 取预览数据
+### 7.3 Admin 预览页取数据
 
 ```http
-GET /api/portal/v1/preview/course?token=<token>
-X-API-Key: <AUTH_TOKEN>
+GET /api/backoffice/courses/:id/portal-preview/content?token=<token>
 ```
 
-Portal 的预览路由（服务端）校验 URL 中的 `token`，再调用该接口取数据。  
-Admin 会再次校验 token 签名、`aud` 和过期时间；通过后返回草稿或指定版本的同一套详情结构，并额外带：
+员工会话 + 预览 token 双重要求：Admin 校验 token 签名、`aud`、过期时间，并要求 token 的 `courseId`
+与路径参数一致（否则 401）。通过后返回草稿或指定版本的详情结构，并额外带：
 
 ```json
 {
@@ -373,6 +386,9 @@ Admin 会再次校验 token 签名、`aud` 和过期时间；通过后返回草�
   }
 }
 ```
+
+> `/api/portal/v1/preview/course` 仍保留（服务鉴权 + token），供 Portal 未来实现自有预览路由时使用；
+> Admin 预览页不依赖该端点。
 
 ### 7.4 Token 载荷
 
@@ -395,7 +411,7 @@ Admin 会再次校验 token 签名、`aud` 和过期时间；通过后返回草�
 token = base64url(JSON.stringify(payload)) + "." + base64url(HMAC-SHA256(secret, base64urlPayload))
 ```
 
-Portal 侧校验示例：
+服务端校验示例（Admin 预览页与 Portal 将来实现共用同一算法）：
 
 ```ts
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -414,7 +430,7 @@ if (payload.aud !== 'portal-preview' || payload.exp <= Date.now() / 1000) {
 }
 ```
 
-> 预览 token 只授权“看这一门课的草稿/版本”，不自带写权限；仍建议 Portal 只在服务端使用，并通过 `X-API-Key` 调用 Admin。
+> 预览 token 只授权“看这一门课的草稿/版本”，不自带写权限；Admin 预览页还要求员工会话。
 
 ---
 
@@ -422,7 +438,8 @@ if (payload.aud !== 'portal-preview' || payload.exp <= Date.now() / 1000) {
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| Portal 预览路由 | 待 Portal 实现 | 需要实现 `/{locale}/portal/courses/{slug}/preview?token=...` 并用生产组件渲染 |
+| 课程预览页 | 已实现（Admin 站点） | `/{locale}/portal-preview/{courseId}?token=...`，按 Portal 课程详情版式渲染草稿/版本；不修改 Portal 仓库 |
+| Portal 自有预览路由 | 非目标 | 原方案的 `/{locale}/portal/courses/{slug}/preview` 需改 Portal 仓库，现由 Admin 自建预览页替代；`/api/portal/v1/preview/course` 仍保留备用 |
 | 媒体绝对地址 | 约定 | 当前返回 Admin 相对路径；Portal 需拼接 Admin origin 或反向代理 |
 | 按 `code` 查询 | 未实现 | 当前详情只接受内部 UUID；Portal 可用列表返回的 `id`，或后续新增 `by-code` 端点 |
 | 多语言协商 | 未实现 | 当前固定默认内容语言；如需按 `Accept-Language` 返回，需要新增参数 |
