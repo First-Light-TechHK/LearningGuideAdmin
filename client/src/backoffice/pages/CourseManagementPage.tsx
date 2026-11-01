@@ -111,6 +111,9 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [actionMenuId, setActionMenuId] = useState<string | null>(null)
+  const [packageFile, setPackageFile] = useState<File | null>(null)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState('')
   const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([])
@@ -329,6 +332,8 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   }
 
   async function onPickFile(file: File) {
+    setPackageFile(file)
+    setShowImport(true)
     const lower = file.name.toLowerCase()
     if (!lower.endsWith('.zip') && !lower.endsWith('.lgcourse.zip')) {
       setMessage(L('只能导入 .lgcourse.zip 课程包。', 'Only .lgcourse.zip course packages can be imported.'))
@@ -375,7 +380,8 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setImportJob(null)
     setConfirmNotice(null)
     if (fileRef.current) fileRef.current.value = ''
-    await load()
+    setShowImport(false)
+    setPackageFile(null)
     if (outcome.courseId) openCourse(outcome.courseId)
   }
 
@@ -388,6 +394,8 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setImportJob(null)
     setConfirmNotice(null)
     if (fileRef.current) fileRef.current.value = ''
+    setShowImport(false)
+    setPackageFile(null)
     setMessage(L('已忽略该课程包（未覆盖同名草稿）。', 'Package ignored (existing draft left untouched).'))
   }
 
@@ -419,21 +427,11 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
             <button type="button" className="button buttonGhost" disabled={busy} onClick={() => void importFromServerFolder()}>
               {L('本地目录导入', 'Import from server folder')}
             </button>
-            <button type="button" className="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <button type="button" className="button" disabled={busy} onClick={() => setShowImport(true)}>
               {L('导入课程包', 'Import course package')}
             </button>
           </div>
         )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".zip,.lgcourse.zip"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) void onPickFile(file)
-          }}
-        />
         <input
           ref={rawFileRef}
           type="file"
@@ -524,15 +522,66 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         </div>
       )}
 
-      {importJob && (
-        <ImportPanel
-          job={importJob}
-          busy={busy}
-          locale={locale}
-          notice={confirmNotice}
-          onConfirm={confirmImport}
-          onIgnore={ignoreImport}
-        />
+      {(showImport || importJob) && (
+        <div
+          role="presentation"
+          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) {
+              setShowImport(false)
+              setImportJob(null)
+              setPackageFile(null)
+              if (fileRef.current) fileRef.current.value = ''
+            }
+          }}
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby="import-package-title" style={{ width: 'min(760px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+              <div>
+                <h2 id="import-package-title" style={{ margin: 0, fontSize: 20 }}>{L('导入课程包', 'Import course package')}</h2>
+                <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>{L('上传 .lgcourse.zip 或 .zip 课程包，系统会校验结构、课时、媒体和学习点。', 'Upload a .lgcourse.zip or .zip package. The system validates structure, lessons, media and learning points.')}</p>
+              </div>
+              <button type="button" aria-label={L('关闭', 'Close')} disabled={busy} onClick={() => { setShowImport(false); setImportJob(null); setPackageFile(null); if (fileRef.current) fileRef.current.value = '' }} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: busy ? 'not-allowed' : 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+
+            {!importJob && (
+              <div
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const file = event.dataTransfer.files?.[0]
+                  if (file) void onPickFile(file)
+                }}
+                style={{ border: '2px dashed #B7C3D8', borderRadius: 12, padding: 28, textAlign: 'center', background: '#F7F9FC' }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{packageFile ? packageFile.name : L('拖拽文件到此处，或点击选择文件', 'Drag a file here, or click to choose')}</div>
+                <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>{L('支持 .zip / .lgcourse.zip', 'Supports .zip / .lgcourse.zip')}</div>
+                <button type="button" className="button" disabled={busy} style={{ marginTop: 14 }} onClick={() => fileRef.current?.click()}>{L('选择文件', 'Choose file')}</button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".zip,.lgcourse.zip"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void onPickFile(file)
+                  }}
+                />
+              </div>
+            )}
+
+            {importJob && (
+              <ImportPanel
+                job={importJob}
+                busy={busy}
+                locale={locale}
+                notice={confirmNotice}
+                onConfirm={confirmImport}
+                onIgnore={ignoreImport}
+              />
+            )}
+          </div>
+        </div>
       )}
 
       {loading && <p className="cardBody">{t(locale, 'common.loading')}</p>}
@@ -585,16 +634,45 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                   </td>
                   <td style={{ fontSize: 12, opacity: 0.8 }}>{formatWhen(course.updatedAt, locale)}</td>
                   <td>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
-                      <button className="button buttonGhost" onClick={() => navigate(`/${locale}/course/${course.id}/preview`)}>{L('预览', 'Preview')}</button>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
                       <button
+                        type="button"
                         className="button buttonGhost"
-                        disabled={busy || exportingId !== null}
-                        onClick={() => void exportCourse(course)}
+                        onClick={() => setActionMenuId((current) => (current === course.id ? null : course.id))}
                       >
-                        {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
+                        {L('操作', 'Actions')} ▾
                       </button>
+                      {actionMenuId === course.id && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 'calc(100% + 4px)',
+                            zIndex: 20,
+                            minWidth: 150,
+                            background: '#fff',
+                            border: '1px solid #D5DCE8',
+                            borderRadius: 10,
+                            boxShadow: '0 12px 32px rgba(16, 24, 40, 0.18)',
+                            padding: 6,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                          }}
+                        >
+                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); openCourse(course.id) }}>{L('打开', 'Open')}</button>
+                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); navigate(`/${locale}/course/${course.id}/preview`) }}>{L('预览', 'Preview')}</button>
+                          <button
+                            type="button"
+                            className="button buttonGhost"
+                            disabled={busy || exportingId !== null}
+                            style={{ justifyContent: 'flex-start' }}
+                            onClick={() => { setActionMenuId(null); void exportCourse(course) }}
+                          >
+                            {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
