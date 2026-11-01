@@ -313,7 +313,7 @@ export function CourseTrialSection({
             <thead>
               <tr>
                 <th>{L(locale, '名称', 'Name')}</th>
-                <th>{L(locale, '周期（月）', 'Billing (months)')}</th>
+                <th>{L(locale, '计费', 'Billing')}</th>
                 <th>{L(locale, '金额（美元）', 'Price (USD)')}</th>
                 <th>Lookup key</th>
                 <th>Stripe</th>
@@ -324,7 +324,12 @@ export function CourseTrialSection({
               {localPlans.map((plan) => (
                 <tr key={plan.id}>
                   <td><input value={plan.name} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, name: event.target.value } : item))} style={{ padding: 6, width: '100%' }} /></td>
-                  <td><input type="number" min={1} value={plan.termMonths} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, termMonths: Number(event.target.value) } : item))} style={{ padding: 6, width: 90 }} /></td>
+                  <td>
+                    <select value={plan.termMonths === 12 ? 'year' : 'month'} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, termMonths: event.target.value === 'year' ? 12 : 1 } : item))} style={{ padding: 6, width: 130 }}>
+                      <option value="month">{L(locale, '每月', 'Every month')}</option>
+                      <option value="year">{L(locale, '每年', 'Every year')}</option>
+                    </select>
+                  </td>
                   <td><input type="number" min={0} step="0.01" value={(plan.amountMinor / 100).toFixed(2)} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, amountMinor: Math.round(Number(event.target.value) * 100) } : item))} style={{ padding: 6, width: 120 }} /></td>
                   <td style={{ fontSize: 12 }}>{plan.stripeLookupKey ?? '—'}</td>
                   <td style={{ fontSize: 12 }}>
