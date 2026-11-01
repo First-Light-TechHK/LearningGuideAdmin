@@ -91,7 +91,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([])
   const [createCategoryId, setCreateCategoryId] = useState('')
   const [createMode, setCreateMode] = useState('VIDEO_AND_TEXT')
-  const [createLanguage, setCreateLanguage] = useState<string>(locale)
+  const [createLanguages, setCreateLanguages] = useState<string[]>([locale.startsWith('zh') ? 'zh-CN' : 'en-GB'])
   const [exportingId, setExportingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
@@ -141,27 +141,53 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   }, [catalogCategories, list, locale])
 
   async function createCourse(form: FormData) {
+    const titleEn = String(form.get('titleEn') || '').trim()
+    const titleZh = String(form.get('titleZh') || '').trim()
+    if (!titleEn || !titleZh) {
+      setMessage(L('英文和中文课程名称均为必填。', 'English and Chinese course titles are both required.'))
+      return
+    }
+    if (!createCategoryId) {
+      setMessage(L('请选择分类。', 'Category is required.'))
+      return
+    }
+    if (createLanguages.length === 0) {
+      setMessage(L('请至少选择一种学习语言。', 'Select at least one learning language.'))
+      return
+    }
+    const defaultLanguage = createLanguages.includes('en-GB') ? 'en-GB' : createLanguages[0]
+    const defaultTitle = defaultLanguage === 'zh-CN' ? titleZh : titleEn
     setBusy(true)
     const result = await boRequest<{ id: string }>('/api/backoffice/courses', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        code: String(form.get('code')),
-        title: String(form.get('title')),
+        code: String(form.get('code') || '').trim() || undefined,
+        title: defaultTitle,
         slug: String(form.get('slug') || ''),
-        language: createLanguage,
-        defaultContentLanguage: createLanguage,
-        learningLanguages: [createLanguage],
+        language: defaultLanguage,
+        defaultContentLanguage: defaultLanguage,
+        learningLanguages: createLanguages,
         learningMode: createMode,
-        categoryId: createCategoryId || null,
+        categoryId: createCategoryId,
       }),
     })
+    if (!result.success) {
+      setBusy(false)
+      setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+      return
+    }
+    const otherLanguage = defaultLanguage === 'zh-CN' ? 'en-GB' : 'zh-CN'
+    const otherTitle = otherLanguage === 'zh-CN' ? titleZh : titleEn
+    await boRequest(`/api/backoffice/courses/${result.data.id}/localizations/${otherLanguage}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: otherTitle }),
+    })
     setBusy(false)
-    if (result.success) {
-      setShowCreate(false)
-      await load()
-      openCourse(result.data.id)
-    } else setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+    setShowCreate(false)
+    await load()
+    openCourse(result.data.id)
   }
 
   // 轮询后台导入作业，直到校验完成 / 失败 / 取消（异步导入：上传即返回，处理在后台）
@@ -495,13 +521,31 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               <button type="button" aria-label={L('关闭', 'Close')} onClick={() => setShowCreate(false)} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 4 }}>×</button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程标题', 'Course title')} *<input name="title" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID', 'Course ID')} *<input name="code" required pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（英文）', 'Course title (English)')} *<input name="titleEn" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（中文）', 'Course title (Chinese)')} *<input name="titleZh" required style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID（留空自动生成）', 'Course ID (auto if blank)')}<input name="code" pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="en-GB">English (en-GB)</option><option value="zh-CN">简体中文 (zh-CN)</option></select></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')} *<select required value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('请选择分类', 'Select a category')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
             </div>
+            <fieldset style={{ border: '1px solid #D5DCE8', borderRadius: 8, padding: 12, marginTop: 14 }}>
+              <legend style={{ fontSize: 13, fontWeight: 600, padding: '0 4px' }}>{L('学习语言', 'Learning languages')} *</legend>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
+                {[['en-GB', 'English'], ['zh-CN', '中文']].map(([code, label]) => (
+                  <label key={code} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={createLanguages.includes(code)}
+                      onChange={(event) => setCreateLanguages((current) => event.target.checked
+                        ? [...new Set([...current, code])]
+                        : current.filter((language) => language !== code))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>{L('学习语言创建后只能增加，不能删除。', 'Learning languages can only be added later, not removed.')}</div>
+            </fieldset>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
               <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
               <button className="button" disabled={busy}>{busy ? L('创建中…', 'Creating…') : L('创建并编辑', 'Create and edit')}</button>
