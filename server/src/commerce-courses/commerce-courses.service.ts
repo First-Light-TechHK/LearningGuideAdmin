@@ -90,8 +90,37 @@ export class CommerceCoursesService {
       this.prisma.commerceCourse.count({ where }),
       this.countsByStatus(),
     ]);
+    const liveVersionIds = rows
+      .map((row) => row.liveVersionId)
+      .filter((id): id is string => Boolean(id));
+    const liveVersions = liveVersionIds.length
+      ? await this.prisma.courseVersion.findMany({
+          where: { id: { in: liveVersionIds } },
+          select: {
+            id: true,
+            versionLabel: true,
+            wentLiveAt: true,
+            createdAt: true,
+          },
+        })
+      : [];
+    const liveVersionById = new Map(
+      liveVersions.map((version) => [version.id, version]),
+    );
     return {
-      courses: rows.map((row) => this.toSummary(row)),
+      courses: rows.map((row) => {
+        const liveVersion = row.liveVersionId
+          ? liveVersionById.get(row.liveVersionId)
+          : undefined;
+        return {
+          ...this.toSummary(row),
+          liveVersionLabel: liveVersion?.versionLabel ?? null,
+          liveVersionWentLiveAt:
+            liveVersion?.wentLiveAt?.toISOString() ??
+            liveVersion?.createdAt.toISOString() ??
+            null,
+        };
+      }),
       total,
       page,
       pages: Math.max(1, Math.ceil(total / pageSize)),
@@ -500,7 +529,9 @@ export class CommerceCoursesService {
         where: { id: lessonId },
         data: {
           ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+          ...(body.sortOrder !== undefined
+            ? { sortOrder: body.sortOrder }
+            : {}),
         },
       });
       if (

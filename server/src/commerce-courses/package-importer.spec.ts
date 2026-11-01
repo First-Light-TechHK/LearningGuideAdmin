@@ -32,9 +32,14 @@ function manifestWith(code: string, slug: string): PackageManifest {
  */
 function fakePrisma(occupiedSlugs: Set<string>) {
   const createdCourses: Array<{ code: string; slug: string }> = [];
-  const findFirst = async ({ where }: { where: { code?: string; slug?: string } }) => {
+  const findFirst = async ({
+    where,
+  }: {
+    where: { code?: string; slug?: string };
+  }) => {
     if (where.code !== undefined) return null;
-    if (where.slug !== undefined) return occupiedSlugs.has(where.slug) ? { id: 'existing' } : null;
+    if (where.slug !== undefined)
+      return occupiedSlugs.has(where.slug) ? { id: 'existing' } : null;
     return null;
   };
   const prisma = {
@@ -42,7 +47,11 @@ function fakePrisma(occupiedSlugs: Set<string>) {
     $transaction: async (cb: (tx: unknown) => Promise<unknown>) =>
       cb({
         commerceCourse: {
-          create: async ({ data }: { data: { code: string; slug: string } }) => {
+          create: async ({
+            data,
+          }: {
+            data: { code: string; slug: string };
+          }) => {
             createdCourses.push({ code: data.code, slug: data.slug });
             return data;
           },
@@ -59,12 +68,20 @@ function importer(prisma: unknown): PackageImporter {
   return new PackageImporter(prisma as never, {} as never, {} as never);
 }
 
-const options = { onConflict: 'ABORT' as const, reassignCodes: false, actorEmployeeId: null };
+const options = {
+  onConflict: 'ABORT' as const,
+  reassignCodes: false,
+  actorEmployeeId: null,
+};
 
 describe('PackageImporter.importPackage — Course ID vs slug 冲突', () => {
   it('keeps the Course ID and uniquifies a collided slug instead of refusing the import', async () => {
     const prisma = fakePrisma(new Set(['modeling-life']));
-    await importer(prisma).importPackage(manifestWith('SCI001', 'modeling-life'), new Map(), options);
+    await importer(prisma).importPackage(
+      manifestWith('SCI001', 'modeling-life'),
+      new Map(),
+      options,
+    );
     expect(prisma._createdCourses).toHaveLength(1);
     // Course ID 必须保留 SCI001（不能被 slug 冲突误判为「课程已存在」）
     expect(prisma._createdCourses[0].code).toBe('SCI001');
@@ -74,8 +91,15 @@ describe('PackageImporter.importPackage — Course ID vs slug 冲突', () => {
 
   it('keeps the original slug when it is free', async () => {
     const prisma = fakePrisma(new Set());
-    await importer(prisma).importPackage(manifestWith('SCI001', 'modeling-life'), new Map(), options);
-    expect(prisma._createdCourses[0]).toMatchObject({ code: 'SCI001', slug: 'modeling-life' });
+    await importer(prisma).importPackage(
+      manifestWith('SCI001', 'modeling-life'),
+      new Map(),
+      options,
+    );
+    expect(prisma._createdCourses[0]).toMatchObject({
+      code: 'SCI001',
+      slug: 'modeling-life',
+    });
   });
 
   it('refuses when the Course ID itself already exists', async () => {
@@ -88,7 +112,11 @@ describe('PackageImporter.importPackage — Course ID vs slug 冲突', () => {
       $transaction: async () => ({}),
     };
     await expect(
-      importer(prisma).importPackage(manifestWith('SCI001', 'modeling-life'), new Map(), options),
+      importer(prisma).importPackage(
+        manifestWith('SCI001', 'modeling-life'),
+        new Map(),
+        options,
+      ),
     ).rejects.toMatchObject({ code: 'PACKAGE_CONFLICT' });
   });
 });

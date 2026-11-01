@@ -277,12 +277,16 @@ export class PackageJobsService {
   }
 
   private async markRawFailed(jobId: string, error: unknown): Promise<void> {
-    const message =
-      error instanceof Error ? error.message : '原始素材解析失败';
+    const message = error instanceof Error ? error.message : '原始素材解析失败';
     await this.prisma.coursePackageJob
       .update({
         where: { id: jobId },
-        data: { status: 'FAILED', error: message, progress: 100, stage: 'FAILED' },
+        data: {
+          status: 'FAILED',
+          error: message,
+          progress: 100,
+          stage: 'FAILED',
+        },
       })
       .catch(() => undefined);
   }
@@ -347,7 +351,8 @@ export class PackageJobsService {
     }
     if (
       bytes.length >
-      PackageJobsService.RAW_CHUNK_BYTES + PackageJobsService.RAW_CHUNK_SLACK_BYTES
+      PackageJobsService.RAW_CHUNK_BYTES +
+        PackageJobsService.RAW_CHUNK_SLACK_BYTES
     ) {
       throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Chunk too large.');
     }
@@ -413,7 +418,6 @@ export class PackageJobsService {
     }
   }
 
-
   /**
    * 本地目录导入：服务端直接读取仓库内素材目录（如 docs/modeling-life），
    * 打包为原始素材 ZIP 后走原始素材导入流程。用于规避浏览器上传超大文件中断。
@@ -449,7 +453,12 @@ export class PackageJobsService {
         return;
       }
       for (const name of entries) {
-        if (name.startsWith('.') || name.startsWith('~$') || name === '__MACOSX') continue;
+        if (
+          name.startsWith('.') ||
+          name.startsWith('~$') ||
+          name === '__MACOSX'
+        )
+          continue;
         const full = path.join(dir, name);
         const stat = await fs.stat(full);
         if (stat.isDirectory()) await walk(full);

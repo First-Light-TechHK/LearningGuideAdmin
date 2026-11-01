@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
@@ -51,7 +52,9 @@ export interface ParsedTextLearningPoint {
 }
 
 /** 从富文本中识别 Heading 1；仅 H1 是 LP（PRD 12.5.2）。 */
-export function parseTextLearningPoints(html: string): ParsedTextLearningPoint[] {
+export function parseTextLearningPoints(
+  html: string,
+): ParsedTextLearningPoint[] {
   const matches = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
   return matches
     .map((match, index) => {
@@ -153,8 +156,7 @@ export class CourseAuthoringService {
   async uploadMedia(
     courseId: string,
     file:
-      | { originalname: string; mimetype?: string; buffer: Buffer }
-      | undefined,
+      { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
     expected?: 'COVER' | 'VIDEO' | 'IMAGE',
   ) {
     if (!file?.buffer) {
@@ -223,8 +225,7 @@ export class CourseAuthoringService {
   async uploadCover(
     courseId: string,
     file:
-      | { originalname: string; mimetype?: string; buffer: Buffer }
-      | undefined,
+      { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
   ) {
     const asset = await this.uploadMedia(courseId, file, 'COVER');
     await this.prisma.commerceCourse.update({
@@ -364,10 +365,7 @@ export class CourseAuthoringService {
           message: `Exhibit ${index + 1} does not belong to this lesson.`,
         });
       }
-      const timeSeconds = Math.max(
-        0,
-        Math.round(Number(row.timeSeconds) || 0),
-      );
+      const timeSeconds = Math.max(0, Math.round(Number(row.timeSeconds) || 0));
       if (duration !== null && timeSeconds > duration) {
         throw new BadRequestException({
           code: 'TRIGGER_BEYOND_VIDEO',
@@ -423,7 +421,7 @@ export class CourseAuthoringService {
         mediaAssetId: body.mediaAssetId ?? null,
         thumbnailAssetId: body.thumbnailAssetId ?? null,
         sourceText: body.sourceText ?? null,
-        localized: (body.localized ?? {}) as Prisma.InputJsonValue,
+        localized: body.localized ?? {},
       },
     });
     await this.touchCourse(courseId);
@@ -483,11 +481,7 @@ export class CourseAuthoringService {
     return updated;
   }
 
-  async deleteExhibit(
-    courseId: string,
-    lessonId: string,
-    exhibitId: string,
-  ) {
+  async deleteExhibit(courseId: string, lessonId: string, exhibitId: string) {
     const lesson = await this.requireLesson(courseId, lessonId);
     const exhibit = lesson.exhibits.find((row) => row.id === exhibitId);
     if (!exhibit)
@@ -578,8 +572,7 @@ export class CourseAuthoringService {
             data: {
               lessonId,
               code:
-                row.code?.trim() ||
-                `K-${String(index + 1).padStart(4, '0')}`,
+                row.code?.trim() || `K-${String(index + 1).padStart(4, '0')}`,
               question: required(
                 row.question,
                 `Question ${index + 1} is required.`,
@@ -614,7 +607,10 @@ export class CourseAuthoringService {
         where: { lessonId },
         create: {
           lessonId,
-          scenario: required(body.scenario, 'Application question is required.'),
+          scenario: required(
+            body.scenario,
+            'Application question is required.',
+          ),
           referenceAnswer: required(
             body.referenceAnswer,
             'Application reference answer is required.',
@@ -622,7 +618,10 @@ export class CourseAuthoringService {
           enabled: true,
         },
         update: {
-          scenario: required(body.scenario, 'Application question is required.'),
+          scenario: required(
+            body.scenario,
+            'Application question is required.',
+          ),
           referenceAnswer: required(
             body.referenceAnswer,
             'Application reference answer is required.',
@@ -635,6 +634,41 @@ export class CourseAuthoringService {
     return { enabled: body.enabled };
   }
 
+  async parseDocx(
+    file: { originalname: string; buffer: Buffer } | undefined,
+  ): Promise<{
+    html: string;
+    messages: Array<{ type: string; message: string }>;
+  }> {
+    if (!file?.buffer) {
+      throw new BadRequestException({
+        code: 'FILE_REQUIRED',
+        message: 'Upload a .docx file.',
+      });
+    }
+    if (!file.originalname.toLowerCase().endsWith('.docx')) {
+      throw new BadRequestException({
+        code: 'DOCX_INVALID',
+        message: 'Use a .docx file.',
+      });
+    }
+    try {
+      const result = await mammoth.convertToHtml({ buffer: file.buffer });
+      return {
+        html: result.value,
+        messages: result.messages.map((message) => ({
+          type: message.type,
+          message: message.message,
+        })),
+      };
+    } catch {
+      throw new BadRequestException({
+        code: 'DOCX_INVALID',
+        message: 'Could not read the Word document.',
+      });
+    }
+  }
+
   async importReadings(
     courseId: string,
     file: { originalname: string; buffer: Buffer } | undefined,
@@ -644,7 +678,9 @@ export class CourseAuthoringService {
       where: { courseId, archivedAt: null },
       select: { id: true, code: true },
     });
-    const lessonByCode = new Map(lessons.map((lesson) => [lesson.code, lesson]));
+    const lessonByCode = new Map(
+      lessons.map((lesson) => [lesson.code, lesson]),
+    );
     const errors: Array<{ row: number; message: string }> = [];
     let added = 0;
     for (const [index, row] of rows.entries()) {
@@ -735,9 +771,7 @@ export class CourseAuthoringService {
         return {
           added: 0,
           byLesson: {},
-          errors: [
-            { row: 1, message: 'Use the template to import questions' },
-          ],
+          errors: [{ row: 1, message: 'Use the template to import questions' }],
         };
       }
     }
@@ -746,7 +780,9 @@ export class CourseAuthoringService {
       where: { courseId, archivedAt: null },
       include: { applicationTest: true },
     });
-    const lessonByCode = new Map(lessons.map((lesson) => [lesson.code, lesson]));
+    const lessonByCode = new Map(
+      lessons.map((lesson) => [lesson.code, lesson]),
+    );
     const errors: Array<{ row: number; message: string }> = [];
     const byLesson: Record<string, number> = {};
     const applicationSeen = new Set<string>();
@@ -931,7 +967,9 @@ export class CourseAuthoringService {
     }
   }
 
-  private readSheet(file: { originalname: string; buffer: Buffer } | undefined) {
+  private readSheet(
+    file: { originalname: string; buffer: Buffer } | undefined,
+  ) {
     if (!file?.buffer) {
       throw new BadRequestException({
         code: 'FILE_REQUIRED',

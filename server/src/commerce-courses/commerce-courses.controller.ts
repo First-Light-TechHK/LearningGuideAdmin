@@ -277,7 +277,9 @@ export class CommerceCoursesController {
   @UseInterceptors(FileInterceptor('file'))
   uploadMedia(
     @Param('id') id: string,
-    @UploadedFile() file: { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
+    @UploadedFile()
+    file:
+      { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
   ) {
     return this.authoring.uploadMedia(id, file);
   }
@@ -286,7 +288,9 @@ export class CommerceCoursesController {
   @UseInterceptors(FileInterceptor('file'))
   uploadCover(
     @Param('id') id: string,
-    @UploadedFile() file: { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
+    @UploadedFile()
+    file:
+      { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
   ) {
     return this.authoring.uploadCover(id, file);
   }
@@ -420,6 +424,17 @@ export class CommerceCoursesController {
     );
   }
 
+  @Post(':id/docx')
+  @UseInterceptors(FileInterceptor('file'))
+  parseDocx(
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+  ): Promise<{
+    html: string;
+    messages: Array<{ type: string; message: string }>;
+  }> {
+    return this.authoring.parseDocx(file);
+  }
+
   @Post(':id/readings/import')
   @UseInterceptors(FileInterceptor('file'))
   importReadings(
@@ -457,7 +472,8 @@ export class CommerceCoursesController {
   saveApplicationTest(
     @Param('id') id: string,
     @Param('lessonId') lessonId: string,
-    @Body() body: { enabled: boolean; scenario?: string; referenceAnswer?: string },
+    @Body()
+    body: { enabled: boolean; scenario?: string; referenceAnswer?: string },
   ) {
     return this.authoring.saveApplicationTest(id, lessonId, body);
   }
@@ -478,10 +494,7 @@ export class CommerceCoursesController {
   }
 
   @Get(':id/understanding/template')
-  async understandingTemplate(
-    @Param('id') id: string,
-    @Res() res: Response,
-  ) {
+  async understandingTemplate(@Param('id') id: string, @Res() res: Response) {
     const csv = await this.authoring.downloadUnderstandingTemplate(id);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
@@ -809,13 +822,7 @@ export class CommerceCoursesController {
     @Body() body: { version?: string },
     @Req() request: BackofficeRequest,
   ) {
-    return wrap(() =>
-      this.jobs.startExport(
-        id,
-        actor(request),
-        body?.version,
-      ),
-    );
+    return wrap(() => this.jobs.startExport(id, actor(request), body?.version));
   }
 
   @Get('export/:jobId')
