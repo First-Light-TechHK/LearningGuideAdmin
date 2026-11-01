@@ -317,4 +317,114 @@ describe('ReleasesService', () => {
     );
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
+
+  // —— exportZip（2026-10-30，仅打包 pages/*.md，无 manifest.json）——
+
+  it('exportZip：ZIP 仅含每页一个 .md，丢弃 sectionTags，无 manifest.json', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      versionTag: '基础数学_202610301200',
+      revisionNotes: '首发快照',
+      createdAt: new Date('2026-10-30T12:00:00Z'),
+      snapshotData: {
+        pages: [
+          {
+            id: 'p1',
+            title: '第一章 入门',
+            contentMd: '# Intro\nhello',
+            sectionTags: { 'h1-a': ['t1'] },
+          },
+          {
+            id: 'p2',
+            title: '第二章 进阶',
+            contentMd: '# Advanced\nworld',
+            sectionTags: null,
+          },
+        ],
+      },
+    });
+
+    const { buffer, filename } = await service.exportZip('r1');
+
+    expect(filename).toBe('基础数学_202610301200.zip');
+    expect(buffer).toBeInstanceOf(Buffer);
+    expect(buffer.length).toBeGreaterThan(0);
+
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+
+    // 没有 manifest.json
+    expect(zip.file('manifest.json')).toBeNull();
+
+    // 只有两个 .md 文件（平铺在 ZIP 根目录，无 pages/ 子目录）
+    const mdFiles = Object.keys(zip.files).filter((k) => k.endsWith('.md'));
+    expect(mdFiles).toHaveLength(2);
+    expect(mdFiles).toContain('001_第一章 入门.md');
+    expect(mdFiles).toContain('002_第二章 进阶.md');
+
+    const md1 = await zip.file('001_第一章 入门.md')!.async('string');
+    expect(md1).toBe('# Intro\nhello');
+    const md2 = await zip.file('002_第二章 进阶.md')!.async('string');
+    expect(md2).toBe('# Advanced\nworld');
+  });
+
+  it('exportZip：空 pages 时 ZIP 内无 .md 文件、无 manifest', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r2',
+      versionTag: 'Empty_202610300000',
+      revisionNotes: '空的',
+      createdAt: new Date(),
+      snapshotData: { pages: [] },
+    });
+
+    const { buffer, filename } = await service.exportZip('r2');
+    expect(filename).toBe('Empty_202610300000.zip');
+
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+    const mdFiles = Object.keys(zip.files).filter((k) => k.endsWith('.md'));
+    expect(mdFiles).toHaveLength(0);
+    expect(zip.file('manifest.json')).toBeNull();
+  });
+
+  it('exportZip：不存在的 release 抛 404', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue(null);
+    await expect(service.exportZip('missing')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('exportZip：文件名含非法字符时自动清洗', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r3',
+      versionTag: 'Course/A*B"<>202610300000',
+      revisionNotes: 'x',
+      createdAt: new Date(),
+      snapshotData: {
+        pages: [
+          {
+            id: 'p1',
+            title: 'page\\with/slash',
+            contentMd: '# hi',
+            sectionTags: null,
+          },
+        ],
+      },
+    });
+
+    const { buffer, filename } = await service.exportZip('r3');
+    // versionTag 里的非法字符被替换为 _
+    expect(filename).toContain('_');
+    expect(filename).not.toMatch(/[\\/:*?"<>|]/);
+
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+    // md 文件直接平铺在 ZIP 根目录
+    const pageFiles = Object.keys(zip.files).filter(
+      (k) => !k.endsWith('/') && k.endsWith('.md'),
+    );
+    expect(pageFiles).toHaveLength(1);
+    expect(pageFiles[0]).not.toMatch(/[\\:*?"<>|]/);
+    expect(pageFiles[0]).toBe('001_page_with_slash.md');
+  });
 });

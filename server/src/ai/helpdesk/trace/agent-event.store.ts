@@ -23,6 +23,8 @@ export type NewAgentEvent = {
 export const LEARNER_TEXT_FIELDS: Partial<Record<AgentEventType, string>> = {
   'turn/start': 'input',
   'assistant/message': 'text',
+  // v5：给学员看的短句（模型写的过了守卫，或模板）可能复述学员原文
+  'turn/end': 'output',
 };
 
 export type AppendOptions = {

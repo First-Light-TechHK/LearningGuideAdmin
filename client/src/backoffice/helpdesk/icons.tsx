@@ -45,6 +45,16 @@ export function HdCalendarIcon({ size = 16, className }: IconProps) {
   )
 }
 
+/** v4 Part A 右栏「订单」块标题的小票图标（无画板，待视觉验收）。 */
+export function HdReceiptIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...stroke(size, className)}>
+      <path d="M5 2h14v20l-3-2-2 2-2-2-2 2-2-2-3 2V2Z" />
+      <path d="M9 7h6M9 11h6M9 15h4" />
+    </svg>
+  )
+}
+
 export function HdCloseIcon({ size = 10, className }: IconProps) {
   return (
     <svg {...stroke(size, className)}>

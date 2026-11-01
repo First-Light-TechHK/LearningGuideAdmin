@@ -68,6 +68,10 @@ interface AiState {
   setLive: () => Promise<void>
   newChat: () => void
   send: (text: string) => Promise<void>
+  /** 撤回最后一条用户消息及其 AI 回复，不重新发送（仅前端，localStorage 持久化） */
+  undoLastUserMessage: () => void
+  /** 重新发送最后一条用户消息（先删 user+ai，再 send 原文） */
+  retryLastUserMessage: () => Promise<boolean>
   isDirty: () => boolean
 }
 
@@ -435,6 +439,37 @@ export const useAiStore = create<AiState>((set, get) => ({
       const aiEmpty = msgs.length > 0 && msgs[msgs.length - 1].role === 'ai' && !msgs[msgs.length - 1].content
       persistChat(selectedCourseId, aiEmpty ? msgs.slice(0, -1) : msgs)
       set({ streaming: false })
+    }
+  },
+
+  /** 找到最后一条 user 消息，删掉它及其后所有消息。流式中禁用。 */
+  undoLastUserMessage() {
+    const { selectedCourseId, messages, streaming } = get()
+    if (!selectedCourseId || streaming) return
+    // 欢迎语（首条 ai，且无 user 之前）不算——找最后一条 user，删掉它及之后所有
+    const lastUserIdx = messages.reduce<number>((acc, m, i) => (m.role === 'user' ? i : acc), -1)
+    if (lastUserIdx === -1) return
+    const trimmed = messages.slice(0, lastUserIdx)
+    set({ messages: trimmed, error: null })
+    persistChat(selectedCourseId, trimmed)
+  },
+
+  /** 重新发送最后一条 user 消息：先删掉 user+ai，再 send 原文。
+   * 失败时返回 false，调用方可提示用户；成功则由 send 的 finally 自动落盘。 */
+  async retryLastUserMessage() {
+    const { selectedCourseId, messages, streaming } = get()
+    if (!selectedCourseId || streaming) return false
+    const lastUserIdx = messages.reduce<number>((acc, m, i) => (m.role === 'user' ? i : acc), -1)
+    if (lastUserIdx === -1) return false
+    const originalText = messages[lastUserIdx].content
+    const trimmed = messages.slice(0, lastUserIdx)
+    set({ messages: trimmed, error: null })
+    persistChat(selectedCourseId, trimmed)
+    try {
+      await get().send(originalText)
+      return true
+    } catch {
+      return false
     }
   },
 }))

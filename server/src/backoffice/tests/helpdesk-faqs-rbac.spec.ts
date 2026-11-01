@@ -41,6 +41,9 @@ const FID = '0192bbbb-0000-7000-8000-000000000001';
 
 const seed: HelpdeskFaq = {
   id: FID,
+  key: 'how-do-i-reset-my-password',
+  type: 'answer',
+  entry: true,
   category: 'account_technical',
   popular: true,
   questionEn: 'How do I reset my password?',
@@ -48,6 +51,7 @@ const seed: HelpdeskFaq = {
   questionZh: '如何重置密码？',
   answerZh: '点击**忘记密码**。',
   keywords: ['password'],
+  signals: [],
   status: 'published',
   version: 1,
   createdBy: null,
@@ -91,6 +95,8 @@ function employeeFor(role: EmployeeRole): SessionEmployee {
             revisions: (id) => repository.revisions(id),
             listPublished: (f) => repository.listPublished(f),
             searchPublished: (s) => repository.searchPublished(s),
+            getByKey: (k) => repository.getByKey(k),
+            getPublished: (id) => repository.getPublished(id),
           },
         }),
     },
@@ -338,6 +344,8 @@ describe('FAQ endpoints', () => {
             popular: true,
             question: seed.questionZh,
             answer: seed.answerZh,
+            // v5 Part A (contract fixture v6)
+            signals: [],
             updatedAt: seed.updatedAt,
           },
         ],
@@ -370,6 +378,7 @@ describe('FAQ endpoints', () => {
         popular: true,
         question: seed.questionEn,
         answer: seed.answerEn,
+        signals: [],
         updatedAt: seed.updatedAt,
       });
       expect(one.headers['cache-control']).toBe('no-cache');

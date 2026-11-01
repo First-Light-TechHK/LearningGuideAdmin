@@ -41,3 +41,27 @@ test("the server job runs the HelpDesk PostgreSQL specs against a postgres servi
   );
   assert.match(server, /POSTGRES_DB: helpdesk_test/);
 });
+
+// v5 Part G5: a free gate (no model, no key) for the data flywheel. It runs the retrieval-only
+// eval over the FAQ library and the accepted regression cases (recall@8 >= 95%), the guard
+// corpus (answers and gap labels) and the PII scrubber corpus shared with Portal, with CI=true
+// so a missing database fails instead of skipping.
+test("the HelpDesk eval gate job runs the free retrieval, guard and scrubber corpus specs against postgres", () => {
+  const gate = job("helpdesk-eval");
+  assert.match(gate, /\n {4}name: HelpDesk eval gate\n/);
+  assert.match(gate, /\n {4}services:\n {6}postgres:\n {8}image: postgres:16\n/);
+  for (const spec of [
+    "src/backoffice/tests/helpdesk-eval-gate.pg.spec.ts",
+    "src/ai/helpdesk/workflow/guard.spec.ts",
+    "src/ai/helpdesk/flywheel/gap-labeller.spec.ts",
+    "src/backoffice/tests/helpdesk-pii-corpus.spec.ts",
+  ])
+    assert.ok(gate.includes(spec), `${spec} missing from the eval gate`);
+  assert.match(gate, /CI: "true"/);
+  assert.match(
+    gate,
+    /HELPDESK_TEST_DATABASE_URL: postgresql:\/\/postgres:postgres@localhost:5432\/helpdesk_test/,
+  );
+  // free: never a model key in this job
+  assert.doesNotMatch(gate, /OPENROUTER_API_KEY|secrets\./);
+});

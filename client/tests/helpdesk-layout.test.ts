@@ -51,3 +51,11 @@ describe('Enquiries column widths', () => {
     assert.equal(rule('.hdMain')['overflow-y'], 'hidden')
   })
 })
+
+describe('FAQs table columns (Figma 1379:2)', () => {
+  test('the Figma column widths: question 47.2%, category 19%, popular 8%, updated 12.9%, action 12.9% (Edit + Preview only)', () => {
+    const widths = ['.hdFaqColQuestion', '.hdFaqColCategory', '.hdFaqColPopular', '.hdFaqColUpdated', '.hdFaqColAction'].map((s) => rule(s).width)
+    assert.deepEqual(widths, ['47.2%', '19%', '8%', '12.9%', '12.9%'])
+    assert.equal(Math.round(widths.reduce((sum, w) => sum + Number.parseFloat(w), 0) * 10) / 10, 100)
+  })
+})

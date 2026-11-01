@@ -160,9 +160,7 @@ export class AiChatService {
         `${STUDENT_WRAPPER.BEGIN}\n${content}\n${STUDENT_WRAPPER.END}`;
 
       const wrappedHistory = history.map((h) =>
-        h.role === 'user'
-          ? { ...h, content: wrapStudent(h.content) }
-          : h,
+        h.role === 'user' ? { ...h, content: wrapStudent(h.content) } : h,
       );
       const messages: LlmMessage[] = [
         {

@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import JSZip from 'jszip';
 import type { Prisma } from '@prisma/client';
 import { lockCourseRow } from '../prisma/course-lock';
 import { PrismaService } from '../prisma/prisma.service';
@@ -355,6 +356,43 @@ export class ReleasesService {
     return release;
   }
 
+  /**
+   * 将 Release 快照打包成 ZIP 下载。
+   * - ZIP 根目录直接平铺每页一个 Markdown 文件：{NNN}_{title}.md
+   * - 不包含 manifest.json、不包含 pages/ 子目录
+   * - 丢弃 sectionTags
+   * - 纯读，不改动 Release / Course 任何状态
+   */
+  async exportZip(releaseId: string): Promise<{
+    buffer: Buffer;
+    filename: string;
+  }> {
+    const release = await this.prisma.release.findUnique({
+      where: { id: releaseId },
+    });
+    if (!release) {
+      throw new NotFoundException('发布版本不存在');
+    }
+    const snapshot = release.snapshotData as unknown as SnapshotData;
+    const pages = snapshot.pages ?? [];
+
+    const zip = new JSZip();
+
+    for (const [i, page] of pages.entries()) {
+      const safe = ReleasesService.sanitizeFilename(
+        page.title || `page_${i + 1}`,
+      );
+      const padded = String(i + 1).padStart(3, '0');
+      // 直接平铺到 ZIP 根目录，序号前缀保证唯一性
+      const path = `${padded}_${safe}.md`;
+      zip.file(path, page.contentMd ?? '');
+    }
+
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    const filename = `${ReleasesService.sanitizeFilename(release.versionTag)}.zip`;
+    return { buffer, filename };
+  }
+
   /** 本地时间 YYYYMMDDHHmm（精确到分钟） */
   private timestamp(): string {
     const d = new Date();
@@ -362,6 +400,20 @@ export class ReleasesService {
     return (
       `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
       `${p(d.getHours())}${p(d.getMinutes())}`
+    );
+  }
+
+  /**
+   * 文件名清洗：去掉 Windows / macOS / Linux 非法字符、控制字符、首尾空白；
+   * 不保留扩展名（zip 后缀由调用方追加）；长度上限 80。
+   */
+  private static sanitizeFilename(input: string): string {
+    return (
+      input
+        .replace(/[\\/:*?"<>|\r\n\t]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 80) || 'untitled'
     );
   }
 }

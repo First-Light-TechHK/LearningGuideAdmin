@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { usePathname, useRouter } from "../lib/navigation";
@@ -30,7 +30,7 @@ import {
   visibleMenus,
   type MenuKey,
 } from "../rbac/permissions";
-import { boFetch, postJson } from "../lib/api";
+import { boFetch, boRequest, postJson } from "../lib/api";
 import { clearEmployeeWorkspace } from "../lib/signOutCleanup";
 
 const MENU_ICON: Record<MenuKey, (props: { size?: number }) => React.ReactElement> = {
@@ -81,6 +81,15 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [environment, setEnvironment] = useState<{ label: string; numbering: string } | null>(null);
+
+  useEffect(() => {
+    void boRequest<{ label: string; versionNumberingMode: string }>("/api/backoffice/environment").then((payload) => {
+      if (payload.success) {
+        setEnvironment({ label: payload.data.label, numbering: payload.data.versionNumberingMode ?? "sandbox" });
+      }
+    });
+  }, []);
 
   const menus = visibleMenus(employee.role);
   const roleLabel = t(locale, `roles.${employee.role}`);
@@ -108,6 +117,23 @@ export function AppShell({
         <span className="headerBrand">
           <BrandMark size={42} />
           {t(locale, "app.name")}
+          {environment && (
+            <span
+              title={environment.numbering === "production" ? "Version N" : "Sandbox X.Y"}
+              style={{
+                marginLeft: 10,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                padding: "3px 10px",
+                borderRadius: 999,
+                color: "#fff",
+                background: environment.numbering === "production" ? "#C0392B" : "#6C4BD3",
+              }}
+            >
+              {environment.label}
+            </span>
+          )}
         </span>
 
         <div className="headerRight">

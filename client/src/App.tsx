@@ -25,6 +25,8 @@ import {
 import { CourseManagementPage } from './backoffice/pages/CourseManagementPage'
 import { CourseEditorPage } from './backoffice/pages/CourseEditorPage'
 import { CoursePreviewPage } from './backoffice/pages/CoursePreviewPage'
+import { PortalCoursePreviewPage } from './backoffice/pages/PortalCoursePreviewPage'
+import { OperationsPage } from './backoffice/pages/OperationsPage'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
@@ -124,11 +126,14 @@ function App() {
             <Route path="activate" element={<ActivatePage />} />
             <Route path="forgot-password" element={<ForgotPasswordPage />} />
             <Route path="reset-password" element={<ResetPasswordPage />} />
+            {/* 「在 Portal 中预览」落地页：独立全宽页面，按 Portal 课程详情版式渲染 */}
+            <Route path="portal-preview/:courseId" element={<PortalCoursePreviewPage />} />
             <Route element={<ShellRoute />}>
               <Route index element={<Navigate to="course" replace />} />
               <Route path="course" element={<CourseManagementPage />} />
               <Route path="course/:courseId" element={<CourseEditorPage />} />
               <Route path="course/:courseId/preview" element={<CoursePreviewPage />} />
+              <Route path="operations" element={<OperationsPage />} />
               <Route
                 path="knowledge"
                 element={

@@ -184,6 +184,8 @@ export function visibleSettingsSubs(role: EmployeeRole): SettingsSubKey[] {
 export function menuFromPathSegments(segments: string[] | undefined): MenuKey | null {
   if (!segments || segments.length === 0) return null;
   const target = segments[0];
+  // Operations 从 Course Overview 进入，侧边栏仍高亮 Course（PRD §6）
+  if (target === "operations") return "course";
   const entry = (Object.entries(MENU_SEGMENT) as [MenuKey, string][]).find(
     ([, segment]) => segment === target
   );

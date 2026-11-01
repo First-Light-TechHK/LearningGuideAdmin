@@ -1,4 +1,12 @@
-import { FAQ_CATEGORIES, type FaqBody, type FaqCategory, type HelpdeskFaq } from '../contracts/helpdesk'
+import {
+  FAQ_CATEGORIES,
+  FAQ_SIGNALS,
+  type FaqBody,
+  type FaqCategory,
+  type FaqNodeType,
+  type FaqSignal,
+  type HelpdeskFaq,
+} from '../contracts/helpdesk'
 import { safeHref, unsafeLinks } from './helpdeskMarkdown'
 
 /**
@@ -36,14 +44,34 @@ export type FaqDraft = {
   answerZh: string
   /** 输入框里的原文（逗号分隔）。 */
   keywords: string
+  /** v5 问题树（graph design §5「追问与选项」）：卡片类型、是否入口、学员情境（按 FAQ_SIGNALS 顺序）。 */
+  type: FaqNodeType
+  entry: boolean
+  signals: FaqSignal[]
 }
 
 export type FaqField = 'category' | 'questionEn' | 'answerEn' | 'questionZh' | 'answerZh' | 'keywords'
-export type FaqFieldError = 'required' | 'tooLong' | 'tooMany' | 'unsafeLink'
+export type FaqFieldError = 'required' | 'tooLong' | 'tooMany' | 'unsafeLink' | 'choicePrompt'
 export type FaqDraftErrors = Partial<Record<FaqField, FaqFieldError>>
 
 export function emptyFaqDraft(): FaqDraft {
-  return { category: null, popular: false, questionEn: '', answerEn: '', questionZh: '', answerZh: '', keywords: '' }
+  return {
+    category: null,
+    popular: false,
+    questionEn: '',
+    answerEn: '',
+    questionZh: '',
+    answerZh: '',
+    keywords: '',
+    type: 'answer',
+    entry: true,
+    signals: [],
+  }
+}
+
+/** 去重并按 FAQ_SIGNALS 的优先级排（与服务端一致）；不认识的丢掉。 */
+export function orderedSignals(signals: readonly string[]): FaqSignal[] {
+  return FAQ_SIGNALS.filter((signal) => signals.includes(signal))
 }
 
 export function draftFromFaq(faq: HelpdeskFaq): FaqDraft {
@@ -55,6 +83,10 @@ export function draftFromFaq(faq: HelpdeskFaq): FaqDraft {
     questionZh: faq.questionZh,
     answerZh: faq.answerZh,
     keywords: faq.keywords.join(', '),
+    // 旧服务端没有这几个字段：按 answer、入口、没有情境处理
+    type: faq.type ?? 'answer',
+    entry: faq.entry ?? true,
+    signals: orderedSignals(faq.signals ?? []),
   }
 }
 
@@ -69,7 +101,17 @@ export function parseKeywords(text: string): string[] {
 }
 
 export function isDraftDirty(draft: FaqDraft, original: FaqDraft): boolean {
-  return (Object.keys(original) as (keyof FaqDraft)[]).some((key) => draft[key] !== original[key])
+  return (Object.keys(original) as (keyof FaqDraft)[]).some((key) =>
+    key === 'signals' ? draft.signals.join('\n') !== original.signals.join('\n') : draft[key] !== original[key],
+  )
+}
+
+const DIGIT = /[0-9０-９]/
+const PROMPT_LINK = /https?:\/\/|www\.|mailto:|\]\(|[^\s@]+@[^\s@]+\.[^\s@]+/i
+
+/** choice 节点的「答案」是一句提问：不陈述事实，不许数字、链接、邮箱（与服务端 choicePromptProblem 一致）。 */
+export function choicePromptProblem(prompt: string): boolean {
+  return DIGIT.test(prompt) || PROMPT_LINK.test(prompt)
 }
 
 function textError(value: string, max: number): FaqFieldError | null {
@@ -95,6 +137,9 @@ export function validateFaqDraft(draft: FaqDraft): FaqDraftErrors {
   set('answerEn', answerError(draft.answerEn))
   set('questionZh', textError(draft.questionZh, FAQ_LIMITS.questionMax))
   set('answerZh', answerError(draft.answerZh))
+  if (draft.type === 'choice')
+    for (const field of ['answerEn', 'answerZh'] as const)
+      if (!errors[field] && choicePromptProblem(draft[field])) errors[field] = 'choicePrompt'
   const keywords = parseKeywords(draft.keywords)
   if (keywords.length > FAQ_LIMITS.keywordsMax) errors.keywords = 'tooMany'
   else if (keywords.some((keyword) => keyword.length > FAQ_LIMITS.keywordMax)) errors.keywords = 'tooLong'
@@ -112,6 +157,9 @@ export function toFaqBody(draft: FaqDraft): FaqBody {
     questionZh: tidy(draft.questionZh),
     answerZh: tidy(draft.answerZh),
     keywords: parseKeywords(draft.keywords),
+    type: draft.type,
+    entry: draft.entry,
+    signals: orderedSignals(draft.signals),
   }
 }
 

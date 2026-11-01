@@ -47,18 +47,30 @@ export class PackageInspector {
     report: PackageValidationReport;
   }> {
     if (zipBytes.length > this.config.packageMaxBytes) {
-      throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Course package exceeds size limit.');
+      throw new PackageError(
+        'PACKAGE_TOO_LARGE',
+        413,
+        'Course package exceeds size limit.',
+      );
     }
     let zip: JSZip;
     try {
       zip = await JSZip.loadAsync(zipBytes);
     } catch {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'Invalid or corrupt ZIP.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'Invalid or corrupt ZIP.',
+      );
     }
 
     const entries = Object.values(zip.files).filter((f) => !f.dir);
     if (entries.length > MAX_ENTRIES) {
-      throw new PackageError('PACKAGE_INVALID_ZIP', 400, 'Too many files in package.');
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'Too many files in package.',
+      );
     }
 
     let total = 0;
@@ -66,12 +78,20 @@ export class PackageInspector {
     for (const entry of entries) {
       const name = entry.name;
       if (name.includes('..') || name.startsWith('/') || name.includes('\\')) {
-        throw new PackageError('PACKAGE_INVALID_ZIP', 400, `Illegal path in package: ${name}`);
+        throw new PackageError(
+          'PACKAGE_INVALID_ZIP',
+          400,
+          `Illegal path in package: ${name}`,
+        );
       }
       const bytes = await entry.async('nodebuffer');
       total += bytes.length;
       if (total > this.config.packageMaxBytes) {
-        throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Unpacked package exceeds size limit.');
+        throw new PackageError(
+          'PACKAGE_TOO_LARGE',
+          413,
+          'Unpacked package exceeds size limit.',
+        );
       }
       files.set(name, bytes);
     }
@@ -96,11 +116,19 @@ export class PackageInspector {
     try {
       rawManifest = JSON.parse(manifestBytes.toString('utf8'));
     } catch {
-      throw new PackageError('PACKAGE_MANIFEST_INVALID', 400, 'manifest.json is not valid JSON.');
+      throw new PackageError(
+        'PACKAGE_MANIFEST_INVALID',
+        400,
+        'manifest.json is not valid JSON.',
+      );
     }
     const shape = validateManifestShape(rawManifest);
     if (!shape.manifest || shape.report.errors.length > 0) {
-      throw new PackageError('PACKAGE_MANIFEST_INVALID', 400, firstError(shape.report));
+      throw new PackageError(
+        'PACKAGE_MANIFEST_INVALID',
+        400,
+        firstError(shape.report),
+      );
     }
 
     // checksums 校验
@@ -111,22 +139,39 @@ export class PackageInspector {
     for (const [, ref] of collectMediaRefs(shape.manifest.course)) {
       const bytes = files.get(ref);
       if (!bytes) {
-        throw new PackageError('PACKAGE_MEDIA_INVALID', 422, `Missing media file: ${ref}`);
+        throw new PackageError(
+          'PACKAGE_MEDIA_INVALID',
+          422,
+          `Missing media file: ${ref}`,
+        );
       }
       try {
-        validateMediaFile({ name: ref.split('/').pop() ?? ref, bytes: files.get(ref)! }, this.config);
+        validateMediaFile(
+          { name: ref.split('/').pop() ?? ref, bytes: files.get(ref)! },
+          this.config,
+        );
       } catch (error) {
         if (error instanceof MediaValidationError) {
-          throw new PackageError('PACKAGE_MEDIA_INVALID', 422, `${ref}: ${error.message}`);
+          throw new PackageError(
+            'PACKAGE_MEDIA_INVALID',
+            422,
+            `${ref}: ${error.message}`,
+          );
         }
         throw error;
       }
     }
 
-    const content = validateCourseContent(shape.manifest.course, { forAction: 'import' });
+    const content = validateCourseContent(shape.manifest.course, {
+      forAction: 'import',
+    });
     const report: PackageValidationReport = {
       errors: [...shape.report.errors, ...content.errors],
-      warnings: [...shape.report.warnings, ...content.warnings, ...mediaWarnings],
+      warnings: [
+        ...shape.report.warnings,
+        ...content.warnings,
+        ...mediaWarnings,
+      ],
       incomplete: content.incomplete,
     };
     return { manifest: shape.manifest, files, report };
@@ -143,10 +188,18 @@ export class PackageInspector {
       const [, hash, rel] = match;
       const bytes = files.get(rel.replace(/^\.?\//, ''));
       if (!bytes) {
-        throw new PackageError('PACKAGE_CHECKSUM_MISMATCH', 422, `Checksum references missing file: ${rel}`);
+        throw new PackageError(
+          'PACKAGE_CHECKSUM_MISMATCH',
+          422,
+          `Checksum references missing file: ${rel}`,
+        );
       }
       if (CourseStorageService.sha256(bytes) !== hash.toLowerCase()) {
-        throw new PackageError('PACKAGE_CHECKSUM_MISMATCH', 422, `Checksum mismatch: ${rel}`);
+        throw new PackageError(
+          'PACKAGE_CHECKSUM_MISMATCH',
+          422,
+          `Checksum mismatch: ${rel}`,
+        );
       }
     }
   }
@@ -157,7 +210,9 @@ function firstError(report: PackageValidationReport): string {
 }
 
 /** 遍历 manifest，收集所有媒体相对路径（cover/video/exhibit/thumbnail）。 */
-export function collectMediaRefs(course: PackageCourse): Array<[string, string]> {
+export function collectMediaRefs(
+  course: PackageCourse,
+): Array<[string, string]> {
   const refs: Array<[string, string]> = [];
   if (course.cover) refs.push(['cover', course.cover]);
   for (const lesson of course.lessons ?? []) {

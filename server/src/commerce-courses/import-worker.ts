@@ -14,7 +14,10 @@ async function runRaw(payload: Record<string, unknown>) {
   const rawPath = String(payload.rawPath);
   const outPath = String(payload.outPath);
   const buf = await fs.readFile(rawPath);
-  const built = await buildPackageFromRawZip(buf);
+  const courseCode =
+    typeof payload.courseCode === 'string' ? payload.courseCode : undefined;
+  const slug = typeof payload.slug === 'string' ? payload.slug : undefined;
+  const built = await buildPackageFromRawZip(buf, { courseCode, slug });
   await fs.writeFile(outPath, built.bytes);
   return {
     warnings: built.warnings,
@@ -49,7 +52,9 @@ async function main() {
   const input = workerData as WorkerInput;
   try {
     const result =
-      input.task === 'raw' ? await runRaw(input.payload) : await runInspect(input.payload);
+      input.task === 'raw'
+        ? await runRaw(input.payload)
+        : await runInspect(input.payload);
     parentPort?.postMessage({ ok: true, result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

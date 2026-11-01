@@ -86,6 +86,10 @@ describeDb('PrismaAgentEventLog (PostgreSQL)', () => {
         'dropping a non-learner field',
         `UPDATE helpdesk_agent_events SET data = data - 'turn' WHERE seq = 1 AND run_id = '${runId}'`,
       ],
+      [
+        'dropping a turn/end field other than output',
+        `UPDATE helpdesk_agent_events SET data = data - 'reason' WHERE seq = 2 AND run_id = '${runId}'`,
+      ],
     ])('rejects %s', async (_name, statement) => {
       await expect(sql(statement)).rejects.toThrow(/append-only/);
     });

@@ -75,7 +75,11 @@ export interface PackageLesson {
   exhibits?: PackageExhibit[];
   recommendedReading?: Record<string, PackageReading[]>;
   knowledgeTest?: { enabled: boolean; questions: PackageKnowledgeQuestion[] };
-  applicationTest?: { enabled: boolean; scenario: string; referenceAnswer?: string };
+  applicationTest?: {
+    enabled: boolean;
+    scenario: string;
+    referenceAnswer?: string;
+  };
 }
 
 export interface PackageCourseLocalization {
@@ -96,6 +100,14 @@ export interface PackageTrial {
   }[];
 }
 
+export interface PackagePlan {
+  name: string;
+  termMonths: number;
+  amountMinor: number;
+  currency: string;
+  lookupKey: string;
+}
+
 export interface PackageCourse {
   code: string;
   slug: string;
@@ -107,6 +119,8 @@ export interface PackageCourse {
   localized: Record<string, PackageCourseLocalization>;
   lessons: PackageLesson[];
   trial?: PackageTrial;
+  /** 价格随包带入；导入后在目标环境 Stripe 重新创建（PRD §16）。 */
+  pricing?: PackagePlan[];
 }
 
 export interface PackageManifest {
