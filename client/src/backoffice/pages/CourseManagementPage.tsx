@@ -19,6 +19,7 @@ type JobView = {
   error: string | null
   courseId: string | null
   package: { courseCode: string; lessons: number; mediaFiles: number; incomplete: boolean } | null
+  conflict?: { existingCourseCode: string; existingCourseId: string; live: boolean } | null
   report: { errors: Array<{ code: string; message: string }>; warnings: Array<{ code: string; message: string }> }
 }
 
@@ -596,6 +597,16 @@ function ImportPanel({
   const zh = locale.startsWith('zh')
   const errors = job.report?.errors ?? []
   const warnings = job.report?.warnings ?? []
+  // 后端在 AWAITING_CONFIRM 阶段就已预判 Course ID 是否已存在：
+  // 在点「导入课程」之前就提示「覆盖草稿 / 已上线拒绝」，而不是点了之后才报错。
+  const conflictNotice =
+    job.status === 'AWAITING_CONFIRM' && job.conflict
+      ? {
+          kind: job.conflict.live ? ('refused' as const) : ('overwrite' as const),
+          courseCode: job.conflict.existingCourseCode,
+        }
+      : null
+  const effectiveNotice = notice ?? conflictNotice
   return (
     <div style={{ marginTop: 16, padding: 16, border: '1px solid #E8EDF5', borderRadius: 12 }}>
       <h3 style={{ margin: 0 }}>{zh ? '导入校验' : 'Import validation'}</h3>
@@ -622,12 +633,12 @@ function ImportPanel({
       )}
       {job.status === 'AWAITING_CONFIRM' && (
         <div style={{ marginTop: 12 }}>
-          {notice?.kind === 'overwrite' ? (
+          {effectiveNotice?.kind === 'overwrite' ? (
             <div style={{ fontSize: 13, background: '#FFF6E5', padding: '10px 12px', borderRadius: 8 }}>
               <p style={{ margin: 0, color: '#9A6B00' }}>
                 {zh
-                  ? `课程 ${notice.courseCode} 已存在（草稿状态，从未上线）。是否用本课程包覆盖其沙盒草稿？覆盖只影响草稿，线上内容不受影响。`
-                  : `Course ${notice.courseCode} already exists as a draft (never published). Overwrite its sandbox draft with this package? Only the draft is replaced; live content is unaffected.`}
+                  ? `课程 ${effectiveNotice?.courseCode} 已存在（草稿状态，从未上线）。是否用本课程包覆盖其沙盒草稿？覆盖只影响草稿，线上内容不受影响。`
+                  : `Course ${effectiveNotice?.courseCode} already exists as a draft (never published). Overwrite its sandbox draft with this package? Only the draft is replaced; live content is unaffected.`}
               </p>
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button className="button" disabled={busy} onClick={() => onConfirm('ABORT', true)}>
@@ -638,12 +649,12 @@ function ImportPanel({
                 </button>
               </div>
             </div>
-          ) : notice?.kind === 'refused' ? (
+          ) : effectiveNotice?.kind === 'refused' ? (
             <div style={{ fontSize: 13, color: '#b42318', background: '#FDECEC', padding: '10px 12px', borderRadius: 8 }}>
               <p style={{ margin: 0 }}>
                 {zh
-                  ? `课程 ${notice.courseCode} 已上线，导入被拒绝。只能覆盖状态为草稿（从未发布）的课程，已上线课程的内容不受影响。`
-                  : `Course ${notice.courseCode} is already live, so the import is refused. Only draft (never published) courses can be overwritten; live content is never affected.`}
+                  ? `课程 ${effectiveNotice?.courseCode} 已上线，导入被拒绝。只能覆盖状态为草稿（从未发布）的课程，已上线课程的内容不受影响。`
+                  : `Course ${effectiveNotice?.courseCode} is already live, so the import is refused. Only draft (never published) courses can be overwritten; live content is never affected.`}
               </p>
               <button className="button buttonGhost" style={{ marginTop: 10 }} disabled={busy} onClick={onIgnore}>
                 {zh ? '知道了' : 'OK'}

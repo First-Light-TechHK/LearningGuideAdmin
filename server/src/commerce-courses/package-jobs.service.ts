@@ -42,6 +42,15 @@ export interface JobView {
     incomplete: boolean;
   } | null;
   conflicts: unknown;
+  /**
+   * 等待确认阶段预先判定的 Course ID 冲突（仅「从包新建」的导入作业）：
+   * 便于前端在点「导入课程」之前就提示「覆盖草稿 / 已上线拒绝」。
+   */
+  conflict: {
+    existingCourseCode: string;
+    existingCourseId: string;
+    live: boolean;
+  } | null;
   report: JobReport;
 }
 
@@ -752,7 +761,33 @@ export class PackageJobsService {
           }
         : null,
       conflicts: job.conflicts,
+      conflict: await this.detectCourseCodeConflict(job, manifest),
       report: report ?? { errors: [], warnings: [] },
+    };
+  }
+
+  /**
+   * 仅对「从包新建」的导入作业，在 Course ID 已存在时给出预判：
+   * live=true 表示已上线（应拒绝覆盖），否则为可覆盖的草稿。
+   */
+  private async detectCourseCodeConflict(
+    job: { courseId: string | null; kind: string },
+    manifest: PackageManifest | null,
+  ): Promise<{
+    existingCourseCode: string;
+    existingCourseId: string;
+    live: boolean;
+  } | null> {
+    if (!manifest || job.courseId || job.kind !== 'IMPORT') return null;
+    const existing = await this.prisma.commerceCourse.findFirst({
+      where: { code: manifest.course.code },
+      select: { id: true, code: true, liveVersionId: true },
+    });
+    if (!existing) return null;
+    return {
+      existingCourseCode: existing.code,
+      existingCourseId: existing.id,
+      live: Boolean(existing.liveVersionId),
     };
   }
 

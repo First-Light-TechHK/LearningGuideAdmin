@@ -123,6 +123,15 @@ function parseCourseInfo(rows: unknown[][]): Map<string, string> {
   return info;
 }
 
+/** 在 Checklist/Course info 等 key→value 表里按标签取值（忽略大小写与首尾空白）。 */
+function readChecklistValue(info: Map<string, string>, label: string): string | undefined {
+  const target = label.trim().toLowerCase();
+  for (const [key, value] of info.entries()) {
+    if (key.trim().toLowerCase() === target && value && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 function parseReadings(rows: unknown[][]): Map<number, PackageReading[]> {
   const map = new Map<number, PackageReading[]>();
   let current = 0;
@@ -446,7 +455,10 @@ async function buildNewTemplatePackage(
   const titleEn = info["course title"]?.en || checklist.get("Course title") || "Imported Course";
   const titleZh = info["course title"]?.zh;
   const category = info["category"]?.en || "Uncategorised";
-  const courseCode = (options.courseCode || checklist.get("Course ID") || "C001").trim().toUpperCase();
+  // Course ID 必须优先取 Excel Checklist 里的值（SCI001 等）；options.courseCode 只是
+  // 「模板里没有 Course ID」时的兜底编号（TEMP001…），绝不能反过来覆盖 Excel 里的真实编号。
+  const checklistCourseId = readChecklistValue(checklist, "Course ID");
+  const courseCode = (checklistCourseId || options.courseCode || "C001").trim().toUpperCase();
   const slug = (options.slug || slugify(titleEn)).trim().toLowerCase();
 
   // 封面

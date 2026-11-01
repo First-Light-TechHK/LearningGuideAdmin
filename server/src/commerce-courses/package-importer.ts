@@ -54,14 +54,17 @@ export class PackageImporter {
   ): Promise<{ courseId: string }> {
     const { course } = manifest;
 
-    // 冲突检测
-    const existing = await this.prisma.commerceCourse.findFirst({
-      where: { OR: [{ code: course.code }, { slug: course.slug }] },
-      select: { id: true, code: true, slug: true },
-    });
+    // 冲突检测：Course ID（课程身份）与 slug（URL 标识）要分开判断。
+    // - Course ID 已存在 → 按冲突策略处理（拒绝 / NEW_VERSION 未实现）；
+    // - 仅 slug 撞车（Course ID 唯一）→ 自动追加序号生成唯一 slug，
+    //   绝不能把「标题 slug 相同」误报成「Course ID 已存在」而拒绝导入。
     let targetCode = course.code;
     let targetSlug = course.slug;
-    if (existing) {
+    const existingByCode = await this.prisma.commerceCourse.findFirst({
+      where: { code: course.code },
+      select: { id: true, code: true },
+    });
+    if (existingByCode) {
       // PRD §9.2 / §16.3：Course ID 已存在时必须拒绝导入；已有课程请使用 Import package。
       if (
         options.onConflict === 'ABORT' ||
@@ -70,7 +73,7 @@ export class PackageImporter {
         throw new ImportError(
           'PACKAGE_CONFLICT',
           409,
-          `Course ${existing.code} already exists. The Course ID must not already exist in this Admin, or the import is refused.`,
+          `Course ${existingByCode.code} already exists. The Course ID must not already exist in this Admin, or the import is refused.`,
         );
       }
       // NEW_VERSION 暂未实现，按冲突处理
@@ -81,6 +84,13 @@ export class PackageImporter {
           'NEW_VERSION import not implemented yet.',
         );
       }
+    }
+    const slugOwner = await this.prisma.commerceCourse.findFirst({
+      where: { slug: targetSlug },
+      select: { id: true },
+    });
+    if (slugOwner) {
+      targetSlug = await this.uniqueSlug(targetSlug);
     }
 
     // 分类（自动创建/复用，大小写不敏感）
@@ -386,6 +396,20 @@ export class PackageImporter {
           }),
       },
     };
+  }
+
+  /** 生成未被占用的 slug：base、base-2、base-3…（slug 仅要求唯一，非课程身份）。 */
+  private async uniqueSlug(base: string): Promise<string> {
+    const root = (base || 'course').trim().toLowerCase() || 'course';
+    for (let i = 2; i < 1000; i++) {
+      const candidate = `${root}-${i}`;
+      const taken = await this.prisma.commerceCourse.findFirst({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+      if (!taken) return candidate;
+    }
+    return `${root}-${Date.now().toString(36)}`;
   }
 
   private async resolveCategory(name: string): Promise<string | null> {
