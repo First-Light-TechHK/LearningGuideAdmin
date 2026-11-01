@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import type { CourseDetail, CourseVersion, HistoryPage } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
@@ -38,6 +39,7 @@ export function CourseVersionsSection({
   onReload: () => Promise<void>;
   onNotice: (message: string) => void;
 }) {
+  const navigate = useNavigate();
   const [publishOpen, setPublishOpen] = useState(false);
   const [notifyLearners, setNotifyLearners] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -274,7 +276,7 @@ export function CourseVersionsSection({
                 <td>{version.sourceVersionLabel ?? version.sourceEnvironment ?? '—'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button type="button" style={buttonStyle} onClick={() => onNotice(`${L(locale, '查看', 'View')} ${version.versionLabel}`)}>{L(locale, '查看', 'View')}</button>
+                    <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course/${course.id}/preview?versionId=${version.id}`)}>{L(locale, '查看', 'View')}</button>
                     {!version.isLive && <button type="button" style={buttonStyle} disabled={busy} onClick={() => setRestoreVersion(version)}>{L(locale, '恢复', 'Restore')}</button>}
                   </div>
                 </td>
