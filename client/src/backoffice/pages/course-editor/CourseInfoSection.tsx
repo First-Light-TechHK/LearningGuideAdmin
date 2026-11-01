@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CourseDetail, CourseLocalization } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
+import { useMediaLimits } from '../../lib/mediaLimits';
+import { UploadProgress } from '../../components/UploadProgress';
 import {
   Chip,
   Field,
@@ -105,7 +108,9 @@ export function CourseInfoSection({
   const [languageOpen, setLanguageOpen] = useState(false);
   const [newLanguage, setNewLanguage] = useState('zh-CN');
   const [coverBusy, setCoverBusy] = useState(false);
+  const [coverPct, setCoverPct] = useState<number | null>(null);
   const [coverError, setCoverError] = useState('');
+  const mediaLimits = useMediaLimits();
   const learnFocus = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -211,6 +216,16 @@ export function CourseInfoSection({
   }
 
   async function uploadCover(file: File) {
+    if (mediaLimits && file.size > mediaLimits.imageBytes) {
+      setCoverError(
+        L(
+          locale,
+          `封面超过单文件上限 ${formatBytes(mediaLimits.imageBytes)}（当前 ${formatBytes(file.size)}）。`,
+          `Cover exceeds the ${formatBytes(mediaLimits.imageBytes)} per-file limit (this file is ${formatBytes(file.size)}).`,
+        ),
+      );
+      return;
+    }
     const valid = await readCover(file);
     if (!valid.ok) {
       setCoverError(valid.message ?? L(locale, '请使用 400 × 185 px 或同比例更大的 JPG 或 PNG。', 'Use a JPG or PNG at 400 × 185 px or larger, same ratio'));
@@ -218,18 +233,15 @@ export function CourseInfoSection({
     }
     setCoverBusy(true);
     setCoverError('');
-    const form = new FormData();
-    form.append('file', file);
-    const result = await boRequest(`/api/backoffice/courses/${course.id}/cover`, {
-      method: 'POST',
-      body: form,
-    });
+    setCoverPct(0);
+    const result = await uploadFileWithProgress(`/api/backoffice/courses/${course.id}/cover`, file, setCoverPct);
+    setCoverPct(null);
     setCoverBusy(false);
     if (result.success) {
       onNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
       await onReload();
     } else {
-      setCoverError(result.message ?? L(locale, '封面上传失败。', 'Cover upload failed.'));
+      setCoverError(result.errorMessage ?? L(locale, '封面上传失败。', 'Cover upload failed.'));
     }
   }
 
@@ -349,7 +361,14 @@ export function CourseInfoSection({
               ))}
             </select>
           </Field>
-          <Field label={L(locale, '课程封面 *', 'Course cover *')} hint={L(locale, '400 × 185 px 或同比例更大尺寸，JPG 或 PNG。', '400 × 185 px or larger, same ratio. JPG or PNG.')}>
+          <Field
+            label={L(locale, '课程封面 *', 'Course cover *')}
+            hint={
+              mediaLimits
+                ? L(locale, `400 × 185 px 或同比例更大尺寸，JPG 或 PNG，单文件最大 ${formatBytes(mediaLimits.imageBytes)}。`, `400 × 185 px or larger, same ratio. JPG or PNG, up to ${formatBytes(mediaLimits.imageBytes)}.`)
+                : L(locale, '400 × 185 px 或同比例更大尺寸，JPG 或 PNG。', '400 × 185 px or larger, same ratio. JPG or PNG.')
+            }
+          >
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               {course.cover ? (
                 <img src={`/api/backoffice/courses/${course.id}/cover`} alt="" style={{ width: 120, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid #E8EDF5' }} />
@@ -376,7 +395,13 @@ export function CourseInfoSection({
                 {course.cover && <button type="button" style={dangerBtn} disabled={coverBusy} onClick={() => void removeCover()}>{L(locale, '移除', 'Remove')}</button>}
               </div>
             </div>
-            {coverBusy && <div style={{ fontSize: 12, color: '#2B58C8', marginTop: 6 }}>{L(locale, '上传中…', 'Uploading…')}</div>}
+            {coverBusy && (
+              <UploadProgress
+                tone="active"
+                title={L(locale, '正在上传封面…', 'Uploading cover…')}
+                pct={coverPct ?? 0}
+              />
+            )}
             {coverError && <div style={{ fontSize: 12, color: '#b42318', marginTop: 6 }}>{coverError}</div>}
           </Field>
         </div>

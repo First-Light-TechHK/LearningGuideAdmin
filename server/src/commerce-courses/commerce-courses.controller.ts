@@ -26,6 +26,7 @@ import { TrialService } from './trial.service';
 import { PricingService } from './pricing.service';
 import { PreviewService } from './preview.service';
 import { CourseAuthoringService } from './course-authoring.service';
+import { MediaUploadService } from './media-upload.service';
 import { PortalPreviewService } from './portal-preview.service';
 import { PortalProjectionService } from './portal-projection.service';
 import { contentTypeFor } from './content-type';
@@ -59,6 +60,7 @@ export class CommerceCoursesController {
     private readonly pricing: PricingService,
     private readonly preview: PreviewService,
     private readonly authoring: CourseAuthoringService,
+    private readonly mediaUploads: MediaUploadService,
     private readonly portalPreview: PortalPreviewService,
     private readonly portalProjection: PortalProjectionService,
   ) {}
@@ -111,6 +113,12 @@ export class CommerceCoursesController {
   @Get('storage-info')
   storageInfo() {
     return this.jobs.storageInfo();
+  }
+
+  // 上传上限：前端在「上传视频/展品/封面」处直接展示，避免用户选完大文件才被拒。需声明在 :id 之前。
+  @Get('media-limits')
+  mediaLimits() {
+    return this.mediaUploads.limits();
   }
 
   @Get(':id')
@@ -301,6 +309,59 @@ export class CommerceCoursesController {
       { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
   ) {
     return this.authoring.uploadMedia(id, file);
+  }
+
+  // ===== 大文件分块上传（视频可达数百 MB，单请求会被边缘切断）=====
+  @Post(':id/media/session')
+  @HttpCode(200)
+  createMediaUploadSession(
+    @Param('id') id: string,
+    @Body() body: { fileName?: string; bytesTotal?: number },
+  ) {
+    return this.mediaUploads.createSession(id, body ?? {});
+  }
+
+  @Get(':id/media/sessions/:sessionId')
+  mediaUploadSession(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.mediaUploads.status(id, sessionId);
+  }
+
+  @Put(':id/media/sessions/:sessionId/chunk')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('chunk'))
+  uploadMediaChunk(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+    @Query('index') index: string | undefined,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ) {
+    return this.mediaUploads.appendChunk(
+      id,
+      sessionId,
+      Number(index),
+      file?.buffer,
+    );
+  }
+
+  @Post(':id/media/sessions/:sessionId/complete')
+  @HttpCode(200)
+  completeMediaUpload(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.mediaUploads.complete(id, sessionId);
+  }
+
+  @Delete(':id/media/sessions/:sessionId')
+  @HttpCode(200)
+  cancelMediaUpload(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.mediaUploads.cancel(id, sessionId);
   }
 
   @Post(':id/cover')

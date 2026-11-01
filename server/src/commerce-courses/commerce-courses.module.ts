@@ -20,6 +20,7 @@ import { OperationsService } from './operations.service';
 import { OperationsController } from './operations.controller';
 import { EnvironmentController } from './environment.controller';
 import { CourseAuthoringService } from './course-authoring.service';
+import { MediaUploadService } from './media-upload.service';
 
 /**
  * 商品课程 v2（Commerce Course）：课程管理、课程包导入/导出、Portal v1 投影。
@@ -54,6 +55,7 @@ import { CourseAuthoringService } from './course-authoring.service';
     PackageWorker,
     CommerceCoursesService,
     CourseAuthoringService,
+    MediaUploadService,
     PortalProjectionService,
     PortalPreviewService,
   ],

@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CourseDetail, Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { formatBytes, uploadFileWithProgress, uploadMediaInChunks } from '../../lib/upload';
+import { useMediaLimits } from '../../lib/mediaLimits';
+import { UploadProgress } from '../../components/UploadProgress';
 import { UnderstandingPanel } from './UnderstandingPanel';
 import { ExhibitDrawer } from './ExhibitDrawer';
 import { TextEditor } from './TextEditor';
@@ -25,6 +28,26 @@ import {
 
 
 type UploadResult = { id: string; kind?: string; originalName?: string };
+
+type VideoUploadState = {
+  phase: 'uploading' | 'processing' | 'assigning' | 'done' | 'error' | 'cancelled';
+  fileName: string;
+  size: number;
+  pct: number;
+  loaded: number;
+  startedAt: number;
+  elapsedMs: number;
+  assetId?: string;
+  durationSeconds?: number | null;
+  error?: string;
+};
+
+type ExhibitUploadState = {
+  index: number;
+  total: number;
+  fileName: string;
+  pct: number;
+} | null;
 
 function loc(lesson: Lesson | undefined, language: string) {
   if (!lesson || !Array.isArray(lesson.localizations)) return undefined;
@@ -84,6 +107,10 @@ export function CourseContentSection({
   const [readingImportFile, setReadingImportFile] = useState<File | null>(null);
   const [readingImportResult, setReadingImportResult] = useState<{ added: number; errors: Array<{ row: number; message: string }> } | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [videoUpload, setVideoUpload] = useState<VideoUploadState | null>(null);
+  const [exhibitUpload, setExhibitUpload] = useState<ExhibitUploadState>(null);
+  const videoAbortRef = useRef<AbortController | null>(null);
+  const lastVideoFileRef = useRef<File | null>(null);
 
   const sortedLessons = useMemo(() => [...course.lessons].sort((a, b) => a.sortOrder - b.sortOrder), [course.lessons]);
   const activeLesson = sortedLessons.find((lesson) => lesson.id === activeLessonId) ?? sortedLessons[0];
@@ -134,6 +161,12 @@ export function CourseContentSection({
   useEffect(() => {
     setAllImportLanguage(contentLanguage);
   }, [contentLanguage]);
+
+  useEffect(() => {
+    videoAbortRef.current?.abort();
+    setVideoUpload(null);
+    setExhibitUpload(null);
+  }, [activeLessonId]);
 
   const textLps = useMemo(() => parseTextLearningPoints(textHtml), [textHtml]);
   const videoDuration = loc(activeLesson, contentLanguage)?.videoDurationSeconds ?? null;
@@ -227,49 +260,154 @@ export function CourseContentSection({
     }
   }
 
+  function uploadFailureText(code: string, detail?: string) {
+    if (code === 'NETWORK_ERROR') {
+      return L(locale, '上传中断：网络不稳定或连接被关闭，请重试。', 'Upload interrupted: network dropped or the connection closed. Please retry.');
+    }
+    if (code === 'TIMEOUT') {
+      return L(locale, '上传超时：网络过慢或服务无响应，请重试。', 'Upload timed out: slow network or no response from the server. Please retry.');
+    }
+    if (code === 'MEDIA_TOO_LARGE') {
+      return L(locale, `文件超过大小限制：${detail ?? ''}`, `File exceeds the size limit: ${detail ?? ''}`);
+    }
+    if (detail && detail.trim()) return L(locale, `上传失败：${detail}`, `Upload failed: ${detail}`);
+    return L(locale, `上传失败：${code}`, `Upload failed: ${code}`);
+  }
+
   async function uploadVideo(file: File) {
     if (!activeLesson) return;
-    setBusy(true);
-    const form = new FormData();
-    form.append('file', file);
-    const uploaded = await boRequest<UploadResult>(`/api/backoffice/courses/${course.id}/media`, { method: 'POST', body: form });
-    if (!uploaded.success) {
-      setBusy(false);
-      onNotice(`${L(locale, '视频上传失败', 'Video upload failed')}: ${uploaded.message ?? uploaded.error}`);
+    if (mediaLimits && file.size > mediaLimits.videoBytes) {
+      const message = L(
+        locale,
+        `视频超过单文件上限 ${formatBytes(mediaLimits.videoBytes)}（当前 ${formatBytes(file.size)}）。`,
+        `Video exceeds the ${formatBytes(mediaLimits.videoBytes)} per-file limit (this file is ${formatBytes(file.size)}).`,
+      );
+      lastVideoFileRef.current = null;
+      setVideoUpload({
+        phase: 'error',
+        fileName: file.name,
+        size: file.size,
+        pct: 0,
+        loaded: 0,
+        startedAt: Date.now(),
+        elapsedMs: 0,
+        error: message,
+      });
+      onNotice(message);
       return;
     }
-    const assigned = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/video`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ language: contentLanguage, assetId: uploaded.data.id }),
+    const lessonId = activeLesson.id;
+    lastVideoFileRef.current = file;
+    const controller = new AbortController();
+    videoAbortRef.current = controller;
+    const startedAt = Date.now();
+    setVideoUpload({ phase: 'uploading', fileName: file.name, size: file.size, pct: 0, loaded: 0, startedAt, elapsedMs: 0 });
+
+    const result = await uploadMediaInChunks<UploadResult>({
+      courseId: course.id,
+      file,
+      callbacks: {
+        signal: controller.signal,
+        onProgress: (progress) =>
+          setVideoUpload((prev) =>
+            prev && {
+              ...prev,
+              phase: 'uploading',
+              pct: progress.pct,
+              loaded: progress.loaded,
+              elapsedMs: Date.now() - startedAt,
+            },
+          ),
+        onProcessing: () =>
+          setVideoUpload((prev) => prev && { ...prev, phase: 'processing', pct: 100, loaded: prev.size }),
+      },
     });
-    setBusy(false);
-    if (assigned.success) {
-      onNotice(L(locale, '视频已上传。', 'Video uploaded.'));
-      await onReload();
-    } else {
-      onNotice(`${L(locale, '视频分配失败', 'Video assign failed')}: ${assigned.message ?? assigned.error}`);
+    videoAbortRef.current = null;
+
+    if (!result.success) {
+      if (result.cancelled) {
+        setVideoUpload((prev) => prev && { ...prev, phase: 'cancelled', pct: 0, loaded: 0 });
+        onNotice(L(locale, '已取消上传。', 'Upload cancelled.'));
+        return;
+      }
+      const message = uploadFailureText(result.error, result.errorMessage);
+      setVideoUpload((prev) => prev && { ...prev, phase: 'error', error: message });
+      onNotice(message);
+      return;
     }
+
+    setVideoUpload((prev) => prev && { ...prev, phase: 'assigning', assetId: result.data.id });
+    const assigned = await boRequest<{ assetId: string; durationSeconds: number | null }>(
+      `/api/backoffice/courses/${course.id}/lessons/${lessonId}/video`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ language: contentLanguage, assetId: result.data.id }),
+      },
+    );
+    if (!assigned.success) {
+      const message = `${L(locale, '视频已上传，但绑定到课时失败', 'Video uploaded, but assigning it to the lesson failed')}: ${assigned.message ?? assigned.error}`;
+      setVideoUpload((prev) => prev && { ...prev, phase: 'error', error: message });
+      onNotice(message);
+      return;
+    }
+    setVideoUpload((prev) =>
+      prev && { ...prev, phase: 'done', pct: 100, durationSeconds: assigned.data.durationSeconds },
+    );
+    onNotice(L(locale, '视频已上传并绑定到当前课时。', 'Video uploaded and assigned to this lesson.'));
+    await onReload();
+  }
+
+  function cancelVideoUpload() {
+    videoAbortRef.current?.abort();
   }
 
   async function batchUploadExhibits(files: FileList | null) {
     if (!files || !activeLesson) return;
+    const list = Array.from(files);
     setBusy(true);
-    for (const file of Array.from(files)) {
+    const failures: string[] = [];
+    let uploadedCount = 0;
+    for (let index = 0; index < list.length; index++) {
+      const file = list[index];
+      setExhibitUpload({ index: index + 1, total: list.length, fileName: file.name, pct: 0 });
       const form = new FormData();
       form.append('file', file);
-      const uploaded = await boRequest<UploadResult>(`/api/backoffice/courses/${course.id}/media`, { method: 'POST', body: form });
-      if (!uploaded.success) continue;
+      const uploaded = await uploadFileWithProgress<UploadResult>(
+        `/api/backoffice/courses/${course.id}/media`,
+        file,
+        (pct) => setExhibitUpload({ index: index + 1, total: list.length, fileName: file.name, pct }),
+      );
+      if (!uploaded.success) {
+        failures.push(`${file.name}（${uploaded.errorMessage ?? uploaded.error}）`);
+        continue;
+      }
       const type =
         uploaded.data.kind === 'VIDEO' ? 'VIDEO' : uploaded.data.kind === 'MODEL3D' ? 'MODEL3D' : 'IMAGE';
-      await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/exhibits`, {
+      const created = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/exhibits`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ type, mediaAssetId: uploaded.data.id, localized: {} }),
       });
+      if (!created.success) {
+        failures.push(`${file.name}（${created.message ?? created.error}）`);
+        continue;
+      }
+      uploadedCount += 1;
     }
+    setExhibitUpload(null);
     setBusy(false);
-    onNotice(L(locale, '展品已上传，点击「补全」填写信息。', 'Exhibits uploaded; click Complete to finish details.'));
+    if (failures.length > 0) {
+      onNotice(
+        L(
+          locale,
+          `已上传 ${uploadedCount}/${list.length} 个展品，失败：${failures.join('；')}`,
+          `Uploaded ${uploadedCount}/${list.length} exhibits. Failed: ${failures.join('; ')}`,
+        ),
+      );
+    } else {
+      onNotice(L(locale, '展品已上传，点击「补全」填写信息。', 'Exhibits uploaded; click Complete to finish details.'));
+    }
     await onReload();
   }
 
@@ -358,6 +496,11 @@ export function CourseContentSection({
   }
 
   const currentVideoLoc = activeLesson ? loc(activeLesson, contentLanguage) : undefined;
+  const mediaLimits = useMediaLimits();
+  const videoBusy =
+    videoUpload?.phase === 'uploading' ||
+    videoUpload?.phase === 'processing' ||
+    videoUpload?.phase === 'assigning';
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20, marginTop: 18 }}>
@@ -450,6 +593,15 @@ export function CourseContentSection({
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, '展品', 'Exhibits')}</h3>
                     <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '列表顺序就是学生端 Exploration 中该课时的展品顺序。', "The list order is the exhibit order in the learner's Exploration.")}</p>
+                    {mediaLimits && (
+                      <p style={{ margin: '2px 0 0', fontSize: 12, opacity: 0.65 }}>
+                        {L(
+                          locale,
+                          `单文件上限：图片 ${formatBytes(mediaLimits.imageBytes)} · 视频 ${formatBytes(mediaLimits.videoBytes)} · 3D ${formatBytes(mediaLimits.modelBytes)}`,
+                          `Per-file limits: image ${formatBytes(mediaLimits.imageBytes)} · video ${formatBytes(mediaLimits.videoBytes)} · 3D ${formatBytes(mediaLimits.modelBytes)}`,
+                        )}
+                      </p>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ fontSize: 12, color: '#5A6577' }}>{exhibits.length} {L(locale, '个展品', 'in Exploration')}</span>
@@ -459,6 +611,17 @@ export function CourseContentSection({
                     </label>
                   </div>
                 </div>
+                {exhibitUpload && (
+                  <UploadProgress
+                    tone="active"
+                    title={L(
+                      locale,
+                      `正在上传展品 ${exhibitUpload.index}/${exhibitUpload.total}：${exhibitUpload.fileName}`,
+                      `Uploading exhibit ${exhibitUpload.index}/${exhibitUpload.total}: ${exhibitUpload.fileName}`,
+                    )}
+                    pct={exhibitUpload.pct}
+                  />
+                )}
                 <div style={{ marginTop: 10 }}>
                   {exhibits.map((exhibit) => {
                     const title = exhibit.localized?.[contentLanguage]?.title ?? exhibit.localized?.['en-GB']?.title ?? exhibit.code;
@@ -492,12 +655,93 @@ export function CourseContentSection({
                 {studyTab === 'video' && hasVideo && (
                   <div style={{ marginTop: 14 }}>
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <label style={{ ...buttonStyle, cursor: busy ? 'not-allowed' : 'pointer' }}>
-                        {currentVideoLoc?.video ? L(locale, '替换视频', 'Replace video') : L(locale, '上传视频', 'Upload video')}
-                        <input type="file" accept="video/*" disabled={busy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file); event.currentTarget.value = ''; }} />
+                      <label style={{ ...buttonStyle, cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
+                        {videoBusy
+                          ? L(locale, '上传中…', 'Uploading…')
+                          : currentVideoLoc?.video
+                            ? L(locale, '替换视频', 'Replace video')
+                            : L(locale, '上传视频', 'Upload video')}
+                        <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file); event.currentTarget.value = ''; }} />
                       </label>
                       <span style={{ fontSize: 12, color: '#5A6577' }}>{currentVideoLoc?.video ? `${currentVideoLoc.video.id} · ${fmtDuration(currentVideoLoc.videoDurationSeconds)}` : L(locale, '尚未上传视频', 'No video yet')}</span>
                     </div>
+                    <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
+                      {mediaLimits
+                        ? L(
+                            locale,
+                            `支持 MP4 / MOV / WebM，单文件最大 ${formatBytes(mediaLimits.videoBytes)}。大文件会自动分块上传并显示进度，可随时取消或重试。`,
+                            `MP4 / MOV / WebM, up to ${formatBytes(mediaLimits.videoBytes)} per file. Large files upload in chunks with live progress and can be cancelled or retried.`,
+                          )
+                        : L(
+                            locale,
+                            '支持 MP4 / MOV / WebM。大文件会自动分块上传并显示进度，可随时取消或重试。',
+                            'MP4 / MOV / WebM. Large files upload in chunks with live progress, and can be cancelled or retried.',
+                          )}
+                    </p>
+                    {videoUpload && videoUpload.phase === 'uploading' && (
+                      <UploadProgress
+                        tone="active"
+                        title={L(locale, `正在上传 ${videoUpload.fileName}`, `Uploading ${videoUpload.fileName}`)}
+                        pct={videoUpload.pct}
+                        loaded={videoUpload.loaded}
+                        total={videoUpload.size}
+                        elapsedMs={videoUpload.elapsedMs}
+                        onCancel={cancelVideoUpload}
+                        cancelLabel={L(locale, '取消上传', 'Cancel upload')}
+                      />
+                    )}
+                    {videoUpload && videoUpload.phase === 'processing' && (
+                      <UploadProgress
+                        tone="active"
+                        title={L(locale, '已上传，服务端正在校验并保存视频…', 'Uploaded. The server is validating and saving the video…')}
+                        pct={100}
+                        detail={L(locale, `文件大小 ${formatBytes(videoUpload.size)}`, `Size ${formatBytes(videoUpload.size)}`)}
+                      />
+                    )}
+                    {videoUpload && videoUpload.phase === 'assigning' && (
+                      <UploadProgress
+                        tone="active"
+                        title={L(locale, '正在绑定到当前课时…', 'Assigning the video to this lesson…')}
+                        pct={100}
+                      />
+                    )}
+                    {videoUpload && videoUpload.phase === 'done' && (
+                      <UploadProgress
+                        tone="success"
+                        title={L(locale, `视频已上传：${videoUpload.fileName}`, `Video uploaded: ${videoUpload.fileName}`)}
+                        pct={100}
+                        detail={`${formatBytes(videoUpload.size)} · ${L(locale, '时长', 'Duration')} ${fmtDuration(videoUpload.durationSeconds)}`}
+                      />
+                    )}
+                    {videoUpload && videoUpload.phase === 'error' && (
+                      <UploadProgress
+                        tone="error"
+                        title={L(locale, '视频上传失败', 'Video upload failed')}
+                        detail={videoUpload.error}
+                      />
+                    )}
+                    {videoUpload && videoUpload.phase === 'cancelled' && (
+                      <UploadProgress
+                        tone="muted"
+                        title={L(locale, '已取消上传', 'Upload cancelled')}
+                        detail={videoUpload.fileName}
+                      />
+                    )}
+                    {videoUpload && (videoUpload.phase === 'error' || videoUpload.phase === 'cancelled') && (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          style={primaryBtn}
+                          disabled={busy || videoBusy}
+                          onClick={() => {
+                            const file = lastVideoFileRef.current;
+                            if (file) void uploadVideo(file);
+                          }}
+                        >
+                          {L(locale, '重试上传', 'Retry upload')}
+                        </button>
+                      </div>
+                    )}
                     <div style={{ marginTop: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <strong style={{ fontSize: 14 }}>{L(locale, '学习点', 'Learning points')}</strong>

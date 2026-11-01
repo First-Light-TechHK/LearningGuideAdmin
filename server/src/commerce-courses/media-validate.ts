@@ -179,6 +179,54 @@ export interface ValidatedMedia {
   originalName: string;
 }
 
+export interface MediaDescriptor {
+  kind: MediaKind;
+  mimeType: string;
+  extension: string;
+  maxBytes: number;
+}
+
+/**
+ * 只看文件名与总字节数做前置校验（分块上传在收第一块之前就要拒绝超大/不支持的文件，
+ * 否则用户要白传几百 MB 才看到失败）。
+ */
+export function describeMediaUpload(
+  input: { name: string; bytesTotal: number },
+  config: CommerceCourseConfig,
+): MediaDescriptor {
+  if (
+    typeof input.name !== 'string' ||
+    input.name.length > 255 ||
+    /[\u0000-\u001f\u007f/\\]/.test(input.name)
+  ) {
+    throw new MediaValidationError('filename', 'Invalid filename.');
+  }
+  const extension = path.extname(input.name).slice(1).toLowerCase();
+  const format = FORMATS[extension];
+  if (!format) {
+    throw new MediaValidationError(
+      'unsupported',
+      `Unsupported file extension: ${extension || '(none)'}`,
+    );
+  }
+  const maxBytes = Number(config[format.maxBytesKey]);
+  if (!Number.isFinite(input.bytesTotal) || input.bytesTotal <= 0) {
+    throw new MediaValidationError('invalid', 'File is empty.');
+  }
+  if (input.bytesTotal > maxBytes) {
+    throw new MediaValidationError(
+      'too_large',
+      `File exceeds size limit (${maxBytes} bytes).`,
+    );
+  }
+  return {
+    kind: format.kind,
+    mimeType: format.mime,
+    extension,
+    maxBytes,
+  };
+}
+
 export function validateMediaFile(
   input: { name: string; type?: string; bytes: Buffer },
   config: CommerceCourseConfig,

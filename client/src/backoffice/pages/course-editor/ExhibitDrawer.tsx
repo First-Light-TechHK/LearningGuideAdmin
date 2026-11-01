@@ -2,6 +2,9 @@ import { useState } from 'react';
 
 import type { Exhibit, Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
+import { useMediaLimits } from '../../lib/mediaLimits';
+import { UploadProgress } from '../../components/UploadProgress';
 import {
   Chip,
   Field,
@@ -57,6 +60,8 @@ export function ExhibitDrawer({
   const [previewLanguage, setPreviewLanguage] = useState(learningLanguages[0] ?? 'en-GB');
   const [preview, setPreview] = useState(false);
   const [error, setError] = useState('');
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const mediaLimits = useMediaLimits();
 
   function kindToType(kind?: string) {
     if (kind === 'VIDEO') return 'VIDEO';
@@ -65,17 +70,35 @@ export function ExhibitDrawer({
   }
 
   async function upload(file: File, thumbnailOnly = false) {
+    const limitBytes = thumbnailOnly
+      ? mediaLimits?.imageBytes
+      : type === 'VIDEO'
+        ? mediaLimits?.videoBytes
+        : type === 'MODEL3D'
+          ? mediaLimits?.modelBytes
+          : mediaLimits?.imageBytes;
+    if (limitBytes && file.size > limitBytes) {
+      setError(
+        L(
+          locale,
+          `文件超过单文件上限 ${formatBytes(limitBytes)}（当前 ${formatBytes(file.size)}）。`,
+          `File exceeds the ${formatBytes(limitBytes)} per-file limit (this file is ${formatBytes(file.size)}).`,
+        ),
+      );
+      return;
+    }
     setBusy(true);
     setError('');
-    const form = new FormData();
-    form.append('file', file);
-    const uploaded = await boRequest<Asset>(`/api/backoffice/courses/${courseId}/media`, {
-      method: 'POST',
-      body: form,
-    });
+    setUploadPct(0);
+    const uploaded = await uploadFileWithProgress<Asset>(
+      `/api/backoffice/courses/${courseId}/media`,
+      file,
+      setUploadPct,
+    );
+    setUploadPct(null);
     setBusy(false);
     if (!uploaded.success) {
-      setError(uploaded.message ?? L(locale, '文件上传失败。', 'File upload failed.'));
+      setError(uploaded.errorMessage ?? L(locale, '文件上传失败。', 'File upload failed.'));
       return;
     }
     if (thumbnailOnly) setThumbnail(uploaded.data);
@@ -159,7 +182,20 @@ export function ExhibitDrawer({
           </Field>
         </div>
 
-        <Field label={L(locale, '文件 *', 'File *')} hint={type === 'VIDEO' ? 'MP4 (H.264), up to 1080p, max 500 MB' : type === 'MODEL3D' ? 'GLB, max 50 MB' : 'JPG, PNG or WebP · long edge ≥ 2000 px · max 20 MB'}>
+        <Field
+          label={L(locale, '文件 *', 'File *')}
+          hint={
+            type === 'VIDEO'
+              ? L(locale, `MP4 (H.264)，最高 1080p，单文件最大 ${mediaLimits ? formatBytes(mediaLimits.videoBytes) : '500 MB'}`, `MP4 (H.264), up to 1080p, max ${mediaLimits ? formatBytes(mediaLimits.videoBytes) : '500 MB'}`)
+              : type === 'MODEL3D'
+                ? L(locale, `GLB，单文件最大 ${mediaLimits ? formatBytes(mediaLimits.modelBytes) : '25 MB'}`, `GLB, max ${mediaLimits ? formatBytes(mediaLimits.modelBytes) : '25 MB'}`)
+                : L(
+                    locale,
+                    `JPG、PNG 或 WebP · 长边 ≥ 2000 px · 单文件最大 ${mediaLimits ? formatBytes(mediaLimits.imageBytes) : '20 MB'}`,
+                    `JPG, PNG or WebP · long edge ≥ 2000 px · max ${mediaLimits ? formatBytes(mediaLimits.imageBytes) : '20 MB'}`,
+                  )
+          }
+        >
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ flex: 1, fontSize: 13 }}>{media ? `${media.originalName ?? media.id}${media.size ? ` · ${(media.size / 1024 / 1024).toFixed(1)} MB` : ''}` : L(locale, '尚未上传', 'No file yet')}</span>
             <label style={{ ...buttonStyle, cursor: busy ? 'not-allowed' : 'pointer' }}>
@@ -198,6 +234,13 @@ export function ExhibitDrawer({
           <input value={source} onChange={(event) => setSource(event.target.value)} placeholder={L(locale, '选填，例如 Wikimedia Commons', 'Optional, e.g. Wikimedia Commons')} style={inputStyle} />
         </Field>
 
+        {uploadPct !== null && (
+          <UploadProgress
+            tone="active"
+            title={L(locale, '正在上传文件…', 'Uploading file…')}
+            pct={uploadPct}
+          />
+        )}
         {error && <p style={{ color: '#b42318', background: '#FDECEC', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>{error}</p>}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>

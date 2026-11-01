@@ -139,6 +139,8 @@ export async function syncTextLearningPoints(
 
 @Injectable()
 export class CourseAuthoringService {
+  private readonly videoDurationCache = new Map<string, number>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: CourseStorageService,
@@ -195,7 +197,7 @@ export class CourseAuthoringService {
     );
     await this.storage.putMedia(storageKey, file.buffer);
     try {
-      return await this.prisma.courseMediaAsset.create({
+      const asset = await this.prisma.courseMediaAsset.create({
         data: {
           id: assetId,
           courseId,
@@ -216,9 +218,33 @@ export class CourseAuthoringService {
           size: true,
         },
       });
+      // 时长解析需要整份文件：刚上传时 Buffer 就在手上，顺手算好并缓存，
+      // 绑定到课时（setLessonVideo）时就不必再从存储下载一遍几百 MB 的视频。
+      let durationSeconds: number | null = null;
+      if (
+        validated.kind === 'VIDEO' &&
+        ['mp4', 'mov'].includes(validated.extension)
+      ) {
+        durationSeconds =
+          Math.max(0, Math.round(mp4DurationSeconds(file.buffer) ?? 0)) || null;
+        this.rememberVideoDuration(asset.id, durationSeconds);
+      }
+      return { ...asset, durationSeconds };
     } catch (error) {
       await this.storage.removeMedia(storageKey).catch(() => undefined);
       throw error;
+    }
+  }
+
+  /** 视频时长小缓存（进程内，最多保留 200 条），避免绑定课时时重复下载大文件。 */
+  private rememberVideoDuration(assetId: string, seconds: number | null): void {
+    if (seconds === null) return;
+    this.videoDurationCache.delete(assetId);
+    this.videoDurationCache.set(assetId, seconds);
+    while (this.videoDurationCache.size > 200) {
+      const oldest = this.videoDurationCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.videoDurationCache.delete(oldest);
     }
   }
 
@@ -262,11 +288,19 @@ export class CourseAuthoringService {
         message: 'Choose a video asset.',
       });
     }
-    const bytes = await this.storage.getMedia(asset.storageKey);
+    const cachedDuration = this.videoDurationCache.get(assetId);
     const duration =
-      asset.extension.toLowerCase() === 'mp4'
-        ? Math.max(0, Math.round(mp4DurationSeconds(bytes) ?? 0)) || null
-        : null;
+      cachedDuration ??
+      (asset.extension.toLowerCase() === 'mp4'
+        ? Math.max(
+            0,
+            Math.round(
+              mp4DurationSeconds(
+                await this.storage.getMedia(asset.storageKey),
+              ) ?? 0,
+            ),
+          ) || null
+        : null);
     const existing = lesson.localizations.find(
       (loc) => loc.language === language,
     );
@@ -878,6 +912,11 @@ export class CourseAuthoringService {
       lines.push(`${course?.code ?? ''},${lesson.code},${csv(title)},,`);
     }
     return lines.join('\n');
+  }
+
+  /** 供分块上传在收第一块之前就确认课程存在（避免大文件传完才发现 404）。 */
+  async ensureCourseExists(courseId: string): Promise<void> {
+    await this.assertCourse(courseId);
   }
 
   private async assertCourse(courseId: string) {
