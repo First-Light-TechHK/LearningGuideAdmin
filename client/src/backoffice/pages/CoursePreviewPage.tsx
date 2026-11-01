@@ -1,7 +1,7 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
-import type { PreviewCourse } from '../contracts/course';
+import type { PortalPreviewLink, PreviewCourse } from '../contracts/course';
 import { providerItems, strings } from '../contracts/course';
 import { boRequest } from '../lib/api';
 
@@ -36,6 +36,8 @@ export function CoursePreviewPage() {
   const [course, setCourse] = useState<PreviewCourse | null>(null);
   const [error, setError] = useState('');
   const [activeLessonId, setActiveLessonId] = useState('');
+  const [portalOpening, setPortalOpening] = useState(false);
+  const [portalError, setPortalError] = useState('');
 
   useEffect(() => {
     const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
@@ -49,6 +51,29 @@ export function CoursePreviewPage() {
     });
   }, [courseId, locale, versionId]);
 
+  async function openPortalPreview() {
+    setPortalOpening(true);
+    setPortalError('');
+    const popup = window.open('about:blank', '_blank');
+    const query = new URLSearchParams({ locale });
+    if (versionId) query.set('versionId', versionId);
+    const result = await boRequest<PortalPreviewLink>(
+      `/api/backoffice/courses/${courseId}/portal-preview?${query.toString()}`,
+    );
+    setPortalOpening(false);
+    if (!result.success) {
+      popup?.close();
+      setPortalError(result.message ?? L(locale, '无法生成 Portal 预览链接。', 'Could not create Portal preview link.'));
+      return;
+    }
+    if (popup) {
+      popup.opener = null;
+      popup.location.href = result.data.url;
+      return;
+    }
+    window.open(result.data.url, '_blank', 'noopener,noreferrer');
+  }
+
   const activeLesson = useMemo(
     () => course?.lessons.find((lesson) => lesson.id === activeLessonId) ?? course?.lessons[0] ?? null,
     [course, activeLessonId],
@@ -61,11 +86,24 @@ export function CoursePreviewPage() {
 
   return (
     <section className="card cardGrow" style={{ overflow: 'auto', maxWidth: 1120, margin: '0 auto', padding: '24px 32px' }}>
-      <nav style={{ fontSize: 13, opacity: 0.65, marginBottom: 16 }}>
+      <nav style={{ fontSize: 13, opacity: 0.65, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Link to={`/${locale}/course/${courseId}`}>{L(locale, '← 返回编辑', '← Back to editor')}</Link>
-        <span style={{ margin: '0 6px' }}>·</span>
+        <span>·</span>
         <span>{course.versionLabel ? `${L(locale, '版本', 'Version')} ${course.versionLabel}（${L(locale, '只读', 'read-only')}）` : L(locale, '学员视角预览（草稿）', 'Learner view preview (draft)')}</span>
+        <button
+          type="button"
+          onClick={openPortalPreview}
+          disabled={portalOpening}
+          style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 8, border: '1px solid #2B58C8', background: '#fff', color: '#2B58C8', cursor: portalOpening ? 'wait' : 'pointer', opacity: portalOpening ? 0.6 : 1 }}
+        >
+          {portalOpening ? L(locale, '生成链接…', 'Creating link…') : L(locale, '在 Portal 中预览', 'Preview in Portal')}
+        </button>
       </nav>
+      {portalError && (
+        <p style={{ background: '#FDECEC', color: '#A32020', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          {portalError}
+        </p>
+      )}
 
       {course.versionLabel && (
         <p style={{ background: '#FFF6E5', color: '#9A6B00', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>

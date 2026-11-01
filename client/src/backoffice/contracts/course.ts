@@ -247,6 +247,15 @@ export type PreviewCourse = {
   completeness: CourseCompleteness;
 };
 
+export type PortalPreviewLink = {
+  url: string;
+  token: string;
+  expiresAt: string;
+  source: 'draft' | 'version';
+  courseId: string;
+  versionId: string | null;
+};
+
 export type EnvironmentInfo = {
   label: string;
   publicSiteUrl: string;

@@ -11,6 +11,7 @@ import { PackageJobsService } from './package-jobs.service';
 import { PackageWorker } from './package-worker';
 import { PortalProjectionService } from './portal-projection.service';
 import { PortalCoursesController } from './portal-courses.controller';
+import { PortalPreviewService } from './portal-preview.service';
 import { PublishingService } from './publishing.service';
 import { TrialService } from './trial.service';
 import { PricingService } from './pricing.service';
@@ -54,6 +55,7 @@ import { CourseAuthoringService } from './course-authoring.service';
     CommerceCoursesService,
     CourseAuthoringService,
     PortalProjectionService,
+    PortalPreviewService,
   ],
 })
 export class CommerceCoursesModule {}

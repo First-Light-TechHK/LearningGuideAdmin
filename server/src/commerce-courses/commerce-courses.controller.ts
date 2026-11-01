@@ -26,35 +26,12 @@ import { TrialService } from './trial.service';
 import { PricingService } from './pricing.service';
 import { PreviewService } from './preview.service';
 import { CourseAuthoringService } from './course-authoring.service';
+import { PortalPreviewService } from './portal-preview.service';
+import { contentTypeFor } from './content-type';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
   return request.employee?.employeeId ?? null;
-}
-
-function contentTypeFor(extension: string): string {
-  const ext = (extension || '').toLowerCase().replace(/^\./, '');
-  switch (ext) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    case 'gif':
-      return 'image/gif';
-    case 'mp4':
-      return 'video/mp4';
-    case 'webm':
-      return 'video/webm';
-    case 'mp3':
-      return 'audio/mpeg';
-    case 'pdf':
-      return 'application/pdf';
-    default:
-      return 'application/octet-stream';
-  }
 }
 
 function wrap<T>(fn: () => Promise<T>): Promise<T> {
@@ -81,6 +58,7 @@ export class CommerceCoursesController {
     private readonly pricing: PricingService,
     private readonly preview: PreviewService,
     private readonly authoring: CourseAuthoringService,
+    private readonly portalPreview: PortalPreviewService,
   ) {}
 
   @Get()
@@ -166,6 +144,20 @@ export class CommerceCoursesController {
     @Query('versionId') versionId?: string,
   ) {
     return this.preview.preview(id, versionId || undefined);
+  }
+
+  /** 生成短时效 Portal 预览链接；Portal 侧校验签名后渲染草稿/指定版本。 */
+  @Get(':id/portal-preview')
+  portalPreviewLink(
+    @Param('id') id: string,
+    @Query('versionId') versionId?: string,
+    @Query('locale') locale?: string,
+  ) {
+    return this.portalPreview.createLink(
+      id,
+      versionId || undefined,
+      locale || undefined,
+    );
   }
 
   // ===== 预览媒体（Admin 课程页展示封面 / 视频 / 展品图） =====
