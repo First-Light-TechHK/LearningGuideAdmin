@@ -661,9 +661,14 @@ function ImportPanel({
               </button>
             </div>
           ) : (
-            <button className="button" disabled={busy} onClick={() => onConfirm('ABORT')}>
-              {zh ? '导入课程' : 'Import course'}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="button" disabled={busy} onClick={() => onConfirm('ABORT')}>
+                {zh ? '导入课程' : 'Import course'}
+              </button>
+              <button className="button buttonGhost" disabled={busy} onClick={onIgnore}>
+                {zh ? '取消本次导入' : 'Cancel import'}
+              </button>
+            </div>
           )}
         </div>
       )}
