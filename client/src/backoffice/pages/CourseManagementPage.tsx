@@ -6,6 +6,7 @@ import type { CourseList } from '../contracts/course'
 import { useResizableColumns } from '../components/resizableColumns'
 import { Pagination, usePageSize } from '../components/Pagination'
 import { boRequest } from '../lib/api'
+import { uploadFileWithProgress } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
@@ -33,46 +34,12 @@ type ConfirmOutcome = {
   message?: string
 }
 
-type UploadResult<T> = { success: true; data: T } | { success: false; error: string; errorMessage?: string }
-
-/**
- * 带上传进度的文件上传（fetch 无法获取上传进度，改用 XHR 的 upload.onprogress）。
- * error 为稳定码：NETWORK_ERROR / ABORTED / 或后端信封里的错误码。
- */
-function uploadFileWithProgress<T>(
-  url: string,
-  file: Blob,
-  onProgress: (pct: number) => void,
-  opts?: { field?: string; method?: 'POST' | 'PUT' },
-): Promise<UploadResult<T>> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open(opts?.method ?? 'POST', url)
-    xhr.withCredentials = true
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
-    }
-    xhr.onload = () => {
-      try {
-        const body = JSON.parse(xhr.responseText) as { success?: boolean; data?: T; error?: { code?: string; message?: string } | null }
-        if (body?.success === true) resolve({ success: true, data: body.data as T })
-        else resolve({ success: false, error: body?.error?.code ?? `HTTP_${xhr.status}`, errorMessage: body?.error?.message ?? `HTTP ${xhr.status}` })
-      } catch {
-        // 响应体不是 JSON 信封（多为网关 5xx/504 或单请求被边缘切断），把真实状态码带出来便于定位
-        resolve({ success: false, error: `HTTP_${xhr.status}`, errorMessage: `HTTP ${xhr.status}${xhr.statusText ? ' ' + xhr.statusText : ''}` })
-      }
-    }
-    xhr.onerror = () => resolve({ success: false, error: 'NETWORK_ERROR' })
-    xhr.onabort = () => resolve({ success: false, error: 'ABORTED' })
-    const form = new FormData()
-    form.append(opts?.field ?? 'file', file)
-    xhr.send(form)
-  })
-}
-
 function uploadErrorText(code: string, detail?: string): string {
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
-    return '上传中断（文件较大或服务被重启/网络中断）。请确认本地服务稳定后重试。'
+    return '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。'
+  }
+  if (code === 'TIMEOUT') {
+    return '上传超时（网络过慢或服务无响应）。请重试。'
   }
   if (detail && detail.trim()) return `导入失败：${detail}`
   return `导入失败：${code}`
@@ -114,6 +81,9 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [showCreate, setShowCreate] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [actionMenuId, setActionMenuId] = useState<string | null>(null)
+  const [statusCourse, setStatusCourse] = useState<CourseList['courses'][number] | null>(null)
+  const [statusTarget, setStatusTarget] = useState<'ONLINE' | 'HIDDEN' | 'OFFLINE'>('ONLINE')
+  const [statusReason, setStatusReason] = useState('')
   const [packageFile, setPackageFile] = useState<File | null>(null)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState('')
@@ -127,7 +97,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
   const courseTable = useResizableColumns({
     storageKey: 'course-list',
-    defaultWidths: [104, 280, 120, 72, 128, 148, 136, 176],
+    defaultWidths: [300, 104, 120, 160, 130, 136, 176],
   })
 
   const load = useCallback(async () => {
@@ -330,6 +300,22 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     }
     setExportingId(null)
     setMessage(L('导出超时，请稍后在课程详情页重试。', 'Export timed out. Retry from the course detail page.'))
+  }
+
+  async function changeCourseStatus() {
+    if (!statusCourse || !statusReason.trim()) return
+    setBusy(true)
+    const result = await boRequest(`/api/backoffice/courses/${statusCourse.id}/live-status`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: statusTarget, reason: statusReason }),
+    })
+    setBusy(false)
+    if (result.success) {
+      setStatusCourse(null)
+      setStatusReason('')
+      await load()
+    } else setMessage(L(`状态更新失败：${result.message ?? result.error}`, `Status update failed: ${result.message ?? result.error}`))
   }
 
   async function onPickFile(file: File) {
@@ -585,6 +571,51 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         </div>
       )}
 
+      {statusCourse && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setStatusCourse(null) }}
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby="change-status-title" style={{ width: 'min(520px, 100%)', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}>
+            <h2 id="change-status-title" style={{ margin: 0, fontSize: 20 }}>{L('更改状态', 'Change status')}</h2>
+            <p style={{ margin: '8px 0 0', fontSize: 13, opacity: 0.7 }}>{statusCourse.code} · {statusCourse.title}</p>
+            <p style={{ margin: '8px 0 0', fontSize: 12, opacity: 0.65 }}>{L('更改状态不会生成新版本。', 'Changing the status does not create a version.')}</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              {(['ONLINE', 'HIDDEN', 'OFFLINE'] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setStatusTarget(status)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: 8,
+                    border: '1px solid ' + (statusTarget === status ? '#2B58C8' : '#D5DCE8'),
+                    background: statusTarget === status ? '#EEF3FF' : '#fff',
+                    color: statusTarget === status ? '#2B58C8' : '#25314C',
+                    fontWeight: statusTarget === status ? 700 : 400,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {status === 'ONLINE' ? L('在线', 'Online') : status === 'HIDDEN' ? L('已隐藏', 'Hidden') : L('已下线', 'Offline')}
+                  {statusCourse.liveStatus === status ? ` · ${L('当前', 'Current')}` : ''}
+                </button>
+              ))}
+            </div>
+            <label style={{ display: 'block', marginTop: 14, fontSize: 13, fontWeight: 600 }}>
+              {L('原因', 'Reason')} *
+              <textarea rows={3} value={statusReason} onChange={(event) => setStatusReason(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8', resize: 'vertical' }} />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+              <button type="button" className="button buttonGhost" onClick={() => setStatusCourse(null)}>{L('取消', 'Cancel')}</button>
+              <button type="button" className="button" disabled={busy || !statusReason.trim()} onClick={() => void changeCourseStatus()}>
+                {busy ? L('更新中…', 'Updating…') : L('更改状态', 'Change status')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading && <p className="cardBody">{t(locale, 'common.loading')}</p>}
 
       {list && (
@@ -593,33 +624,32 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
             {courseTable.colGroup}
             <thead>
               <tr>
-                <th>{L('课程 ID', 'Course ID')}{courseTable.resizeHandle(0)}</th>
-                <th>{L('课程', 'Course')}{courseTable.resizeHandle(1)}</th>
+                <th>{L('课程', 'Course')}{courseTable.resizeHandle(0)}</th>
+                <th>{L('课程 ID', 'Course ID')}{courseTable.resizeHandle(1)}</th>
                 <th>{L('分类', 'Category')}{courseTable.resizeHandle(2)}</th>
-                <th>{L('课时', 'Lessons')}{courseTable.resizeHandle(3)}</th>
-                <th>{L('工作副本', 'Working copy')}{courseTable.resizeHandle(4)}</th>
-                <th>{L('线上状态', 'Live status')}{courseTable.resizeHandle(5)}</th>
-                <th>{L('更新时间', 'Updated')}{courseTable.resizeHandle(6)}</th>
-                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(7)}</th>
+                <th>{L('版本', 'Version')}{courseTable.resizeHandle(3)}</th>
+                <th>{L('状态', 'Status')}{courseTable.resizeHandle(4)}</th>
+                <th>{L('更新时间', 'Updated')}{courseTable.resizeHandle(5)}</th>
+                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(6)}</th>
               </tr>
             </thead>
             <tbody>
               {list.courses.map((course) => (
                 <tr key={course.id}>
-                  <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{course.code}</td>
                   <td>
                     <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
                     <div style={{ opacity: 0.7, fontSize: 12 }}>
-                      {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')}
+                      {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessonCount} {L('课时', 'lessons')}
                       {course.trialEnabled ? ` · ${L('含试看', 'trial')}` : ''}
                     </div>
                   </td>
+                  <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{course.code}</td>
                   <td>{course.category?.name ?? '—'}</td>
-                  <td>{course.lessonCount}</td>
                   <td>
-                    {course.hasDraft
-                      ? <span title={L('有尚未发布的更改', 'Unpublished changes')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#9A6B00', fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: '#E2A400' }} />{L('有草稿更改', 'Draft changes')}</span>
-                      : <span style={{ opacity: 0.65 }}>{L('无未发布更改', 'No changes')}</span>}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontWeight: 600 }}>{course.liveVersionLabel ?? '—'}</span>
+                      {course.hasDraft ? <span style={{ fontSize: 11, color: '#9A6B00' }}>{L('有未发布草稿', 'Draft not published')}</span> : <span style={{ fontSize: 11, opacity: 0.6 }}>{L('无草稿', 'No draft')}</span>}
+                    </div>
                   </td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -630,7 +660,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                       ) : (
                         <span style={{ opacity: 0.65 }}>{L('未发布', 'Not published')}</span>
                       )}
-                      {course.liveVersionLabel && <span style={{ fontSize: 11, opacity: 0.65 }}>{course.liveVersionLabel}</span>}
+                      {course.published && course.liveVersionWentLiveAt && <span style={{ fontSize: 11, opacity: 0.65 }}>{formatWhen(course.liveVersionWentLiveAt, locale)}</span>}
                     </div>
                   </td>
                   <td style={{ fontSize: 12, opacity: 0.8 }}>{formatWhen(course.updatedAt, locale)}</td>
@@ -650,7 +680,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                             right: 0,
                             top: 'calc(100% + 4px)',
                             zIndex: 20,
-                            minWidth: 150,
+                            minWidth: 170,
                             background: '#fff',
                             border: '1px solid #D5DCE8',
                             borderRadius: 10,
@@ -661,8 +691,18 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                             gap: 4,
                           }}
                         >
-                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); openCourse(course.id) }}>{L('打开', 'Open')}</button>
-                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); navigate(`/${locale}/course/${course.id}/preview`) }}>{L('预览', 'Preview')}</button>
+                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); openCourse(course.id) }}>{L('编辑内容', 'Edit content')}</button>
+                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); openCourse(course.id) }}>{L('版本', 'Versions')}</button>
+                          <button
+                            type="button"
+                            className="button buttonGhost"
+                            disabled={!course.published}
+                            style={{ justifyContent: 'flex-start' }}
+                            onClick={() => { setActionMenuId(null); if (course.published) setStatusCourse(course) }}
+                            title={!course.published ? L('请先发布', 'Publish first') : undefined}
+                          >
+                            {L('更改状态', 'Change status')}
+                          </button>
                           <button
                             type="button"
                             className="button buttonGhost"
@@ -680,7 +720,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               ))}
               {list.courses.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
                     {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
                   </td>
                 </tr>
