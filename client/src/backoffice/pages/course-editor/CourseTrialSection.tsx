@@ -48,6 +48,9 @@ export function CourseTrialSection({
   const [enabled, setEnabled] = useState(trial.enabled);
   const [rows, setRows] = useState<TrialRow[]>(trial.rows);
   const [localPlans, setLocalPlans] = useState(course.plans ?? []);
+  const languages = trial.learningLanguages?.length ? trial.learningLanguages : [contentLanguage];
+  const [cutoffLanguage, setCutoffLanguage] = useState(contentLanguage);
+  const activeCutoffLanguage = languages.includes(cutoffLanguage) ? cutoffLanguage : contentLanguage;
 
   useEffect(() => {
     setEnabled(trial.enabled);
@@ -73,8 +76,42 @@ export function CourseTrialSection({
     });
   }
 
-  function updateRow(lessonId: string, patch: Partial<TrialRow>) {
-    setRows((current) => current.map((row) => (row.lessonId === lessonId ? { ...row, ...patch } : row)));
+  function videoCutoffFor(row: TrialRow, language: string): number | null {
+    if (language === contentLanguage) return row.videoCutoffSeconds;
+    return row.videoCutoffByLanguage?.[language] ?? null;
+  }
+
+  function textCutoffFor(row: TrialRow, language: string): string | null {
+    if (language === contentLanguage) return row.textCutoffLearningPointId;
+    return row.textCutoffByLanguage?.[language] ?? null;
+  }
+
+  function setVideoCutoff(lessonId: string, language: string, seconds: number | null) {
+    setRows((current) => current.map((row) => row.lessonId === lessonId
+      ? {
+          ...row,
+          videoCutoffByLanguage: { ...(row.videoCutoffByLanguage ?? {}), [language]: seconds },
+          ...(language === contentLanguage ? { videoCutoffSeconds: seconds } : {}),
+        }
+      : row));
+  }
+
+  function setTextCutoff(lessonId: string, language: string, learningPointId: string | null) {
+    setRows((current) => current.map((row) => row.lessonId === lessonId
+      ? {
+          ...row,
+          textCutoffByLanguage: { ...(row.textCutoffByLanguage ?? {}), [language]: learningPointId },
+          ...(language === contentLanguage ? { textCutoffLearningPointId: learningPointId } : {}),
+        }
+      : row));
+  }
+
+  function cutoffMissing(row: TrialRow): boolean {
+    return languages.some((language) => {
+      const needsVideo = trial.learningMode !== 'TEXT_ONLY';
+      const needsText = trial.learningMode !== 'VIDEO_ONLY';
+      return (needsVideo && videoCutoffFor(row, language) === null) || (needsText && !textCutoffFor(row, language));
+    });
   }
 
   async function saveTrial() {
@@ -177,7 +214,29 @@ export function CourseTrialSection({
         </div>
 
         {enabled && (
-          <div style={{ overflowX: 'auto', marginTop: 12 }}>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, opacity: 0.65 }}>{L(locale, '截止点语言', 'Cut-off language')}:</span>
+              {languages.map((language) => (
+                <button
+                  key={language}
+                  type="button"
+                  onClick={() => setCutoffLanguage(language)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 999,
+                    border: '1px solid ' + (activeCutoffLanguage === language ? '#1D6BFF' : '#D5DCE8'),
+                    background: activeCutoffLanguage === language ? '#EAF2FF' : '#fff',
+                    color: activeCutoffLanguage === language ? '#1D6BFF' : '#475467',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {language}{language === contentLanguage ? ` · ${L(locale, '内容语言', 'content')}` : ''}
+                </button>
+              ))}
+            </div>
+            <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%' }}>
               <thead>
                 <tr>
@@ -196,26 +255,49 @@ export function CourseTrialSection({
                     <td>{row.index}. {row.title}</td>
                     <td>{row.videoDurationSeconds ? `${Math.floor(row.videoDurationSeconds / 60)}:${String(Math.round(row.videoDurationSeconds % 60)).padStart(2, '0')}` : '—'}</td>
                     <td>
-                      <input value={fmtTime(row.videoCutoffSeconds)} disabled={!row.inTrial} placeholder="mm:ss" onChange={(event) => updateRow(row.lessonId, { videoCutoffSeconds: parseTime(event.target.value) })} style={{ width: 90, padding: 6 }} />
+                      <input value={fmtTime(videoCutoffFor(row, activeCutoffLanguage))} disabled={!row.inTrial} placeholder="mm:ss" onChange={(event) => setVideoCutoff(row.lessonId, activeCutoffLanguage, parseTime(event.target.value))} style={{ width: 90, padding: 6 }} />
                     </td>
                     <td>
-                      <select value={row.textCutoffLearningPointId ?? ''} disabled={!row.inTrial} onChange={(event) => updateRow(row.lessonId, { textCutoffLearningPointId: event.target.value || null })} style={{ padding: 6, maxWidth: 220 }}>
+                      <select value={textCutoffFor(row, activeCutoffLanguage) ?? ''} disabled={!row.inTrial} onChange={(event) => setTextCutoff(row.lessonId, activeCutoffLanguage, event.target.value || null)} style={{ padding: 6, maxWidth: 220 }}>
                         <option value="">—</option>
-                        {row.learningPoints.filter((point) => point.language === contentLanguage).map((point) => <option key={point.id} value={point.id}>{point.code} · {point.title}</option>)}
+                        {row.learningPoints.filter((point) => point.language === activeCutoffLanguage).map((point) => <option key={point.id} value={point.id}>{point.code} · {point.title}</option>)}
                       </select>
                     </td>
                     <td>
                       <Chip tone={row.status === 'READY' ? 'green' : row.status === 'RE_CONFIRM' ? 'amber' : 'grey'}>{row.inTrial ? row.status : 'LOCKED'}</Chip>
+                      {row.inTrial && row.status === 'RE_CONFIRM' && (
+                        <div style={{ fontSize: 11, color: '#9A6B00', marginTop: 4, maxWidth: 220 }}>
+                          {L(locale, '视频已更换，请检查并重新确认截止点。', 'Video changed. Check and re-confirm the cut-off.')}
+                        </div>
+                      )}
+                      {row.inTrial && cutoffMissing(row) && (
+                        <div style={{ fontSize: 11, color: '#b42318', marginTop: 4 }}>
+                          {L(locale, '还有语言未设置截止点。', 'Some languages still need a cut-off.')}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          <button type="button" style={primaryBtn} disabled={busy} onClick={() => void saveTrial()}>{L(locale, '保存试看', 'Save trial')}</button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            style={primaryBtn}
+            disabled={busy || rows.some((row) => row.inTrial && cutoffMissing(row))}
+            onClick={() => void saveTrial()}
+          >
+            {rows.some((row) => row.inTrial && row.status === 'RE_CONFIRM')
+              ? L(locale, '确认截止点并保存', 'Confirm cut-offs & save')
+              : L(locale, '保存试看', 'Save trial')}
+          </button>
+          {rows.some((row) => row.inTrial && cutoffMissing(row)) && (
+            <span style={{ fontSize: 12, color: '#b42318' }}>{L(locale, '请先为所有学习语言填写截止点。', 'Set cut-offs for every learning language first.')}</span>
+          )}
         </div>
       </div>
 

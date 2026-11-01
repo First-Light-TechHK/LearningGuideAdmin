@@ -77,6 +77,13 @@ function uploadErrorText(code: string, detail?: string): string {
   return `导入失败：${code}`
 }
 
+function formatWhen(value: string | null | undefined, locale: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
 /**
  * Course Overview（PRD CM01）：列表 + Category 筛选 + 新建 / 从包导入 / Operations 入口。
  * Publish / 版本 / 导入到已有课程在课程详情的 Versions 区完成。
@@ -116,7 +123,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
   const courseTable = useResizableColumns({
     storageKey: 'course-list',
-    defaultWidths: [92, 300, 120, 76, 84, 110, 150],
+    defaultWidths: [104, 280, 120, 72, 128, 148, 136, 176],
   })
 
   const load = useCallback(async () => {
@@ -480,16 +487,41 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       )}
 
       {showCreate && (
-        <form action={(form) => void createCourse(form)} style={{ marginTop: 12, padding: 16, border: '1px solid #E8EDF5', borderRadius: 12, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-          <label>{L('课程标题', 'Course title')}<input name="title" required style={{ display: 'block', padding: 8 }} /></label>
-          <label>{L('课程 ID', 'Course ID')}<input name="code" required style={{ display: 'block', padding: 8 }} /></label>
-          <label>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', padding: 8 }} /></label>
-          <label>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="en-GB">en-GB</option><option value="zh-CN">zh-CN</option></select></label>
-          <label>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="VIDEO_ONLY">VIDEO_ONLY</option><option value="TEXT_ONLY">TEXT_ONLY</option><option value="VIDEO_AND_TEXT">VIDEO_AND_TEXT</option></select></label>
-          <label>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', padding: 8 }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
-          <button className="button" disabled={busy}>{L('创建并编辑', 'Create and edit')}</button>
-          <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
-        </form>
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowCreate(false)
+          }}
+          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-course-title"
+            action={(form) => void createCourse(form)}
+            style={{ width: 'min(640px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+              <div>
+                <h2 id="create-course-title" style={{ margin: 0, fontSize: 20 }}>{L('新建课程', 'Create course')}</h2>
+                <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>{L('创建后会进入课程编辑页，可继续填写内容、试看和价格。', 'After creating, you will enter the course editor to continue with content, trial and pricing.')}</p>
+              </div>
+              <button type="button" aria-label={L('关闭', 'Close')} onClick={() => setShowCreate(false)} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程标题', 'Course title')} *<input name="title" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID', 'Course ID')} *<input name="code" required pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="en-GB">English (en-GB)</option><option value="zh-CN">简体中文 (zh-CN)</option></select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></label>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
+              <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
+              <button className="button" disabled={busy}>{busy ? L('创建中…', 'Creating…') : L('创建并编辑', 'Create and edit')}</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {importJob && (
@@ -515,32 +547,47 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                 <th>{L('课程', 'Course')}{courseTable.resizeHandle(1)}</th>
                 <th>{L('分类', 'Category')}{courseTable.resizeHandle(2)}</th>
                 <th>{L('课时', 'Lessons')}{courseTable.resizeHandle(3)}</th>
-                <th>{L('草稿', 'Draft')}{courseTable.resizeHandle(4)}</th>
-                <th>{L('在线', 'Live')}{courseTable.resizeHandle(5)}</th>
-                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(6)}</th>
+                <th>{L('工作副本', 'Working copy')}{courseTable.resizeHandle(4)}</th>
+                <th>{L('线上状态', 'Live status')}{courseTable.resizeHandle(5)}</th>
+                <th>{L('更新时间', 'Updated')}{courseTable.resizeHandle(6)}</th>
+                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(7)}</th>
               </tr>
             </thead>
             <tbody>
               {list.courses.map((course) => (
                 <tr key={course.id}>
-                  <td>{course.code}</td>
+                  <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{course.code}</td>
                   <td>
                     <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
                     <div style={{ opacity: 0.7, fontSize: 12 }}>
                       {course.learningMode} · {course.learningLanguages.join(', ')}
+                      {course.trialEnabled ? ` · ${L('含试看', 'trial')}` : ''}
                     </div>
                   </td>
                   <td>{course.category?.name ?? '—'}</td>
                   <td>{course.lessonCount}</td>
-                  <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
                   <td>
-                    {course.published
-                      ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
-                      : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
+                    {course.hasDraft
+                      ? <span title={L('有尚未发布的更改', 'Unpublished changes')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#9A6B00', fontWeight: 600 }}><span style={{ width: 7, height: 7, borderRadius: 999, background: '#E2A400' }} />{L('有草稿更改', 'Draft changes')}</span>
+                      : <span style={{ opacity: 0.65 }}>{L('无未发布更改', 'No changes')}</span>}
                   </td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {course.published ? (
+                        <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>
+                          {course.liveStatus === 'ONLINE' ? L('在线', 'Online') : course.liveStatus === 'HIDDEN' ? L('已隐藏', 'Hidden') : course.liveStatus === 'OFFLINE' ? L('已下线', 'Offline') : course.liveStatus}
+                        </span>
+                      ) : (
+                        <span style={{ opacity: 0.65 }}>{L('未发布', 'Not published')}</span>
+                      )}
+                      {course.liveVersionLabel && <span style={{ fontSize: 11, opacity: 0.65 }}>{course.liveVersionLabel}</span>}
+                    </div>
+                  </td>
+                  <td style={{ fontSize: 12, opacity: 0.8 }}>{formatWhen(course.updatedAt, locale)}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
+                      <button className="button buttonGhost" onClick={() => navigate(`/${locale}/course/${course.id}/preview`)}>{L('预览', 'Preview')}</button>
                       <button
                         className="button buttonGhost"
                         disabled={busy || exportingId !== null}
@@ -554,7 +601,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               ))}
               {list.courses.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
                     {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
                   </td>
                 </tr>
