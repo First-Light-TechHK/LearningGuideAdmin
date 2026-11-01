@@ -282,9 +282,7 @@ export async function buildCoursePackageFromSnapshot(
         select: { id: true, code: true },
       })
     : [];
-  const lpCodeById = new Map(
-    cutoffRows.map((row) => [row.id, row.code]),
-  );
+  const lpCodeById = new Map(cutoffRows.map((row) => [row.id, row.code]));
   const trial = {
     enabled: course.trialEnabled,
     lessons: course.trialRows

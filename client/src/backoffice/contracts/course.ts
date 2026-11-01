@@ -38,16 +38,28 @@ export type LessonLocalization = {
   videoDurationSeconds: number | null;
 };
 
+export type ExhibitMedia = {
+  id: string;
+  kind?: string;
+  originalName?: string;
+  mimeType?: string;
+  extension?: string;
+  size?: number;
+};
+
 export type Exhibit = {
   id: string;
   code: string;
   type: string;
-  media: { id: string } | null;
-  thumbnail: { id: string } | null;
+  mediaAssetId?: string | null;
+  thumbnailAssetId?: string | null;
+  sourceText?: string | null;
+  media: ExhibitMedia | null;
+  thumbnail: ExhibitMedia | null;
   localized: Record<string, { title?: string; description?: string }>;
 };
 
-export type Reading = { type: string; title: string; author: string | null; whyRecommended: string | null };
+export type Reading = { type: string; title: string; author: string | null; whyRecommended: string | null; language?: string };
 export type Question = { id?: string; code: string; question: string; referenceAnswer: string | null; enabled?: boolean };
 export type ApplicationTest = { scenario: string; referenceAnswer: string | null; enabled?: boolean };
 
@@ -60,7 +72,17 @@ export type Lesson = {
   readings: Reading[];
   questions: Question[];
   applicationTest: ApplicationTest | null;
-  learningPoints: Array<{ language: string; code: string; title: string; source: string; timeSeconds: number | null }>;
+  learningPoints: Array<{
+    id?: string;
+    language: string;
+    code: string;
+    title: string;
+    source: string;
+    timeSeconds: number | null;
+    sortOrder?: number;
+    anchorHeading?: string | null;
+  }>;
+  triggers?: Array<{ id?: string; language: string; exhibitId: string; timeSeconds: number }>;
 };
 
 export type CoursePlan = {
@@ -160,6 +182,8 @@ export type CourseSummary = {
   lifecycleStatus: string;
   liveStatus: string;
   liveVersionId: string | null;
+  liveVersionLabel?: string | null;
+  liveVersionWentLiveAt?: string | null;
   hasDraft: boolean;
   trialEnabled: boolean;
   published: boolean;
