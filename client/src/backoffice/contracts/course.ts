@@ -34,7 +34,14 @@ export type LessonLocalization = {
   description: string | null;
   textHtml: string | null;
   videoAssetId?: string | null;
-  video: { id: string } | null;
+  video: {
+    id: string;
+    originalName?: string | null;
+    size?: number | null;
+    mimeType?: string | null;
+    extension?: string | null;
+    createdAt?: string | null;
+  } | null;
   videoDurationSeconds: number | null;
 };
 

@@ -21,6 +21,7 @@ import {
   labelStyle,
   languageLabel,
   fmtDuration,
+  fmtDate,
   parseTime,
   primaryBtn,
   readingTypeLabel,
@@ -109,6 +110,7 @@ export function CourseContentSection({
   const [importBusy, setImportBusy] = useState(false);
   const [videoUpload, setVideoUpload] = useState<VideoUploadState | null>(null);
   const [exhibitUpload, setExhibitUpload] = useState<ExhibitUploadState>(null);
+  const [videoPreviewOpen, setVideoPreviewOpen] = useState(false);
   const videoAbortRef = useRef<AbortController | null>(null);
   const lastVideoFileRef = useRef<File | null>(null);
 
@@ -166,6 +168,7 @@ export function CourseContentSection({
     videoAbortRef.current?.abort();
     setVideoUpload(null);
     setExhibitUpload(null);
+    setVideoPreviewOpen(false);
   }, [activeLessonId]);
 
   const textLps = useMemo(() => parseTextLearningPoints(textHtml), [textHtml]);
@@ -188,20 +191,22 @@ export function CourseContentSection({
   async function saveLessonInfo() {
     if (!activeLesson) return;
     setBusy(true);
+    // 同一语言的课时信息与正文必须顺序保存：并发写同一条 LessonLocalization
+    // 会互相覆盖（后写入的请求用旧值把 textHtml 清空，导致文本学习点丢失）。
     const requests = [
-      boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
+      () => boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ language: 'en-GB', code: lessonCode, title: lessonTitleEn, description: lessonDescEn }),
       }),
-      boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
+      () => boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ language: 'zh-CN', code: lessonCode, title: lessonTitleZh, description: lessonDescZh }),
       }),
     ];
     if (hasText) {
-      requests.push(
+      requests.push(() =>
         boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
@@ -209,7 +214,8 @@ export function CourseContentSection({
         }),
       );
     }
-    const results = await Promise.all(requests);
+    const results = [];
+    for (const request of requests) results.push(await request());
     setBusy(false);
     if (results.every((result) => result.success)) {
       onNotice(L(locale, '课时信息已保存。', 'Lesson information saved.'));
@@ -497,6 +503,11 @@ export function CourseContentSection({
 
   const currentVideoLoc = activeLesson ? loc(activeLesson, contentLanguage) : undefined;
   const mediaLimits = useMediaLimits();
+  // PRD 12.5.1：Lesson 时长 = 视频时长；Course 时长 = 全部 Lesson 时长之和。
+  const courseDurationSeconds = sortedLessons.reduce(
+    (sum, lesson) => sum + (loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0),
+    0,
+  );
   const videoBusy =
     videoUpload?.phase === 'uploading' ||
     videoUpload?.phase === 'processing' ||
@@ -654,17 +665,85 @@ export function CourseContentSection({
 
                 {studyTab === 'video' && hasVideo && (
                   <div style={{ marginTop: 14 }}>
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <label style={{ ...buttonStyle, cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
-                        {videoBusy
-                          ? L(locale, '上传中…', 'Uploading…')
-                          : currentVideoLoc?.video
-                            ? L(locale, '替换视频', 'Replace video')
-                            : L(locale, '上传视频', 'Upload video')}
-                        <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file); event.currentTarget.value = ''; }} />
-                      </label>
-                      <span style={{ fontSize: 12, color: '#5A6577' }}>{currentVideoLoc?.video ? `${currentVideoLoc.video.id} · ${fmtDuration(currentVideoLoc.videoDurationSeconds)}` : L(locale, '尚未上传视频', 'No video yet')}</span>
-                    </div>
+                    {currentVideoLoc?.video ? (
+                      <div style={{ border: '1px solid #C7E8D3', background: '#F4FBF6', borderRadius: 10, padding: '12px 14px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+                            <Chip tone="green">✓ {L(locale, '视频已上传', 'Video uploaded')}</Chip>
+                            <strong style={{ fontSize: 14, wordBreak: 'break-all' }}>
+                              {currentVideoLoc.video.originalName?.trim()
+                                ? currentVideoLoc.video.originalName
+                                : `${L(locale, '视频文件', 'Video file')} #${currentVideoLoc.video.id.slice(0, 8)}`}
+                            </strong>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              style={{ ...buttonStyle, padding: '4px 10px' }}
+                              onClick={() => setVideoPreviewOpen((value) => !value)}
+                            >
+                              {videoPreviewOpen ? L(locale, '收起预览', 'Hide preview') : L(locale, '预览', 'Preview')}
+                            </button>
+                            <label style={{ ...buttonStyle, padding: '4px 10px', cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
+                              {videoBusy ? L(locale, '上传中…', 'Uploading…') : L(locale, '替换视频', 'Replace video')}
+                              <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (!file) return; if (currentVideoLoc?.video && !window.confirm(L(locale, '替换后该课时学员的播放进度会清零（课程完成状态不变）。确认替换？', 'Replacing resets learners’ playback position for this lesson (course completion is kept). Continue?'))) return; void uploadVideo(file); }} />
+                            </label>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px 20px', flexWrap: 'wrap', marginTop: 10, fontSize: 12, color: '#3B4A63' }}>
+                          <span>
+                            <span style={{ color: '#5A6577' }}>{L(locale, '时长（自动读取）', 'Duration (auto-read)')}</span>{' '}
+                            <strong>{fmtDuration(currentVideoLoc.videoDurationSeconds)}</strong>
+                          </span>
+                          <span>
+                            <span style={{ color: '#5A6577' }}>{L(locale, '文件大小', 'File size')}</span>{' '}
+                            <strong>{currentVideoLoc.video.size ? formatBytes(currentVideoLoc.video.size) : '—'}</strong>
+                          </span>
+                          <span>
+                            <span style={{ color: '#5A6577' }}>{L(locale, '格式', 'Format')}</span>{' '}
+                            <strong>{(currentVideoLoc.video.extension ?? 'video').toUpperCase()}</strong>
+                          </span>
+                          <span>
+                            <span style={{ color: '#5A6577' }}>{L(locale, '上传时间', 'Uploaded')}</span> {fmtDate(currentVideoLoc.video.createdAt)}
+                          </span>
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 12, color: '#5A6577' }}>
+                          {L(locale, '本课时长', 'Lesson length')} {fmtDuration(currentVideoLoc.videoDurationSeconds)} · {L(locale, '课程总时长', 'Course length')} {fmtDuration(courseDurationSeconds)}
+                        </div>
+                        <div style={{ marginTop: 2, fontSize: 12, color: '#8A6D00' }}>
+                          {L(
+                            locale,
+                            '替换视频后，该课时学员的播放进度会清零（课程完成状态保持不变）。',
+                            'Replacing the video resets learners’ playback position for this lesson (course completion is kept).',
+                          )}
+                        </div>
+                        {videoPreviewOpen && (
+                          <video
+                            controls
+                            preload="metadata"
+                            src={`/api/backoffice/courses/${course.id}/media/${currentVideoLoc.video.id}`}
+                            style={{ width: '100%', maxHeight: 320, marginTop: 10, borderRadius: 8, background: '#000' }}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ border: '1px dashed #C9D3E3', borderRadius: 10, padding: '14px', background: '#FAFBFD', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        <div>
+                          <strong style={{ fontSize: 13 }}>{L(locale, '尚未上传视频', 'No video yet')}</strong>
+                          <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>
+                            {L(
+                              locale,
+                              '上传后系统会自动读取视频时长（无需手填），并作为本课时长与学习点、触发点的时间轴。',
+                              'After upload the duration is read from the file automatically (no manual entry); it becomes the lesson length and the timeline for learning points and triggers.',
+                            )}
+                          </div>
+                        </div>
+                        <label style={{ ...buttonStyle, cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
+                          {videoBusy ? L(locale, '上传中…', 'Uploading…') : L(locale, '上传视频', 'Upload video')}
+                          <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file); event.currentTarget.value = ''; }} />
+                        </label>
+                      </div>
+                    )}
                     <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
                       {mediaLimits
                         ? L(
@@ -708,9 +787,9 @@ export function CourseContentSection({
                     {videoUpload && videoUpload.phase === 'done' && (
                       <UploadProgress
                         tone="success"
-                        title={L(locale, `视频已上传：${videoUpload.fileName}`, `Video uploaded: ${videoUpload.fileName}`)}
+                        title={L(locale, `已完成上传：${videoUpload.fileName}`, `Upload complete: ${videoUpload.fileName}`)}
                         pct={100}
-                        detail={`${formatBytes(videoUpload.size)} · ${L(locale, '时长', 'Duration')} ${fmtDuration(videoUpload.durationSeconds)}`}
+                        detail={`${formatBytes(videoUpload.size)} · ${L(locale, '时长（自动读取）', 'Duration (auto-read)')} ${fmtDuration(videoUpload.durationSeconds)}`}
                       />
                     )}
                     {videoUpload && videoUpload.phase === 'error' && (
