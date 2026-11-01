@@ -20,9 +20,10 @@ import {
   inputStyle,
   labelStyle,
   languageLabel,
+  localizeMissing,
   fmtDuration,
   fmtDate,
-  parseTime,
+  TimeInput,
   primaryBtn,
   readingTypeLabel,
 } from './shared';
@@ -536,7 +537,7 @@ export function CourseContentSection({
             ? `${loc(lesson, contentLanguage)?.videoDurationSeconds ? `${Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} ${L(locale, '学习点', 'LPs')} · ${lesson.exhibits.length} ${L(locale, '个展品', 'exhibits')}`
             : `${lesson.questions.length} ${L(locale, '题', 'questions')} · ${lesson.applicationTest ? L(locale, '有应用测试', 'App test') : L(locale, '无应用测试', 'no App test')}`;
           return (
-            <button key={lesson.id} type="button" onClick={() => setActiveLessonId(lesson.id)} style={{ ...buttonStyle, display: 'block', width: '100%', textAlign: 'left', marginBottom: 6, borderColor: activeLessonId === lesson.id ? '#2B58C8' : '#E8EDF5', background: activeLessonId === lesson.id ? '#F5F8FF' : '#fff' }}>
+            <button key={lesson.id} type="button" title={completeness && completeness.missing.length > 0 ? completeness.missing.map((item) => localizeMissing(locale, item)).join(locale.startsWith('zh') ? '；' : '; ') : undefined} onClick={() => setActiveLessonId(lesson.id)} style={{ ...buttonStyle, display: 'block', width: '100%', textAlign: 'left', marginBottom: 6, borderColor: activeLessonId === lesson.id ? '#2B58C8' : '#E8EDF5', background: activeLessonId === lesson.id ? '#F5F8FF' : '#fff' }}>
               <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ fontWeight: 600 }}>{lesson.sortOrder}. {title}</span>
                 <span>{completeness?.studyComplete ? '✓' : '!'}{completeness?.understandingComplete ? '✓' : '!'}</span>
@@ -557,7 +558,7 @@ export function CourseContentSection({
                 <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{activeLesson.code} · {activeLesson.id}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button type="button" style={{ ...buttonStyle, borderColor: part === 'study' ? '#2B58C8' : '#d9e0ea', color: part === 'study' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('study')}>{L(locale, '学习与探索', 'Study & Exploration')} {lessonCompleteness?.studyComplete ? '✓' : '!'}</button>
+                <button type="button" title={lessonCompleteness && lessonCompleteness.missing.length > 0 ? lessonCompleteness.missing.map((item) => localizeMissing(locale, item)).join(locale.startsWith('zh') ? '；' : '; ') : undefined} style={{ ...buttonStyle, borderColor: part === 'study' ? '#2B58C8' : '#d9e0ea', color: part === 'study' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('study')}>{L(locale, '学习与探索', 'Study & Exploration')} {lessonCompleteness?.studyComplete ? '✓' : '!'}</button>
                 <button type="button" style={{ ...buttonStyle, borderColor: part === 'understanding' ? '#2B58C8' : '#d9e0ea', color: part === 'understanding' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('understanding')}>{L(locale, '理解', 'Understanding')} {lessonCompleteness?.understandingComplete ? '✓' : '!'}</button>
               </div>
             </div>
@@ -833,7 +834,7 @@ export function CourseContentSection({
                           <div key={index} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                             <span style={{ fontSize: 12, color: '#5A6577' }}>{activeLesson.sortOrder}.{index + 1}</span>
                             <input value={point.title} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, 'LP 标题', 'Learning point title')} style={inputStyle} />
-                            <input value={`${Math.floor(point.timeSeconds / 60)}:${String(point.timeSeconds % 60).padStart(2, '0')}`} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: parseTime(event.target.value) } : item))} placeholder="mm:ss" style={{ ...inputStyle, borderColor: beyond ? '#b42318' : '#d9e0ea' }} />
+                            <TimeInput seconds={point.timeSeconds} onChange={(seconds) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: seconds ?? 0 } : item))} placeholder="mm:ss" style={{ ...inputStyle, borderColor: beyond ? '#b42318' : '#d9e0ea' }} />
                             <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setVideoLps((rows) => rows.filter((_, i) => i !== index))}>×</button>
                             {beyond && <div style={{ gridColumn: '1 / -1', fontSize: 11, color: '#b42318' }}>{L(locale, '超出视频时长', 'Beyond video length')} ({fmtDuration(videoDuration)})</div>}
                           </div>
@@ -852,7 +853,7 @@ export function CourseContentSection({
                             <option value="">{L(locale, '选择展品', 'Choose an exhibit')}</option>
                             {exhibits.map((exhibit) => <option key={exhibit.id} value={exhibit.id}>{exhibit.localized?.[contentLanguage]?.title ?? exhibit.code}</option>)}
                           </select>
-                          <input value={`${Math.floor(trigger.timeSeconds / 60)}:${String(trigger.timeSeconds % 60).padStart(2, '0')}`} onChange={(event) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: parseTime(event.target.value) } : item))} placeholder="mm:ss" style={inputStyle} />
+                          <TimeInput seconds={trigger.timeSeconds} onChange={(seconds) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: seconds ?? 0 } : item))} placeholder="mm:ss" style={inputStyle} />
                           <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setTriggerRows((rows) => rows.filter((_, i) => i !== index))}>×</button>
                         </div>
                       ))}

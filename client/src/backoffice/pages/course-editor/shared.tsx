@@ -159,10 +159,98 @@ export function fmtDate(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 }
 
+/**
+ * 完成度缺失项来自服务端的英文句式（与 Publish 门禁共用）。界面面向运营，
+ * 这里把常见句式翻成中文，认不出的保留原文，避免漏信息。
+ */
+export function localizeMissing(locale: string, message: string): string {
+  const body = message.replace(/^Lesson [^:]+:\s*/, '');
+  if (!locale.startsWith('zh')) return body;
+  const patterns: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+    [/^title is required \((.+)\)$/, (m) => `标题缺失（${m[1]}）`],
+    [/^description is required \((.+)\)$/, (m) => `课时简介缺失（${m[1]}）`],
+    [/^video is required \((.+)\)$/, (m) => `视频缺失（${m[1]}）`],
+    [/^video duration is missing \((.+)\)$/, (m) => `视频时长缺失（${m[1]}，上传视频后自动读取）`],
+    [/^add at least 1 video learning point \((.+)\)$/, (m) => `至少 1 个视频学习点（${m[1]}）`],
+    [/^text content is required \((.+)\)$/, (m) => `文字内容缺失（${m[1]}）`],
+    [/^add at least 1 text learning point \((.+)\)$/, (m) => `至少 1 个文字学习点（${m[1]}）`],
+    [/^missing (.+) content$/, (m) => `缺少 ${m[1]} 语言内容`],
+    [/^knowledge question (\d+) needs a question$/, (m) => `知识测试第 ${m[1]} 题缺少题目`],
+    [/^knowledge question (\d+) needs a reference answer$/, (m) => `知识测试第 ${m[1]} 题缺少参考答案`],
+    [/^application test needs a question$/, () => '应用测试缺少题目'],
+    [/^application test needs a reference answer$/, () => '应用测试缺少参考答案'],
+  ];
+  for (const [pattern, format] of patterns) {
+    const match = body.match(pattern);
+    if (match) return format(match);
+  }
+  return body;
+}
+
 export function parseTime(value: string): number {
   const [m, s] = value.split(':').map((part) => Number(part));
   if (Number.isNaN(m)) return 0;
   return Math.max(0, Math.round((m || 0) * 60 + (s || 0)));
+}
+
+export function fmtTimeInput(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return '';
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * 解析时间输入：`m:ss` / `mm:ss` 按“分:秒”理解；`h:mm:ss` 按“时:分:秒”理解。
+ * 不带冒号的纯数字按总秒数理解（如 180 → 3:00），方便按秒快速输入。
+ */
+export function parseTimeInput(value: string): number | null {
+  const trimmed = value.trim().replace(/：/g, ':');
+  if (!trimmed) return null;
+  const parts = trimmed.split(':').map((part) => Number(part.trim()));
+  if (parts.some((part) => !Number.isFinite(part))) return null;
+  const seconds =
+    parts.length === 1
+      ? parts[0]
+      : parts.length === 2
+        ? parts[0] * 60 + parts[1]
+        : parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return Math.max(0, Math.round(seconds));
+}
+
+/** 时间输入框：编辑时保留原文，失焦/回车时才解析，避免边打字边重排格式。 */
+export function TimeInput({
+  seconds,
+  onChange,
+  disabled,
+  placeholder = 'mm:ss',
+  style,
+}: {
+  seconds: number | null | undefined;
+  onChange: (seconds: number | null) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  style?: React.CSSProperties;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? fmtTimeInput(seconds);
+  return (
+    <input
+      value={display}
+      disabled={disabled}
+      placeholder={placeholder}
+      onFocus={() => setDraft(fmtTimeInput(seconds))}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft === null) return;
+        onChange(parseTimeInput(draft));
+        setDraft(null);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+      }}
+      style={style}
+    />
+  );
 }
 
 export function Modal({
