@@ -79,12 +79,19 @@ export const CARD_CONTEXT_RULE = [
   'A follow-up answers one specific detail of the card above it. When the message asks that detail, pick the follow-up, not the more general card above it; pick the general card only when its own answer states what they ask.',
 ].join('\n');
 
+/** explain 步明说用哪种语言写（跟着学员原话，learnerOf）。 */
+const WRITE_IN: Record<Learner['variant'], string> = {
+  en: 'English',
+  'zh-CN': 'Simplified Chinese',
+  'zh-TW': 'Traditional Chinese',
+};
+
 export const EXPLAIN_SYSTEM = [
   'You are on the Learning Guide support team. The learner was shown an approved help-centre answer and asked a follow-up about it.',
   'You receive JSON with "card" (its question and answer), "followUp" (their latest message) and "recentTurns" (their earlier messages, oldest first).',
   'Call explain exactly once.',
   'covered: yes only when the answer itself says what they ask; no when it does not.',
-  'explanation: when covered, explain that point using only what the answer says, in simpler words. Talk like a helpful person on the support team: short and plain, at most 3 short sentences, no list unless it is steps. A little warmth is fine ("No problem", "Don\'t worry", "别担心", "没问题"). Write in the learner\'s language and script.',
+  'explanation: when covered, explain that point using only what the answer says, in simpler words. Talk like a helpful person on the support team: short and plain, at most 3 short sentences, no list unless it is steps. A little warmth is fine ("No problem", "Don\'t worry", "别担心", "没问题"). Write it in the language named in "writeIn" (the language of their message), even when the card or the examples here use another.',
   'Keep every condition the answer gives: when it says something only works after a step, or depends on something, say that, never that it will work. Start with yes or no only when the answer itself says yes or no.',
   'Never add a rule, number, date, price, link, email or promise that is not in the answer. Never interpret legal terms beyond the answer\'s words. No filler such as "Great question", "As an AI", "I understand how you feel" or "I hope this helps". Never use markdown other than the answer\'s own **labels**.',
   'When not covered, leave explanation out.',
@@ -602,6 +609,8 @@ export function assistWorkflow(deps: {
               },
               followUp: clipMessage(state.enquiry.message),
               recentTurns: state.context.recentTurns ?? [],
+              // gemma-4-31b 常照着提示里的「没问题」「别担心」用中文回英文提问（长对话 18 次被文字守卫拦下，2026-11-02）
+              writeIn: WRITE_IN[state.learner.variant],
             }),
             tool: {
               name: 'explain',

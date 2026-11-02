@@ -711,6 +711,7 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
       card: { question: PAID.question, answer: PAID.answer },
       followUp: 'So do I just have to wait?',
       recentTurns: shown.recentTurns,
+      writeIn: 'English',
     });
     expect(explain.system).not.toContain('wait');
   });
@@ -779,6 +780,16 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
       });
     },
   );
+
+  it("tells explain which language to write in, from the learner's own words (Traditional Chinese here)", async () => {
+    const { service, run } = setup({ pick: () => pick('clarify', PAID.id) });
+    await ask(service, chat('這是什麼意思？', shown));
+    const explain = specOf(run, 'explain') as AgentStepSpec;
+    expect((JSON.parse(explain.prompt) as { writeIn: string }).writeIn).toBe(
+      'Traditional Chinese',
+    );
+    expect(explain.system).toContain('"writeIn"');
+  });
 
   it('names each step it starts for the thinking panel: pick_faq is pick, and nothing else is said', async () => {
     const { service } = setup({
