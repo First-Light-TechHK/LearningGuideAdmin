@@ -746,6 +746,9 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       const hedged = cutoffMs !== undefined && cutoffMs > 0;
       // 分级 L2 精排（HELPDESK_RERANK_MODEL，缺省关）：在共享查询之前，两路只精排一次
       const rerank = rerankConfig(env);
+      // 追问卡片带上父卡片的问题（HELPDESK_CARD_CONTEXT=on，缺省关）：精排与挑卡都看「父问题 → 追问」
+      const cardContext =
+        env.HELPDESK_CARD_CONTEXT?.trim().toLowerCase() === 'on';
       const ranked = rerank
         ? rerankedSource(
             this.deps.qa,
@@ -755,6 +758,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
               baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
             }),
             rerank.keep,
+            { withContext: cardContext },
           )
         : this.deps.qa;
       const qa = hedged ? sharedLookups(ranked) : ranked;
@@ -769,6 +773,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
             limit: ASSIST_CANDIDATES,
             left: until,
             direct: rerank?.direct ?? null,
+            cardContext,
           }),
           initialAssistState({
             locale: input.locale,

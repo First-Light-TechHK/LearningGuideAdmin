@@ -77,6 +77,11 @@ export type HelpdeskQaCandidate = {
   relation?: 'child' | 'sibling' | 'search';
   /** 精排分数（ai/helpdesk/rerank.ts，只在开了 HELPDESK_RERANK_MODEL 时有），越大越相关。 */
   rerankScore?: number;
+  /**
+   * 追问卡片：它跟在哪张卡片下面（发布版本里那张父卡片的问题，同一语言）。追问的问题是接着父卡片问的
+   * （如「手机上也有吗？」），单独看缺上下文；HELPDESK_CARD_CONTEXT=on 时给精排和挑卡模型一起看。
+   */
+  under?: string;
 };
 
 export type HelpdeskQaSearch = {

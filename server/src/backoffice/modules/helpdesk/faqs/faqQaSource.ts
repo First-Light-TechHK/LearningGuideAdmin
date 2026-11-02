@@ -138,6 +138,10 @@ export function createHelpdeskQaSource(
     relation: HelpdeskQaCandidate['relation'],
   ): HelpdeskQaCandidate {
     const text = localised(faq, locale);
+    const parent = v.edges
+      .filter((edge) => edge.kind === 'follow_up' && edge.childId === faq.id)
+      .map((edge) => v.nodes.get(edge.parentId))
+      .find((node) => node !== undefined);
     return {
       id: faq.id,
       category: faq.category,
@@ -150,6 +154,7 @@ export function createHelpdeskQaSource(
         .filter((edge) => edge.kind === 'option' && edge.childId === faq.id)
         .map((edge) => edge.parentId),
       relation,
+      ...(parent ? { under: localised(parent, locale).question } : {}),
     };
   }
 

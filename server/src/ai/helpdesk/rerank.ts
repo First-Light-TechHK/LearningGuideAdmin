@@ -103,8 +103,9 @@ export function openRouterReranker(input: {
   };
 }
 
-const rerankDocument = (c: HelpdeskQaCandidate) =>
-  `${c.question}\n${c.answer.slice(0, RERANK_LIMITS.answerChars)}`;
+/** withContext：追问卡片前面带上父卡片的问题（「父问题 → 追问」），单独看也是完整的问题。 */
+const rerankDocument = (c: HelpdeskQaCandidate, withContext: boolean) =>
+  `${withContext && c.under ? `${c.under} → ` : ''}${c.question}\n${c.answer.slice(0, RERANK_LIMITS.answerChars)}`;
 
 /**
  * 候选按精排分数从高到低重排（同分保持原顺序），每张带上 rerankScore，至多留 keep 张。
@@ -114,6 +115,7 @@ export function rerankedSource(
   qa: HelpdeskQaSource,
   reranker: Reranker,
   keep: number | null,
+  options: { withContext?: boolean } = {},
 ): HelpdeskQaSource {
   return {
     ...qa,
@@ -137,7 +139,10 @@ export function rerankedSource(
         ...vector.filter((c) => !seen.has(c.id) && seen.add(c.id)),
       ];
       if (found.length === 0) return found;
-      const scores = await reranker(search.text, found.map(rerankDocument));
+      const scores = await reranker(
+        search.text,
+        found.map((c) => rerankDocument(c, options.withContext ?? false)),
+      );
       if (!scores) return retrieved;
       const ranked = found
         .map((c, index) => ({ c, index, score: scores[index] }))

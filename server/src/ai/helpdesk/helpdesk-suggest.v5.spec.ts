@@ -28,7 +28,10 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
-import { PICK_FAQ_V5_SYSTEM } from './workflow/assist-workflow';
+import {
+  CARD_CONTEXT_RULE,
+  PICK_FAQ_V5_SYSTEM,
+} from './workflow/assist-workflow';
 import { ANSWER_LINES, TEMPLATES } from './workflow/guard';
 import { LEARNER_STATE_RULE } from './workflow/learner-facts';
 import {
@@ -1512,6 +1515,45 @@ describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, off by default)',
     });
     await ask(service, chat('and then?', { nodeId: FAILED.id }));
     expect(run).toHaveBeenCalled();
+  });
+
+  it('HELPDESK_CARD_CONTEXT=on: a follow-up card carries its parent question to the reranker and the model, with the rule', async () => {
+    const fetch = rerankWith([0.5, 0.6, 0.55]);
+    const UNDER = 'Can I see my password?';
+    const found = [PAID, FAILED, { ...RESET, under: UNDER }];
+    const on = setup({
+      found,
+      env: { ...ENV, HELPDESK_CARD_CONTEXT: 'on' },
+    });
+    await ask(on.service, chat('is it on my phone too?'));
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as RequestInit).body as string,
+    ) as { documents: string[] };
+    expect(body.documents[2].startsWith(`${UNDER} → ${RESET.question}\n`)).toBe(
+      true,
+    );
+    const spec = specOf(on.run, 'pick_faq') as AgentStepSpec;
+    expect(spec.system).toBe(`${PICK_FAQ_V5_SYSTEM}\n${CARD_CONTEXT_RULE}`);
+    const sent = JSON.parse(spec.prompt) as {
+      candidates: { id: string; under?: string }[];
+    };
+    expect(sent.candidates.find((c) => c.id === RESET.id)?.under).toBe(UNDER);
+
+    // off (the default): documents, rules and prompt exactly as before
+    fetch.mockClear();
+    const off = setup({ found, env: ENV });
+    await ask(off.service, chat('is it on my phone too?'));
+    const plain = JSON.parse(
+      (fetch.mock.calls[0][1] as RequestInit).body as string,
+    ) as { documents: string[] };
+    expect(plain.documents[2].startsWith(`${RESET.question}\n`)).toBe(true);
+    const before = specOf(off.run, 'pick_faq') as AgentStepSpec;
+    expect(before.system).toBe(PICK_FAQ_V5_SYSTEM);
+    expect(
+      (JSON.parse(before.prompt) as { candidates: object[] }).candidates.some(
+        (c) => 'under' in c,
+      ),
+    ).toBe(false);
   });
 
   it('a failed rerank keeps the retrieval order and still asks the model', async () => {

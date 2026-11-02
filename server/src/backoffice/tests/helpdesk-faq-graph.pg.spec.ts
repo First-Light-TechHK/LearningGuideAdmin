@@ -1163,6 +1163,9 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       });
       expect(onFailed[0].score).toBeGreaterThan(0);
       expect(onFailed[1].score).toBe(0);
+      // a follow-up carries the question of the card it follows, in the same language (HELPDESK_CARD_CONTEXT)
+      expect(onFailed[0].under).toBe('What if my payment failed?');
+      expect(onFailed[2].under).toBeUndefined();
 
       const onRetry = await qa.findCandidates({
         locale: 'en-GB',
