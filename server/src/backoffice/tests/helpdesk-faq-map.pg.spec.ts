@@ -14,7 +14,11 @@ import {
   type FaqMapRepository,
   type MapNodeInput,
 } from '../modules/helpdesk/faqs/faqMapRepository';
-import { parseMapSeed, seedFaqMap } from '../modules/helpdesk/faqs/faqMapSeed';
+import {
+  parseMapSeed,
+  pruneFaqMap,
+  seedFaqMap,
+} from '../modules/helpdesk/faqs/faqMapSeed';
 import {
   createHelpdeskQaSource,
   type LocatorMode,
@@ -561,6 +565,180 @@ describeDb('Helpdesk FAQ process map and rule table (PostgreSQL)', () => {
       expect(again.nodes).toEqual({ created: [], changed: [], unchanged: 5 });
       expect(again.placements.changed).toBe(0);
       expect(await revisionCount()).toBe(5 + 2);
+    });
+    it('a new tree version: prune drops old and moved nodes, the seed re-places the cards, and a second run changes nothing', async () => {
+      const [a, b, c] = [await create(), await create(), await create()];
+      const v1 = parseMapSeed(
+        {
+          stages: [
+            {
+              key: 'account',
+              labelEn: 'Account',
+              labelZh: '账号',
+              steps: [
+                { key: 'account.verify', labelEn: 'Verify', labelZh: '激活' },
+              ],
+            },
+            {
+              key: 'site',
+              labelEn: 'Site',
+              labelZh: '全站',
+              steps: [
+                { key: 'site.language', labelEn: 'Language', labelZh: '语言' },
+              ],
+            },
+          ],
+          objects: [
+            {
+              key: 'account',
+              labelEn: 'Account',
+              labelZh: '账号',
+              stage: 'S1',
+            },
+          ],
+          attributes: [{ key: 'timing', labelEn: 'Timing', labelZh: '时效' }],
+        },
+        [
+          {
+            key: a.key,
+            primary: {
+              node: 'deviation',
+              step: 'account.verify',
+              deviation: {
+                key: 'account.verify.no-email',
+                en: 'No email',
+                zh: '收不到邮件',
+              },
+            },
+            secondary: [
+              { node: 'cell', object: 'account', attribute: 'timing' },
+            ],
+          },
+          { key: b.key, primary: { node: 'step', step: 'site.language' } },
+          {
+            key: c.key,
+            primary: { node: 'step', step: 'account.verify' },
+            secondary: [{ node: 'step', step: 'site.language' }],
+          },
+        ],
+      );
+      await seedFaqMap({ map, faqs: repo }, v1, staff);
+      // v2：site 阶段没了（语言搬到 settings），对象 account 换到 settings 阶段，岔子写在 skeleton 里并改了名
+      const v2 = parseMapSeed(
+        {
+          stages: [
+            {
+              key: 'account',
+              labelEn: 'Account',
+              labelZh: '账号',
+              steps: [
+                {
+                  key: 'account.verify',
+                  labelEn: 'Verify',
+                  labelZh: '激活',
+                  deviations: [
+                    {
+                      key: 'account.verify.not-received',
+                      en: 'The email does not arrive',
+                      zh: '收不到激活邮件',
+                    },
+                    {
+                      key: 'account.verify.link-expired',
+                      en: 'The link has expired',
+                      zh: '链接过期',
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              key: 'settings',
+              labelEn: 'Settings',
+              labelZh: '设置',
+              steps: [
+                {
+                  key: 'settings.language',
+                  labelEn: 'Language',
+                  labelZh: '语言',
+                },
+              ],
+            },
+          ],
+          objects: [
+            {
+              key: 'account',
+              labelEn: 'Account',
+              labelZh: '账号',
+              stage: 'settings',
+            },
+          ],
+          attributes: [{ key: 'timing', labelEn: 'Timing', labelZh: '时效' }],
+        },
+        [
+          {
+            key: a.key,
+            primary: {
+              node: 'deviation',
+              deviation: 'account.verify.not-received',
+            },
+            secondary: [
+              { node: 'cell', object: 'account', attribute: 'timing' },
+            ],
+          },
+          { key: b.key, primary: { node: 'step', step: 'settings.language' } },
+        ],
+      );
+      const pruned = await pruneFaqMap({ map }, v2, staff);
+      expect(pruned).toEqual({
+        deleted: [
+          'account.verify.no-email',
+          'rules.account.timing',
+          'site.language',
+          'rules.account',
+          'site',
+        ],
+        detached: 4,
+      });
+      const seeded = await seedFaqMap({ map, faqs: repo }, v2, staff);
+      expect(seeded.placements.missingCards).toEqual([]);
+      const nodes = await map.nodes();
+      const keyOf = new Map(nodes.map((n) => [n.id, n.key]));
+      expect(
+        nodes.map((n) => [n.key, n.kind, keyOf.get(n.parentId ?? '') ?? null]),
+      ).toEqual([
+        ['account', 'stage', null],
+        ['account.verify', 'step', 'account'],
+        ['account.verify.link-expired', 'deviation', 'account.verify'],
+        ['account.verify.not-received', 'deviation', 'account.verify'],
+        ['rules.account', 'object', null],
+        ['rules.account.timing', 'cell', 'rules.account'],
+        ['settings', 'stage', null],
+        ['settings.language', 'step', 'settings'],
+      ]);
+      expect(
+        keyOf.get(nodes.find((n) => n.key === 'rules.account')!.stageId!),
+      ).toBe('settings');
+      const placed = async (faqId: string) =>
+        (await map.placements(faqId))
+          .map((p) => [keyOf.get(p.nodeId), p.primary])
+          .sort();
+      expect(await placed(a.id)).toEqual([
+        ['account.verify.not-received', true],
+        ['rules.account.timing', false],
+      ]);
+      expect(await placed(b.id)).toEqual([['settings.language', true]]);
+      // 不在种子里的卡：只拿掉删了的位置，主位置还在
+      expect(await placed(c.id)).toEqual([['account.verify', true]]);
+      const revisions = await revisionCount();
+      expect(await pruneFaqMap({ map }, v2, staff)).toEqual({
+        deleted: [],
+        detached: 0,
+      });
+      const again = await seedFaqMap({ map, faqs: repo }, v2, staff);
+      expect(again.nodes.created).toEqual([]);
+      expect(again.nodes.changed).toEqual([]);
+      expect(again.placements.changed).toBe(0);
+      expect(await revisionCount()).toBe(revisions);
     });
   });
 

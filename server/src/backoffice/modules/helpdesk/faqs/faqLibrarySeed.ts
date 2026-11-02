@@ -643,8 +643,8 @@ async function reorderLinks(
   }
 }
 
-/** 建发布版本（工作表没变就不新建），检查与评测门过了就发布。 */
-async function releaseNow(
+/** 建发布版本（工作表没变就不新建），检查与评测门过了就发布。流程树换版（helpdeskDemoSeed）也用。 */
+export async function releaseNow(
   releases: FaqReleaseService,
   actor: FaqActor,
 ): Promise<NonNullable<SeedReport['release']>> {

@@ -9,6 +9,7 @@ import { createPgFaqGraphRepository } from '../faqs/faqGraphRepository';
 import { createFaqGraphService } from '../faqs/faqGraphService';
 import {
   parseFaqLibrary,
+  releaseNow,
   seedExitCode,
   seedFaqLibrary,
   syncLibraryPopular,
@@ -17,7 +18,13 @@ import {
   type SeedReport,
 } from '../faqs/faqLibrarySeed';
 import { createPgFaqMapRepository } from '../faqs/faqMapRepository';
-import { parseMapSeed, seedFaqMap } from '../faqs/faqMapSeed';
+import {
+  parseMapSeed,
+  pruneFaqMap,
+  seedFaqMap,
+  type MapPruneReport,
+  type MapSeedReport,
+} from '../faqs/faqMapSeed';
 import {
   createFaqReleaseService,
   createPgFaqReleaseSource,
@@ -33,7 +40,8 @@ import { removeDemoRows, seedDemoRows, type DemoReport } from './helpdeskDemo';
  */
 export const DEMO_LIBRARY_TAG = 'faq-library-v3.1';
 const LIBRARY = join(__dirname, 'library', 'faq-library-v3.1.json');
-const MAP = join(__dirname, 'library', 'faq-map-v3.1.json');
+/** SOP 树 v2（2026-11-02，按 Portal 代码与 PRD 建：阶段 > 步骤 > 岔子 + 对象 × 属性）与 685 张卡的位置。 */
+const MAP = join(__dirname, 'library', 'faq-map-v2.json');
 /** 记在 backoffice_settings：灌过一次就不再自动灌（--remove 之后也不会被启动灌回来）。 */
 export const DEMO_MARKER_KEY = 'helpdesk_demo_seeded';
 /**
@@ -48,6 +56,12 @@ export const DEMO_POPULAR_MARKER_KEY = 'helpdesk_demo_popular';
  */
 export const DEMO_CONTENT_TAG = 'content-2026-11-02c';
 export const DEMO_CONTENT_MARKER_KEY = 'helpdesk_demo_content';
+/**
+ * 流程树那一版（库文件 faq-map-v2.json）。树或卡的位置再改就换这个值：已经灌过的 DEV 下次启动先删掉种子里
+ * 没有的节点（pruneFaqMap），再按种子建节点、挂卡，有改动就出一版发布（结构随发布冻结进快照）。
+ */
+export const DEMO_MAP_TAG = 'map-v2-2026-11-02';
+export const DEMO_MAP_MARKER_KEY = 'helpdesk_demo_map';
 // 与夜间任务的锁（FLYWHEEL_LOCK = [719320, 1]）同一命名空间，第二个数不同
 const DEMO_LOCK: readonly [number, number] = [719320, 2];
 
@@ -58,6 +72,14 @@ export const demoDb: SqlDb = {
 
 function readLibrary() {
   return parseFaqLibrary(JSON.parse(readFileSync(LIBRARY, 'utf8')));
+}
+
+function readMap() {
+  const raw = JSON.parse(readFileSync(MAP, 'utf8')) as {
+    skeleton: unknown;
+    placements: unknown[];
+  };
+  return parseMapSeed(raw.skeleton, raw.placements);
 }
 
 /** 正常的服务层（PostgreSQL）+ 发布后建向量索引；跑完等索引建好再返回。 */
@@ -125,6 +147,44 @@ export function syncDemoContent(
   );
 }
 
+export type MapSyncReport = {
+  pruned: MapPruneReport;
+  seeded: MapSeedReport;
+  release: SeedReport['release'];
+};
+
+/** 先删种子里没有的节点，再按种子建节点、挂卡；有改动就出一版发布（命令行 --map 和 DEV 启动共用）。 */
+export function syncDemoMap(employeeId: string | null): Promise<MapSyncReport> {
+  return withLibraryDeps(async (deps) => {
+    const actor = { employeeId };
+    const seed = readMap();
+    const map = createPgFaqMapRepository();
+    const pruned = await pruneFaqMap({ map }, seed, actor);
+    const seeded = await seedFaqMap(
+      { map, faqs: createPgFaqRepository() },
+      seed,
+      actor,
+    );
+    const changed =
+      pruned.deleted.length > 0 ||
+      pruned.detached > 0 ||
+      seeded.nodes.created.length > 0 ||
+      seeded.nodes.changed.length > 0 ||
+      seeded.placements.changed > 0;
+    const release =
+      changed && deps.releases ? await releaseNow(deps.releases, actor) : null;
+    return { pruned, seeded, release };
+  });
+}
+
+/** 种子里的卡都挂上了（库里都有），有发布就发布成功，才算这一版树已经到位。 */
+export function mapSyncOk(report: MapSyncReport): boolean {
+  return (
+    report.seeded.placements.missingCards.length === 0 &&
+    (report.release === null || report.release.published)
+  );
+}
+
 /** 同步干净（没有失败，有发布就发布成功）才算这一版热门已经到位。 */
 export function popularSyncOk(report: PopularSyncReport): boolean {
   return (
@@ -175,14 +235,15 @@ export async function seedHelpdeskDemo(options: {
   };
   if (options.library) {
     const library = await seedLibrary(options.employeeId, false);
-    const raw = JSON.parse(readFileSync(MAP, 'utf8')) as {
-      skeleton: unknown;
-      placements: unknown[];
-    };
+    const seed = readMap();
+    const actor = { employeeId: options.employeeId };
+    const mapRepository = createPgFaqMapRepository();
+    // 整库重灌时库里可能还有上一版的树（--remove 不删结构）
+    await pruneFaqMap({ map: mapRepository }, seed, actor);
     const map = await seedFaqMap(
-      { map: createPgFaqMapRepository(), faqs: createPgFaqRepository() },
-      parseMapSeed(raw.skeleton, raw.placements),
-      { employeeId: options.employeeId },
+      { map: mapRepository, faqs: createPgFaqRepository() },
+      seed,
+      actor,
     );
     const release = await seedLibrary(options.employeeId, true);
     out.library = summary(library);
@@ -193,10 +254,11 @@ export async function seedHelpdeskDemo(options: {
   }
   out.demo = await seedDemoRows(demoDb);
   await setMarker(DEMO_MARKER_KEY, DEMO_LIBRARY_TAG);
-  // 整库刚灌过：库文件里的 popular 和卡片内容就是这一版
+  // 整库刚灌过：库文件里的 popular、卡片内容和流程树就是这一版
   if (options.library && out.ok) {
     await setMarker(DEMO_POPULAR_MARKER_KEY, DEMO_POPULAR_TAG);
     await setMarker(DEMO_CONTENT_MARKER_KEY, DEMO_CONTENT_TAG);
+    await setMarker(DEMO_MAP_MARKER_KEY, DEMO_MAP_TAG);
   }
   return out;
 }
@@ -219,8 +281,9 @@ export function shouldAutoSeedDemo(env: NodeJS.ProcessEnv): boolean {
 
 /**
  * DEV 启动后在后台灌一次（不阻塞启动和健康检查）。几个实例同时起时用 advisory lock 只让一个灌；
- * 灌过（backoffice_settings 有标记）就不再灌，只看两个版本标记：热门（DEMO_POPULAR_TAG，只同步 popular）和
- * 卡片内容（DEMO_CONTENT_TAG，按库文件更新员工没改过的卡）。失败只记日志、不写标记，下次启动再试。
+ * 灌过（backoffice_settings 有标记）就不再灌，只看三个版本标记：热门（DEMO_POPULAR_TAG，只同步 popular）、
+ * 卡片内容（DEMO_CONTENT_TAG，按库文件更新员工没改过的卡）和流程树（DEMO_MAP_TAG，换版并重挂卡）。
+ * 失败只记日志、不写标记，下次启动再试。
  */
 export async function autoSeedDemoOnce(
   logger: Pick<Logger, 'log' | 'warn'> = new Logger('HelpdeskDemo'),
@@ -229,7 +292,9 @@ export async function autoSeedDemoOnce(
     if ((await marker(DEMO_MARKER_KEY)) !== null) {
       const popular = await syncTagOnce(logger, POPULAR_STEP);
       const content = await syncTagOnce(logger, CONTENT_STEP);
-      return combined([popular, content]);
+      // 树在卡片内容之后：新卡先建出来才能挂
+      const map = await syncTagOnce(logger, MAP_STEP);
+      return combined([popular, content, map]);
     }
     const result = await createPgJobLock(undefined, DEMO_LOCK).withLock(
       async () => {
@@ -331,6 +396,24 @@ async function syncTagOnce<R>(
   );
   return ok ? 'synced' : 'failed';
 }
+
+const MAP_STEP: TagStep<MapSyncReport> = {
+  key: DEMO_MAP_MARKER_KEY,
+  tag: DEMO_MAP_TAG,
+  event: 'demo_map_synced',
+  run: () => syncDemoMap(null),
+  ok: mapSyncOk,
+  log: (report) => ({
+    deleted: report.pruned.deleted.length,
+    detached: report.pruned.detached,
+    created: report.seeded.nodes.created.length,
+    changed: report.seeded.nodes.changed.length,
+    placed: report.seeded.placements.cards,
+    placementsChanged: report.seeded.placements.changed,
+    missingCards: report.seeded.placements.missingCards,
+    release: report.release,
+  }),
+};
 
 /** 几步的结果合成一个：有失败算失败，其次有锁被占算 busy，有同步算 synced，都跳过才是 skipped。 */
 function combined(outcomes: SyncOutcome[]): SyncOutcome {
