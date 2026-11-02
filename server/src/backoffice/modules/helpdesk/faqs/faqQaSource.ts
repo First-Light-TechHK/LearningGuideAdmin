@@ -25,6 +25,8 @@ import {
   retrievalMode,
   warmFaqVectors,
   withFaqVectorSearch,
+  FAQ_VECTOR_LIMITS,
+  type FaqVectorHit,
   type FaqVectorSearch,
 } from './faqVectors';
 
@@ -60,6 +62,12 @@ export type HelpdeskQaSourceDeps = {
   liveEdges: () => Promise<QaEdge[]>;
   /** 定位方式（每次现读；缺省 flat）。 */
   locator?: () => LocatorMode;
+  /**
+   * 向量排序（faqVectors.ts）：精排的召回池要的向量那一路。不给 → 没有 findVectorCandidates 的结果（[]）。
+   */
+  vectors?: FaqVectorSearch;
+  /** 向量那一路的期限（缺省 FAQ_VECTOR_LIMITS.queryTimeoutMs）。 */
+  vectorTimeoutMs?: number;
 };
 
 export const LOCATOR_MODES = ['flat', 'hybrid'] as const;
@@ -338,6 +346,49 @@ export function createHelpdeskQaSource(
       return out;
     },
 
+    async findVectorCandidates(search) {
+      if (!deps.vectors || !isHelpdeskLocale(search.locale)) return [];
+      const locale = search.locale;
+      const v = await view(true);
+      if (v.release === null || search.text.trim() === '') return [];
+      const controller = new AbortController();
+      let timer: NodeJS.Timeout | undefined;
+      const timedOut = new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(null);
+          controller.abort();
+        }, deps.vectorTimeoutMs ?? FAQ_VECTOR_LIMITS.queryTimeoutMs);
+        timer.unref?.();
+      });
+      let ranked: FaqVectorHit[] | null;
+      try {
+        ranked = await Promise.race([
+          deps.vectors.rank(v.release, search.text, controller.signal),
+          timedOut,
+        ]);
+      } catch {
+        ranked = null;
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!ranked) return [];
+      const release = v.release;
+      const hits = ranked
+        .filter((hit) => hit.type === 'answer' || hit.type === 'choice')
+        .slice(
+          0,
+          Math.max(0, Math.min(search.limit, FAQ_LIMITS.publicLimitMax)),
+        );
+      const rows = await Promise.all(
+        hits.map((hit) => repository.getPublished(hit.id, { release })),
+      );
+      return rows.flatMap((faq, index) =>
+        faq
+          ? [candidate(faq, hits[index].similarity, locale, v, 'search')]
+          : [],
+      );
+    },
+
     async findPopular(search) {
       if (!isHelpdeskLocale(search.locale)) return [];
       const locale = search.locale;
@@ -375,6 +426,7 @@ export function createPgHelpdeskQaSource(
 ): HelpdeskQaSource {
   const graph = createPgFaqGraphRepository(db);
   const source = createHelpdeskQaSource({
+    vectors,
     // 候选检索按 HELPDESK_RETRIEVAL（每次现读，缺省 lexical = 和以前一样只走字词）
     repository: withFaqVectorSearch(repository ?? createPgFaqRepository(db), {
       vectors,

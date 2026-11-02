@@ -150,6 +150,37 @@ describe('rerankedSource (only findCandidates changes)', () => {
     const ranked = rerankedSource(qa, () => Promise.resolve(null), 1);
     await expect(ranked.findCandidates(search)).resolves.toBe(found);
   });
+
+  it('reranks the pool of retrieval candidates plus the vector top cards (deduplicated), asking for RERANK_LIMITS.vectorPool', async () => {
+    const findVectorCandidates = jest.fn(() =>
+      Promise.resolve([card(2, { score: 0.9 }), card(7, { score: 0.8 })]),
+    );
+    const rerank = jest.fn((query: string, docs: string[]) =>
+      Promise.resolve(
+        docs.map((d) => (d.startsWith('Question 7') ? 0.9 : 0.1)),
+      ),
+    );
+    const ranked = rerankedSource({ ...qa, findVectorCandidates }, rerank, 2);
+    const out = await ranked.findCandidates(search);
+    expect(findVectorCandidates).toHaveBeenCalledWith({
+      locale: 'en-GB',
+      text: 'reset',
+      limit: RERANK_LIMITS.vectorPool,
+    });
+    expect(rerank.mock.calls[0][1]).toHaveLength(4);
+    expect(out.map((c) => c.id)).toEqual([card(7).id, card(1).id]);
+  });
+
+  it('a failing vector side leaves the retrieval candidates', async () => {
+    const ranked = rerankedSource(
+      { ...qa, findVectorCandidates: () => Promise.reject(new Error('x')) },
+      (_, docs) => Promise.resolve(docs.map(() => 0.5)),
+      null,
+    );
+    expect((await ranked.findCandidates(search)).map((c) => c.id)).toEqual(
+      found.map((c) => c.id),
+    );
+  });
 });
 
 describe('directPick (give the top card without the model only when the reranker is sure)', () => {

@@ -19,6 +19,8 @@ export const RERANK_LIMITS = {
   /** 每张卡给精排看的答案字数（问题全给）。 */
   answerChars: 600,
   queryChars: 600,
+  /** 召回池里向量那一路至多几张（S650 dev：字词 10 张 ∪ 向量 10 张，平均 16.5 张，正确卡在池里 99.5%）。 */
+  vectorPool: 10,
 } as const;
 
 export type RerankConfig = {
@@ -116,10 +118,27 @@ export function rerankedSource(
   return {
     ...qa,
     findCandidates: async (search) => {
-      const found = await qa.findCandidates(search);
+      // 召回池 = 原来的候选（字词检索 + 树上近亲）∪ 向量最像的 RERANK_LIMITS.vectorPool 个（来源支持时）
+      const [retrieved, vector] = await Promise.all([
+        qa.findCandidates(search),
+        qa.findVectorCandidates
+          ? qa
+              .findVectorCandidates({
+                locale: search.locale,
+                text: search.text,
+                limit: RERANK_LIMITS.vectorPool,
+              })
+              .catch(() => [])
+          : Promise.resolve([]),
+      ]);
+      const seen = new Set(retrieved.map((c) => c.id));
+      const found = [
+        ...retrieved,
+        ...vector.filter((c) => !seen.has(c.id) && seen.add(c.id)),
+      ];
       if (found.length === 0) return found;
       const scores = await reranker(search.text, found.map(rerankDocument));
-      if (!scores) return found;
+      if (!scores) return retrieved;
       const ranked = found
         .map((c, index) => ({ c, index, score: scores[index] }))
         .sort((a, b) => b.score - a.score || a.index - b.index)

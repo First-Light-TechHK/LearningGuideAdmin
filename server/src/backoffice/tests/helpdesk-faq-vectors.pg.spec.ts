@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { Pool } from 'pg';
 
 import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
+import { createHelpdeskQaSource } from '../modules/helpdesk/faqs/faqQaSource';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
 import {
   createFaqGraphService,
@@ -308,6 +309,44 @@ describeDb('Helpdesk FAQ vectors (PostgreSQL)', () => {
       category: 'account_technical',
     });
     expect(filtered.map((f) => f.id)).toEqual([password.id]);
+  });
+
+  it('gives the rerank pool its vector side: the nearest answer cards of the live release, with their similarity', async () => {
+    const { version, refund } = await publishedRelease();
+    const embedder = fakeEmbedder();
+    await indexFaqRelease({ store, embedder, release: version });
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    const qa = createHelpdeskQaSource({
+      repository: repo,
+      releases: createPgFaqReleaseSource(graph),
+      liveEdges: () => graph.allEdges(),
+      vectors,
+    });
+    const found = await qa.findVectorCandidates?.({
+      locale: 'zh-CN',
+      text: '钱没退',
+      limit: 1,
+    });
+    expect(found).toHaveLength(1);
+    expect(found?.[0]).toMatchObject({
+      id: refund.id,
+      question: '如何申请退款？',
+      relation: 'search',
+    });
+    expect(found?.[0].score).toBeGreaterThan(0.9);
+    // no vectors -> nothing, never an error
+    const plain = createHelpdeskQaSource({
+      repository: repo,
+      releases: createPgFaqReleaseSource(graph),
+      liveEdges: () => graph.allEdges(),
+    });
+    await expect(
+      plain.findVectorCandidates?.({
+        locale: 'zh-CN',
+        text: '钱没退',
+        limit: 3,
+      }),
+    ).resolves.toEqual([]);
   });
 
   it('keeps the tables append-only and checked', async () => {

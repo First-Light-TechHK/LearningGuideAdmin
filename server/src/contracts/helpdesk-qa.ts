@@ -131,6 +131,16 @@ export interface HelpdeskQaSource {
    * 可选：旧的实现与单测的假来源不必提供。
    */
   releaseVersion?(): Promise<number | null>;
+  /**
+   * 分级 L1 的向量那一路（精排开着时才用）：发布版本里和问题最像的至多 limit 个 answer / choice 节点
+   * （含非入口），按相似度从高到低，score 为相似度。没有向量模型、还没算好、失败或超时 → []。
+   * 可选：没有向量检索的来源不必提供。
+   */
+  findVectorCandidates?(search: {
+    locale: string;
+    text: string;
+    limit: number;
+  }): Promise<HelpdeskQaCandidate[]>;
 }
 
 // ---------------------------------------------------------------------------
