@@ -353,6 +353,7 @@ export async function pgQaSource(
           // v5 Part A: the eval library carries no signals yet; v5 graph: every eval FAQ is an
           // entry answer, and the database derives its key from the English question
           signals: [],
+          popularRank: null,
           key: '',
           type: 'answer',
           entry: true,

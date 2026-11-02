@@ -38,6 +38,8 @@ export type FaqSnapshotNode = {
   entry: boolean;
   category: FaqCategory;
   popular: boolean;
+  /** 热门里的顺序（1 最前，null 没排）；2026-11-02 之前的快照没有这个字段（按 null 读）。 */
+  popularRank?: number | null;
   questionEn: string;
   answerEn: string;
   questionZh: string;
@@ -111,6 +113,20 @@ export function freezeNode(
   };
 }
 
+/** 有顺序的热门节点按顺序排到最前，其余（包括没排顺序的热门）保持原来的先后。 */
+function popularFirst(
+  nodes: readonly FaqSnapshotNode[],
+): readonly FaqSnapshotNode[] {
+  const rank = (node: FaqSnapshotNode) =>
+    node.popular && typeof node.popularRank === 'number'
+      ? node.popularRank
+      : Number.POSITIVE_INFINITY;
+  return nodes
+    .map((node, index) => ({ node, index }))
+    .sort((a, b) => rank(a.node) - rank(b.node) || a.index - b.index)
+    .map(({ node }) => node);
+}
+
 /** 快照 → Portal 读到的某一种语言（与 PublicFaq 一样挑字段；边的 label 解析成文字）。 */
 export function publicRelease(
   release: PublishedFaqRelease,
@@ -127,7 +143,8 @@ export function publicRelease(
     version: release.version,
     publishedAt: release.publishedAt,
     locale,
-    nodes: release.snapshot.nodes.map((node) => ({
+    // 热门按 popularRank 排在前面，其余保持快照顺序：Portal 的「热门」chip 按这里的先后补位（situationChips）
+    nodes: popularFirst(release.snapshot.nodes).map((node) => ({
       id: node.id,
       key: node.key,
       type: node.type,
@@ -246,6 +263,7 @@ export function freezeSnapshot(
         entry: faq.entry,
         category: faq.category,
         popular: faq.popular,
+        popularRank: faq.popularRank,
         questionEn: faq.questionEn,
         answerEn: faq.answerEn,
         questionZh: faq.questionZh,
@@ -288,6 +306,7 @@ const DIFF_FIELDS = [
   'entry',
   'category',
   'popular',
+  'popularRank',
   'questionEn',
   'answerEn',
   'questionZh',
@@ -355,7 +374,10 @@ export function diffSnapshots(
       continue;
     }
     const fields = DIFF_FIELDS.filter(
-      (field) => JSON.stringify(old[field]) !== JSON.stringify(node[field]),
+      // 旧快照没有 popularRank：缺的按 null 比
+      (field) =>
+        JSON.stringify(old[field] ?? null) !==
+        JSON.stringify(node[field] ?? null),
     );
     if (fields.length > 0) nodes.changed.push({ ...ref(node), fields });
   }

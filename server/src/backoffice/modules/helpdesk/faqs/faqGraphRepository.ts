@@ -50,7 +50,7 @@ const RELEASE_LOCK = `SELECT pg_advisory_xact_lock(hashtext('helpdesk_faq_releas
 const EDGE_COLUMNS = `id, parent_id, child_id, kind, position, label_en, label_zh,
   created_by, created_at, updated_at`;
 
-const FAQ_COLUMNS = `id, key, node_type, entry, category, popular, question_en, answer_en,
+const FAQ_COLUMNS = `id, key, node_type, entry, category, popular, popular_rank, question_en, answer_en,
   question_zh, answer_zh, keywords, signals, status, version, created_by, updated_by,
   created_at, updated_at`;
 
@@ -232,7 +232,7 @@ function toRelease(row: Row): FaqReleaseRow {
 
 /** 发布版本检索行的列（与 helpdesk_faqs 同名），由快照派生。 */
 const RELEASE_NODE_RECORD = `id uuid, key text, type text, entry boolean, category text,
-  popular boolean, "questionEn" text, "answerEn" text, "questionZh" text, "answerZh" text,
+  popular boolean, "popularRank" int, "questionEn" text, "answerEn" text, "questionZh" text, "answerZh" text,
   keywords text[], signals text[], version int, "updatedAt" timestamptz, "phrasingText" text`;
 
 export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
@@ -305,7 +305,7 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
     /** 还在用这个节点的已发布父节点（归档前检查）。 */
     async liveParents(childId: string): Promise<FaqNodeSummary[]> {
       const rows = await db.query(
-        `SELECT f.id, f.key, f.node_type, f.entry, f.category, f.popular, f.question_en,
+        `SELECT f.id, f.key, f.node_type, f.entry, f.category, f.popular, f.popular_rank, f.question_en,
                 f.answer_en, f.question_zh, f.answer_zh, f.keywords, f.signals, f.status,
                 f.version, f.created_by, f.updated_by, f.created_at, f.updated_at
            FROM helpdesk_faq_edges e
@@ -689,10 +689,11 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
         }));
         await client.query(
           `INSERT INTO helpdesk_faq_release_nodes
-             (release_version, id, key, node_type, entry, category, popular, question_en,
-              answer_en, question_zh, answer_zh, keywords, signals, version, created_at,
-              updated_at, phrasing_text)
-           SELECT $1, n.id, n.key, n.type, n.entry, n.category, n.popular, n."questionEn",
+             (release_version, id, key, node_type, entry, category, popular, popular_rank,
+              question_en, answer_en, question_zh, answer_zh, keywords, signals, version,
+              created_at, updated_at, phrasing_text)
+           SELECT $1, n.id, n.key, n.type, n.entry, n.category, n.popular, n."popularRank",
+                  n."questionEn",
                   n."answerEn", n."questionZh", n."answerZh", COALESCE(n.keywords, '{}'),
                   COALESCE(n.signals, '{}'), COALESCE(n.version, 1),
                   COALESCE(n."updatedAt", now()), COALESCE(n."updatedAt", now()),

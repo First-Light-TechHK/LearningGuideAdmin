@@ -527,7 +527,13 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
     const picked = JSON.parse(JSON.stringify(SAMPLE)) as {
       faqs: Record<string, unknown>[];
     };
-    for (const faq of picked.faqs) faq.popular = faq.key === 'paid-not-active';
+    // two picks, in the product's order: contact-support first, then paid-not-active
+    for (const faq of picked.faqs) {
+      faq.popular =
+        faq.key === 'paid-not-active' || faq.key === 'contact-support';
+      if (faq.key === 'contact-support') faq.popularRank = 1;
+      if (faq.key === 'paid-not-active') faq.popularRank = 2;
+    }
     const library = parseFaqLibrary(picked);
 
     const first = await syncLibraryPopular(deps(), library, {
@@ -535,8 +541,9 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       release: true,
     });
     expect(first).toEqual({
-      on: ['paid-not-active'],
+      on: ['paid-not-active', 'contact-support'],
       off: ['how-do-i-reset-my-password'],
+      reordered: [],
       missing: [],
       failed: [],
       release: {
@@ -548,17 +555,30 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
     });
     const after = (await deps().repository.getByKey('contact-support'))!;
     expect(after.answerEn).toBe('Edited in BackOffice.');
-    expect(after.popular).toBe(false);
-    expect((await deps().repository.getByKey('paid-not-active'))!.popular).toBe(
-      true,
-    );
+    expect(after).toMatchObject({ popular: true, popularRank: 1 });
+    expect(await deps().repository.getByKey('paid-not-active')).toMatchObject({
+      popular: true,
+      popularRank: 2,
+    });
     const release = await deps().source.current();
     expect(release!.version).toBe(2);
+    // the release lists the popular nodes first, in the product's order (Portal's popular chips follow it)
     expect(
       publicRelease(release!, 'en-GB')
         .nodes.filter((n) => n.popular)
         .map((n) => n.key),
-    ).toEqual(['paid-not-active']);
+    ).toEqual(['contact-support', 'paid-not-active']);
+    // and the Help Centre list (release scope) is in the same order
+    const listed = await createPgFaqRepository(db).listPublished({
+      popular: true,
+      limit: 10,
+      release: 2,
+      entryOnly: false,
+    });
+    expect(listed.map((f) => f.key)).toEqual([
+      'contact-support',
+      'paid-not-active',
+    ]);
 
     const again = await syncLibraryPopular(deps(), library, {
       actor,
@@ -567,9 +587,31 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
     expect(again).toEqual({
       on: [],
       off: [],
+      reordered: [],
       missing: [],
       failed: [],
       release: null,
     });
+
+    // only the order changes: the two swap places, and one more release is published
+    for (const faq of picked.faqs) {
+      if (faq.key === 'contact-support') faq.popularRank = 2;
+      if (faq.key === 'paid-not-active') faq.popularRank = 1;
+    }
+    const swapped = await syncLibraryPopular(deps(), parseFaqLibrary(picked), {
+      actor,
+      release: true,
+    });
+    expect(swapped).toMatchObject({
+      on: [],
+      off: [],
+      reordered: ['paid-not-active', 'contact-support'],
+      release: { version: 3, published: true },
+    });
+    expect(
+      publicRelease((await deps().source.current())!, 'zh-CN')
+        .nodes.filter((n) => n.popular)
+        .map((n) => n.key),
+    ).toEqual(['paid-not-active', 'contact-support']);
   });
 });

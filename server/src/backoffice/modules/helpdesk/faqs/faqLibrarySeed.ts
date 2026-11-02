@@ -31,7 +31,8 @@ import { toSimplified } from './faqSearchText';
  *
  * 库文件的形状（宽松读，v1 与 v2 都认；不认识的字段忽略）：
  * - 顶层：{ faqs: [...] } 或数组；
- * - 每条：category、popular、questionEn、answerEn、questionZh、answerZh、keywords（同 BackOffice）；
+ * - 每条：category、popular、popularRank（热门里的顺序，1 最前；可选）、questionEn、answerEn、questionZh、
+ *   answerZh、keywords（同 BackOffice）；
  *   可选 key（缺省 = 英文问题的 slug，与迁移回填同一规则）、type / nodeType（answer | choice；
  *   有 options 就是 choice）、entry（缺省：顶层是入口；有 parentKey 或写在别人 followUps / options
  *   里的不是）、signals（不认识的忽略并报告）、phrasings（字符串数组按文字判断语言，
@@ -58,6 +59,8 @@ export type LibraryNode = {
   entry: boolean;
   category: FaqCategory;
   popular: boolean;
+  /** 热门里的顺序（1 最前）；库里没写 = null。 */
+  popularRank: number | null;
   questionEn: string;
   answerEn: string;
   questionZh: string;
@@ -196,6 +199,7 @@ export function parseFaqLibrary(raw: unknown): ParsedLibrary {
           : !inline && parentKeys.length === 0,
       category: item.category,
       popular: item.popular === true,
+      popularRank: rankOf(item.popularRank, warnings, key),
       questionEn,
       answerEn: typeof item.answerEn === 'string' ? item.answerEn : '',
       questionZh: typeof item.questionZh === 'string' ? item.questionZh : '',
@@ -332,6 +336,24 @@ async function publishedByQuestion(
   }
 }
 
+/** 热门顺序：1–999 的整数；别的（没写、小数、超范围）按没排（null），写了但不对的记 warning。 */
+function rankOf(
+  value: unknown,
+  warnings: string[],
+  key: string,
+): number | null {
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 999
+  )
+    return value;
+  warnings.push(`${key}: popularRank ${JSON.stringify(value)} ignored (1–999)`);
+  return null;
+}
+
 export async function seedFaqLibrary(
   deps: SeedDeps,
   library: ParsedLibrary,
@@ -376,6 +398,7 @@ export async function seedFaqLibrary(
       entry: node.entry,
       category: node.category,
       popular: node.popular,
+      popularRank: node.popularRank,
       questionEn: node.questionEn,
       answerEn: node.answerEn,
       questionZh: node.questionZh,
@@ -486,6 +509,8 @@ export type PopularSyncReport = {
   on: string[];
   /** popular 改成 false 的 key。 */
   off: string[];
+  /** 还是热门（或还不是），只改了顺序的 key。 */
+  reordered: string[];
   /** 库里有、表里没有已发布行的 key（不新建，交给整库导入）。 */
   missing: string[];
   failed: { key: string; reason: string }[];
@@ -493,9 +518,10 @@ export type PopularSyncReport = {
 };
 
 /**
- * 只同步「热门」（产品 2026-11-02 在 Helpdesk-FAQ-Popular.xlsx 里挑的那版）：按 key 找已发布的行，只改 popular，
- * 其他字段原样带回（BackOffice 里改过的文字、关键词、标签不会被库文件盖掉）。经正常的服务层，所以有修订和审计；
- * 有改动才建发布版本（发布把 popular 一起冻结进快照，Portal 读的是快照）。再跑一次什么都不改。
+ * 只同步「热门」（产品 2026-11-02 在 Helpdesk-FAQ-Popular.xlsx 里挑的那版）：按 key 找已发布的行，只改 popular
+ * 和 popularRank（热门顺序），其他字段原样带回（BackOffice 里改过的文字、关键词、标签不会被库文件盖掉）。
+ * 经正常的服务层，所以有修订和审计；有改动才建发布版本（发布把热门和顺序一起冻结进快照，Portal 读的是快照）。
+ * 再跑一次什么都不改。
  */
 export async function syncLibraryPopular(
   deps: Pick<SeedDeps, 'faqs' | 'repository' | 'releases'>,
@@ -505,6 +531,7 @@ export async function syncLibraryPopular(
   const report: PopularSyncReport = {
     on: [],
     off: [],
+    reordered: [],
     missing: [],
     failed: [],
     release: null,
@@ -515,7 +542,11 @@ export async function syncLibraryPopular(
       report.missing.push(node.key);
       continue;
     }
-    if (current.popular === node.popular) continue;
+    if (
+      current.popular === node.popular &&
+      current.popularRank === node.popularRank
+    )
+      continue;
     try {
       await deps.faqs.update(options.actor, current.id, {
         key: current.key,
@@ -523,6 +554,7 @@ export async function syncLibraryPopular(
         entry: current.entry,
         category: current.category,
         popular: node.popular,
+        popularRank: node.popularRank,
         questionEn: current.questionEn,
         answerEn: current.answerEn,
         questionZh: current.questionZh,
@@ -531,12 +563,15 @@ export async function syncLibraryPopular(
         signals: current.signals,
         version: current.version,
       });
-      (node.popular ? report.on : report.off).push(node.key);
+      if (current.popular !== node.popular)
+        (node.popular ? report.on : report.off).push(node.key);
+      else report.reordered.push(node.key);
     } catch (error) {
       report.failed.push({ key: node.key, reason: reason(error) });
     }
   }
-  const changed = report.on.length + report.off.length > 0;
+  const changed =
+    report.on.length + report.off.length + report.reordered.length > 0;
   if (changed && options.release && deps.releases)
     report.release = await releaseNow(deps.releases, options.actor);
   return report;

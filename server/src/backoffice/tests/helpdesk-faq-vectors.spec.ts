@@ -40,6 +40,7 @@ function faq(id: string, fields: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'other',
     popular: false,
+    popularRank: null,
     questionEn: `Question ${id}?`,
     answerEn: 'Answer.',
     questionZh: `问题${id}？`,

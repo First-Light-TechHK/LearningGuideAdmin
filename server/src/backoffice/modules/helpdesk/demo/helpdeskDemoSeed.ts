@@ -261,6 +261,7 @@ async function syncPopularOnce(
       ok,
       on: result.value.on.length,
       off: result.value.off.length,
+      reordered: result.value.reordered.length,
       missing: result.value.missing.length,
       failed: result.value.failed,
       release: result.value.release,
