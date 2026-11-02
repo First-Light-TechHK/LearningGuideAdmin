@@ -461,21 +461,84 @@ export async function seedFaqLibrary(
     }
   }
 
-  if (options.release && deps.releases) {
-    const { release, created } = await deps.releases.create(options.actor);
-    let published = release.status === 'published';
-    let final = release;
-    if (!published && release.publishable) {
-      final = await deps.releases.publish(options.actor, release.version);
-      published = true;
-    }
-    report.release = {
-      version: final.version,
-      status: final.status,
-      created,
-      published,
-    };
+  if (options.release && deps.releases)
+    report.release = await releaseNow(deps.releases, options.actor);
+  return report;
+}
+
+/** 建发布版本（工作表没变就不新建），检查与评测门过了就发布。 */
+async function releaseNow(
+  releases: FaqReleaseService,
+  actor: FaqActor,
+): Promise<NonNullable<SeedReport['release']>> {
+  const { release, created } = await releases.create(actor);
+  let published = release.status === 'published';
+  let final = release;
+  if (!published && release.publishable) {
+    final = await releases.publish(actor, release.version);
+    published = true;
   }
+  return { version: final.version, status: final.status, created, published };
+}
+
+export type PopularSyncReport = {
+  /** popular 改成 true 的 key。 */
+  on: string[];
+  /** popular 改成 false 的 key。 */
+  off: string[];
+  /** 库里有、表里没有已发布行的 key（不新建，交给整库导入）。 */
+  missing: string[];
+  failed: { key: string; reason: string }[];
+  release: SeedReport['release'];
+};
+
+/**
+ * 只同步「热门」（产品 2026-11-02 在 Helpdesk-FAQ-Popular.xlsx 里挑的那版）：按 key 找已发布的行，只改 popular，
+ * 其他字段原样带回（BackOffice 里改过的文字、关键词、标签不会被库文件盖掉）。经正常的服务层，所以有修订和审计；
+ * 有改动才建发布版本（发布把 popular 一起冻结进快照，Portal 读的是快照）。再跑一次什么都不改。
+ */
+export async function syncLibraryPopular(
+  deps: Pick<SeedDeps, 'faqs' | 'repository' | 'releases'>,
+  library: ParsedLibrary,
+  options: { actor: FaqActor; release: boolean },
+): Promise<PopularSyncReport> {
+  const report: PopularSyncReport = {
+    on: [],
+    off: [],
+    missing: [],
+    failed: [],
+    release: null,
+  };
+  for (const node of library.nodes) {
+    const current = await deps.repository.getByKey(node.key);
+    if (!current || current.status !== 'published') {
+      report.missing.push(node.key);
+      continue;
+    }
+    if (current.popular === node.popular) continue;
+    try {
+      await deps.faqs.update(options.actor, current.id, {
+        key: current.key,
+        type: current.type,
+        entry: current.entry,
+        category: current.category,
+        popular: node.popular,
+        questionEn: current.questionEn,
+        answerEn: current.answerEn,
+        questionZh: current.questionZh,
+        answerZh: current.answerZh,
+        keywords: current.keywords,
+        signals: current.signals,
+        version: current.version,
+      });
+      (node.popular ? report.on : report.off).push(node.key);
+    } catch (error) {
+      report.failed.push({ key: node.key, reason: reason(error) });
+    }
+  }
+  const changed = report.on.length + report.off.length > 0;
+  if (changed && options.release && deps.releases)
+    report.release = await releaseNow(deps.releases, options.actor);
   return report;
 }
 

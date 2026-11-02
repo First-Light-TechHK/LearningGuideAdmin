@@ -10,6 +10,7 @@ import {
   seedExitCode,
   seedFaqLibrary,
   seedIdempotencyKey,
+  syncLibraryPopular,
   type SeedDeps,
   type SeedReport,
 } from '../modules/helpdesk/faqs/faqLibrarySeed';
@@ -503,5 +504,72 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
           e.childId === ids.get('contact-support'),
       ),
     ).toHaveLength(1);
+  });
+  it('syncs only the popular flags: BackOffice edits stay, one new release is published, and a second run changes nothing', async () => {
+    const actor = { employeeId: null };
+    await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor,
+      release: true,
+    });
+    // edited in BackOffice after the seed: the popular sync must not put the library text back
+    const support = (await deps().repository.getByKey('contact-support'))!;
+    await deps().faqs.update(actor, support.id, {
+      key: support.key,
+      category: support.category,
+      popular: support.popular,
+      questionEn: support.questionEn,
+      answerEn: 'Edited in BackOffice.',
+      questionZh: support.questionZh,
+      answerZh: support.answerZh,
+      keywords: support.keywords,
+      version: support.version,
+    });
+    const picked = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    for (const faq of picked.faqs) faq.popular = faq.key === 'paid-not-active';
+    const library = parseFaqLibrary(picked);
+
+    const first = await syncLibraryPopular(deps(), library, {
+      actor,
+      release: true,
+    });
+    expect(first).toEqual({
+      on: ['paid-not-active'],
+      off: ['how-do-i-reset-my-password'],
+      missing: [],
+      failed: [],
+      release: {
+        version: 2,
+        status: 'published',
+        created: true,
+        published: true,
+      },
+    });
+    const after = (await deps().repository.getByKey('contact-support'))!;
+    expect(after.answerEn).toBe('Edited in BackOffice.');
+    expect(after.popular).toBe(false);
+    expect((await deps().repository.getByKey('paid-not-active'))!.popular).toBe(
+      true,
+    );
+    const release = await deps().source.current();
+    expect(release!.version).toBe(2);
+    expect(
+      publicRelease(release!, 'en-GB')
+        .nodes.filter((n) => n.popular)
+        .map((n) => n.key),
+    ).toEqual(['paid-not-active']);
+
+    const again = await syncLibraryPopular(deps(), library, {
+      actor,
+      release: true,
+    });
+    expect(again).toEqual({
+      on: [],
+      off: [],
+      missing: [],
+      failed: [],
+      release: null,
+    });
   });
 });
