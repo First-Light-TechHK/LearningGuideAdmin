@@ -134,6 +134,23 @@ export function routeAccess(method: string, path: string): RouteAccess {
       action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'CREATE',
     };
   }
+  // 学生管理（Student Management PRD §2）：读 = VIEW（所有能看 Student 菜单的角色），
+  // 改单人访问、停用 / 启用、改邮箱、发链接都按 CREATE 处理，只有 Student 为 Full 的角色（Admin、Operation Admin）可用
+  if (first === 'students') {
+    return {
+      kind: 'menu',
+      menus: ['student'],
+      action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'CREATE',
+    };
+  }
+  // Settings › Learning Access & Experiments（PRD §7）：只读角色可看；全局开关与紧急关闭只给 Settings 为 Full 的角色
+  if (first === 'learning-access') {
+    return {
+      kind: 'menu',
+      menus: ['settings'],
+      action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+    };
+  }
   if (first === 'backoffice') {
     // 环境标识是所有后台页面的公共信息
     if (second === 'environment') return { kind: 'signedIn' };

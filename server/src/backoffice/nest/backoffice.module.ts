@@ -58,6 +58,8 @@ import {
 } from '../modules/helpdesk/flywheel/flywheelService';
 import { createPgInsightRepository } from '../modules/helpdesk/flywheel/insightRepository';
 import { createPortalHelpdeskClient } from '../modules/helpdesk/portalHelpdeskClient';
+import { createPortalStudentsClient } from '../modules/students/portalStudentsClient';
+import { createStudentsService } from '../modules/students/studentsService';
 import {
   autoSeedDemoOnce,
   shouldAutoSeedDemo,
@@ -91,6 +93,11 @@ import {
   HELPDESK_FAQ_SERVICE,
   HelpdeskIntegrationFaqsController,
 } from './helpdesk-faqs.controller';
+import {
+  BackofficeLearningAccessController,
+  BackofficeStudentsController,
+  STUDENTS_SERVICE,
+} from './students.controller';
 import {
   BackofficeHelpdeskFaqReviewController,
   HELPDESK_FAQ_REVIEW_SERVICE,
@@ -182,8 +189,19 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         BackofficeHelpdeskAgentRunsController,
         BackofficeHelpdeskFlywheelController,
         BackofficeHelpdeskFaqReviewController,
+        BackofficeStudentsController,
+        BackofficeLearningAccessController,
       ],
       providers: [
+        // 学生管理（Student Management PRD v1.0）：数据与判定在 Portal，这里经集成接口读写并记审计
+        {
+          provide: STUDENTS_SERVICE,
+          useFactory: () =>
+            createStudentsService({
+              portal: createPortalStudentsClient(),
+              audit: tryRecordAuditEvent,
+            }),
+        },
         {
           provide: HELPDESK_SERVICE,
           useFactory: () => createHelpdeskService(),

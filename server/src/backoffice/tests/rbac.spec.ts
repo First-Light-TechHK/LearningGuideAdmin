@@ -121,7 +121,7 @@ describe('settings sub-navigation', () => {
       assert.equal(subs.includes('employeeAccount'), false, role);
       assert.deepEqual(
         subs,
-        ['paymentGateway', 'notificationConfiguration'],
+        ['paymentGateway', 'notificationConfiguration', 'learningAccess'],
         role,
       );
     }
@@ -135,6 +135,10 @@ describe('settings sub-navigation', () => {
     assert.equal(
       settingsSubHref('en-GB', 'notificationConfiguration'),
       '/en-GB/settings/notification-configuration',
+    );
+    assert.equal(
+      settingsSubHref('en-GB', 'learningAccess'),
+      '/en-GB/settings/learning-access',
     );
   });
 });

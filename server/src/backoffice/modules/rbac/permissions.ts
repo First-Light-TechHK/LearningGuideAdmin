@@ -161,18 +161,24 @@ export function employeeAccountHref(locale: string): string {
  * Payment Gateway 与 Notification Configuration 在 P0 只是占位入口。
  */
 export type SettingsSubKey =
-  'employeeAccount' | 'paymentGateway' | 'notificationConfiguration';
+  | 'employeeAccount'
+  | 'paymentGateway'
+  | 'notificationConfiguration'
+  | 'learningAccess';
 
 export const SETTINGS_SUB_ORDER = [
   'employeeAccount',
   'paymentGateway',
   'notificationConfiguration',
+  // Student Management PRD §7：紧跟 Notification Configuration；能看 Settings 的角色都能看（只读角色只读）
+  'learningAccess',
 ] as const;
 
 export const SETTINGS_SUB_SEGMENT: Record<SettingsSubKey, string> = {
   employeeAccount: 'employee-account',
   paymentGateway: 'payment-gateway',
   notificationConfiguration: 'notification-configuration',
+  learningAccess: 'learning-access',
 };
 
 export function settingsSubHref(locale: string, sub: SettingsSubKey): string {
