@@ -1,8 +1,8 @@
 ﻿import { createHash, randomUUID } from "node:crypto";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
-import { MarkItDown } from "markitdown-ts";
 import { PACKAGE_FORMAT, PACKAGE_FORMAT_VERSION } from "./contracts/manifest";
+import { convertDocxToHtml } from "./docx-to-html";
 import { mp4DurationSeconds } from "./media-duration";
 import type {
   ExhibitType,
@@ -18,7 +18,6 @@ import type {
 } from "./contracts/manifest";
 
 const LANG = "en-GB";
-const mdConverter = new MarkItDown();
 
 function sha(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -37,27 +36,6 @@ function hasSheet(wb: XLSX.WorkBook, name: string): boolean {
 function cell(v: unknown): string {
   return v === null || v === undefined ? "" : String(v).trim();
 }
-
-function mdToHtml(markdown: string): string {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const out: string[] = [];
-  let para: string[] = [];
-  const flush = () => { if (para.length) { out.push("<p>" + esc(para.join(" ")) + "</p>"); para = []; } };
-  for (const raw of markdown.split(/\r?\n/)) {
-    const line = raw.trimEnd();
-    if (!line.trim()) { flush(); continue; }
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) { flush(); out.push("<h" + h[1].length + ">" + esc(h[2].trim()) + "</h" + h[1].length + ">"); continue; }
-    para.push(line.trim());
-  }
-  flush();
-  return out.join("\n") || "<p></p>";
-}
-
-const mdConverterDone = async (bytes: Buffer): Promise<string> => {
-  try { const r = await mdConverter.convertBuffer(bytes, { file_extension: ".docx" }); return mdToHtml(r?.markdown ?? ""); }
-  catch { return ""; }
-};
 
 /** 把 "mm:ss" / "hh:mm:ss" / Excel 时间小数（以天为单位）都换算成秒。 */
 export function toSeconds(value: unknown): number | null {
@@ -502,8 +480,10 @@ async function buildNewTemplatePackage(
 
     // 文本正文：优先同目录 docx
     const docx = findMedia(media, (n) => isDocxName(n) && lessonNameMatch(n, lessonId, def.no) && isZhName(n) === false);
-    const html = docx ? await mdConverterDone(docx.bytes) : "";
+    const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
+    const html = converted?.html ?? "";
     if (!docx) warnings.push(`Lesson ${def.no} 缺少文本课件 DOCX`);
+    if (converted) for (const message of converted.warnings) warnings.push(`Lesson ${def.no} 文本课件：${message}`);
 
     for (const lang of languages) {
       const isZh = lang === "zh-CN";
@@ -523,8 +503,19 @@ async function buildNewTemplatePackage(
         warnings.push(`Lesson ${def.no} 缺少 ${lang} 视频文件`);
       }
 
-      const textLps: PackageTextLearningPoint[] = defsTextPoints(def.points, isZh)
-        .map((p) => ({ code: `T-${p.code}`, heading: p.title, level: 1 }));
+      const textLps: PackageTextLearningPoint[] = (
+        converted?.headings.length
+          ? converted.headings.map((heading, index) => ({
+              code: `T-${heading.code || index + 1}`,
+              heading: heading.title,
+              level: 1,
+            }))
+          : defsTextPoints(def.points, isZh).map((p) => ({
+              code: `T-${p.code}`,
+              heading: p.title,
+              level: 1,
+            }))
+      );
 
       localized[lang] = {
         title,
@@ -728,8 +719,10 @@ async function buildLegacyPackage(
     const code = `L${String(lesson.no).padStart(3, "0")}`;
     const docx = findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("文本课件") && n.endsWith(".docx"))
       || findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("文本") && n.endsWith(".docx"));
-    const html = docx ? await mdConverterDone(docx.bytes) : "";
+    const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
+    const html = converted?.html ?? "";
     if (!docx) warnings.push(`Lesson ${lesson.no} 缺少文本课件 DOCX`);
+    if (converted) for (const message of converted.warnings) warnings.push(`Lesson ${lesson.no} 文本课件：${message}`);
     const video = findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("视频课件") && n.endsWith(".mp4"));
     let videoPath: string | undefined;
     let videoDuration: number | null = null;
@@ -755,7 +748,9 @@ async function buildLegacyPackage(
       exhibits.push({ code: exCode, type: "IMAGE", file: imagePath, thumbnail: thumbnailPath, localized: { [LANG]: { title: meta.title, description: meta.description || undefined } } });
     }
 
-    const textLearningPoints: PackageTextLearningPoint[] = lesson.textLps.map((heading, i) => ({ code: `T-${lesson.no}.${i + 1}`, heading, level: 1 }));
+    const textLearningPoints: PackageTextLearningPoint[] = converted?.headings.length
+      ? converted.headings.map((heading, i) => ({ code: `T-${lesson.no}.${heading.code || i + 1}`, heading: heading.title, level: 1 }))
+      : lesson.textLps.map((heading, i) => ({ code: `T-${lesson.no}.${i + 1}`, heading, level: 1 }));
     const videoLearningPoints: PackageVideoLearningPoint[] = video ? lesson.videoLps.map((lp, i) => ({ code: `V-${lesson.no}.${i + 1}`, timeSeconds: lp.timeSeconds, title: lp.title })) : [];
     const loc = {
       title: lesson.title || `Lesson ${lesson.no}`,

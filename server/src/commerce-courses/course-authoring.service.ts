@@ -7,10 +7,10 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { PrismaService } from '../prisma/prisma.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
+import { convertDocxToHtml } from './docx-to-html';
 import { mp4DurationSeconds } from './media-duration';
 import {
   MediaValidationError,
@@ -687,15 +687,22 @@ export class CourseAuthoringService {
       });
     }
     try {
-      const result = await mammoth.convertToHtml({ buffer: file.buffer });
+      const result = await convertDocxToHtml(file.buffer);
+      if (!result.html) {
+        throw new BadRequestException({
+          code: 'DOCX_INVALID',
+          message: 'Could not read the Word document.',
+        });
+      }
       return {
-        html: result.value,
-        messages: result.messages.map((message) => ({
-          type: message.type,
-          message: message.message,
+        html: result.html,
+        messages: result.warnings.map((message) => ({
+          type: 'warning',
+          message,
         })),
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
       throw new BadRequestException({
         code: 'DOCX_INVALID',
         message: 'Could not read the Word document.',
