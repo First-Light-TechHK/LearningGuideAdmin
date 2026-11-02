@@ -62,6 +62,8 @@ export type HelpdeskQaSourceDeps = {
   liveEdges: () => Promise<QaEdge[]>;
   /** 定位方式（每次现读；缺省 flat）。 */
   locator?: () => LocatorMode;
+  /** 候选范围（每次现读；缺省 tree）：all = 平铺，见 searchScope()。 */
+  searchScope?: () => SearchScope;
   /**
    * 向量排序（faqVectors.ts）：精排的召回池要的向量那一路。不给 → 没有 findVectorCandidates 的结果（[]）。
    */
@@ -77,6 +79,22 @@ export function locatorMode(env: NodeJS.ProcessEnv): LocatorMode {
   return env.HELPDESK_LOCATOR?.trim().toLowerCase() === 'hybrid'
     ? 'hybrid'
     : 'flat';
+}
+
+/**
+ * 候选范围（HELPDESK_SEARCH_SCOPE，每次现读）。owner 2026-11-02 定了平铺：
+ * - tree（缺省，和以前一样）：普通检索只搜入口卡；屏幕上有卡时先给它的子卡和树上近亲；
+ * - all：平铺。每张已发布的答案卡都直接参与检索，不管是不是入口；不按父子边加子卡、近亲，
+ *   边只留给显示（追问 chip、选项卡）。要和「追问卡的问题单独看也完整」的卡库一起开
+ *   （三组终测 2026-11-02：平铺与树准确率打平，单问中位 1.1 秒 vs 1.9 秒、每次更便宜）。
+ */
+export const SEARCH_SCOPES = ['tree', 'all'] as const;
+export type SearchScope = (typeof SEARCH_SCOPES)[number];
+
+export function searchScope(env: NodeJS.ProcessEnv): SearchScope {
+  return env.HELPDESK_SEARCH_SCOPE?.trim().toLowerCase() === 'all'
+    ? 'all'
+    : 'tree';
 }
 
 type View = {
@@ -168,7 +186,9 @@ export function createHelpdeskQaSource(
       const locale = search.locale;
       const limit = Math.min(search.limit, FAQ_LIMITS.candidatesMax);
       const v = await view(true);
-      const contextId = search.nodeId?.toLowerCase();
+      const flat = (deps.searchScope?.() ?? 'tree') === 'all';
+      // 平铺：屏幕上的卡片不决定候选（不加子卡、近亲）；入口限制也去掉（hybrid 的结构排序因此不生效）
+      const contextId = flat ? undefined : search.nodeId?.toLowerCase();
       const children = contextId
         ? v.edges
             .filter((edge) => edge.parentId === contextId)
@@ -193,7 +213,7 @@ export function createHelpdeskQaSource(
         }
         relatives.delete(contextId);
       }
-      const entryOnly = search.entryOnly ?? true;
+      const entryOnly = flat ? false : (search.entryOnly ?? true);
       const types = search.types ?? ['answer'];
       const deepWanted =
         entryOnly && types.includes('answer')
@@ -216,7 +236,10 @@ export function createHelpdeskQaSource(
                   ? (['answer', 'choice'] as const)
                   : search.types,
             }
-          : { entryOnly: search.entryOnly, types: search.types }),
+          : {
+              entryOnly: flat ? false : search.entryOnly,
+              types: search.types,
+            }),
       });
       const scored = new Map<string, ScoredFaq>(
         searched.map((faq) => [faq.id, faq]),
@@ -441,6 +464,7 @@ export function createPgHelpdeskQaSource(
     releases: createPgFaqReleaseSource(graph),
     liveEdges: () => graph.allEdges(),
     locator: () => locatorMode(process.env),
+    searchScope: () => searchScope(process.env),
   });
   // 向量检索或精排（精排的召回池含向量那一路）开着时，启动就把上线版本的向量读进内存（约 1 秒），
   // 免得最先几个提问等不到、退回字词检索
