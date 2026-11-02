@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
 import { computeCompleteness } from './completeness';
+import { pickSummaryLocalization, summaryTitle } from './course-summary';
 import { detailToCompletenessInput } from './version-snapshot';
 import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
 import { syncTextLearningPoints } from './course-authoring.service';
@@ -694,19 +695,15 @@ export class CommerceCoursesService {
   }) {
     // localizations 的返回顺序不稳定（没有 orderBy，Postgres 堆顺序可能因更新而改变），
     // 若直接取 [0]，可能拿到「添加学习语言」时以空标题占位的本地化记录，导致列表里
-    // 课程名为空。这里优先取默认内容语言且标题非空的那条，再退到任意非空标题。
-    const localized =
-      row.localizations.find(
-        (loc) =>
-          loc.language === row.defaultContentLanguage &&
-          loc.title.trim() !== '',
-      ) ??
-      row.localizations.find((loc) => loc.title.trim() !== '') ??
-      row.localizations.find(
-        (loc) => loc.language === row.defaultContentLanguage,
-      ) ??
-      row.localizations[0];
-    const title = localized?.title?.trim() || row.slug || row.code;
+    // 课程名为空。选择规则见 pickSummaryLocalization。
+    const localized = pickSummaryLocalization(
+      row.localizations,
+      row.defaultContentLanguage,
+    );
+    const title = summaryTitle(row.localizations, row.defaultContentLanguage, {
+      slug: row.slug,
+      code: row.code,
+    });
     return {
       id: row.id,
       code: row.code,

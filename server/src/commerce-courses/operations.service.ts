@@ -6,6 +6,7 @@ import {
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HISTORY_ACTIONS } from './publishing.service';
+import { summaryTitle } from './course-summary';
 
 const BANNER_LANGUAGES = ['en-GB', 'zh-CN'] as const;
 
@@ -36,12 +37,16 @@ export class OperationsService {
     return {
       items: entries.map((entry) => {
         const course = courseById.get(entry.courseId);
-        const loc = course?.localizations[0];
         return {
           courseId: entry.courseId,
           sortOrder: entry.sortOrder,
           code: course?.code ?? '—',
-          title: loc?.title ?? course?.slug ?? '—',
+          title: course
+            ? summaryTitle(course.localizations, course.defaultContentLanguage, {
+                slug: course.slug,
+                code: course.code,
+              })
+            : '—',
           category: course?.category?.name ?? null,
           liveStatus: course?.liveStatus ?? 'OFFLINE',
           trialEnabled: course?.trialEnabled ?? false,
@@ -123,7 +128,11 @@ export class OperationsService {
         ? {
             id: course.id,
             code: course.code,
-            title: course.localizations[0]?.title ?? course.slug,
+            title: summaryTitle(
+              course.localizations,
+              course.defaultContentLanguage,
+              { slug: course.slug, code: course.code },
+            ),
             liveStatus: course.liveStatus,
             trialEnabled: course.trialEnabled,
             coverUrl: course.cover
