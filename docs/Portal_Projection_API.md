@@ -1,10 +1,12 @@
 # Portal 只读投影 API 文档
 
-> 版本：v1.1（2026-11-01）  
+> 版本：v1.2（2026-11-02）  
 > 适用范围：Portal 课程列表 / 详情 / 媒体 / 草稿预览  
-> 实现位置：`server/src/commerce-courses/portal-courses.controller.ts`、`portal-projection.service.ts`、`portal-preview.service.ts`
+> 实现位置：`server/src/commerce-courses/portal-courses.controller.ts`、`portal-projection.service.ts`、`portal-preview.service.ts`、`media-stream.ts`
 >
 > **v1.1 变更**：详情补齐 `whatYouLearn` / `provides` / `plans` / `learningMode` / `learningLanguages` / `totalDurationSeconds` / `durationSeconds`；`contents[].url` 从相对 `media/...` 改为 `/api/portal/v1/media/...`；新增封面、媒体和签名预览端点。
+>
+> **v1.2 变更**：`sections[].lessons[].trial` 增加试看截止点（视频秒数 / 文本截止 LP）供正式 Portal 实现试播；全部媒体端点支持 HTTP `Range`；新增预览媒体端点 `portal-preview/cover`、`portal-preview/media/:assetId`，让「在 Portal 中预览」可播放草稿视频与正文。
 
 Admin 是课程数据的唯一写入方；Portal 通过只读投影 API 拉取**线上版本**内容。  
 Portal 页面不应直接读 Admin 的工作区草稿；草稿预览走短时效签名链接。
@@ -22,6 +24,8 @@ Portal 页面不应直接读 Admin 的工作区草稿；草稿预览走短时效
 | `GET` | `/api/portal/v1/preview/course?token=...` | 用签名 token 取草稿 / 指定版本详情（Portal 备用） | `X-API-Key` + preview token |
 | `GET` | `/api/backoffice/courses/:id/portal-preview` | Admin 生成课程预览链接（指向 Admin 预览页） | 员工会话 |
 | `GET` | `/api/backoffice/courses/:id/portal-preview/content?token=...` | Admin 预览页读取草稿 / 指定版本投影 | 员工会话 + preview token |
+| `GET` | `/api/backoffice/courses/:id/portal-preview/cover?token=...` | 预览页封面（草稿可用） | 员工会话 + preview token |
+| `GET` | `/api/backoffice/courses/:id/portal-preview/media/:assetId?token=...` | 预览页视频 / 展品（草稿可用，支持 Range） | 员工会话 + preview token |
 
 ### 1.1 列表查询参数
 
@@ -74,6 +78,7 @@ JSON 端点统一返回：
 | 课时摘要 | `sections[].lessons[].summary` | live 快照 lesson 描述 | ✅ |
 | 课时时长 | `sections[].lessons[].durationSeconds` | live 快照视频时长 | ✅ 新增 |
 | 试看标记 | `sections[].lessons[].isPublic` + `trial` | 当前环境 `TrialSetting.status='READY'` | ✅ |
+| 试看截止点 | `sections[].lessons[].trial` | `TrialSetting.videoCutoffByLanguage` / `textCutoffLearningPointId` | ✅ 新增 |
 | 视频 / 文本内容 | `contents[]` | live 快照 | ✅ |
 | 视频 / 展品媒体 | `contents[].url`、`contents[].nodes[].url` | 媒体资产 ID | ✅ 改为 Portal 媒体端点 |
 | 本课程提供 | `provides` | live 快照本地化 | ✅ 新增 |
@@ -235,6 +240,11 @@ curl -s "https://cpzmzuzkkj.ap-southeast-1.awsapprunner.com/api/portal/v1/course
             "summary": "A system can be thought of as a collection of states at different times.",
             "durationSeconds": 1469,
             "isPublic": true,
+            "trial": {
+              "videoCutoffSeconds": 300,
+              "textCutoffLearningPointId": null,
+              "textCutoffCode": "LP01"
+            },
             "contents": [
               {
                 "id": "L001-video",
@@ -279,8 +289,13 @@ curl -s "https://cpzmzuzkkj.ap-southeast-1.awsapprunner.com/api/portal/v1/course
 | `trial` | `enabled` 来自课程；`lessonIds` 来自 `TrialSetting.status='READY'` |
 | `plans` | 当前环境有效订阅计划；价格不属于版本快照 |
 | `sections[].lessons[].isPublic` | 该课时是否在试看中开放 |
+| `sections[].lessons[].trial` | 试看截止点：`videoCutoffSeconds`（按内容语言）、`textCutoffLearningPointId`、`textCutoffCode`；非试看课时为 `null` |
 | `contents[].url` | Portal 媒体端点相对路径 |
 | `contents[].nodes` | 展品 / 触发器节点 |
+
+> 所有媒体端点（正式 Portal 与 Admin 预览）都支持 HTTP `Range`（返回 `206` + `Content-Range` + `Accept-Ranges: bytes`），
+> 视频可直接拖动进度；三个入口（课程编辑、学员视角预览、在 Portal 中预览）与正式 Portal 读的是
+> **同一个 `CourseMediaAsset.storageKey`**，没有多份副本，只有鉴权与门禁不同。
 
 ---
 
@@ -309,7 +324,24 @@ GET /api/portal/v1/media/:courseId/assets/:assetId
 
 否则 404。
 
+两个媒体端点都支持 HTTP `Range`：带 `Range: bytes=start-end` 时返回 `206` 与 `Content-Range`，
+并带 `Accept-Ranges: bytes`；单个 Range 响应最多 8MB（客户端用后续 Range 请求继续取）。
+
 > 这两个端点的响应是二进制，不带 JSON 信封；Portal 可直接作为 `<img src>` / `<video src>` 使用。
+
+### 6.3 预览媒体（草稿 / 指定版本）
+
+```http
+GET /api/backoffice/courses/:id/portal-preview/cover?token=...
+GET /api/backoffice/courses/:id/portal-preview/media/:assetId?token=...
+```
+
+员工会话 + 预览 token 双重校验（token 的 `courseId` 必须与路径一致）。与 6.1/6.2 读同一个
+`CourseMediaAsset.storageKey`，区别只是不要求课程 `ONLINE`，所以草稿/未上线课程也能预览视频与封面。
+同样支持 `Range`。
+
+> Admin 预览页把投影中的 `/api/portal/v1/media/...` URL 映射到这两个端点（浏览器端无法带 `X-API-Key`）。
+> 正式 Portal 用服务密钥调用 6.1/6.2，契约字段完全相同。
 
 ---
 
@@ -390,6 +422,15 @@ GET /api/backoffice/courses/:id/portal-preview/content?token=<token>
 > `/api/portal/v1/preview/course` 仍保留（服务鉴权 + token），供 Portal 未来实现自有预览路由时使用；
 > Admin 预览页不依赖该端点。
 
+**接口一致性要求（必须遵守）**：预览页的渲染只能依赖本投影的字段，不允许另外读 Admin 编辑工作区接口。
+这样「在 Portal 中预览」验证的就是正式 Portal 将要消费的同一份契约；后续正式 Portal 课程页只替换
+媒体基址（`/api/portal/v1/media/**`）与鉴权方式（`X-API-Key`），页面结构与字段不变。
+
+| 预览用途 | 数据来源 | 媒体端点 |
+|---|---|---|
+| 在 Portal 中预览 | `GET portal-preview/content`（内部调用 `PortalProjectionService.getPreviewCourse`，与 `/api/portal/v1/courses/:id` 同一 `toDetail`） | `portal-preview/cover`、`portal-preview/media/:assetId`（草稿可用、支持 Range） |
+| 正式 Portal | `GET /api/portal/v1/courses/:id` / `GET /api/portal/v1/preview/course` | `/api/portal/v1/media/**`（要求 ONLINE） |
+
 ### 7.4 Token 载荷
 
 ```json
@@ -438,9 +479,12 @@ if (payload.aud !== 'portal-preview' || payload.exp <= Date.now() / 1000) {
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| 课程预览页 | 已实现（Admin 站点） | `/{locale}/portal-preview/{courseId}?token=...`，按 Portal 课程详情版式渲染草稿/版本；不修改 Portal 仓库 |
+| 课程预览页 | 已实现（Admin 站点） | `/{locale}/portal-preview/{courseId}?token=...`，按 Portal 课程详情版式渲染草稿/版本，并可直接播放草稿视频 / 阅读正文；不修改 Portal 仓库 |
 | Portal 自有预览路由 | 非目标 | 原方案的 `/{locale}/portal/courses/{slug}/preview` 需改 Portal 仓库，现由 Admin 自建预览页替代；`/api/portal/v1/preview/course` 仍保留备用 |
 | 媒体绝对地址 | 约定 | 当前返回 Admin 相对路径；Portal 需拼接 Admin origin 或反向代理 |
+| 媒体 Range | 已实现 | 正式与预览媒体端点都支持 206 分段，单次上限 8MB |
+| 试看截止点 | 已实现 | `sections[].lessons[].trial` 给出视频秒数、文本截止 LP 与 code；Portal 侧需按此裁剪播放/正文 |
+| 试看执行 | Portal 侧待实现 | 投影只提供规则数据，真正“截止后不可继续播放/阅读”由 Portal 或媒体签名实现 |
 | 按 `code` 查询 | 未实现 | 当前详情只接受内部 UUID；Portal 可用列表返回的 `id`，或后续新增 `by-code` 端点 |
 | 多语言协商 | 未实现 | 当前固定默认内容语言；如需按 `Accept-Language` 返回，需要新增参数 |
 | SEO / OG 元数据 | 非投影目标 | Portal 可用 `title` / `description` / `coverUrl` 自行生成 |
@@ -706,6 +750,12 @@ components:
         summary: { type: [string, 'null'] }
         durationSeconds: { type: [integer, 'null'] }
         isPublic: { type: boolean }
+        trial:
+          type: [object, 'null']
+          properties:
+            videoCutoffSeconds: { type: [integer, 'null'] }
+            textCutoffLearningPointId: { type: [string, 'null'] }
+            textCutoffCode: { type: [string, 'null'] }
         contents:
           type: array
           items:

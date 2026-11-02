@@ -21,6 +21,10 @@ import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 export interface StorageDriver {
   put(key: string, bytes: Buffer): Promise<void>;
   get(key: string): Promise<Buffer>;
+  /** 读取一段字节（视频 Range 请求用，避免整份文件读进内存）。 */
+  getRange(key: string, start: number, length: number): Promise<Buffer>;
+  /** 对象字节数；不存在返回 null。 */
+  size(key: string): Promise<number | null>;
   has(key: string): Promise<boolean>;
   remove(key: string): Promise<void>;
   removePrefix(prefix: string): Promise<void>;
@@ -53,6 +57,27 @@ class LocalDriver implements StorageDriver {
 
   async get(key: string): Promise<Buffer> {
     return fs.readFile(this.resolve(key));
+  }
+
+  async getRange(key: string, start: number, length: number): Promise<Buffer> {
+    const full = this.resolve(key);
+    const handle = await fs.open(full, 'r');
+    try {
+      const buffer = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async size(key: string): Promise<number | null> {
+    try {
+      const info = await fs.stat(this.resolve(key));
+      return info.size;
+    } catch {
+      return null;
+    }
   }
 
   async has(key: string): Promise<boolean> {
@@ -119,6 +144,38 @@ class S3Driver implements StorageDriver {
       chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks);
+  }
+
+  async getRange(key: string, start: number, length: number): Promise<Buffer> {
+    const out = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: this.k(key),
+        Range: `bytes=${start}-${start + length - 1}`,
+      }),
+    );
+    const body = out.Body as
+      { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+    if (!body) throw new Error(`Empty S3 body for ${key}`);
+    if (typeof body.transformToByteArray === 'function') {
+      return Buffer.from(await body.transformToByteArray());
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  }
+
+  async size(key: string): Promise<number | null> {
+    try {
+      const out = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }),
+      );
+      return typeof out.ContentLength === 'number' ? out.ContentLength : null;
+    } catch {
+      return null;
+    }
   }
 
   async has(key: string): Promise<boolean> {
@@ -213,6 +270,14 @@ export class CourseStorageService {
 
   getMedia(key: string): Promise<Buffer> {
     return this.media.get(key);
+  }
+
+  getMediaRange(key: string, start: number, length: number): Promise<Buffer> {
+    return this.media.getRange(key, start, length);
+  }
+
+  mediaSize(key: string): Promise<number | null> {
+    return this.media.size(key);
   }
 
   hasMedia(key: string): Promise<boolean> {

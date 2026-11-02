@@ -8,9 +8,10 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 
-import { contentTypeFor } from './content-type';
+import { sendMedia } from './media-stream';
 import { PortalProjectionService } from './portal-projection.service';
 import { PortalPreviewService } from './portal-preview.service';
+import { CourseStorageService } from './storage.service';
 
 /**
  * Portal 只读投影（v1 形状）。服务令牌鉴权（/api 路由在 route-access 登记为 service）。
@@ -21,6 +22,7 @@ export class PortalCoursesController {
   constructor(
     private readonly projection: PortalProjectionService,
     private readonly preview: PortalPreviewService,
+    private readonly storage: CourseStorageService,
   ) {}
 
   @Get('courses')
@@ -61,14 +63,12 @@ export class PortalCoursesController {
     @Res() res: Response,
   ) {
     const media = await this.projection.getCoverBytes(courseId);
-    if (!media)
+    if (!media || !(await sendMedia(res, this.storage, media))) {
       throw new NotFoundException({
         code: 'COURSE_MEDIA_NOT_FOUND',
         message: 'Cover not found.',
       });
-    res.setHeader('Content-Type', contentTypeFor(media.extension));
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    res.send(media.bytes);
+    }
   }
 
   @Get('media/:courseId/assets/:assetId')
@@ -78,13 +78,11 @@ export class PortalCoursesController {
     @Res() res: Response,
   ) {
     const media = await this.projection.getMediaBytes(courseId, assetId);
-    if (!media)
+    if (!media || !(await sendMedia(res, this.storage, media))) {
       throw new NotFoundException({
         code: 'COURSE_MEDIA_NOT_FOUND',
         message: 'Media not found.',
       });
-    res.setHeader('Content-Type', contentTypeFor(media.extension));
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    res.send(media.bytes);
+    }
   }
 }

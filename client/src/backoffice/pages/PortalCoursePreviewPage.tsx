@@ -51,9 +51,15 @@ function provideEntries(value: unknown): Array<{ title: string; key: string | nu
     .map((item) => {
       if (typeof item === 'string') return { title: item, key: null }
       if (!item || typeof item !== 'object') return { title: '', key: null }
-      const record = item as { title?: unknown; text?: unknown; key?: unknown }
+      const record = item as { title?: unknown; text?: unknown; key?: unknown; type?: unknown }
       const title = typeof record.title === 'string' ? record.title : typeof record.text === 'string' ? record.text : ''
-      return { title, key: typeof record.key === 'string' ? record.key : null }
+      const key =
+        typeof record.key === 'string'
+          ? record.key
+          : typeof record.type === 'string'
+            ? record.type.toUpperCase()
+            : null
+      return { title, key }
     })
     .filter((entry) => Boolean(entry.title.trim()))
 }
@@ -148,7 +154,14 @@ export function PortalCoursePreviewPage() {
     detail.preview.source === 'version'
       ? `${L(locale, '版本预览', 'Version preview')} ${detail.preview.versionLabel ?? ''}`
       : L(locale, '草稿预览（未发布）', 'Draft preview (not published)')
-  const coverSrc = detail.coverUrl ? `/api/backoffice/courses/${detail.id}/cover` : null
+  const previewMediaUrl = (url: string) => {
+    const match = /^\/api\/portal\/v1\/media\/[^/]+\/assets\/(.+)$/.exec(url)
+    if (!match) return url
+    return `/api/backoffice/courses/${detail.id}/portal-preview/media/${match[1]}?token=${encodeURIComponent(token)}`
+  }
+  const coverSrc = detail.coverUrl
+    ? `/api/backoffice/courses/${detail.id}/portal-preview/cover?token=${encodeURIComponent(token)}`
+    : null
 
   return (
     <div style={{ minHeight: '100vh', background: PAGE_BG, color: '#0A0A0A' }} data-portal-preview>
@@ -235,36 +248,77 @@ export function PortalCoursePreviewPage() {
               <div style={{ display: 'grid', gap: 12 }}>
                 {lessons.map((lesson, index) => {
                   const badges = contentBadges(lesson.contents, locale)
+                  const videoSource = lesson.contents.find((content) => content.type === 'video' && content.url)
+                  const textContents = lesson.contents.filter((content) => content.type === 'text' && content.html)
                   return (
                     <article
                       key={lesson.id}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20, minHeight: 88, padding: '14px 18px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8 }}
+                      style={{ display: 'grid', gap: 14, padding: '16px 18px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 8 }}
                     >
-                      <div style={{ minWidth: 0 }}>
-                        <h3 style={{ display: 'flex', gap: 14, alignItems: 'baseline', margin: '0 0 8px', fontSize: 16, fontWeight: 500, color: '#596478' }}>
-                          <span>{L(locale, '课时', 'Lesson')} {index + 1}</span>
-                          <span>{lesson.title}</span>
-                          {lesson.isPublic && <span style={{ fontSize: 11, color: '#155DFC' }}>{L(locale, '试看', 'Trial')}</span>}
-                        </h3>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, color: '#99A1AF', fontSize: 13 }}>
-                          <time style={{ flex: '0 0 64px', borderRight: '1px solid rgba(0,0,0,0.1)', minHeight: 30 }}>
-                            {lesson.durationSeconds ? formatDuration(lesson.durationSeconds, locale) : '—'}
-                          </time>
-                          <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as CSSProperties}>{lesson.summary ?? ''}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <h3 style={{ display: 'flex', gap: 14, alignItems: 'baseline', margin: '0 0 8px', fontSize: 16, fontWeight: 500, color: '#596478' }}>
+                            <span>{L(locale, '课时', 'Lesson')} {index + 1}</span>
+                            <span>{lesson.title}</span>
+                            {lesson.isPublic && <span style={{ fontSize: 11, color: '#155DFC' }}>{L(locale, '试看', 'Trial')}</span>}
+                          </h3>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, color: '#99A1AF', fontSize: 13 }}>
+                            <time style={{ flex: '0 0 64px', borderRight: '1px solid rgba(0,0,0,0.1)', minHeight: 30 }}>
+                              {lesson.durationSeconds ? formatDuration(lesson.durationSeconds, locale) : '—'}
+                            </time>
+                            <span style={{ overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as CSSProperties}>{lesson.summary ?? ''}</span>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          {badges.map((badge) => (
+                            <span key={badge} style={{ padding: '4px 10px', borderRadius: 999, background: '#EEF4FF', color: '#155DFC', fontSize: 12 }}>{badge}</span>
+                          ))}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                        {badges.map((badge) => (
-                          <span key={badge} style={{ padding: '4px 10px', borderRadius: 999, background: '#EEF4FF', color: '#155DFC', fontSize: 12 }}>{badge}</span>
-                        ))}
-                      </div>
+                      {lesson.trial?.videoCutoffSeconds ? (
+                        <p style={{ margin: 0, fontSize: 12, color: '#155DFC' }}>
+                          {L(locale, '试看范围', 'Trial')}：{formatDuration(lesson.trial.videoCutoffSeconds, locale)}
+                        </p>
+                      ) : null}
+                      {videoSource?.url && (
+                        <video
+                          controls
+                          preload="metadata"
+                          style={{ width: '100%', maxHeight: 420, background: '#000', borderRadius: 8 }}
+                          src={previewMediaUrl(videoSource.url)}
+                        />
+                      )}
+                      {textContents.map((content) => (
+                        <div
+                          key={content.id}
+                          style={{ lineHeight: 1.7, fontSize: 14 }}
+                          dangerouslySetInnerHTML={{ __html: content.html ?? '' }}
+                        />
+                      ))}
+                      {lesson.contents.some((content) => content.type === 'video' && content.nodes?.length) && (
+                        <ul style={{ margin: 0, paddingLeft: 18, color: '#5A6577', fontSize: 13 }}>
+                          {lesson.contents
+                            .filter((content) => content.type === 'video')
+                            .flatMap((content) => content.nodes ?? [])
+                            .map((node) => (
+                              <li key={node.id}>
+                                {node.title}
+                                {node.triggerTime ? ` · ${formatDuration(node.triggerTime, locale)}` : ''}
+                              </li>
+                            ))}
+                        </ul>
+                      )}
                     </article>
                   )
                 })}
               </div>
             )}
             <p style={{ margin: '16px 0 0', color: '#99A1AF', fontSize: 12 }}>
-              {L(locale, '课时正文与视频请在「学员视角预览」中查看。', 'Lesson text and video are available in the learner view preview.')}
+              {L(
+                locale,
+                '预览使用与正式 Portal 相同的课程投影数据；视频/正文来自同一个课程资产库（草稿内容仅员工可见）。试看范围以「学员视角预览」中的截止点为准。',
+                'This preview uses the same course projection data as the live Portal. Video and text come from the same course asset store (drafts are staff-only). Trial cut-offs follow the learner view preview.',
+              )}
             </p>
           </section>
         </div>

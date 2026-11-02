@@ -362,6 +362,11 @@ describe('Portal projection contract (e2e)', () => {
       summary: 'Live summary',
       durationSeconds: 125,
       isPublic: true,
+      trial: {
+        videoCutoffSeconds: 60,
+        textCutoffLearningPointId: null,
+        textCutoffCode: null,
+      },
     });
     expect(lesson.contents[0].url).toBe(
       `/api/portal/v1/media/${courseId}/assets/${videoAssetId}`,
@@ -457,6 +462,49 @@ describe('Portal projection contract (e2e)', () => {
     await request(app.getHttpServer())
       .get(
         `/api/backoffice/courses/${courseId}/portal-preview/content?token=${token}`,
+      )
+      .expect(401);
+  });
+
+  it('serves draft preview media to the Admin preview page with Range support', async () => {
+    const agent = await signInAs(app, 'ADMIN');
+    const link = await agent
+      .get(`/api/backoffice/courses/${courseId}/portal-preview?locale=zh-CN`)
+      .expect(200);
+    const token = encodeURIComponent(String(link.body.data.token));
+
+    const cover = await agent
+      .get(
+        `/api/backoffice/courses/${courseId}/portal-preview/cover?token=${token}`,
+      )
+      .expect(200);
+    expect(cover.headers['content-type']).toBe('image/png');
+    expect(Buffer.from(cover.body).equals(PNG)).toBe(true);
+
+    const probe = await agent
+      .get(
+        `/api/backoffice/courses/${courseId}/portal-preview/media/${videoAssetId}?token=${token}`,
+      )
+      .expect(200);
+    expect(probe.headers['content-type']).toBe('video/mp4');
+    expect(probe.headers['accept-ranges']).toBe('bytes');
+    expect(Buffer.from(probe.body).toString()).toBe('e2e-video-bytes');
+
+    const partial = await agent
+      .get(
+        `/api/backoffice/courses/${courseId}/portal-preview/media/${videoAssetId}?token=${token}`,
+      )
+      .set('Range', 'bytes=0-3')
+      .expect(206);
+    expect(partial.headers['content-range']).toBe(
+      'bytes 0-3/15',
+    );
+    expect(Buffer.from(partial.body).toString()).toBe('e2e-');
+
+    // token 只授权它签发的那门课
+    await agent
+      .get(
+        `/api/backoffice/courses/${hiddenCourseId}/portal-preview/media/${videoAssetId}?token=${token}`,
       )
       .expect(401);
   });

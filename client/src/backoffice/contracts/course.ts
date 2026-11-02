@@ -302,7 +302,20 @@ export type PortalPreviewDetail = {
       summary: string | null;
       durationSeconds: number | null;
       isPublic: boolean;
-      contents: Array<{ id: string; title?: string; type: string; mode?: string; url?: string; html?: string }>;
+      trial?: {
+        videoCutoffSeconds: number | null;
+        textCutoffLearningPointId: string | null;
+        textCutoffCode: string | null;
+      } | null;
+      contents: Array<{
+        id: string;
+        title?: string;
+        type: string;
+        mode?: string;
+        url?: string;
+        html?: string;
+        nodes?: Array<{ id: string; title: string; triggerTime?: number; url?: string; type?: string }>;
+      }>;
     }>;
   }>;
   preview: { source: 'draft' | 'version'; versionLabel: string | null };

@@ -22,31 +22,37 @@ export class CommerceCoursesService {
     private readonly publishing: PublishingService,
   ) {}
 
-  /** 读取课程封面字节（Admin 预览用）�?*/
+  /** 读取课程封面的存储位置（Admin 预览用）。 */
   async getCoverBytes(
     id: string,
-  ): Promise<{ bytes: Buffer; extension: string } | null> {
+  ): Promise<{ storageKey: string; extension: string; size: number | null } | null> {
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      select: { cover: { select: { storageKey: true, extension: true } } },
+      select: { cover: { select: { storageKey: true, extension: true, size: true } } },
     });
     if (!course?.cover) return null;
-    const bytes = await this.storage.getMedia(course.cover.storageKey);
-    return { bytes, extension: course.cover.extension };
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
   }
 
-  /** 读取课程某媒体资产字节（Admin 预览用，仅限该课程内资产）�?*/
+  /** 读取课程某媒体资产的存储位置（Admin 预览用，仅限该课程内资产）。 */
   async getMediaBytes(
     id: string,
     assetId: string,
-  ): Promise<{ bytes: Buffer; extension: string } | null> {
+  ): Promise<{ storageKey: string; extension: string; size: number | null } | null> {
     const asset = await this.prisma.courseMediaAsset.findUnique({
       where: { id: assetId },
-      select: { courseId: true, storageKey: true, extension: true },
+      select: { courseId: true, storageKey: true, extension: true, size: true },
     });
     if (!asset || asset.courseId !== id) return null;
-    const bytes = await this.storage.getMedia(asset.storageKey);
-    return { bytes, extension: asset.extension };
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
   }
 
   async list(query: {

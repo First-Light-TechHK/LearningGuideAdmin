@@ -29,7 +29,8 @@ import { CourseAuthoringService } from './course-authoring.service';
 import { MediaUploadService } from './media-upload.service';
 import { PortalPreviewService } from './portal-preview.service';
 import { PortalProjectionService } from './portal-projection.service';
-import { contentTypeFor } from './content-type';
+import { sendMedia } from './media-stream';
+import { CourseStorageService } from './storage.service';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
@@ -63,6 +64,7 @@ export class CommerceCoursesController {
     private readonly mediaUploads: MediaUploadService,
     private readonly portalPreview: PortalPreviewService,
     private readonly portalProjection: PortalProjectionService,
+    private readonly storage: CourseStorageService,
   ) {}
 
   @Get()
@@ -195,15 +197,61 @@ export class CommerceCoursesController {
     return course;
   }
 
+  /**
+   * 预览页媒体：员工会话 + 预览 token 双重校验。
+   * 与正式 Portal 媒体端点读同一个存储对象，只是允许草稿/指定版本课程
+   * （不要求已 ONLINE），并支持 HTTP Range 供视频试播。
+   */
+  @Get(':id/portal-preview/cover')
+  async portalPreviewCover(
+    @Param('id') id: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const payload = this.portalPreview.verifyToken(token ?? '');
+    if (payload.courseId !== id) {
+      throw new PackageError(
+        'INVALID_PREVIEW_TOKEN',
+        401,
+        'Preview token does not match this course.',
+      );
+    }
+    const media = await this.portalProjection.getPreviewCoverBytes(id);
+    if (!media || !(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
+    }
+  }
+  @Get(':id/portal-preview/media/:assetId')
+  async portalPreviewMedia(
+    @Param('id') id: string,
+    @Param('assetId') assetId: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const payload = this.portalPreview.verifyToken(token ?? '');
+    if (payload.courseId !== id) {
+      throw new PackageError(
+        'INVALID_PREVIEW_TOKEN',
+        401,
+        'Preview token does not match this course.',
+      );
+    }
+    const media = await this.portalProjection.getPreviewMediaBytes(id, assetId);
+    if (!media || !(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
+    }
+  }
+
   // ===== 预览媒体（Admin 课程页展示封面 / 视频 / 展品图） =====
   @Get(':id/cover')
   async cover(@Param('id') id: string, @Res() res: Response) {
     const media = await this.courses.getCoverBytes(id);
-    if (!media)
+    if (!media) {
       throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
-    res.setHeader('Content-Type', contentTypeFor(media.extension));
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.send(media.bytes);
+    }
+    if (!(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
+    }
   }
 
   @Get(':id/media/:assetId')
@@ -213,11 +261,12 @@ export class CommerceCoursesController {
     @Res() res: Response,
   ) {
     const media = await this.courses.getMediaBytes(id, assetId);
-    if (!media)
+    if (!media) {
       throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
-    res.setHeader('Content-Type', contentTypeFor(media.extension));
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.send(media.bytes);
+    }
+    if (!(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
+    }
   }
 
   // ===== 编辑工作区（第一版） =====
