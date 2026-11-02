@@ -191,7 +191,15 @@ describe('seed command line (eval/helpdesk/seed-faq-library.ts)', () => {
         kept: [],
         skipped: [],
       },
-      edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
+      edges: {
+        created: 0,
+        existing: 0,
+        relabelled: 0,
+        removed: 0,
+        reordered: 0,
+        kept: [],
+        failed: [],
+      },
       phrasings: { created: 0, existing: 0, failed: [] },
       release: {
         version: 1,
@@ -348,6 +356,9 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       created: 6,
       existing: 0,
       relabelled: 0,
+      removed: 0,
+      reordered: 0,
+      kept: [],
       failed: [],
     });
     expect(first.phrasings).toEqual({ created: 5, existing: 0, failed: [] });
@@ -489,6 +500,9 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       created: 1,
       existing: 5,
       relabelled: 1,
+      removed: 0,
+      reordered: 0,
+      kept: [],
       failed: [],
     });
     expect(second.release).toEqual({
@@ -586,6 +600,90 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
     expect(again.nodes).toMatchObject({
       updated: [],
       kept: ['contact-support'],
+    });
+    expect(again.release).toMatchObject({ version: 2, created: false });
+  });
+
+  it("keepStaffEdits: follow-ups follow the library (dropped links go, labels and order follow the file) unless staff changed that card's follow-ups", async () => {
+    const seed = { employeeId: null };
+    await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor: seed,
+      release: true,
+    });
+    // a staff member renames one option of payment-problem in BackOffice
+    const staff = { employeeId: '0192f0e0-0000-7000-8000-00000000e001' };
+    const problem = (await deps().repository.getByKey('payment-problem'))!;
+    const { children } = await deps().graph.edges(problem.id);
+    await deps().graph.updateEdge(staff, children[1].edge.id, {
+      labelEn: 'Staff label',
+      labelZh: '员工标签',
+    });
+    // the library's follow-ups change (grounding check)
+    const fixed = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    const byKey = (key: string) => fixed.faqs.find((f) => f.key === key)!;
+    const failedCard = byKey('payment-failed');
+    const [retry] = failedCard.followUps as unknown[];
+    // labelled chip, and the order turns round
+    failedCard.followUps = [
+      { key: 'contact-support', labelEn: 'Talk to us', labelZh: '联系我们' },
+      retry,
+    ];
+    // contact-support is no longer a follow-up of paid-not-active
+    byKey('paid-not-active').followUps = [];
+    // still-not-active loses its chip text: the chip shows its question again
+    delete byKey('still-not-active').labelEn;
+    delete byKey('still-not-active').labelZh;
+    // ignored: staff changed payment-problem's options
+    (byKey('payment-problem').options as Record<string, unknown>[])[1].labelEn =
+      'Charged, plan not active';
+    const library = parseFaqLibrary(fixed);
+
+    const synced = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(synced.edges).toEqual({
+      created: 0,
+      existing: 1,
+      relabelled: 2,
+      removed: 1,
+      reordered: 1,
+      kept: ['payment-problem'],
+      failed: [],
+    });
+    expect(synced.release).toMatchObject({ version: 2, published: true });
+    const en = publicRelease((await deps().source.current())!, 'en-GB');
+    const id = (key: string) => en.nodes.find((n) => n.key === key)!.id;
+    const chips = (key: string) =>
+      en.edges.filter((e) => e.parentId === id(key)).map((e) => e.label);
+    expect(chips('payment-failed')).toEqual([
+      'Talk to us',
+      en.nodes.find((n) => n.key === 'retry-charged-twice')!.question,
+    ]);
+    expect(chips('paid-not-active')).toEqual([
+      en.nodes.find((n) => n.key === 'still-not-active')!.question,
+    ]);
+    expect(chips('payment-problem')).toEqual([
+      'The payment failed',
+      'Staff label',
+    ]);
+
+    const again = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(again.edges).toEqual({
+      created: 0,
+      existing: 3,
+      relabelled: 0,
+      removed: 0,
+      reordered: 0,
+      kept: ['payment-problem'],
+      failed: [],
     });
     expect(again.release).toMatchObject({ version: 2, created: false });
   });

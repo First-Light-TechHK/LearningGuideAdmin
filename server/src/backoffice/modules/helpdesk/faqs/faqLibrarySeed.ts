@@ -286,6 +286,12 @@ export type SeedReport = {
     created: number;
     existing: number;
     relabelled: number;
+    /** keepStaffEdits：库文件里已经没有的追问 / 选项（旧版库建的），删掉的条数。 */
+    removed: number;
+    /** keepStaffEdits：按库文件重排了追问顺序的父卡数。 */
+    reordered: number;
+    /** keepStaffEdits：员工在 BackOffice 改过追问的父卡（边修订有员工署名），整组追问不动。 */
+    kept: string[];
     failed: { link: string; reason: string }[];
   };
   phrasings: {
@@ -364,14 +370,24 @@ export async function seedFaqLibrary(
     release: boolean;
     /**
      * true：已发布、最后一次由员工在 BackOffice 改过的卡（updatedBy 不为空）原样留着，只更新还是库文件那版的卡
-     * （DEV 启动时同步改过的库文件用这个，不盖掉运营的编辑）。追问链接和相似问照常补。
+     * （DEV 启动时同步改过的库文件用这个，不盖掉运营的编辑）。追问按库文件对齐：库里没有的删掉（先删，免得
+     * 新的追问撞上每张卡 4 条的上限）、缺的补上、文字照库文件、顺序照库文件；员工改过追问的父卡整组不动。
+     * 相似问照常补。
      */
     keepStaffEdits?: boolean;
   },
 ): Promise<SeedReport> {
   const report: SeedReport = {
     nodes: { created: [], updated: [], unchanged: 0, kept: [], skipped: [] },
-    edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
+    edges: {
+      created: 0,
+      existing: 0,
+      relabelled: 0,
+      removed: 0,
+      reordered: 0,
+      kept: [],
+      failed: [],
+    },
     phrasings: { created: 0, existing: 0, failed: [] },
     release: null,
     warnings: [...library.warnings],
@@ -444,7 +460,25 @@ export async function seedFaqLibrary(
     }
   }
 
+  const childKeysOf = new Map<string, string[]>();
+  for (const edge of library.edges)
+    childKeysOf.set(edge.parentKey, [
+      ...(childKeysOf.get(edge.parentKey) ?? []),
+      edge.childKey,
+    ]);
+  const linksKept = options.keepStaffEdits
+    ? await removeStaleLinks(
+        deps,
+        library,
+        ids,
+        childKeysOf,
+        options.actor,
+        report,
+      )
+    : new Set<string>();
+
   for (const edge of library.edges) {
+    if (linksKept.has(edge.parentKey)) continue;
     const link = `${edge.parentKey} → ${edge.childKey}`;
     const parentId = ids.get(edge.parentKey);
     const childId = ids.get(edge.childKey);
@@ -457,12 +491,25 @@ export async function seedFaqLibrary(
         ? { labelEn: edge.labelEn, labelZh: edge.labelZh }
         : {};
     try {
-      const { created } = await deps.graph.createEdge(options.actor, parentId, {
-        childId,
-        ...labels,
-      });
+      const { edge: row, created } = await deps.graph.createEdge(
+        options.actor,
+        parentId,
+        { childId, ...labels },
+      );
       if (created) report.edges.created += 1;
-      else report.edges.existing += 1;
+      else if (
+        options.keepStaffEdits &&
+        edge.labelEn === null &&
+        edge.labelZh === null &&
+        (row.labelEn !== null || row.labelZh !== null)
+      ) {
+        // 库文件去掉了 chip 文字：回到用子卡的问题
+        await deps.graph.updateEdge(options.actor, row.id, {
+          labelEn: null,
+          labelZh: null,
+        });
+        report.edges.relabelled += 1;
+      } else report.edges.existing += 1;
     } catch (error) {
       if (error instanceof HelpdeskError && error.code === 'FAQ_EDGE_EXISTS') {
         const { children } = await deps.graph.edges(parentId);
@@ -479,6 +526,16 @@ export async function seedFaqLibrary(
       report.edges.failed.push({ link, reason: reason(error) });
     }
   }
+
+  if (options.keepStaffEdits)
+    await reorderLinks(
+      deps,
+      ids,
+      childKeysOf,
+      linksKept,
+      options.actor,
+      report,
+    );
 
   for (const node of library.nodes) {
     const id = ids.get(node.key);
@@ -502,6 +559,88 @@ export async function seedFaqLibrary(
   if (options.release && deps.releases)
     report.release = await releaseNow(deps.releases, options.actor);
   return report;
+}
+
+/**
+ * keepStaffEdits 的第一步：每张父卡的追问 / 选项里，库文件已经没有的删掉（旧版库建的）。员工改过这张卡追问的
+ * （边修订里有员工署名）整组不动，返回这些父卡的 key，后面补边、排序都跳过它们。
+ */
+async function removeStaleLinks(
+  deps: SeedDeps,
+  library: ParsedLibrary,
+  ids: ReadonlyMap<string, string>,
+  childKeysOf: ReadonlyMap<string, readonly string[]>,
+  actor: FaqActor,
+  report: SeedReport,
+): Promise<Set<string>> {
+  const kept = new Set<string>();
+  for (const node of library.nodes) {
+    const parentId = ids.get(node.key);
+    if (!parentId) continue;
+    try {
+      const { revisions } = await deps.graph.edgeRevisions(parentId);
+      if (
+        revisions.some(
+          (revision) =>
+            revision.parentId === parentId && revision.employeeId !== null,
+        )
+      ) {
+        kept.add(node.key);
+        report.edges.kept.push(node.key);
+        continue;
+      }
+      const wanted = new Set(
+        (childKeysOf.get(node.key) ?? []).map((key) => ids.get(key)),
+      );
+      const { children } = await deps.graph.edges(parentId);
+      for (const view of children) {
+        if (wanted.has(view.edge.childId)) continue;
+        const { deleted } = await deps.graph.deleteEdge(actor, view.edge.id);
+        if (deleted) report.edges.removed += 1;
+      }
+    } catch (error) {
+      // 没删干净的父卡不再补边、不排序，免得撞上限或排出半截
+      kept.add(node.key);
+      report.edges.failed.push({
+        link: `${node.key} (stale links)`,
+        reason: reason(error),
+      });
+    }
+  }
+  return kept;
+}
+
+/** keepStaffEdits 的最后一步：追问 / 选项的顺序照库文件（员工改过追问的父卡不动；没补齐的不排）。 */
+async function reorderLinks(
+  deps: SeedDeps,
+  ids: ReadonlyMap<string, string>,
+  childKeysOf: ReadonlyMap<string, readonly string[]>,
+  linksKept: ReadonlySet<string>,
+  actor: FaqActor,
+  report: SeedReport,
+): Promise<void> {
+  for (const [parentKey, childKeys] of childKeysOf) {
+    if (linksKept.has(parentKey)) continue;
+    const parentId = ids.get(parentKey);
+    const childIds = childKeys.map((key) => ids.get(key));
+    if (!parentId || childIds.some((id) => id === undefined)) continue;
+    try {
+      const { children } = await deps.graph.edges(parentId);
+      const now = children.map((view) => view.edge.childId);
+      if (
+        now.length !== childIds.length ||
+        now.every((id, index) => id === childIds[index])
+      )
+        continue;
+      await deps.graph.reorder(actor, parentId, { childIds });
+      report.edges.reordered += 1;
+    } catch (error) {
+      report.edges.failed.push({
+        link: `${parentKey} (order)`,
+        reason: reason(error),
+      });
+    }
+  }
 }
 
 /** 建发布版本（工作表没变就不新建），检查与评测门过了就发布。 */
