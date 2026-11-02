@@ -14,6 +14,7 @@ import {
   syncLibraryPopular,
   type PopularSyncReport,
   type SeedDeps,
+  type SeedReport,
 } from '../faqs/faqLibrarySeed';
 import { createPgFaqMapRepository } from '../faqs/faqMapRepository';
 import { parseMapSeed, seedFaqMap } from '../faqs/faqMapSeed';
@@ -41,6 +42,12 @@ export const DEMO_MARKER_KEY = 'helpdesk_demo_seeded';
  */
 export const DEMO_POPULAR_TAG = 'popular-2026-11-02';
 export const DEMO_POPULAR_MARKER_KEY = 'helpdesk_demo_popular';
+/**
+ * 卡片内容那一版（库文件里的问题、答案、追问；2026-11-02 起按代码核对过的修正）。库文件的卡片内容再改就换这个值：
+ * 已经灌过的 DEV 下次启动按库文件更新卡片，员工在 BackOffice 改过的卡不动（keepStaffEdits），再出一版发布。
+ */
+export const DEMO_CONTENT_TAG = 'content-2026-11-02';
+export const DEMO_CONTENT_MARKER_KEY = 'helpdesk_demo_content';
 // 与夜间任务的锁（FLYWHEEL_LOCK = [719320, 1]）同一命名空间，第二个数不同
 const DEMO_LOCK: readonly [number, number] = [719320, 2];
 
@@ -101,6 +108,19 @@ export function syncDemoPopular(
     syncLibraryPopular(deps, readLibrary(), {
       actor: { employeeId },
       release: true,
+    }),
+  );
+}
+
+/** 按库文件更新卡片内容，员工改过的卡不动，有改动就出一版发布（命令行 --content 和 DEV 启动共用）。 */
+export function syncDemoContent(
+  employeeId: string | null,
+): Promise<SeedReport> {
+  return withLibraryDeps((deps) =>
+    seedFaqLibrary(deps, readLibrary(), {
+      actor: { employeeId },
+      release: true,
+      keepStaffEdits: true,
     }),
   );
 }
@@ -173,9 +193,11 @@ export async function seedHelpdeskDemo(options: {
   }
   out.demo = await seedDemoRows(demoDb);
   await setMarker(DEMO_MARKER_KEY, DEMO_LIBRARY_TAG);
-  // 整库刚灌过：库文件里的 popular 就是这一版热门
-  if (options.library && out.ok)
+  // 整库刚灌过：库文件里的 popular 和卡片内容就是这一版
+  if (options.library && out.ok) {
     await setMarker(DEMO_POPULAR_MARKER_KEY, DEMO_POPULAR_TAG);
+    await setMarker(DEMO_CONTENT_MARKER_KEY, DEMO_CONTENT_TAG);
+  }
   return out;
 }
 
@@ -197,15 +219,18 @@ export function shouldAutoSeedDemo(env: NodeJS.ProcessEnv): boolean {
 
 /**
  * DEV 启动后在后台灌一次（不阻塞启动和健康检查）。几个实例同时起时用 advisory lock 只让一个灌；
- * 灌过（backoffice_settings 有标记）就不再灌，只看热门那一版：标记不是 DEMO_POPULAR_TAG 就只同步 popular。
- * 失败只记日志、不写标记，下次启动再试。
+ * 灌过（backoffice_settings 有标记）就不再灌，只看两个版本标记：热门（DEMO_POPULAR_TAG，只同步 popular）和
+ * 卡片内容（DEMO_CONTENT_TAG，按库文件更新员工没改过的卡）。失败只记日志、不写标记，下次启动再试。
  */
 export async function autoSeedDemoOnce(
   logger: Pick<Logger, 'log' | 'warn'> = new Logger('HelpdeskDemo'),
 ): Promise<'skipped' | 'busy' | 'seeded' | 'synced' | 'failed'> {
   try {
-    if ((await marker(DEMO_MARKER_KEY)) !== null)
-      return await syncPopularOnce(logger);
+    if ((await marker(DEMO_MARKER_KEY)) !== null) {
+      const popular = await syncTagOnce(logger, POPULAR_STEP);
+      const content = await syncTagOnce(logger, CONTENT_STEP);
+      return combined([popular, content]);
+    }
     const result = await createPgJobLock(undefined, DEMO_LOCK).withLock(
       async () => {
         if ((await marker(DEMO_MARKER_KEY)) !== null) return null;
@@ -235,39 +260,83 @@ export async function autoSeedDemoOnce(
   }
 }
 
-async function syncPopularOnce(
+type SyncOutcome = 'skipped' | 'busy' | 'synced' | 'failed';
+
+/** 一个版本标记：标记不是 tag 就在锁里跑一次，干净才写标记。 */
+type TagStep<R> = {
+  key: string;
+  tag: string;
+  event: string;
+  run: () => Promise<R>;
+  ok: (report: R) => boolean;
+  log: (report: R) => Record<string, unknown>;
+};
+
+const POPULAR_STEP: TagStep<PopularSyncReport> = {
+  key: DEMO_POPULAR_MARKER_KEY,
+  tag: DEMO_POPULAR_TAG,
+  event: 'demo_popular_synced',
+  run: () => syncDemoPopular(null),
+  ok: popularSyncOk,
+  log: (report) => ({
+    on: report.on.length,
+    off: report.off.length,
+    reordered: report.reordered.length,
+    missing: report.missing.length,
+    failed: report.failed,
+    release: report.release,
+  }),
+};
+
+const CONTENT_STEP: TagStep<SeedReport> = {
+  key: DEMO_CONTENT_MARKER_KEY,
+  tag: DEMO_CONTENT_TAG,
+  event: 'demo_content_synced',
+  run: () => syncDemoContent(null),
+  ok: (report) => seedExitCode(report) === 0,
+  log: (report) => ({
+    created: report.nodes.created.length,
+    updated: report.nodes.updated,
+    kept: report.nodes.kept,
+    skipped: report.nodes.skipped,
+    edges: report.edges,
+    release: report.release,
+  }),
+};
+
+async function syncTagOnce<R>(
   logger: Pick<Logger, 'log' | 'warn'>,
-): Promise<'skipped' | 'busy' | 'synced' | 'failed'> {
-  if ((await marker(DEMO_POPULAR_MARKER_KEY)) === DEMO_POPULAR_TAG)
-    return 'skipped';
+  step: TagStep<R>,
+): Promise<SyncOutcome> {
+  if ((await marker(step.key)) === step.tag) return 'skipped';
   const result = await createPgJobLock(undefined, DEMO_LOCK).withLock(
     async () => {
-      if ((await marker(DEMO_POPULAR_MARKER_KEY)) === DEMO_POPULAR_TAG)
-        return null;
-      const report = await syncDemoPopular(null);
-      if (popularSyncOk(report))
-        await setMarker(DEMO_POPULAR_MARKER_KEY, DEMO_POPULAR_TAG);
+      if ((await marker(step.key)) === step.tag) return null;
+      const report = await step.run();
+      if (step.ok(report)) await setMarker(step.key, step.tag);
       return report;
     },
   );
   if (!result.acquired) return 'busy';
   if (!result.value) return 'skipped';
-  const ok = popularSyncOk(result.value);
+  const ok = step.ok(result.value);
   logger[ok ? 'log' : 'warn'](
     JSON.stringify({
       type: 'helpdesk',
-      event: 'demo_popular_synced',
-      tag: DEMO_POPULAR_TAG,
+      event: step.event,
+      tag: step.tag,
       ok,
-      on: result.value.on.length,
-      off: result.value.off.length,
-      reordered: result.value.reordered.length,
-      missing: result.value.missing.length,
-      failed: result.value.failed,
-      release: result.value.release,
+      ...step.log(result.value),
     }),
   );
   return ok ? 'synced' : 'failed';
+}
+
+/** 几步的结果合成一个：有失败算失败，其次有锁被占算 busy，有同步算 synced，都跳过才是 skipped。 */
+function combined(outcomes: SyncOutcome[]): SyncOutcome {
+  for (const outcome of ['failed', 'busy', 'synced'] as const)
+    if (outcomes.includes(outcome)) return outcome;
+  return 'skipped';
 }
 
 /** 库报告里 key 列表很长，列表只留个数。 */

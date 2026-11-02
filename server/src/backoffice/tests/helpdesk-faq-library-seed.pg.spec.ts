@@ -184,7 +184,13 @@ describe('seed command line (eval/helpdesk/seed-faq-library.ts)', () => {
 
   it('exits 1 when anything was skipped or failed, or the release was not published', () => {
     const clean: SeedReport = {
-      nodes: { created: ['a'], updated: [], unchanged: 0, skipped: [] },
+      nodes: {
+        created: ['a'],
+        updated: [],
+        unchanged: 0,
+        kept: [],
+        skipped: [],
+      },
       edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
       phrasings: { created: 0, existing: 0, failed: [] },
       release: {
@@ -335,6 +341,7 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       ],
       updated: ['how-do-i-reset-my-password'],
       unchanged: 0,
+      kept: [],
       skipped: [],
     });
     expect(first.edges).toEqual({
@@ -389,6 +396,7 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       created: [],
       updated: [],
       unchanged: 7,
+      kept: [],
       skipped: [],
     });
     expect(second.edges).toMatchObject({ created: 0, existing: 6 });
@@ -505,6 +513,83 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       ),
     ).toHaveLength(1);
   });
+  it('keepStaffEdits: a changed library updates the cards still as the seed left them, keeps the ones staff edited, and publishes once', async () => {
+    const seed = { employeeId: null };
+    await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor: seed,
+      release: true,
+    });
+    // a staff member edits one card in BackOffice (updatedBy is set)
+    const staff = { employeeId: '0192f0e0-0000-7000-8000-00000000e001' };
+    const support = (await deps().repository.getByKey('contact-support'))!;
+    await deps().faqs.update(staff, support.id, {
+      key: support.key,
+      category: support.category,
+      popular: support.popular,
+      questionEn: support.questionEn,
+      answerEn: 'Edited in BackOffice.',
+      questionZh: support.questionZh,
+      answerZh: support.answerZh,
+      keywords: support.keywords,
+      version: support.version,
+    });
+    // the library fixes two answers (grounding check), one of them on the edited card
+    const fixed = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    const byKey = (key: string) => fixed.faqs.find((f) => f.key === key)!;
+    byKey('contact-support').answerEn = 'The library fix.';
+    byKey('paid-not-active').answerEn = 'Corrected answer.';
+    const library = parseFaqLibrary(fixed);
+
+    const synced = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(synced.nodes).toEqual({
+      created: [],
+      updated: ['paid-not-active'],
+      unchanged: 5,
+      kept: ['contact-support'],
+      skipped: [],
+    });
+    expect(synced.release).toEqual({
+      version: 2,
+      status: 'published',
+      created: true,
+      published: true,
+    });
+    expect(
+      (await deps().repository.getByKey('contact-support'))!.answerEn,
+    ).toBe('Edited in BackOffice.');
+    const en = publicRelease((await deps().source.current())!, 'en-GB');
+    expect(en.nodes.find((n) => n.key === 'paid-not-active')!.answer).toBe(
+      'Corrected answer.',
+    );
+    expect(en.nodes.find((n) => n.key === 'contact-support')!.answer).toBe(
+      'Edited in BackOffice.',
+    );
+    // the links of a kept card are still there
+    expect(
+      en.edges.filter(
+        (e) =>
+          e.childId === en.nodes.find((n) => n.key === 'contact-support')!.id,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    const again = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(again.nodes).toMatchObject({
+      updated: [],
+      kept: ['contact-support'],
+    });
+    expect(again.release).toMatchObject({ version: 2, created: false });
+  });
+
   it('syncs only the popular flags: BackOffice edits stay, one new release is published, and a second run changes nothing', async () => {
     const actor = { employeeId: null };
     await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {

@@ -278,6 +278,8 @@ export type SeedReport = {
     created: string[];
     updated: string[];
     unchanged: number;
+    /** keepStaffEdits：员工在 BackOffice 改过（updatedBy 不为空）的卡，文字和设置都不动。 */
+    kept: string[];
     skipped: { key: string; reason: string }[];
   };
   edges: {
@@ -357,10 +359,18 @@ function rankOf(
 export async function seedFaqLibrary(
   deps: SeedDeps,
   library: ParsedLibrary,
-  options: { actor: FaqActor; release: boolean },
+  options: {
+    actor: FaqActor;
+    release: boolean;
+    /**
+     * true：已发布、最后一次由员工在 BackOffice 改过的卡（updatedBy 不为空）原样留着，只更新还是库文件那版的卡
+     * （DEV 启动时同步改过的库文件用这个，不盖掉运营的编辑）。追问链接和相似问照常补。
+     */
+    keepStaffEdits?: boolean;
+  },
 ): Promise<SeedReport> {
   const report: SeedReport = {
-    nodes: { created: [], updated: [], unchanged: 0, skipped: [] },
+    nodes: { created: [], updated: [], unchanged: 0, kept: [], skipped: [] },
     edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
     phrasings: { created: 0, existing: 0, failed: [] },
     release: null,
@@ -390,6 +400,11 @@ export async function seedFaqLibrary(
     if (current) claimed.add(current.id);
     if (current && current.status !== 'published') {
       report.nodes.skipped.push({ key: node.key, reason: 'archived' });
+      continue;
+    }
+    if (current && options.keepStaffEdits && current.updatedBy !== null) {
+      ids.set(node.key, current.id);
+      report.nodes.kept.push(node.key);
       continue;
     }
     const body = {

@@ -3,10 +3,12 @@ import { parseArgs } from 'node:util';
 import { isUuid } from '../../../src/common/uuidv7';
 import { closePool } from '../../../src/backoffice/lib/db';
 import { isLocalDatabase } from '../../../src/backoffice/modules/helpdesk/demo/helpdeskDemo';
+import { seedExitCode } from '../../../src/backoffice/modules/helpdesk/faqs/faqLibrarySeed';
 import {
   popularSyncOk,
   removeHelpdeskDemo,
   seedHelpdeskDemo,
+  syncDemoContent,
   syncDemoPopular,
 } from '../../../src/backoffice/modules/helpdesk/demo/helpdeskDemoSeed';
 
@@ -16,17 +18,19 @@ import {
  *   DATABASE_URL=… npm run seed:helpdesk-demo                 灌（再跑一次不重复）
  *   DATABASE_URL=… npm run seed:helpdesk-demo -- --remove     删掉全部演示行（id 以 de000000- 开头）
  *   DATABASE_URL=… npm run seed:helpdesk-demo -- --popular    只把库文件里的「热门」同步到已有的卡，再出一版发布
+ *   DATABASE_URL=… npm run seed:helpdesk-demo -- --content    按库文件更新卡片内容（员工在 BackOffice 改过的卡不动），再出一版发布
  *
  * 部署的 DEV 启动时会自动灌一次（HelpdeskDemoBoot），不用手动跑。FAQ 卡片是正式内容，--remove 不删卡；
  * 删过之后重启也不会再灌回来。命令行默认只连本机数据库，远端库要加 --allow-remote。
  */
 const USAGE =
-  'usage: npm run seed:helpdesk-demo -- [--remove | --popular] [--no-library] [--employee-id <uuid>] [--allow-remote]';
+  'usage: npm run seed:helpdesk-demo -- [--remove | --popular | --content] [--no-library] [--employee-id <uuid>] [--allow-remote]';
 
 async function main(): Promise<void> {
   let values: {
     remove?: boolean;
     popular?: boolean;
+    content?: boolean;
     'no-library'?: boolean;
     'employee-id'?: string;
     'allow-remote'?: boolean;
@@ -38,6 +42,7 @@ async function main(): Promise<void> {
       options: {
         remove: { type: 'boolean' },
         popular: { type: 'boolean' },
+        content: { type: 'boolean' },
         'no-library': { type: 'boolean' },
         'employee-id': { type: 'string' },
         'allow-remote': { type: 'boolean' },
@@ -80,6 +85,12 @@ async function main(): Promise<void> {
       const synced = await syncDemoPopular(employeeId);
       console.log(JSON.stringify(synced, null, 2));
       if (!popularSyncOk(synced)) process.exitCode = 1;
+      return;
+    }
+    if (values.content) {
+      const synced = await syncDemoContent(employeeId);
+      console.log(JSON.stringify(synced, null, 2));
+      if (seedExitCode(synced) !== 0) process.exitCode = 1;
       return;
     }
     const report = await seedHelpdeskDemo({
