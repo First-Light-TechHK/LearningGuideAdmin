@@ -6370,7 +6370,7 @@
    "primary": {
     "node": "cell",
     "object": "privacy",
-    "attribute": "consequence"
+    "attribute": "definition"
    },
    "secondary": [
     {
@@ -8835,6 +8835,10 @@
    "secondary": [
     {
      "node": "deviation",
+     "deviation": "group.live.network-weak"
+    },
+    {
+     "node": "deviation",
      "deviation": "group.live.connection-failed"
     }
    ]
@@ -8999,7 +9003,7 @@
     },
     {
      "node": "step",
-     "step": "group.signup"
+     "step": "group.sessions"
     }
    ]
   },
