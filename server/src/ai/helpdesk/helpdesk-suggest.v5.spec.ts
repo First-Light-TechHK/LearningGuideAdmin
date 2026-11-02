@@ -1448,3 +1448,85 @@ describe('v7 learner state (Portal → Agent)', () => {
     },
   );
 });
+
+describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, off by default)', () => {
+  const ENV = {
+    OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
+    OPENROUTER_BASE_URL: 'http://llm.test/v1',
+    HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+    HELPDESK_RERANK_MODEL: 'voyageai/rerank-2.5-lite',
+  };
+  /** 精排分数按 [PAID, FAILED, RESET] 的顺序给。 */
+  const rerankWith = (scores: number[] | null) =>
+    jest.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+      expect(url as string).toBe('http://llm.test/v1/rerank');
+      return Promise.resolve(
+        scores
+          ? new Response(
+              JSON.stringify({
+                results: scores.map((s, index) => ({
+                  index,
+                  relevance_score: s,
+                })),
+              }),
+            )
+          : new Response('{}', { status: 502 }),
+      );
+    });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('a sure first message gets the top card without asking the model', async () => {
+    rerankWith([0.2, 0.3, 0.95]);
+    const { service, run } = setup({
+      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.8,0.1' },
+    });
+    const result = await ask(service, chat('forgot my password'));
+    expect(result).toMatchObject({
+      kind: 'answer',
+      suggestion: { faqId: RESET.id },
+      intent: 'question',
+      confidence: 'sure',
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('not sure (small lead): the model sees the reranked order, cut to HELPDESK_RERANK_KEEP', async () => {
+    rerankWith([0.5, 0.9, 0.85]);
+    const { service, run } = setup({
+      env: {
+        ...ENV,
+        HELPDESK_RERANK_DIRECT: '0.8,0.1',
+        HELPDESK_RERANK_KEEP: '2',
+      },
+    });
+    await ask(service, chat('payment problem'));
+    const spec = specOf(run, 'pick_faq');
+    const sent = JSON.parse(spec!.prompt) as { candidates: { id: string }[] };
+    expect(sent.candidates.map((c) => c.id)).toEqual([FAILED.id, RESET.id]);
+  });
+
+  it('never answers directly when a card is on screen (follow-ups need the model)', async () => {
+    rerankWith([0.99, 0.1, 0.1]);
+    const { service, run } = setup({
+      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.5,0' },
+    });
+    await ask(service, chat('and then?', { nodeId: FAILED.id }));
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('a failed rerank keeps the retrieval order and still asks the model', async () => {
+    rerankWith(null);
+    const { service, run } = setup({
+      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.1,0' },
+    });
+    await ask(service, chat('I paid but my plan is not active'));
+    const sent = JSON.parse(specOf(run, 'pick_faq')!.prompt) as {
+      candidates: { id: string }[];
+    };
+    expect(sent.candidates.map((c) => c.id)).toEqual([
+      PAID.id,
+      FAILED.id,
+      RESET.id,
+    ]);
+  });
+});

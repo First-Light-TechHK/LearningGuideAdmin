@@ -75,6 +75,8 @@ export type HelpdeskQaCandidate = {
   blocks?: FaqBlock[];
   optionOf?: string[];
   relation?: 'child' | 'sibling' | 'search';
+  /** 精排分数（ai/helpdesk/rerank.ts，只在开了 HELPDESK_RERANK_MODEL 时有），越大越相关。 */
+  rerankScore?: number;
 };
 
 export type HelpdeskQaSearch = {

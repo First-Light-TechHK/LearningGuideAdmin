@@ -14,6 +14,7 @@ import {
 import type { JsonObject } from '../../../contracts/helpdesk-trace';
 import type { AgentCallExtras, WorkflowTemplate } from './engine';
 import { NONE } from './faq-workflow';
+import { directPick, type RerankConfig } from '../rerank';
 import { LEARNER_STATE_RULE, learnerFacts } from './learner-facts';
 import {
   ANSWER_LINES,
@@ -302,6 +303,8 @@ export function assistWorkflow(deps: {
   qa: HelpdeskQaSource;
   limit: number;
   left: () => number;
+  /** 精排有把握时直接给卡（rerank.ts directPick）；不给 = 每次都问模型。 */
+  direct?: RerankConfig['direct'];
 }): WorkflowTemplate<AssistState> {
   const findNode = async (state: AssistState, id: string) =>
     state.candidates.find((c) => c.id === id) ??
@@ -331,6 +334,35 @@ export function assistWorkflow(deps: {
           ]);
           // 条数由来源定：缺省至多 limit；HELPDESK_LOCATOR=hybrid 时结构排序的前 3 张另加在最前面
           const candidates = found.filter((c) => c.id !== shown?.id);
+          // 分级 L2：第一句（屏幕上没有卡片）且精排有把握 → 直接给第一名，不问模型（固定开头结尾照旧）
+          const direct = nodeId
+            ? null
+            : directPick(candidates, deps.direct ?? null);
+          if (direct) {
+            const output: JsonObject = {
+              candidates: candidates.map((c) => ({
+                id: c.id,
+                score: c.score,
+                ...(c.rerankScore !== undefined
+                  ? { rerankScore: c.rerankScore }
+                  : {}),
+              })),
+              shown: null,
+              direct: direct.id,
+            };
+            return {
+              state: {
+                ...state,
+                candidates,
+                shown,
+                intent: 'question',
+                confidence: 'sure',
+                picked: direct.id,
+              },
+              then: { next: 'route' },
+              output,
+            };
+          }
           return {
             state: { ...state, candidates, shown },
             // 没有候选也问模型：寒暄、clarify 要靠它分类
@@ -340,6 +372,9 @@ export function assistWorkflow(deps: {
                 id: c.id,
                 score: c.score,
                 ...(c.relation ? { relation: c.relation } : {}),
+                ...(c.rerankScore !== undefined
+                  ? { rerankScore: c.rerankScore }
+                  : {}),
               })),
               shown: shown?.id ?? null,
             },

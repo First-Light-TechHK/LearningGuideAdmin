@@ -53,6 +53,7 @@ import {
   initialFaqState,
 } from './workflow/faq-workflow';
 import { learnerOf } from './workflow/guard';
+import { openRouterReranker, rerankConfig, rerankedSource } from './rerank';
 
 /**
  * Helpdesk 推荐答案（Figma addendum §C；Tickets v2 §2；helpdesk-agent-v2-pi-dsh，Agent 角色）。
@@ -743,14 +744,32 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     if (isV5(input)) {
       // 开思考：同时发一个不思考的后备（不报步骤给「思考中」面板，步骤记 branch quick）
       const hedged = cutoffMs !== undefined && cutoffMs > 0;
-      const qa = hedged ? sharedLookups(this.deps.qa) : this.deps.qa;
+      // 分级 L2 精排（HELPDESK_RERANK_MODEL，缺省关）：在共享查询之前，两路只精排一次
+      const rerank = rerankConfig(env);
+      const ranked = rerank
+        ? rerankedSource(
+            this.deps.qa,
+            openRouterReranker({
+              model: rerank.model,
+              apiKey,
+              baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
+            }),
+            rerank.keep,
+          )
+        : this.deps.qa;
+      const qa = hedged ? sharedLookups(ranked) : ranked;
       const assist = (
         target: ModelTarget,
         until: () => number,
         extra: Partial<WorkflowDeps> = {},
       ) =>
         runWorkflow(
-          assistWorkflow({ qa, limit: ASSIST_CANDIDATES, left: until }),
+          assistWorkflow({
+            qa,
+            limit: ASSIST_CANDIDATES,
+            left: until,
+            direct: rerank?.direct ?? null,
+          }),
           initialAssistState({
             locale: input.locale,
             category: input.faqCategory,
