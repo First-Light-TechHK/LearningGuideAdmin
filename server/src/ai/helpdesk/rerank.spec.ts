@@ -181,6 +181,55 @@ describe('rerankedSource (only findCandidates changes)', () => {
       found.map((c) => c.id),
     );
   });
+
+  it('with search.context, also asks vectors and the reranker with "previous → message" and keeps the higher score per card', async () => {
+    const findVectorCandidates = jest.fn((q: { text: string }) =>
+      Promise.resolve(q.text.includes('→') ? [card(8)] : []),
+    );
+    const rerank = jest.fn((query: string, docs: string[]) =>
+      Promise.resolve(
+        docs.map((d) =>
+          query.includes('→')
+            ? d.startsWith('Question 8')
+              ? 0.9
+              : 0.2
+            : d.startsWith('Question 1')
+              ? 0.6
+              : 0.1,
+        ),
+      ),
+    );
+    const ranked = rerankedSource({ ...qa, findVectorCandidates }, rerank, 3);
+    const out = await ranked.findCandidates({
+      ...search,
+      text: 'and WeChat Pay?',
+      context: ' Which ways can I pay? ',
+    });
+    expect(findVectorCandidates.mock.calls.map((c) => c[0].text)).toEqual([
+      'and WeChat Pay?',
+      'Which ways can I pay? → and WeChat Pay?',
+    ]);
+    expect(rerank.mock.calls.map((c) => c[0])).toEqual([
+      'and WeChat Pay?',
+      'Which ways can I pay? → and WeChat Pay?',
+    ]);
+    expect(out.map((c) => [c.id, c.rerankScore])).toEqual([
+      [card(8).id, 0.9],
+      [card(1).id, 0.6],
+      [card(2).id, 0.2],
+    ]);
+  });
+
+  it('with search.context, one failing rerank call still ranks by the other', async () => {
+    const rerank = jest.fn((query: string, docs: string[]) =>
+      Promise.resolve(query.includes('→') ? null : docs.map(() => 0.5)),
+    );
+    const out = await rerankedSource(qa, rerank, null).findCandidates({
+      ...search,
+      context: 'before',
+    });
+    expect(out.map((c) => c.rerankScore)).toEqual([0.5, 0.5, 0.5]);
+  });
 });
 
 describe('directPick (give the top card without the model only when the reranker is sure)', () => {

@@ -103,6 +103,11 @@ export type HelpdeskQaSearch = {
   entryOnly?: boolean;
   types?: FaqNodeType[];
   deepReserved?: number;
+  /**
+   * 前文（HELPDESK_QUERY_CONTEXT）：学员的上一条原文。只给向量与精排那一路用（另按「前文 → 本句」再查一次，
+   * 取两次中更高的分），字词检索不看它：「微信支付呢」「要多久」这种短追问单看找不到卡。
+   */
+  context?: string;
 };
 
 /** 热门已发布 FAQ（v3 §1「你可能想问」：检索不到候选时的兜底）。 */

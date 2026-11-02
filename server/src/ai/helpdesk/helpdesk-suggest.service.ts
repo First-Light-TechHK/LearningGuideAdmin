@@ -749,6 +749,10 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       // 追问卡片带上父卡片的问题（HELPDESK_CARD_CONTEXT=on，缺省关）：精排与挑卡都看「父问题 → 追问」
       const cardContext =
         env.HELPDESK_CARD_CONTEXT?.trim().toLowerCase() === 'on';
+      // 只在精排开着时有用（字词检索不看前文）
+      const queryContext =
+        rerank !== null &&
+        env.HELPDESK_QUERY_CONTEXT?.trim().toLowerCase() === 'on';
       const ranked = rerank
         ? rerankedSource(
             this.deps.qa,
@@ -774,6 +778,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
             left: until,
             direct: rerank?.direct ?? null,
             cardContext,
+            queryContext,
           }),
           initialAssistState({
             locale: input.locale,

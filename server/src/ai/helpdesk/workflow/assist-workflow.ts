@@ -313,6 +313,8 @@ export function assistWorkflow(deps: {
   direct?: RerankConfig['direct'];
   /** 候选带上 under（追问卡片的父卡片问题），挑卡提示多一条规则（HELPDESK_CARD_CONTEXT）。 */
   cardContext?: boolean;
+  /** 检索带上学员的上一条原文（HelpdeskQaSearch.context，HELPDESK_QUERY_CONTEXT）。 */
+  queryContext?: boolean;
 }): WorkflowTemplate<AssistState> {
   const findNode = async (state: AssistState, id: string) =>
     state.candidates.find((c) => c.id === id) ??
@@ -327,6 +329,9 @@ export function assistWorkflow(deps: {
         kind: 'code',
         async run(state) {
           const nodeId = state.context.nodeId;
+          const previous = deps.queryContext
+            ? state.context.recentTurns?.at(-1)?.trim()
+            : undefined;
           const [found, shown] = await Promise.all([
             deps.qa.findCandidates({
               locale: state.enquiry.locale,
@@ -334,6 +339,7 @@ export function assistWorkflow(deps: {
               text: state.queryText,
               limit: deps.limit,
               ...(nodeId ? { nodeId } : {}),
+              ...(previous ? { context: previous } : {}),
               ...ASSIST_SEARCH,
             }),
             nodeId

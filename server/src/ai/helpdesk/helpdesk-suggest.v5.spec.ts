@@ -1550,6 +1550,34 @@ describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, off by default)',
     ).toBe(false);
   });
 
+  it('HELPDESK_QUERY_CONTEXT=on: the reranker is also asked with "previous message → message"; off asks once', async () => {
+    const fetch = rerankWith([0.5, 0.6, 0.55]);
+    const context = { recentTurns: ['older', 'Which ways can I pay?'] };
+    const on = setup({ env: { ...ENV, HELPDESK_QUERY_CONTEXT: 'on' } });
+    await ask(on.service, chat('and WeChat Pay?', context));
+    const queries = fetch.mock.calls.map(
+      (call) =>
+        (
+          JSON.parse((call[1] as RequestInit).body as string) as {
+            query: string;
+          }
+        ).query,
+    );
+    expect(queries.sort()).toEqual([
+      'Which ways can I pay? → and WeChat Pay?',
+      'and WeChat Pay?',
+    ]);
+    expect(on.findCandidates.mock.calls[0][0].context).toBe(
+      'Which ways can I pay?',
+    );
+
+    fetch.mockClear();
+    const off = setup({ env: ENV });
+    await ask(off.service, chat('and WeChat Pay?', context));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(off.findCandidates.mock.calls[0][0].context).toBeUndefined();
+  });
+
   it('a failed rerank keeps the retrieval order and still asks the model', async () => {
     rerankWith(null);
     const { service, run } = setup({

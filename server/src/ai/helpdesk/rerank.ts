@@ -19,6 +19,8 @@ export const RERANK_LIMITS = {
   /** 每张卡给精排看的答案字数（问题全给）。 */
   answerChars: 600,
   queryChars: 600,
+  /** 前文（search.context）至多这么多字。 */
+  contextChars: 200,
   /** 召回池里向量那一路至多几张（S650 dev：字词 10 张 ∪ 向量 10 张，平均 16.5 张，正确卡在池里 99.5%）。 */
   vectorPool: 10,
 } as const;
@@ -121,28 +123,45 @@ export function rerankedSource(
     ...qa,
     findCandidates: async (search) => {
       // 召回池 = 原来的候选（字词检索 + 树上近亲）∪ 向量最像的 RERANK_LIMITS.vectorPool 个（来源支持时）
-      const [retrieved, vector] = await Promise.all([
-        qa.findCandidates(search),
+      // 有前文（search.context）时向量与精排各按「前文 → 本句」再查一次：短追问单看找不到卡，
+      // 换了话题时本句自己的分数又够高，所以每张卡取两次里更高的分
+      const withPrevious = search.context?.trim()
+        ? `${search.context.trim().slice(0, RERANK_LIMITS.contextChars)} → ${search.text}`
+        : null;
+      const vectorOf = (text: string) =>
         qa.findVectorCandidates
           ? qa
               .findVectorCandidates({
                 locale: search.locale,
-                text: search.text,
+                text,
                 limit: RERANK_LIMITS.vectorPool,
               })
               .catch(() => [])
-          : Promise.resolve([]),
+          : Promise.resolve([]);
+      const [retrieved, vector, vectorWithPrevious] = await Promise.all([
+        qa.findCandidates(search),
+        vectorOf(search.text),
+        withPrevious ? vectorOf(withPrevious) : Promise.resolve([]),
       ]);
       const seen = new Set(retrieved.map((c) => c.id));
       const found = [
         ...retrieved,
-        ...vector.filter((c) => !seen.has(c.id) && seen.add(c.id)),
+        ...[...vector, ...vectorWithPrevious].filter(
+          (c) => !seen.has(c.id) && seen.add(c.id),
+        ),
       ];
       if (found.length === 0) return found;
-      const scores = await reranker(
-        search.text,
-        found.map((c) => rerankDocument(c, options.withContext ?? false)),
+      const documents = found.map((c) =>
+        rerankDocument(c, options.withContext ?? false),
       );
+      const [own, previous] = await Promise.all([
+        reranker(search.text, documents),
+        withPrevious ? reranker(withPrevious, documents) : null,
+      ]);
+      const scores =
+        own && previous
+          ? own.map((score, index) => Math.max(score, previous[index]))
+          : (own ?? previous);
       if (!scores) return retrieved;
       const ranked = found
         .map((c, index) => ({ c, index, score: scores[index] }))
