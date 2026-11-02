@@ -5,6 +5,7 @@ import { boRequest } from '../../lib/api';
 import {
   Chip,
   L,
+  TimeInput,
   buttonStyle,
   card,
   languageLabel,
@@ -12,18 +13,12 @@ import {
   trialStatusLabel,
 } from './shared';
 
-function parseTime(value: string): number | null {
-  if (!value.trim()) return null;
-  const [m, s] = value.split(':').map((part) => Number(part));
-  if (Number.isNaN(m)) return null;
-  return Math.max(0, Math.round((m || 0) * 60 + (s || 0)));
-}
+const PLAN_TERM_OPTIONS = [1, 3, 6, 12];
 
-function fmtTime(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined) return '';
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+function planTermLabel(locale: string, months: number): string {
+  return months === 12
+    ? L(locale, '每年（12个月）', 'Yearly (12 months)')
+    : L(locale, `每${months}个月`, `Every ${months} months`);
 }
 
 export function CourseTrialSection({
@@ -148,24 +143,42 @@ export function CourseTrialSection({
   }
 
   function addPlan() {
-    setLocalPlans((current) => [
-      ...current,
-      {
-        id: `new-${Date.now()}`,
-        name: '',
-        termMonths: 1,
-        amountMinor: 1000,
-        currency: 'usd',
-        stripeLookupKey: null,
-        stripeProductId: null,
-        stripePriceId: null,
-        lastSyncedAt: null,
-        syncError: null,
-      },
-    ]);
+    setLocalPlans((current) => {
+      const used = new Set(current.map((plan) => plan.termMonths));
+      const termMonths =
+        PLAN_TERM_OPTIONS.find((months) => !used.has(months)) ?? 1;
+      return [
+        ...current,
+        {
+          id: `new-${Date.now()}`,
+          name: '',
+          termMonths,
+          amountMinor: 1000,
+          currency: 'usd',
+          stripeLookupKey: null,
+          stripeProductId: null,
+          stripePriceId: null,
+          lastSyncedAt: null,
+          syncError: null,
+        },
+      ];
+    });
   }
 
+  // Stripe 要求同一个 lookup key 只能对应一个有效 Price；同周期套餐必然撞 key。
+  const lookupKeyFor = (plan: { termMonths: number }): string =>
+    `${course.code}_${plan.termMonths}m`;
+  const duplicateLookupKeys = new Set(
+    localPlans
+      .map((plan) => lookupKeyFor(plan))
+      .filter((key, index, all) => all.indexOf(key) !== index),
+  );
+
   async function savePlans() {
+    if (duplicateLookupKeys.size > 0) {
+      onNotice(L(locale, `以下 Lookup key 重复，请为套餐选择不同计费周期：${[...duplicateLookupKeys].join(', ')}`, `Duplicate lookup keys — pick a different billing period per plan: ${[...duplicateLookupKeys].join(', ')}`));
+      return;
+    }
     setBusy(true);
     const result = await boRequest<{ plans: typeof localPlans; sync: Array<{ status: string; error?: string }> }>(`/api/backoffice/courses/${courseId}/plans`, {
       method: 'PUT',
@@ -257,7 +270,7 @@ export function CourseTrialSection({
                     <td>{row.index}. {row.title}</td>
                     <td>{row.videoDurationSeconds ? `${Math.floor(row.videoDurationSeconds / 60)}:${String(Math.round(row.videoDurationSeconds % 60)).padStart(2, '0')}` : '—'}</td>
                     <td>
-                      <input value={fmtTime(videoCutoffFor(row, activeCutoffLanguage))} disabled={!row.inTrial} placeholder="mm:ss" onChange={(event) => setVideoCutoff(row.lessonId, activeCutoffLanguage, parseTime(event.target.value))} style={{ width: 90, padding: 6 }} />
+                      <TimeInput seconds={videoCutoffFor(row, activeCutoffLanguage)} disabled={!row.inTrial} placeholder="mm:ss" onChange={(seconds) => setVideoCutoff(row.lessonId, activeCutoffLanguage, seconds)} style={{ width: 90, padding: 6 }} />
                     </td>
                     <td>
                       <select value={textCutoffFor(row, activeCutoffLanguage) ?? ''} disabled={!row.inTrial} onChange={(event) => setTextCutoff(row.lessonId, activeCutoffLanguage, event.target.value || null)} style={{ padding: 6, maxWidth: 220 }}>
@@ -325,13 +338,23 @@ export function CourseTrialSection({
                 <tr key={plan.id}>
                   <td><input value={plan.name} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, name: event.target.value } : item))} style={{ padding: 6, width: '100%' }} /></td>
                   <td>
-                    <select value={plan.termMonths === 12 ? 'year' : 'month'} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, termMonths: event.target.value === 'year' ? 12 : 1 } : item))} style={{ padding: 6, width: 130 }}>
-                      <option value="month">{L(locale, '每月', 'Every month')}</option>
-                      <option value="year">{L(locale, '每年', 'Every year')}</option>
+                    <select
+                      value={String(plan.termMonths)}
+                      onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, termMonths: Number(event.target.value) } : item))}
+                      style={{ padding: 6, width: 130 }}
+                    >
+                      {(PLAN_TERM_OPTIONS.includes(plan.termMonths) ? PLAN_TERM_OPTIONS : [...PLAN_TERM_OPTIONS, plan.termMonths].sort((a, b) => a - b)).map((months) => (
+                        <option key={months} value={months}>{planTermLabel(locale, months)}</option>
+                      ))}
                     </select>
                   </td>
                   <td><input type="number" min={0} step="0.01" value={(plan.amountMinor / 100).toFixed(2)} onChange={(event) => setLocalPlans((current) => current.map((item) => item.id === plan.id ? { ...item, amountMinor: Math.round(Number(event.target.value) * 100) } : item))} style={{ padding: 6, width: 120 }} /></td>
-                  <td style={{ fontSize: 12 }}>{plan.stripeLookupKey ?? '—'}</td>
+                  <td style={{ fontSize: 12, color: duplicateLookupKeys.has(lookupKeyFor(plan)) ? '#b42318' : undefined }}>
+                    {lookupKeyFor(plan)}
+                    {duplicateLookupKeys.has(lookupKeyFor(plan)) && (
+                      <div>{L(locale, '与其它套餐重复，Stripe 要求每个周期唯一。', 'Same as another plan; Stripe needs a unique key per period.')}</div>
+                    )}
+                  </td>
                   <td style={{ fontSize: 12 }}>
                     {plan.syncError ? <span style={{ color: '#b42318' }}>{L(locale, '同步失败', 'Failed')}</span> : plan.lastSyncedAt ? <span style={{ color: '#1E7A3C' }}>{L(locale, '已创建', 'Created')}</span> : '—'}
                     {plan.syncError && <div style={{ opacity: 0.75 }}>{plan.syncError}</div>}
@@ -345,8 +368,11 @@ export function CourseTrialSection({
             </tbody>
           </table>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          <button type="button" style={primaryBtn} disabled={busy} onClick={() => void savePlans()}>{L(locale, '保存并同步 Stripe', 'Save & sync Stripe')}</button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button type="button" style={primaryBtn} disabled={busy || duplicateLookupKeys.size > 0} onClick={() => void savePlans()}>{L(locale, '保存并同步 Stripe', 'Save & sync Stripe')}</button>
+          {duplicateLookupKeys.size > 0 && (
+            <span style={{ fontSize: 12, color: '#b42318' }}>{L(locale, '有套餐的计费周期相同，Lookup key 会重复，请先调整。', 'Some plans share a billing period, so their lookup keys clash — adjust them first.')}</span>
+          )}
         </div>
       </div>
     </div>

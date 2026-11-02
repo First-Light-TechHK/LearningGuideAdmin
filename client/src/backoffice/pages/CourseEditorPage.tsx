@@ -87,7 +87,7 @@ export function CourseEditorPage() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course`)}>← {L(locale, '课程列表', 'Course Overview')}</button>
           <div>
-            <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title ?? course.code}</h1>
+            <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title?.trim() || course.localizations.find((item) => item.title.trim())?.title || course.code}</h1>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>
               {course.code} · {course.category ? categoryLabel(locale, course.category.name) : L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
             </div>
@@ -138,12 +138,14 @@ export function CourseEditorPage() {
             {item.label} · {stepLabel(item.complete)}
           </button>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')}</span>
-          <select value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
-            {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
-          </select>
-        </div>
+        {course.learningLanguages.length > 1 && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')}</span>
+            <select value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
+              {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
       {notice && <p role="status" style={{ padding: 10, background: /fail|error|invalid/i.test(notice) ? '#FDECEC' : '#F3F7FF', borderRadius: 8, marginTop: 14 }}>{notice}</p>}

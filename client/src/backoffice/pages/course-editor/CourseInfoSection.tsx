@@ -282,8 +282,14 @@ export function CourseInfoSection({
       icon: row.icon,
       title: row.zh.trim(),
     }));
-    const saveLoc = (language: string, title: string, description: string, overview: string, learn: string[], provides: unknown[]) =>
-      boRequest(`/api/backoffice/courses/${course.id}/localizations/${encodeURIComponent(language)}`, {
+    const existingLanguages = new Set(course.localizations.map((item) => item.language));
+    // 课程只教一种语言时，另一种语言的标题往往为空。若照旧无条件 PUT，
+    // 会新建一条 title 为空的本地化记录，列表接口取到它时课程名就会变空。
+    const saveLoc = (language: string, title: string, description: string, overview: string, learn: string[], provides: unknown[]) => {
+      if (!title && !existingLanguages.has(language)) {
+        return Promise.resolve({ success: true as const });
+      }
+      return boRequest(`/api/backoffice/courses/${course.id}/localizations/${encodeURIComponent(language)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -294,6 +300,7 @@ export function CourseInfoSection({
           provides,
         }),
       });
+    };
     const [enResult, zhResult] = await Promise.all([
       saveLoc('en-GB', titleEn.trim(), descEn, overviewEn, learnEn, provideEn),
       saveLoc('zh-CN', titleZh.trim(), descZh, overviewZh, learnZh, provideZh),
@@ -319,20 +326,15 @@ export function CourseInfoSection({
       body: JSON.stringify({ learningLanguages: nextLanguages }),
     });
     if (updated.success) {
-      await boRequest(`/api/backoffice/courses/${course.id}/localizations/${encodeURIComponent(newLanguage)}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: '', whatYouLearn: [], provides: [] }),
-      });
-    }
-    setBusy(false);
-    if (updated.success) {
+      // 只登记学习语言，不预建空标题的本地化记录：空标题会让课程列表取到
+      // 空白课程名，等用户在「课程信息」里填好该语言的标题后再自动创建。
       setLanguageOpen(false);
       onNotice(L(locale, `已添加学习语言 ${newLanguage}。`, `Learning language ${newLanguage} added.`));
       await onReload();
     } else {
       onNotice(`${L(locale, '添加语言失败', 'Add language failed')}: ${updated.message ?? updated.error}`);
     }
+    setBusy(false);
   }
 
   return (

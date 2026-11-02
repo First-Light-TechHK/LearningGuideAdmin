@@ -97,7 +97,12 @@ export class CommerceCoursesService {
     const liveVersions = liveVersionIds.length
       ? await this.prisma.courseVersion.findMany({
           where: { id: { in: liveVersionIds } },
-          select: { id: true, versionLabel: true, wentLiveAt: true, createdAt: true },
+          select: {
+            id: true,
+            versionLabel: true,
+            wentLiveAt: true,
+            createdAt: true,
+          },
         })
       : [];
     const liveVersionById = new Map(
@@ -530,7 +535,9 @@ export class CommerceCoursesService {
           where: { id: lessonId },
           data: {
             ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-            ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+            ...(body.sortOrder !== undefined
+              ? { sortOrder: body.sortOrder }
+              : {}),
           },
         });
         if (
@@ -538,25 +545,26 @@ export class CommerceCoursesService {
           body.description !== undefined ||
           body.textHtml !== undefined
         ) {
-          const existing = await tx.lessonLocalization.findUnique({
-            where: { lessonId_language: { lessonId, language } },
-            select: { title: true, description: true, textHtml: true },
-          });
-          const payload = {
-            title: body.title ?? existing?.title ?? 'Untitled',
-            description:
-              body.description !== undefined
-                ? body.description
-                : (existing?.description ?? null),
-            textHtml:
-              body.textHtml !== undefined
-                ? body.textHtml
-                : (existing?.textHtml ?? null),
-          };
+          // 只写本次提交的字段：先读后整行写回会在并发保存（例如标题与正文
+          // 同时提交）时用旧值互相覆盖，把正文 textHtml 清空并连带删除文本学习点。
           await tx.lessonLocalization.upsert({
             where: { lessonId_language: { lessonId, language } },
-            create: { lessonId, language, ...payload },
-            update: payload,
+            create: {
+              lessonId,
+              language,
+              title: body.title ?? 'Untitled',
+              description: body.description ?? null,
+              textHtml: body.textHtml ?? null,
+            },
+            update: {
+              ...(body.title !== undefined ? { title: body.title } : {}),
+              ...(body.description !== undefined
+                ? { description: body.description }
+                : {}),
+              ...(body.textHtml !== undefined
+                ? { textHtml: body.textHtml }
+                : {}),
+            },
           });
           if (body.textHtml !== undefined) {
             await syncTextLearningPoints(tx, lessonId, language, body.textHtml);
@@ -667,6 +675,7 @@ export class CommerceCoursesService {
     id: string;
     code: string;
     slug: string;
+    defaultContentLanguage: string;
     learningMode: string;
     learningLanguages: unknown;
     lifecycleStatus: string;
@@ -683,13 +692,27 @@ export class CommerceCoursesService {
     }[];
     _count: { lessons: number };
   }) {
-    const defaultLoc = row.localizations[0];
+    // localizations 的返回顺序不稳定（没有 orderBy，Postgres 堆顺序可能因更新而改变），
+    // 若直接取 [0]，可能拿到「添加学习语言」时以空标题占位的本地化记录，导致列表里
+    // 课程名为空。这里优先取默认内容语言且标题非空的那条，再退到任意非空标题。
+    const localized =
+      row.localizations.find(
+        (loc) =>
+          loc.language === row.defaultContentLanguage &&
+          loc.title.trim() !== '',
+      ) ??
+      row.localizations.find((loc) => loc.title.trim() !== '') ??
+      row.localizations.find(
+        (loc) => loc.language === row.defaultContentLanguage,
+      ) ??
+      row.localizations[0];
+    const title = localized?.title?.trim() || row.slug || row.code;
     return {
       id: row.id,
       code: row.code,
       slug: row.slug,
-      title: defaultLoc?.title ?? row.slug,
-      subtitle: defaultLoc?.shortDescription ?? null,
+      title,
+      subtitle: localized?.shortDescription ?? null,
       category: row.category
         ? { id: row.category.id, name: row.category.name }
         : null,
