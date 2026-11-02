@@ -103,7 +103,11 @@ export const openRouterSource: ModelSource = (pi, target) => {
     openRouterModels.setProvider(pi.openrouter.openrouterProvider());
   }
   const known = openRouterModels.getModel('openrouter', target.model);
-  const thinks = target.thinking !== undefined;
+  // 价目里写明不会思考的模型（如 qwen3-30b-a3b-instruct-2507、mistral-small-3.2）关思考时不发 reasoning：
+  // 发了 effort none，require_parameters 会把它所有 provider 都筛掉（OpenRouter 404，2026-11-02 实测）
+  const thinks =
+    target.thinking !== undefined &&
+    !(target.thinking === 'off' && known !== undefined && !known.reasoning);
   const routing = { openRouterRouting: { ...OPENROUTER_ROUTING } };
   const model: Model<Api> =
     known?.api === 'openai-completions'
