@@ -597,7 +597,7 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
         const [first] = shape.ids;
         const call =
           shape.kind === 'explain'
-            ? pi.ai.fauxToolCall('explain', { covered: false })
+            ? pi.ai.fauxToolCall('explain', { covered: 'no' })
             : pi.ai.fauxToolCall('pick_faq', {
                 intent: 'question',
                 faqId: first ?? 'none',

@@ -191,10 +191,7 @@ function setup(
     [AgentStepSpec, AgentStepContext]
   >((spec, context) =>
     spec.tool.name === 'explain'
-      ? (options.explain ?? (() => called({}, { flags: { covered: false } })))(
-          spec,
-          context,
-        )
+      ? (options.explain ?? (() => called({ covered: 'no' })))(spec, context)
       : (
           options.pick ??
           (() =>
@@ -674,8 +671,7 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     const { service, run, findPublished, findCandidates } = setup({
       found: [FAILED, RESET],
       pick: () => pick('clarify', PAID.id),
-      explain: () =>
-        called({}, { texts: { explanation }, flags: { covered: true } }),
+      explain: () => called({ covered: 'yes' }, { texts: { explanation } }),
     });
     const result = await ask(
       service,
@@ -706,10 +702,11 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     const explain = specOf(run, 'explain') as AgentStepSpec;
     expect(explain.tool).toMatchObject({
       name: 'explain',
-      enumArgs: {},
+      enumArgs: { covered: ['yes', 'no'] },
       textArgs: { explanation: expect.any(String) as string },
-      flagArgs: { covered: expect.any(String) as string },
     });
+    // 不用布尔：gemma-4-31b 会把布尔后面的键名写坏（2026-11-02），covered 是 yes / no
+    expect(explain.tool.flagArgs).toBeUndefined();
     expect(JSON.parse(explain.prompt)).toEqual({
       card: { question: PAID.question, answer: PAID.answer },
       followUp: 'So do I just have to wait?',
@@ -721,17 +718,16 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
   it.each([
     [
       'the model says the answer does not cover it',
-      () => called({}, { flags: { covered: false } }),
+      () => called({ covered: 'no' }),
       'not_covered',
     ],
     [
       'the explanation adds a number',
       () =>
         called(
-          {},
+          { covered: 'yes' },
           {
             texts: { explanation: 'It takes 30 minutes.' },
-            flags: { covered: true },
           },
         ),
       'ungrounded',
@@ -740,17 +736,16 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
       'the explanation sounds like an AI',
       () =>
         called(
-          {},
+          { covered: 'yes' },
           {
             texts: { explanation: 'Great question! Just wait a few minutes.' },
-            flags: { covered: true },
           },
         ),
       'ai_filler',
     ],
     [
       'covered without an explanation',
-      () => called({}, { flags: { covered: true } }),
+      () => called({ covered: 'yes' }),
       'missing',
     ],
     [
@@ -791,10 +786,9 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
       pick: () => pick('clarify', PAID.id),
       explain: () =>
         called(
-          {},
+          { covered: 'yes' },
           {
             texts: { explanation: 'Only for a few minutes.' },
-            flags: { covered: true },
           },
         ),
     });
@@ -1287,7 +1281,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
         [
           pi.ai.fauxToolCall('explain', {
             explanation: 'Only a few minutes. Then reload My Learning.',
-            covered: true,
+            covered: 'yes',
           }),
         ],
         { stopReason: 'toolUse' },

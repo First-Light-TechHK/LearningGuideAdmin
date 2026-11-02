@@ -83,7 +83,7 @@ export const EXPLAIN_SYSTEM = [
   'You are on the Learning Guide support team. The learner was shown an approved help-centre answer and asked a follow-up about it.',
   'You receive JSON with "card" (its question and answer), "followUp" (their latest message) and "recentTurns" (their earlier messages, oldest first).',
   'Call explain exactly once.',
-  'covered: true only when the answer itself says what they ask; false when it does not.',
+  'covered: yes only when the answer itself says what they ask; no when it does not.',
   'explanation: when covered, explain that point using only what the answer says, in simpler words. Talk like a helpful person on the support team: short and plain, at most 3 short sentences, no list unless it is steps. A little warmth is fine ("No problem", "Don\'t worry", "别担心", "没问题"). Write in the learner\'s language and script.',
   'Keep every condition the answer gives: when it says something only works after a step, or depends on something, say that, never that it will work. Start with yes or no only when the answer itself says yes or no.',
   'Never add a rule, number, date, price, link, email or promise that is not in the answer. Never interpret legal terms beyond the answer\'s words. No filler such as "Great question", "As an AI", "I understand how you feel" or "I hope this helps". Never use markdown other than the answer\'s own **labels**.',
@@ -601,13 +601,12 @@ export function assistWorkflow(deps: {
               name: 'explain',
               description:
                 'Say whether the shown answer covers the follow-up, and if so explain that point in simpler words.',
-              enumArgs: {},
+              // covered 用 yes / no 而不是布尔：gemma-4-31b 在布尔值后面的那个键名常写坏（"explanation(" 之类），
+              // 整次调用就作废；改成字符串枚举后 12/12 合法（2026-11-02 实测，长对话 146 次 clarify 有 109 次因此失败）
+              enumArgs: { covered: ['yes', 'no'] },
               textArgs: {
                 explanation:
                   "Only when covered: at most 3 short sentences, using only what the answer says, in the learner's language.",
-              },
-              flagArgs: {
-                covered: 'true only when the answer itself says what they ask.',
               },
             },
             maxTokens: 400,
@@ -619,7 +618,7 @@ export function assistWorkflow(deps: {
             explained: args
               ? {
                   explanation: extras?.texts.explanation,
-                  covered: extras?.flags.covered === true,
+                  covered: args.covered === 'yes',
                 }
               : null,
           },

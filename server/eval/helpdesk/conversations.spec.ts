@@ -213,8 +213,8 @@ function scriptedRunner(script: {
         if (e.explanation) texts.explanation = e.explanation;
         return Promise.resolve({
           kind: 'called',
-          args: {},
-          extras: { lists: {}, texts, flags: { covered: e.covered } },
+          args: { covered: e.covered ? 'yes' : 'no' },
+          extras: { lists: {}, texts, flags: {} },
         });
       }
       const s = script.pick[prompt.message as string] ?? {
