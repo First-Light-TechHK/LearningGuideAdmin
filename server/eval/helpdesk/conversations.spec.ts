@@ -370,6 +370,7 @@ describe('running conversations like the Portal chat', () => {
       },
       'and with PayPal?': { intent: 'clarify', faqId: 'shown' },
       'still lost': { intent: 'question', faqId: 'none' },
+      'I want a human': { intent: 'question', faqId: 'none' },
       bye: { intent: 'farewell', faqId: 'none' },
     },
     explain: {
@@ -381,7 +382,7 @@ describe('running conversations like the Portal chat', () => {
     },
   };
 
-  it('sends the shown card, the session and the earlier words; clicks and handover words never reach Admin', async () => {
+  it('sends the shown card, the session and the earlier words; clicks never reach Admin, handover words do (Portal bc0aa9d)', async () => {
     const { runner, prompts } = scriptedRunner(script);
     const outcome = await runConversations({
       conversations: [conversation],
@@ -406,13 +407,15 @@ describe('running conversations like the Portal chat', () => {
     const picks = prompts.filter((p) => 'message' in p);
     expect(
       picks.map((p) => (p.shown as { id: string } | null)?.id ?? null),
-    ).toEqual([null, null, FAQ(13), FAQ(12), FAQ(12), FAQ(12)]);
+    ).toEqual([null, null, FAQ(13), FAQ(12), FAQ(12), FAQ(12), FAQ(12)]);
     expect(picks[3].recentTurns).toEqual([
       'hello',
       'can I get a refund',
       'what does fewer than two lessons mean?',
     ]);
-    expect(results.filter((r) => r.calledAdmin)).toHaveLength(6);
+    expect(results.filter((r) => r.calledAdmin)).toHaveLength(7);
+    // no answer card on the handover-word turn → the handover card alone
+    expect(results[6].got).toMatchObject({ handover: true, nodeId: null });
     // two unsolved in a row (the uncovered clarify, then a no_match) → the handover card is offered
     expect(results[5].unsolvedStreak).toBe(2);
     expect(results[2].grounded).toBe(true);
@@ -485,6 +488,64 @@ describe('running conversations like the Portal chat', () => {
     expect(report.gate.reasons).toEqual([
       'wrong FAQ 0.3333 > 2%',
       'small-talk intent 0 < 95%',
+    ]);
+  });
+
+  it('a handover word still asks Admin: an answer card comes first and the handover card ends the reply (neither wrong nor extra)', async () => {
+    const { runner } = scriptedRunner({
+      pick: {
+        'can I get a refund or must I ask 客服?': {
+          intent: 'question',
+          faqId: FAQ(13),
+        },
+        'I want a human about my refund': {
+          intent: 'question',
+          faqId: FAQ(13),
+        },
+      },
+    });
+    const outcome = await runConversations({
+      conversations: [
+        {
+          ...conversation,
+          flow: undefined,
+          turns: [
+            {
+              message: 'can I get a refund or must I ask 客服?',
+              expect: { kind: 'answer', faqId: FAQ(13) },
+            },
+          ],
+        },
+        {
+          ...conversation,
+          id: 'c2',
+          flow: undefined,
+          turns: [
+            {
+              message: 'I want a human about my refund',
+              expect: { kind: 'handover' },
+            },
+          ],
+        },
+      ],
+      qa: memoryQaSource(faqs),
+      runner,
+      env: ENV,
+      budgetUsd: 1,
+      paid: false,
+    });
+    expect(
+      outcome.results.map((r) => [
+        r.got.kind,
+        r.got.handover,
+        r.right,
+        r.wrongFaq,
+        r.extraCard,
+        r.calledAdmin,
+      ]),
+    ).toEqual([
+      ['answer', true, true, false, false, true],
+      ['answer', true, true, false, false, true],
     ]);
   });
 

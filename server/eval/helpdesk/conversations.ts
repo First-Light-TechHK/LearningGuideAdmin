@@ -272,8 +272,15 @@ export function isHandoverRequest(message: string): boolean {
 export const UNSOLVED_HANDOVER_STREAK = 2;
 
 export type GotTurn = {
-  /** Admin 的 kind；handover = Portal 按关键词直接转人工；click = 点追问 / 选项。 */
+  /**
+   * Admin 的 kind；handover = 只给转人工卡（关键词那一轮 Admin 没给答案卡）；click = 点追问 / 选项。
+   */
   kind: SuggestKind | 'handover' | 'click';
+  /**
+   * Portal（bc0aa9d 起）：消息含转人工关键词时照样问 Admin，答案卡在前、转人工卡接在回复末尾；
+   * 没有答案卡（无卡 / 寒暄 / 追问 / 选项 / 出错）就只给转人工卡（kind = handover）。
+   */
+  handover?: boolean;
   intent: SuggestIntent | null;
   nodeId: string | null;
   covered: boolean | null;
@@ -440,10 +447,12 @@ export function score(
       return {
         right:
           got.kind === 'handover' ||
+          got.handover === true ||
           (got.kind === 'clarify' && got.covered === false) ||
           (got.kind === 'no_match' && streak >= UNSOLVED_HANDOVER_STREAK),
         wrongFaq: false,
-        extraCard: shownCard !== null,
+        // 关键词那一轮先给答案卡、末尾再给转人工卡：用户 2026-10-30「转人工也先尽量用卡片解决」，不算多给
+        extraCard: shownCard !== null && got.handover !== true,
       };
   }
 }
@@ -576,28 +585,6 @@ export async function runConversations(
         continue;
       }
       const expect = turn.expect ?? null;
-      if (isHandoverRequest(turn.message)) {
-        const got: GotTurn = { ...none, kind: 'handover' };
-        turns.push({
-          ...base,
-          message: turn.message,
-          expect,
-          got,
-          right: expect ? score(expect, got, streak).right : null,
-          wrongFaq: false,
-          viaEntry: false,
-          extraCard: false,
-          grounded: null,
-          escapes: [],
-          unsolvedStreak: streak,
-          latencyMs: 0,
-          costUsd: 0,
-          unpricedCalls: 0,
-          calledAdmin: false,
-        });
-        said.push(turn.message);
-        continue;
-      }
       const runId = uuidv7();
       rootRunId ??= runId;
       const started = performance.now();
@@ -629,7 +616,7 @@ export async function runConversations(
       ).length;
       const costUsd = replies.reduce((sum, e) => sum + num(e.data.costUsd), 0);
       const unpricedCalls = Math.max(0, requests - priced);
-      const got: GotTurn = {
+      const asked: GotTurn = {
         kind: reply.kind ?? (reply.suggestion ? 'answer' : 'no_match'),
         intent: reply.intent ?? null,
         nodeId: reply.nodeId ?? reply.suggestion?.faqId ?? null,
@@ -648,6 +635,11 @@ export async function runConversations(
           ),
         ),
       };
+      const got: GotTurn = !isHandoverRequest(turn.message)
+        ? asked
+        : asked.kind === 'answer'
+          ? { ...asked, handover: true }
+          : { ...asked, kind: 'handover', nodeId: null, handover: true };
       const unsolved =
         got.kind === 'no_match' ||
         (got.kind === 'clarify' && got.covered === false);
