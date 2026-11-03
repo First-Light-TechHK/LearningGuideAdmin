@@ -43,6 +43,8 @@ export const CANDIDATE_SUGGESTIONS = [
   'new_faq',
   'add_phrasing',
   'follow_up',
+  'update_faq',
+  'retire_faq',
 ] as const;
 export const CANDIDATE_ORIGINS = ['mining', 'ticket'] as const;
 export type CandidateOrigin = (typeof CANDIDATE_ORIGINS)[number];
@@ -82,6 +84,8 @@ export type FaqCandidate = {
   reasonNote: string | null;
   acceptedAs: Suggestion | null;
   acceptedFaqId: string | null;
+  /** 接受时员工选的主位置（结构节点 id）。 */
+  acceptedPlaceId: string | null;
   mergedInto: string | null;
   decidedBy: string | null;
   decidedAt: string | null;
@@ -144,6 +148,7 @@ export type CandidateDecision =
       acceptedAs: Suggestion;
       acceptedFaqId: string;
       parentNodeId?: string | null;
+      acceptedPlaceId?: string | null;
     }
   | { status: 'dismissed'; reason: DismissReason; reasonNote: string | null };
 
@@ -173,7 +178,7 @@ const iso = (value: unknown): string | null =>
 const COLUMNS = `id, status, suggestion, origin, topic, proposed_question, label_source, category, locale,
   turn_count, examples, source_mix, answer_sources, related_node_id, related_score, parent_node_id,
   shown_node_id, ticket_id, first_seen_at, last_seen_at, reason, reason_note, accepted_as,
-  accepted_faq_id, merged_into, decided_by, decided_at, action_key, version, created_by, created_at,
+  accepted_faq_id, accepted_place_id, merged_into, decided_by, decided_at, action_key, version, created_by, created_at,
   updated_at`;
 
 export function toCandidate(row: Row): FaqCandidate {
@@ -205,6 +210,7 @@ export function toCandidate(row: Row): FaqCandidate {
     reasonNote: (row.reason_note as string | null) ?? null,
     acceptedAs: (row.accepted_as as Suggestion | null) ?? null,
     acceptedFaqId: (row.accepted_faq_id as string | null) ?? null,
+    acceptedPlaceId: (row.accepted_place_id as string | null) ?? null,
     mergedInto: (row.merged_into as string | null) ?? null,
     decidedBy: (row.decided_by as string | null) ?? null,
     decidedAt: iso(row.decided_at),
@@ -566,6 +572,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
               SET status = $2, accepted_as = $3, accepted_faq_id = $4,
                   parent_node_id = COALESCE($5, parent_node_id), reason = $6, reason_note = $7,
                   decided_by = $8, decided_at = CURRENT_TIMESTAMP, action_key = $9,
+                  accepted_place_id = $10,
                   version = version + 1, updated_at = CURRENT_TIMESTAMP
             WHERE id = $1 RETURNING ${COLUMNS}`,
           [
@@ -578,6 +585,7 @@ export function createPgCandidateRepository(db: SqlDb = defaultDb) {
             accepted ? null : decision.reasonNote,
             employeeId,
             actionKey,
+            accepted ? (decision.acceptedPlaceId ?? null) : null,
           ],
         );
         let candidate = toCandidate(updated.rows[0]);

@@ -56,6 +56,18 @@ export class BackofficeHelpdeskFlywheelController {
     return run(() => this.candidates.get(candidateId));
   }
 
+  /** 审核数据：建议与理由、AI 当时怎么处理的、相似卡、建议的位置（只读，不调模型）。 */
+  @Get('faq-candidates/:candidateId/review')
+  review(@Param('candidateId') candidateId: string) {
+    return run(() => this.candidates.review(candidateId));
+  }
+
+  /** 结构树（流程树与规则表），审核页选位置用。 */
+  @Get('faq-map')
+  faqMap() {
+    return run(() => this.candidates.faqMap());
+  }
+
   /** 新 FAQ / 追问的预填（答案留空；草稿只来自已解决工单里人写的回复，标「草稿 待核实」）。 */
   @Get('faq-candidates/:candidateId/draft')
   draft(@Param('candidateId') candidateId: string) {
@@ -151,6 +163,12 @@ export class BackofficeHelpdeskFlywheelController {
     );
     response.status(created ? 201 : 200);
     return started;
+  }
+
+  /** 工单每日数字（Portal 的只读汇总，UTC 天）：新建、解决、取消、当天结束时还开着、首次人工回复用时。 */
+  @Get('flywheel/ticket-stats')
+  ticketStats(@Query() query: Record<string, unknown>) {
+    return run(() => this.metrics.ticketStats(query));
   }
 
   /** Portal 的学员原文保留任务（180 天后只留脱敏文字与标签）：运行记录。 */

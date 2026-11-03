@@ -1,5 +1,10 @@
 import type { FaqGraphRepository } from '../faqs/faqGraphRepository';
-import { HelpdeskError } from '../portalHelpdeskClient';
+import type { TicketStats } from '../contracts';
+import {
+  HelpdeskError,
+  notConnected,
+  type PortalHelpdeskClient,
+} from '../portalHelpdeskClient';
 import type {
   InsightRepository,
   MetricsCounts,
@@ -80,6 +85,8 @@ export function createFlywheelMetrics(deps: {
     'metrics' | 'topGapGroups' | 'ticketFaqs' | 'lastIngestedAt'
   >;
   graph: Pick<FaqGraphRepository, 'summaries'>;
+  /** 工单每日数字从 Portal 读（不给 = 503 HELPDESK_NOT_CONNECTED）。 */
+  portal?: Pick<PortalHelpdeskClient, 'ticketStats'>;
   now?: () => Date;
 }) {
   const now = deps.now ?? (() => new Date());
@@ -91,6 +98,27 @@ export function createFlywheelMetrics(deps: {
       .slice(0, 10);
 
   return {
+    /**
+     * GET /api/helpdesk/flywheel/ticket-stats?from=&to=：Portal 的工单每日数字（UTC 天）。
+     * 默认和指标页一样是最近 METRICS_LIMITS.defaultDays 天；至多 dayRangeMax 天。
+     */
+    async ticketStats(raw: Record<string, unknown>): Promise<TicketStats> {
+      if (!deps.portal) throw notConnected();
+      const today = now().toISOString().slice(0, 10);
+      const to = date(raw.to, 'to') ?? today;
+      const from =
+        date(raw.from, 'from') ??
+        plusDays(to, -(METRICS_LIMITS.defaultDays - 1));
+      if (from > to) throw invalid('from must be on or before to');
+      const span =
+        (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+          day +
+        1;
+      if (span > METRICS_LIMITS.dayRangeMax)
+        throw invalid(`At most ${METRICS_LIMITS.dayRangeMax} days at a time`);
+      return deps.portal.ticketStats({ from, to });
+    },
+
     async metrics(raw: Record<string, unknown>) {
       const granularity: MetricsGranularity =
         raw.granularity === undefined || raw.granularity === ''

@@ -117,10 +117,15 @@ export class PackageWorker implements OnModuleInit, OnModuleDestroy {
       });
       // sourceVersionId 为空 = 导出当前草稿（不产生版本、不标记 Exported）
       const built = job.sourceVersionId
-        ? await buildCoursePackageFromSnapshot(this.prisma, this.storage, job.courseId, {
-            versionId: job.sourceVersionId,
-            environment: this.config.environmentLabel,
-          })
+        ? await buildCoursePackageFromSnapshot(
+            this.prisma,
+            this.storage,
+            job.courseId,
+            {
+              versionId: job.sourceVersionId,
+              environment: this.config.environmentLabel,
+            },
+          )
         : await this.buildDraftPackage(job.courseId);
       const storageKey = this.storage.stagingKey(job.id, 'export.zip');
       await this.storage.putStaging(storageKey, built.bytes);

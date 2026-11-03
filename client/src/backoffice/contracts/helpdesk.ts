@@ -358,6 +358,9 @@ export const GRAPH_RULES = [
   "language",
   "label_length",
   "answer_blocks",
+  "map_shape",
+  "map_placement",
+  "map_primary",
 ] as const;
 
 export type GraphProblem = {
@@ -454,6 +457,8 @@ export type FaqSnapshotDiff = {
     changed: { before: FaqSnapshotEdge; after: FaqSnapshotEdge; fields: string[] }[];
   };
   phrasings: { added: number; removed: number };
+  /** 流程树与对象表（节点与挂载）新增、去掉了几条；旧的服务端不给。 */
+  map?: { added: number; removed: number };
   same: boolean;
 };
 
@@ -497,7 +502,8 @@ export type FaqGraphPreview = {
  */
 export const CANDIDATE_STATUSES = ["new", "accepted", "dismissed", "merged"] as const;
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
-export const CANDIDATE_SUGGESTIONS = ["new_faq", "add_phrasing", "follow_up"] as const;
+/** update_faq：已有卡过时或缺细节；retire_faq：卡标记失效（归档，不删除）。见 candidate-review/api-spec.md §1。 */
+export const CANDIDATE_SUGGESTIONS = ["new_faq", "add_phrasing", "follow_up", "update_faq", "retire_faq"] as const;
 export type CandidateSuggestion = (typeof CANDIDATE_SUGGESTIONS)[number];
 export const CANDIDATE_ORIGINS = ["mining", "ticket"] as const;
 export type CandidateOrigin = (typeof CANDIDATE_ORIGINS)[number];
@@ -616,6 +622,12 @@ export type AcceptCandidateBody = {
   /** 选作问法的例句序号；不带 = 所有不含占位符的。 */
   phrasings?: number[];
   version: number;
+  /** 主位置（step / deviation / cell）：new_faq / follow_up 在结构不为空时必填；update_faq 可选（换位置）。 */
+  placementNodeId?: string;
+  /** retire_faq 可选：把 X 的问法挪到这张卡。 */
+  moveTo?: string;
+  /** retire_faq 可选：为什么下线（至多 500 字，服务端脱敏）。 */
+  note?: string;
 };
 
 export type AcceptCandidateResult = {
@@ -626,6 +638,95 @@ export type AcceptCandidateResult = {
   evalCasesAdded: number;
   edgeId: string | null;
 };
+
+/* ---------------- FAQ 候选审核（candidate-review/api-spec.md §2、§3、§5、§6） ---------------- */
+
+/** 路径上的一级（流程阶段、步骤、对象、规则格）。 */
+export type MapPathItem = { key: string; labelZh: string; labelEn: string };
+
+export const FAQ_MAP_KINDS = ["stage", "step", "deviation", "object", "cell"] as const;
+export type FaqMapKind = (typeof FAQ_MAP_KINDS)[number];
+/** 只有这三种能挂卡（数据库触发器保证）。 */
+export const PLACEABLE_KINDS = ["step", "deviation", "cell"] as const;
+export type PlaceableKind = (typeof PLACEABLE_KINDS)[number];
+
+export type ReviewHandling = {
+  exampleIndex: number;
+  shownFaqId: string | null;
+  outcome: SourceMixKey;
+  /** 固定 null：AI 的回答就是卡片原文。 */
+  reply: string | null;
+};
+
+export type ReviewSimilar = {
+  faqId: string;
+  key: string;
+  questionEn: string;
+  questionZh: string;
+  answerExcerptEn: string;
+  answerExcerptZh: string;
+  entry: boolean;
+  score: number;
+  samePlace: boolean;
+  placePath: MapPathItem[];
+  /** 同位置且问题向量相似度 ≥ 0.88：要员工读两张卡的答案再判断（可能重复、矛盾或不同情境）。 */
+  closeMatch: boolean;
+};
+
+export type ReviewPlace = { nodeId: string; kind: PlaceableKind; path: MapPathItem[]; score: number };
+export type ReviewRegion = { key: string; kind: "stage" | "object"; labelZh: string; labelEn: string; score: number };
+
+export const USER_STATE_BUCKETS = [
+  "paid_active",
+  "trial_active",
+  "cancelling",
+  "payment_failed",
+  "ended",
+  "never_had_plan",
+  "unknown",
+] as const;
+export type UserStateBucket = (typeof USER_STATE_BUCKETS)[number];
+export type ReviewUserStates = { total: number; buckets: Partial<Record<UserStateBucket, number>> };
+export type ReviewNetValue = { releaseVersion: number; gains: number; steals: number; net: number; evalCases: number };
+
+export type CandidateReview = {
+  candidateId: string;
+  version: number;
+  recommendation: {
+    action: CandidateSuggestion;
+    faqId: string | null;
+    rationale: string;
+    rationaleZh?: string;
+    rationaleEn?: string;
+    confidence: number | null;
+  };
+  handling: ReviewHandling[];
+  similaritySource: "text" | "vectors";
+  similar: ReviewSimilar[];
+  places: ReviewPlace[];
+  regions: ReviewRegion[];
+  /** 第 3 阶段之前为 null。 */
+  userStates: ReviewUserStates | null;
+  /** 第 2 阶段之前、或这张卡还没进过建版本时为 null。 */
+  netValue: ReviewNetValue | null;
+};
+
+export type FaqMapNode = {
+  id: string;
+  key: string;
+  kind: FaqMapKind;
+  parentId: string | null;
+  labelZh: string;
+  labelEn: string;
+  position?: number;
+  stageKey?: string;
+  attribute?: string;
+  cards: number;
+};
+export type FaqMap = { version: number; nodes: FaqMapNode[] };
+
+export type MergeCandidateBody = { targetId: string; version: number };
+export type MergeCandidateResult = { source: FaqCandidate; target: FaqCandidate | null; replayed: boolean };
 
 export type DismissCandidateBody = { reason: DismissReason; note?: string | null; version: number };
 
@@ -814,4 +915,109 @@ export type FaqHistoryPage = {
   page: number;
   pageSize: number;
   truncated: boolean;
+};
+
+/**
+ * 「AI 按指令改卡」（像 Claude Artifact，只用 DeepSeek；接口待后端确认）：不保存，只回一份改好的草稿。
+ * selection：只改这一段（字段 + 字符位置）。
+ */
+export type FaqRewriteBody = {
+  questionZh: string;
+  answerZh: string;
+  questionEn: string;
+  answerEn: string;
+  category: string | null;
+  instruction: string;
+  lang: "zh" | "en";
+  selection?: { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; start: number; end: number };
+};
+
+export type FaqRewriteResult = {
+  draft: { questionZh: string; answerZh: string; questionEn: string; answerEn: string; category: string | null };
+  changed: string[];
+  model: string;
+  costUsd: number | null;
+  /** 老的后端没有这个字段。 */
+  warnings?: FaqRewriteWarning[];
+};
+
+/* ------------- 卡片全表逐张审核与改动历史（Admin server faqReview.ts；api-spec 第 8、9 节） ------------- */
+
+export const FAQ_REVIEW_FILTERS = ["unreviewed", "needs_change", "ok", "all"] as const;
+export type FaqReviewFilter = (typeof FAQ_REVIEW_FILTERS)[number];
+export type FaqReviewStatus = "ok" | "needs_change";
+
+export type HelpdeskPerson = { id: string; name: string };
+
+/** 当前版本上最近的一次审核；faqVersion 小于卡的 version = 审过、后来改过（status 是 unreviewed）。 */
+export type FaqReviewState = {
+  status: "unreviewed" | FaqReviewStatus;
+  faqVersion: number | null;
+  note: string | null;
+  by: HelpdeskPerson | null;
+  at: string | null;
+};
+
+export type FaqReviewList = {
+  faqs: HelpdeskFaq[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: Record<"unreviewed" | FaqReviewStatus, number>;
+  reviews: Record<string, FaqReviewState>;
+};
+
+export type FaqReviewBody = { status: FaqReviewStatus; version: number; note?: string };
+
+export type FaqHistoryEntry =
+  | {
+      kind: "card";
+      at: string;
+      by: HelpdeskPerson | null;
+      action: string;
+      version: number;
+      changes: { field: string; before: unknown; after: unknown }[];
+    }
+  | {
+      kind: "placement";
+      at: string;
+      by: HelpdeskPerson | null;
+      action: "create" | "update" | "delete";
+      nodeKey: string | null;
+      primary: { before: boolean | null; after: boolean | null };
+    }
+  | { kind: "review"; at: string; by: HelpdeskPerson | null; action: FaqReviewStatus; version: number; note: string | null };
+
+export type FaqHistory = { faqId: string; version: number; review: FaqReviewState; history: FaqHistoryEntry[] };
+
+/** AI 改卡的提醒（api-spec 第 10 节）：加了原卡和指令里都没有的数字 / 链接 / 邮箱，或者某一栏改坏了已保留原文。 */
+export type FaqRewriteWarning =
+  | { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; kind: "number" | "link" | "email"; text: string }
+  | { field: "questionZh" | "answerZh" | "questionEn" | "answerEn"; kind: "dropped"; reason: "empty" | "too_long" | "language" };
+
+/** 工单每日数字（api-spec §11，Portal 算，Admin 转一层）：按 UTC 日，没有工单的天也在，用时没有是 null。 */
+export type TicketStatsDay = {
+  day: string;
+  created: number;
+  resolved: number;
+  cancelled: number;
+  openAtEnd: number;
+  firstReplies: number;
+  firstReplyMedianMinutes: number | null;
+  firstReplyP90Minutes: number | null;
+};
+
+export type TicketStats = {
+  from: string;
+  to: string;
+  timeZone: "UTC";
+  days: TicketStatsDay[];
+  totals: {
+    created: number;
+    resolved: number;
+    cancelled: number;
+    firstReplies: number;
+    firstReplyMedianMinutes: number | null;
+    firstReplyP90Minutes: number | null;
+  };
 };

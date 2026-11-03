@@ -11,6 +11,11 @@ import {
 } from '@nestjs/common';
 
 import {
+  HELPDESK_CARD_REWRITER,
+  noCardRewriter,
+  type CardRewriter,
+} from '../../contracts/helpdesk-card-rewrite';
+import {
   HELPDESK_GAP_LABELLER,
   noGapLabeller,
   type GapLabeller,
@@ -19,13 +24,23 @@ import {
 import { closePool } from '../lib/db';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
 import { createFaqChangeLogService } from '../modules/helpdesk/faqs/faqChangeLogService';
+import {
+  createFaqReviewService,
+  createPgFaqReviewRepository,
+} from '../modules/helpdesk/faqs/faqReview';
+import { createFaqRewriteService } from '../modules/helpdesk/faqs/faqRewrite';
 import { createFaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
 import { HELPDESK_FAQ_RELEASE_SOURCE } from '../modules/helpdesk/faqs/faqRelease';
 import {
   createFaqReleaseService,
   createPgFaqReleaseSource,
 } from '../modules/helpdesk/faqs/faqReleaseService';
-import { createFaqService } from '../modules/helpdesk/faqs/faqService';
+import { createPgFaqMapRepository } from '../modules/helpdesk/faqs/faqMapRepository';
+import {
+  createFaqService,
+  type FaqService,
+} from '../modules/helpdesk/faqs/faqService';
+import { sharedFaqVectorSearch } from '../modules/helpdesk/faqs/faqVectors';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
 import { createPgCandidateRepository } from '../modules/helpdesk/flywheel/candidateRepository';
 import { createFaqCandidateService } from '../modules/helpdesk/flywheel/faqCandidateService';
@@ -44,6 +59,12 @@ import {
 } from '../modules/helpdesk/flywheel/flywheelService';
 import { createPgInsightRepository } from '../modules/helpdesk/flywheel/insightRepository';
 import { createPortalHelpdeskClient } from '../modules/helpdesk/portalHelpdeskClient';
+import { createPortalStudentsClient } from '../modules/students/portalStudentsClient';
+import { createStudentsService } from '../modules/students/studentsService';
+import {
+  autoSeedDemoOnce,
+  shouldAutoSeedDemo,
+} from '../modules/helpdesk/demo/helpdeskDemoSeed';
 import { tryRecordAuditEvent } from '../repositories/auditRepository';
 import {
   bootstrapAdminFromEnv,
@@ -77,6 +98,16 @@ import {
   HELPDESK_FAQ_SERVICE,
   HelpdeskIntegrationFaqsController,
 } from './helpdesk-faqs.controller';
+import {
+  BackofficeLearningAccessController,
+  BackofficeStudentsController,
+  STUDENTS_SERVICE,
+} from './students.controller';
+import {
+  BackofficeHelpdeskFaqReviewController,
+  HELPDESK_FAQ_REVIEW_SERVICE,
+  HELPDESK_FAQ_REWRITE_SERVICE,
+} from './helpdesk-faq-review.controller';
 
 /**
  * BackOffice Portal（PRD v1.1）：员工登录、员工账号、六角色菜单权限、语言偏好；
@@ -93,6 +124,11 @@ export type BackofficeModuleOptions = {
    * 不给 = 不问模型（代码写的标签）。
    */
   gapLabeller?: Provider;
+  /**
+   * HELPDESK_CARD_REWRITER 的提供者（AppModule 组装：Agent 的一次 DeepSeek 调用；没有 key / 测试 = 不问模型）。
+   * 不给 = 「AI 按指令改卡」回 503 REWRITE_UNAVAILABLE。
+   */
+  cardRewriter?: Provider;
 };
 
 const HELPDESK_FLYWHEEL_RUNNER = Symbol('HELPDESK_FLYWHEEL_RUNNER');
@@ -124,6 +160,19 @@ export class HelpdeskFlywheelScheduler
   }
 }
 
+/**
+ * 部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后在后台灌一次 Helpdesk 演示数据和 FAQ 卡片库 v3.1，
+ * 方便测试和产品演示；灌过就不再灌（删除用 npm run seed:helpdesk-demo -- --remove）。其它环境什么都不做。
+ */
+@Injectable()
+export class HelpdeskDemoBoot implements OnApplicationBootstrap {
+  onApplicationBootstrap(): void {
+    if (!shouldAutoSeedDemo(process.env)) return;
+    // 不 await：不阻塞启动和健康检查
+    void autoSeedDemoOnce();
+  }
+}
+
 @Module({})
 export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(BackofficeModule.name);
@@ -145,8 +194,20 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         HelpdeskIntegrationFaqReleaseController,
         BackofficeHelpdeskAgentRunsController,
         BackofficeHelpdeskFlywheelController,
+        BackofficeHelpdeskFaqReviewController,
+        BackofficeStudentsController,
+        BackofficeLearningAccessController,
       ],
       providers: [
+        // 学生管理（Student Management PRD v1.0）：数据与判定在 Portal，这里经集成接口读写并记审计
+        {
+          provide: STUDENTS_SERVICE,
+          useFactory: () =>
+            createStudentsService({
+              portal: createPortalStudentsClient(),
+              audit: tryRecordAuditEvent,
+            }),
+        },
         {
           provide: HELPDESK_SERVICE,
           useFactory: () => createHelpdeskService(),
@@ -180,6 +241,27 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
           provide: HELPDESK_GAP_LABELLER,
           useValue: noGapLabeller,
         },
+        options.cardRewriter ?? {
+          provide: HELPDESK_CARD_REWRITER,
+          useValue: noCardRewriter,
+        },
+        // FAQ 逐张审核（只追加的审核记录；状态按卡的当前版本算）与改动历史
+        {
+          provide: HELPDESK_FAQ_REVIEW_SERVICE,
+          useFactory: (faqs: FaqService) =>
+            createFaqReviewService({
+              reviews: createPgFaqReviewRepository(),
+              faqs,
+            }),
+          inject: [HELPDESK_FAQ_SERVICE],
+        },
+        // AI 按指令改卡（只用 DeepSeek，不保存）
+        {
+          provide: HELPDESK_FAQ_REWRITE_SERVICE,
+          useFactory: (rewriter: CardRewriter) =>
+            createFaqRewriteService({ rewriter }),
+          inject: [HELPDESK_CARD_REWRITER],
+        },
         // v5 Part G：数据飞轮（事实表 ← Portal insights；候选；运行行；指标）
         {
           provide: HELPDESK_FLYWHEEL_RUNNER,
@@ -201,16 +283,26 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         },
         {
           provide: HELPDESK_FAQ_CANDIDATE_SERVICE,
-          useFactory: (labeller: GapLabeller) =>
-            createFaqCandidateService({
+          useFactory: (labeller: GapLabeller, faqs: FaqService) => {
+            const insights = createPgInsightRepository();
+            return createFaqCandidateService({
               candidates: createPgCandidateRepository(),
               graph,
               graphService: createFaqGraphService({ graph }),
               portal: createPortalHelpdeskClient(),
               nodes: () => workingNodeTexts(graph),
+              map: createPgFaqMapRepository(),
+              faqs,
+              shownCards: (turnIds) => insights.shownCards(turnIds),
+              // 审核页的相似卡：和线上检索同一份向量索引（没配向量模型 → 文字相似度）
+              vectors: {
+                search: sharedFaqVectorSearch(),
+                release: () => releaseSource.publishedVersion(),
+              },
               labeller,
-            }),
-          inject: [HELPDESK_GAP_LABELLER],
+            });
+          },
+          inject: [HELPDESK_GAP_LABELLER, HELPDESK_FAQ_SERVICE],
         },
         {
           provide: HELPDESK_FLYWHEEL_RUNS_SERVICE,
@@ -229,9 +321,11 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
             createFlywheelMetrics({
               insights: createPgInsightRepository(),
               graph,
+              portal: createPortalHelpdeskClient(),
             }),
         },
         HelpdeskFlywheelScheduler,
+        HelpdeskDemoBoot,
       ],
     };
   }

@@ -2,12 +2,18 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { createAppModule } from './app.module';
 import { learnerApiOpenWarning, parseAppRoles } from './app-roles';
 import { configureApp } from './common/app-setup';
 import { accessLog } from './common/access-log';
+import {
+  readBuildVersion,
+  registerVersionRoute,
+  setNoStore,
+  withBuildMeta,
+} from './common/build-version';
 
 /**
  * 单服务发布：只要构建产物里带着 client/dist，就由本服务直接提供 BackOffice 前端，
@@ -28,27 +34,23 @@ function serveBackOfficeUi(app: NestExpressApplication) {
     maxAge: 31_536_000_000,
     immutable: true,
     setHeaders: (res: any, filePath: string) => {
-      if (basename(filePath) === 'index.html') {
-        res.setHeader(
-          'Cache-Control',
-          'no-store, no-cache, must-revalidate, proxy-revalidate',
-        );
-        res.setHeader('Pragma', 'no-cache');
-        res.setHeader('Expires', '0');
-      }
+      if (basename(filePath) === 'index.html') setNoStore(res);
     },
   });
   const express = app.getHttpAdapter().getInstance();
+  // 必须在 SPA 回退路由之前注册，否则 /version.json 会被前端回退先吃掉。
+  const buildVersion = readBuildVersion(clientDir);
+  const indexHtml = withBuildMeta(readFileSync(indexFile, 'utf8'), buildVersion);
+  registerVersionRoute(express, buildVersion);
   express.get(/^\/(?!api(?:\/|$)|health$).*/, (_req, res: any) => {
-    res.setHeader(
-      'Cache-Control',
-      'no-store, no-cache, must-revalidate, proxy-revalidate',
-    );
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.sendFile(indexFile);
+    setNoStore(res);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(indexHtml);
   });
-  Logger.log(`前端由本服务提供：${clientDir}`, 'Bootstrap');
+  Logger.log(
+    `前端由本服务提供：${clientDir}（构建 ${buildVersion ?? 'unknown'}）`,
+    'Bootstrap',
+  );
 }
 
 async function bootstrap() {

@@ -1,9 +1,11 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
-import type { PreviewCourse } from '../contracts/course';
+import type { PortalPreviewLink, PreviewCourse } from '../contracts/course';
 import { providerItems, strings } from '../contracts/course';
 import { boRequest } from '../lib/api';
+import { categoryLabel } from '../lib/categoryLabel';
+import { languageLabel, learningModeLabel, localizeMissing } from './course-editor/shared';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -36,6 +38,8 @@ export function CoursePreviewPage() {
   const [course, setCourse] = useState<PreviewCourse | null>(null);
   const [error, setError] = useState('');
   const [activeLessonId, setActiveLessonId] = useState('');
+  const [portalOpening, setPortalOpening] = useState(false);
+  const [portalError, setPortalError] = useState('');
 
   useEffect(() => {
     const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : '';
@@ -49,9 +53,36 @@ export function CoursePreviewPage() {
     });
   }, [courseId, locale, versionId]);
 
+  async function openPortalPreview() {
+    setPortalOpening(true);
+    setPortalError('');
+    const popup = window.open('about:blank', '_blank');
+    const query = new URLSearchParams({ locale });
+    if (versionId) query.set('versionId', versionId);
+    const result = await boRequest<PortalPreviewLink>(
+      `/api/backoffice/courses/${courseId}/portal-preview?${query.toString()}`,
+    );
+    setPortalOpening(false);
+    if (!result.success) {
+      popup?.close();
+      setPortalError(result.message ?? L(locale, '无法生成 Portal 预览链接。', 'Could not create Portal preview link.'));
+      return;
+    }
+    if (popup) {
+      popup.opener = null;
+      popup.location.href = result.data.url;
+      return;
+    }
+    window.open(result.data.url, '_blank', 'noopener,noreferrer');
+  }
+
   const activeLesson = useMemo(
     () => course?.lessons.find((lesson) => lesson.id === activeLessonId) ?? course?.lessons[0] ?? null,
     [course, activeLessonId],
+  );
+  const pendingLessons = useMemo(
+    () => (course?.completeness.steps.content.lessons ?? []).filter((lesson) => !lesson.studyComplete),
+    [course],
   );
 
   if (error) return <section className="card cardGrow"><p>{error}</p></section>;
@@ -61,11 +92,24 @@ export function CoursePreviewPage() {
 
   return (
     <section className="card cardGrow" style={{ overflow: 'auto', maxWidth: 1120, margin: '0 auto', padding: '24px 32px' }}>
-      <nav style={{ fontSize: 13, opacity: 0.65, marginBottom: 16 }}>
+      <nav style={{ fontSize: 13, opacity: 0.65, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <Link to={`/${locale}/course/${courseId}`}>{L(locale, '← 返回编辑', '← Back to editor')}</Link>
-        <span style={{ margin: '0 6px' }}>·</span>
+        <span>·</span>
         <span>{course.versionLabel ? `${L(locale, '版本', 'Version')} ${course.versionLabel}（${L(locale, '只读', 'read-only')}）` : L(locale, '学员视角预览（草稿）', 'Learner view preview (draft)')}</span>
+        <button
+          type="button"
+          onClick={openPortalPreview}
+          disabled={portalOpening}
+          style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 8, border: '1px solid #2B58C8', background: '#fff', color: '#2B58C8', cursor: portalOpening ? 'wait' : 'pointer', opacity: portalOpening ? 0.6 : 1 }}
+        >
+          {portalOpening ? L(locale, '生成链接…', 'Creating link…') : L(locale, '在 Portal 中预览', 'Preview in Portal')}
+        </button>
       </nav>
+      {portalError && (
+        <p style={{ background: '#FDECEC', color: '#A32020', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+          {portalError}
+        </p>
+      )}
 
       {course.versionLabel && (
         <p style={{ background: '#FFF6E5', color: '#9A6B00', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
@@ -77,14 +121,14 @@ export function CoursePreviewPage() {
 
       {course.category && (
         <div style={{ marginTop: 20 }}>
-          <span style={{ background: '#EEF3FF', color: '#2B58C8', borderRadius: 999, padding: '2px 10px', fontSize: 12 }}>{course.category}</span>
+          <span style={{ background: '#EEF3FF', color: '#2B58C8', borderRadius: 999, padding: '2px 10px', fontSize: 12 }}>{categoryLabel(locale, course.category)}</span>
         </div>
       )}
       <h1 style={{ margin: '12px 0 8px', fontSize: 30 }}>{course.title}</h1>
       {course.shortDescription && <p style={{ fontSize: 16, opacity: 0.8, margin: 0 }}>{course.shortDescription}</p>}
       <div style={{ marginTop: 10, opacity: 0.7, fontSize: 14 }}>
         {course.lessonCount} {L(locale, '节课', 'lessons')}
-        {course.totalDurationSeconds ? ` · ${fmtTotal(course.totalDurationSeconds, locale)}` : ''} · {course.learningMode} · {course.learningLanguages.join(', ')}
+        {course.totalDurationSeconds ? ` · ${fmtTotal(course.totalDurationSeconds, locale)}` : ''} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')}
         {course.trial.enabled ? ` · ${L(locale, '试看', 'Trial')} ${course.trial.available ? '✓' : L(locale, '未完成', 'incomplete')}` : ` · ${L(locale, '无试看', 'No trial')}`}
       </div>
 
@@ -127,7 +171,50 @@ export function CoursePreviewPage() {
               </button>
             );
           })}
-          {course.lessons.length === 0 && <p style={{ opacity: 0.7 }}>{L(locale, '暂无完成的课时。完成 Study & Exploration 后才会显示。', 'No completed lessons yet. A lesson appears after Study & Exploration is complete.')}</p>}
+          {course.lessons.length === 0 && (
+            <div style={{ borderRadius: 12, border: '1px dashed #E0C48A', background: '#FFFBF0', padding: '12px 14px' }}>
+              {pendingLessons.length === 0 ? (
+                <>
+                  <p style={{ margin: 0, opacity: 0.75 }}>
+                    {L(
+                      locale,
+                      '保存成功不代表课时已达到学员端展示条件。学员大纲只显示 Study & Exploration 已完成的课时。',
+                      'A successful save does not mean a lesson is ready for learners. The outline only shows lessons with completed Study & Exploration.',
+                    )}
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontSize: 13 }}>
+                    <Link to={`/${locale}/course/${courseId}`}>{L(locale, '去编辑课程并添加课时', 'Open the editor to add lessons')}</Link>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <strong style={{ fontSize: 14 }}>
+                    {L(
+                      locale,
+                      '学员端大纲只列出 Study & Exploration 已完成的课时，以下课时尚未完成：',
+                      'The learner outline only lists lessons whose Study & Exploration is complete. Still incomplete:',
+                    )}
+                  </strong>
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, lineHeight: 1.9 }}>
+                    {pendingLessons.map((lesson) => {
+                      const shown = lesson.missing.slice(0, 6).map((item) => localizeMissing(locale, item));
+                      const rest = lesson.missing.length - shown.length;
+                      return (
+                        <li key={lesson.lessonId}>
+                          <strong>{lesson.code}</strong>{' — '}
+                          {shown.join(locale.startsWith('zh') ? '；' : '; ')}
+                          {rest > 0 ? L(locale, ` 等共 ${lesson.missing.length} 项`, ` (+${rest} more)`) : ''}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p style={{ margin: '8px 0 0', fontSize: 13 }}>
+                    <Link to={`/${locale}/course/${courseId}`}>{L(locale, '返回编辑继续完善并保存', 'Back to the editor to finish and save')}</Link>
+                  </p>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

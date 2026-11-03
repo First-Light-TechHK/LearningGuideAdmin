@@ -88,9 +88,9 @@ function queries(): Record<string, string>[] {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
+/** 指标：趋势模块上面那排标签（按名字），澄清覆盖率与守卫回退率在模块底下一行（group）。 */
 function card(label: string): HTMLElement {
-  const element = screen.getByRole('group', { name: label })
-  return element
+  return screen.queryByRole('tab', { name: label }) ?? screen.getByRole('group', { name: label })
 }
 
 beforeEach(() => {
@@ -103,7 +103,7 @@ afterEach(() => {
 })
 
 describe('HelpDesk data (G6)', () => {
-  test('the last 28 days by day, no split: seven stat cards with their parts, the trend, gaps and ticket FAQs', async () => {
+  test('the last 28 days by day, no split: the trend module tabs with their parts, the trend table, gaps and ticket FAQs', async () => {
     serve(() => ({ data: metrics() }))
     await openData()
     const [first] = queries()
@@ -141,12 +141,14 @@ describe('HelpDesk data (G6)', () => {
   test('FAQs that most often lead to a ticket show the question in the page language', async () => {
     serve(() => ({ data: metrics() }))
     await openData({ locale: 'zh-CN' })
+    await screen.findByRole('tab', { name: 'AI 解决率' })
+    fireEvent.click(screen.getByRole('tab', { name: /最常导致工单的 FAQ/ }))
     const table = await screen.findByRole('table', { name: '最常导致工单的 FAQ' })
     const rowElement = within(table).getByText('怎么退款？').closest('tr') as HTMLElement
     assert.ok(within(rowElement).getByText('12'))
     assert.ok(within(rowElement).getByText('3'))
     assert.ok(within(rowElement).getByText('25.0%'))
-    assert.ok(screen.getByRole('group', { name: 'AI 解决率' }))
+    assert.ok(screen.getByRole('tab', { name: 'AI 解决率' }))
   })
 
   test('split by locale: cards stay overall, a segment table is added', async () => {

@@ -15,6 +15,7 @@ const SUB_LABEL: Record<SettingsSubKey, string> = {
   employeeAccount: "nav.employeeAccount",
   paymentGateway: "nav.paymentGateway",
   notificationConfiguration: "nav.notificationConfiguration",
+  learningAccess: "nav.learningAccess",
 };
 
 /** 设计稿：Settings 的二级导航是内容区左侧一列，而不是侧边栏内的嵌套项。 */

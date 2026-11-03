@@ -7,6 +7,7 @@ import { RunTrace } from '../trace/run-trace';
 import type { AgentStepContext, AgentStepSpec, ModelTarget } from './engine';
 import {
   loadPi,
+  OPENROUTER_ROUTING,
   openRouterSource,
   PiStepRunner,
   THINKING_TOKENS,
@@ -608,7 +609,11 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
         high: 16_384,
       });
       expect(THINKING_TOKENS[thinking]).toBe(room);
-      for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
+      // gpt-4o-mini 在价目里（不会思考）；真正不在价目里的模型用 acme/brand-new-model
+      for (const model of [
+        'deepseek/deepseek-v4.1-flash',
+        'acme/brand-new-model',
+      ]) {
         const { outcome, fetch } = await call(picked, {
           ...TARGET,
           model,
@@ -620,6 +625,37 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
       }
     },
   );
+
+  it('with thinking off sends no reasoning to a catalog model that cannot think (its providers would all be filtered out)', async () => {
+    // 2026-11-02：qwen3-30b-a3b-instruct-2507 带 effort none + require_parameters → OpenRouter 404 No endpoints
+    for (const model of [
+      'qwen/qwen3-30b-a3b-instruct-2507',
+      'mistralai/mistral-small-3.2-24b-instruct',
+    ]) {
+      const { outcome, fetch } = await call(picked, {
+        ...TARGET,
+        model,
+        thinking: 'off',
+      });
+      expect(outcome).toEqual({ kind: 'called', args: { faqId: IDS[0] } });
+      expect(sentReasoning(fetch)).toBeUndefined();
+    }
+  });
+
+  it('asks OpenRouter for its cheapest providers that take every parameter we send, also for a model missing from the catalog', async () => {
+    // owner 2026-10-31：只选最便宜（最快的几家贵 10 到 20 倍）；慢的由 6.3 秒切换兜住
+    for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
+      const { fetch } = await call(picked, { ...TARGET, model, thinking: 'high' });
+      const body = JSON.parse(
+        (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
+      ) as { provider?: unknown };
+      expect(body.provider).toEqual(OPENROUTER_ROUTING);
+      expect(OPENROUTER_ROUTING).toEqual({
+        sort: 'price',
+        require_parameters: true,
+      });
+    }
+  });
 
   it('without a thinking setting turns thinking off for a catalog model and sends nothing for any other', async () => {
     // pi 的价目里 DeepSeek v4.1 flash 能思考：2026-10-30 之前的评测都是 effort none（思考关）

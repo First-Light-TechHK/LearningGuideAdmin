@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import type { VersionSnapshot } from './version-snapshot';
+import {
+  captureVersionSnapshot,
+  type VersionSnapshot,
+} from './version-snapshot';
+
+type SnapshotLesson = VersionSnapshot['course']['lessons'][number];
+type SnapshotLocalization = VersionSnapshot['course']['localizations'][number];
 
 /**
- * Portal v1 只读投影（设计文档 §22.2）：从 v2 数据重建旧 `ProductCourse` 形状。
+ * Portal v1 只读投影（设计文档 §22.2）：从 v2 数据重建 Portal 课程详情。
  *
  * P1b：线上内容来自 **live version 快照**，而不是工作区行。
  * 这样保存草稿不会提前改变 Portal，Publish 后才切换。
@@ -40,10 +46,7 @@ export class PortalProjectionService {
       ]),
     );
     return rows.map((row) =>
-      this.toSummary(
-        row,
-        snapshotById.get(row.liveVersionId ?? '')?.course.lessons.length ?? 0,
-      ),
+      this.toSummary(row, snapshotById.get(row.liveVersionId ?? '') ?? null),
     );
   }
 
@@ -55,36 +58,143 @@ export class PortalProjectionService {
         cover: true,
         localizations: true,
         trialRows: true,
+        plans: {
+          where: { active: true },
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
       },
     });
-    if (!row || row.liveStatus !== 'ONLINE' || !row.liveVersionId) return null;
+    if (
+      !row ||
+      row.liveStatus !== 'ONLINE' ||
+      row.archivedAt ||
+      !row.liveVersionId
+    )
+      return null;
     const version = await this.prisma.courseVersion.findUnique({
       where: { id: row.liveVersionId },
       select: { snapshotData: true },
     });
     if (!version) return null;
     const snapshot = version.snapshotData as unknown as VersionSnapshot;
+    return this.toDetail(row, snapshot);
+  }
 
-    const assetIds = new Set<string>();
-    for (const lesson of snapshot.course.lessons) {
-      for (const loc of lesson.localizations)
-        if (loc.videoAssetId) assetIds.add(loc.videoAssetId);
-      for (const exhibit of lesson.exhibits) {
-        if (exhibit.mediaAssetId) assetIds.add(exhibit.mediaAssetId);
-        if (exhibit.thumbnailAssetId) assetIds.add(exhibit.thumbnailAssetId);
-      }
+  /** 预览投影：草稿或指定版本，仅在 Portal preview token 校验通过后调用。 */
+  async getPreviewCourse(courseId: string, versionId?: string) {
+    const row = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      include: {
+        category: true,
+        cover: true,
+        localizations: true,
+        trialRows: true,
+        plans: {
+          where: { active: true },
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
+    if (!row || row.archivedAt) return null;
+
+    let snapshot: VersionSnapshot;
+    let versionLabel: string | null = null;
+    if (versionId) {
+      const version = await this.prisma.courseVersion.findFirst({
+        where: { id: versionId, courseId },
+        select: { snapshotData: true, versionLabel: true },
+      });
+      if (!version) return null;
+      snapshot = version.snapshotData as unknown as VersionSnapshot;
+      versionLabel = version.versionLabel;
+    } else {
+      snapshot = await captureVersionSnapshot(this.prisma, courseId);
     }
-    const assets = assetIds.size
-      ? await this.prisma.courseMediaAsset.findMany({
-          where: { id: { in: [...assetIds] } },
-          select: { id: true, storageKey: true },
-        })
-      : [];
-    return this.toDetail(
-      row,
-      snapshot,
-      new Map(assets.map((asset) => [asset.id, asset.storageKey])),
-    );
+
+    return {
+      ...this.toDetail(row, snapshot),
+      preview: {
+        source: versionId ? 'version' : 'draft',
+        versionLabel,
+      },
+    };
+  }
+
+  async getCoverBytes(courseId: string) {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: {
+        liveStatus: true,
+        archivedAt: true,
+        cover: { select: { storageKey: true, extension: true, size: true } },
+      },
+    });
+    if (
+      !course ||
+      course.liveStatus !== 'ONLINE' ||
+      course.archivedAt ||
+      !course.cover
+    )
+      return null;
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
+  }
+
+  async getMediaBytes(courseId: string, assetId: string) {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { liveStatus: true, archivedAt: true },
+    });
+    if (!course || course.liveStatus !== 'ONLINE' || course.archivedAt)
+      return null;
+    const asset = await this.prisma.courseMediaAsset.findFirst({
+      where: { id: assetId, courseId },
+      select: { storageKey: true, extension: true, size: true },
+    });
+    if (!asset) return null;
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
+  }
+
+  /** 预览媒体（草稿/指定版本）：只要课程未归档即可，不要求已 ONLINE。 */
+  async getPreviewCoverBytes(courseId: string) {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: {
+        archivedAt: true,
+        cover: { select: { storageKey: true, extension: true, size: true } },
+      },
+    });
+    if (!course || course.archivedAt || !course.cover) return null;
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
+  }
+
+  async getPreviewMediaBytes(courseId: string, assetId: string) {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { archivedAt: true },
+    });
+    if (!course || course.archivedAt) return null;
+    const asset = await this.prisma.courseMediaAsset.findFirst({
+      where: { id: assetId, courseId },
+      select: { storageKey: true, extension: true, size: true },
+    });
+    if (!asset) return null;
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
   }
 
   private toSummary(
@@ -98,21 +208,21 @@ export class PortalProjectionService {
       referencePrice: number | null;
       discount: number | null;
       category: { name: string } | null;
-      localizations: {
-        language: string;
-        title: string;
-        shortDescription: string | null;
-        overview: string | null;
-      }[];
+      localizations: SnapshotLocalization[];
       cover: { storageKey: string } | null;
     },
-    lessonCount: number,
+    snapshot: VersionSnapshot | null,
   ) {
-    const loc = row.localizations[0];
+    const loc =
+      this.pickLocalization(
+        snapshot?.course.localizations,
+        snapshot?.course.defaultContentLanguage,
+      ) ?? row.localizations[0];
+    const lessons = snapshot?.course.lessons ?? [];
     return {
       id: row.id,
-      slug: row.slug,
-      code: row.code,
+      slug: snapshot?.course.slug ?? row.slug,
+      code: snapshot?.course.code ?? row.code,
       title: loc?.title ?? row.slug,
       subtitle: row.subtitle ?? null,
       shortDescription: loc?.shortDescription ?? null,
@@ -123,7 +233,13 @@ export class PortalProjectionService {
       referencePrice: row.referencePrice ?? 0,
       discount: row.discount ?? 0,
       coverUrl: row.cover ? `/api/portal/v1/media/${row.id}/cover` : null,
-      lessonCount,
+      lessonCount: lessons.length,
+      totalDurationSeconds: this.totalDuration(
+        lessons,
+        snapshot?.course.defaultContentLanguage,
+      ),
+      learningMode: snapshot?.course.learningMode ?? null,
+      learningLanguages: snapshot?.course.learningLanguages ?? [],
     };
   }
 
@@ -139,27 +255,45 @@ export class PortalProjectionService {
       discount: number | null;
       category: { name: string } | null;
       cover: { storageKey: string } | null;
-      localizations: {
-        language: string;
-        title: string;
-        shortDescription: string | null;
-        overview: string | null;
-      }[];
-      trialRows: Array<{ lessonId: string; status: string }>;
+      localizations: SnapshotLocalization[];
+      trialEnabled: boolean;
+      trialRows: Array<{
+        lessonId: string;
+        status: string;
+        videoCutoffSeconds?: number | null;
+        textCutoffLearningPointId?: string | null;
+        confirmedTextCutoffCode?: string | null;
+        videoCutoffByLanguage?: unknown;
+        textCutoffByLanguage?: unknown;
+      }>;
+      plans: Array<{
+        id: string;
+        name: string;
+        termMonths: number;
+        amountMinor: number;
+        currency: string;
+        stripeLookupKey: string | null;
+        trialEligible: boolean;
+      }>;
     },
     snapshot: VersionSnapshot,
-    storageKeyById: Map<string, string>,
+    media?: { coverUrl: string | null; assetUrl: (assetId: string) => string },
   ) {
     const loc =
-      snapshot.course.localizations.find(
-        (entry) => entry.language === snapshot.course.defaultContentLanguage,
-      ) ??
-      snapshot.course.localizations[0] ??
-      row.localizations[0];
+      this.pickLocalization(
+        snapshot.course.localizations,
+        snapshot.course.defaultContentLanguage,
+      ) ?? row.localizations[0];
     const publicLessonIds = new Set(
       row.trialRows
         .filter((trial) => trial.status === 'READY')
         .map((trial) => trial.lessonId),
+    );
+    const trialRowByLesson = new Map(
+      row.trialRows.map((trial) => [trial.lessonId, trial]),
+    );
+    const lessons = [...snapshot.course.lessons].sort(
+      (a, b) => a.sortOrder - b.sortOrder,
     );
     return {
       id: row.id,
@@ -167,6 +301,7 @@ export class PortalProjectionService {
       code: snapshot.course.code ?? row.code,
       title: loc?.title ?? row.slug,
       subtitle: row.subtitle ?? null,
+      shortDescription: loc?.shortDescription ?? null,
       description: loc?.overview ?? null,
       category: row.category?.name ?? null,
       level: row.level ?? null,
@@ -174,45 +309,85 @@ export class PortalProjectionService {
       referencePrice: row.referencePrice ?? 0,
       discount: row.discount ?? 0,
       coverUrl: row.cover ? `/api/portal/v1/media/${row.id}/cover` : null,
+      learningMode: snapshot.course.learningMode,
+      learningLanguages: snapshot.course.learningLanguages ?? [],
+      defaultContentLanguage: snapshot.course.defaultContentLanguage,
+      whatYouLearn: loc?.whatYouLearn ?? [],
+      provides: loc?.provides ?? [],
+      lessonCount: lessons.length,
+      totalDurationSeconds: this.totalDuration(
+        lessons,
+        snapshot.course.defaultContentLanguage,
+      ),
+      trial: {
+        enabled: row.trialEnabled,
+        lessonIds: [...publicLessonIds],
+      },
+      plans: row.plans.map((plan) => ({
+        id: plan.id,
+        name: plan.name,
+        termMonths: plan.termMonths,
+        amountMinor: plan.amountMinor,
+        currency: plan.currency,
+        lookupKey: plan.stripeLookupKey,
+        trialEligible: plan.trialEligible,
+      })),
       sections: [
         {
           id: 'all',
           title: 'Lessons',
-          lessons: [...snapshot.course.lessons]
-            .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map((lesson) => {
-              const lessonLoc =
-                lesson.localizations.find(
-                  (entry) =>
-                    entry.language === snapshot.course.defaultContentLanguage,
-                ) ?? lesson.localizations[0];
-              return {
-                id: lesson.id,
-                title: lessonLoc?.title ?? lesson.code,
-                summary: lessonLoc?.description ?? null,
-                isPublic: publicLessonIds.has(lesson.id),
-                contents: this.rebuildContents(lesson, storageKeyById),
-              };
-            }),
+          lessons: lessons.map((lesson) => {
+            const lessonLoc = this.pickLocalization(
+              lesson.localizations,
+              snapshot.course.defaultContentLanguage,
+            );
+            const trialRow = trialRowByLesson.get(lesson.id);
+            const isPublic = publicLessonIds.has(lesson.id);
+            return {
+              id: lesson.id,
+              title: lessonLoc?.title ?? lesson.code,
+              summary: lessonLoc?.description ?? null,
+              durationSeconds: lessonLoc?.videoDurationSeconds ?? null,
+              isPublic,
+              // 试看截止点：正式 Portal 与 Admin 预览、学员视角预览共用同一份规则
+              // （视频按秒、文本按截止 LP），避免三处各写一套。
+              trial: isPublic
+                ? {
+                    videoCutoffSeconds: this.cutoffForLanguage(
+                      trialRow?.videoCutoffByLanguage,
+                      trialRow?.videoCutoffSeconds ?? null,
+                      lessonLoc?.language,
+                    ),
+                    textCutoffLearningPointId:
+                      trialRow?.textCutoffLearningPointId ?? null,
+                    textCutoffCode: trialRow?.confirmedTextCutoffCode ?? null,
+                  }
+                : null,
+              contents: this.rebuildContents(lesson, snapshot, row.id),
+            };
+          }),
         },
       ],
     };
   }
 
   private rebuildContents(
-    lesson: VersionSnapshot['course']['lessons'][number],
-    storageKeyById: Map<string, string>,
+    lesson: SnapshotLesson,
+    snapshot: VersionSnapshot,
+    courseId: string,
   ) {
-    const loc = lesson.localizations[0];
+    const loc = this.pickLocalization(
+      lesson.localizations,
+      snapshot.course.defaultContentLanguage,
+    );
     const contents: unknown[] = [];
     if (loc?.videoAssetId) {
-      const storageKey = storageKeyById.get(loc.videoAssetId) ?? '';
       contents.push({
         id: `${lesson.code}-video`,
         title: '',
         type: 'video',
         mode: 'lecture',
-        url: `media/${storageKey}`,
+        url: this.mediaUrl(courseId, loc.videoAssetId),
         nodes: lesson.exhibits.map((exhibit) => {
           const trigger = lesson.triggers.find(
             (entry) =>
@@ -224,7 +399,7 @@ export class PortalProjectionService {
             title: exhibit.code,
             type: this.mapExhibitType(exhibit.type),
             url: exhibit.mediaAssetId
-              ? `media/${storageKeyById.get(exhibit.mediaAssetId) ?? ''}`
+              ? this.mediaUrl(courseId, exhibit.mediaAssetId)
               : undefined,
             triggerTime: trigger?.timeSeconds ?? 0,
           };
@@ -242,6 +417,45 @@ export class PortalProjectionService {
       });
     }
     return contents;
+  }
+
+  private mediaUrl(courseId: string, assetId: string): string {
+    return `/api/portal/v1/media/${courseId}/assets/${assetId}`;
+  }
+
+  /** 按语言取视频截止秒数，缺省回退到单语言字段。 */
+  private cutoffForLanguage(
+    byLanguage: unknown,
+    fallback: number | null,
+    language: string | undefined,
+  ): number | null {
+    if (byLanguage && typeof byLanguage === 'object') {
+      const map = byLanguage as Record<string, unknown>;
+      const value = language ? map[language] : undefined;
+      if (typeof value === 'number') return value;
+      if (value === null) return null;
+    }
+    return fallback;
+  }
+
+  private pickLocalization<T extends { language: string }>(
+    entries: T[] | undefined,
+    language: string | undefined,
+  ): T | undefined {
+    if (!entries?.length) return undefined;
+    return (
+      entries.find((entry) => entry.language === language) ?? entries[0]
+    );
+  }
+
+  private totalDuration(
+    lessons: SnapshotLesson[],
+    language: string | undefined,
+  ): number {
+    return lessons.reduce((sum, lesson) => {
+      const loc = this.pickLocalization(lesson.localizations, language);
+      return sum + (loc?.videoDurationSeconds ?? 0);
+    }, 0);
   }
 
   private mapExhibitType(type: string): string {

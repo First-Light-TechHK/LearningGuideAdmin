@@ -40,7 +40,8 @@
     "employeeAccount": "Employee Account",
     "paymentGateway": "Payment Gateway",
     "notificationConfiguration": "Notification Configuration",
-    "toggleSidebar": "Toggle sidebar"
+    "toggleSidebar": "Toggle sidebar",
+    "learningAccess": "Learning Access & Experiments"
   },
   "settings": {
     "paymentGatewayTitle": "Payment Gateway",
@@ -192,12 +193,6 @@
     },
     "neverSignedIn": "—",
     "empty": "No employee accounts match the current search and filters.",
-    "showing": "{from}–{to} of {total}",
-    "showingSingle": "{from} of {total}",
-    "showingEmpty": "0 items",
-    "pageSizeLabel": "Rows/page",
-    "pageOf": "Page {page} / {total}",
-    "pageNumber": "Page {page}",
     "actions": {
       "edit": "Edit",
       "resetPassword": "Reset Password",
@@ -221,6 +216,14 @@
       "linkReady": "One-time link generated.",
       "linkLabel": "One-time link"
     }
+  },
+  "pagination": {
+    "showing": "{from}–{to} of {total}",
+    "showingSingle": "{from} of {total}",
+    "showingEmpty": "0 items",
+    "pageSizeLabel": "Rows/page",
+    "pageOf": "Page {page} / {total}",
+    "pageNumber": "Page {page}"
   },
   "delivery": {
     "SENT": "sent",
@@ -703,7 +706,14 @@
       "JOB_ALREADY_RUNNING": "This job is already running. Try again when it has finished.",
       "JOB_START_FAILED": "The job could not be started. Try again in a moment.",
       "JOB_NOT_FOUND": "This job does not exist.",
-      "JOB_RUN_NOT_FOUND": "This run no longer exists."
+      "JOB_RUN_NOT_FOUND": "This run no longer exists.",
+      "PLACE_REQUIRED": "Choose a place first.",
+      "INVALID_PLACE": "Cards cannot go in this place: choose a step, deviation or rule cell.",
+      "FAQ_NOT_UPDATED": "The card has not been edited yet: save your changes first, then approve.",
+      "REWRITE_UNAVAILABLE": "AI is not connected in this environment yet (no OpenRouter key). Edit by hand for now.",
+      "REWRITE_FAILED": "AI did not edit the card as asked. Try saying it another way.",
+      "REWRITE_TIMEOUT": "AI took too long this time. Try again shortly, or edit by hand.",
+      "REWRITE_RATE_LIMITED": "Too many AI edits in a minute. Wait a moment and try again."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -1029,7 +1039,10 @@
         "follow_ups": "More than 6 follow-ups.",
         "language": "English or Chinese text is missing.",
         "label_length": "A chip or option text is too long.",
-        "answer_blocks": "The answer is empty in one language."
+        "answer_blocks": "The answer is empty in one language.",
+        "map_shape": "A node in the process map or the rule table is at the wrong level.",
+        "map_placement": "A card hangs on a node that cannot hold cards (only steps, deviations and cells can).",
+        "map_primary": "A card has no primary place in the map, or more than one."
       }
     },
     "tree": {
@@ -1179,7 +1192,9 @@
       "suggestion": {
         "new_faq": "New FAQ",
         "add_phrasing": "Add phrasing",
-        "follow_up": "Follow-up"
+        "follow_up": "Follow-up",
+        "update_faq": "Update card",
+        "retire_faq": "Mark obsolete"
       },
       "origin": {
         "mining": "Nightly mining",
@@ -1401,6 +1416,398 @@
         "locale": "By locale",
         "entry": "By channel",
         "signal": "By signal"
+      },
+      "charts": {
+        "title": "Trends",
+        "turns": "Questions",
+        "jobReceived": "Background job",
+        "caption": {
+          "turns": "Questions (turns) per period",
+          "aiSolvedRate": "Share of answers with no ticket in the next 24 hours",
+          "noMatchRate": "Share of questions that matched no FAQ",
+          "handoverRate": "Share of questions handed to a person",
+          "helpfulRate": "Share of votes that were helpful or solved",
+          "avgRating": "User rating (1 to 5)",
+          "jobReceived": "Turns pulled from Portal by the nightly gap mining, with each day's result below",
+          "tickets": "Tickets created in each period (from Portal, by UTC day)"
+        },
+        "perDay": "by day",
+        "perWeek": "by week",
+        "turnsDetail": "{answers} got an answer",
+        "jobDetail": "days that succeeded",
+        "empty": "No data in this period.",
+        "partial": "partial week",
+        "noRuns": "No runs yet.",
+        "runsOk": "All {count} recent days succeeded",
+        "runsFailed": "{failed} of the last {count} days failed",
+        "runsLabel": "Run status per day",
+        "status": {
+          "succeeded": "Succeeded",
+          "failed": "Failed",
+          "running": "Running"
+        },
+        "created": "{count} new candidates",
+        "showTable": "Show the trend table (numbers per period)",
+        "changePoints": "{n} pts",
+        "change": "{n}",
+        "vsDay": "arrows compare with the day before",
+        "vsWeek": "arrows compare with the week before",
+        "tickets": "Daily tickets",
+        "ticketsPoint": "Resolved {resolved} · cancelled {cancelled}",
+        "ticketsDetail": "Resolved {resolved}",
+        "ticketsOff": "Portal not connected yet",
+        "ticketsClipped": "tickets show at most 92 days, so this is the last 92 days",
+        "minutes": "{n} min",
+        "hours": "{n} h",
+        "ticketFacts": {
+          "resolved": "Resolved",
+          "cancelled": "Cancelled",
+          "openAtEnd": "Open at the end of the last day",
+          "firstReplyMedian": "First reply (median)",
+          "firstReplyP90": "First reply (P90)",
+          "replies": "{n} replied"
+        },
+        "ticketHints": {
+          "resolved": "Tickets closed in this period, not counting cancelled ones",
+          "cancelled": "Tickets closed as cancelled in this period",
+          "openAtEnd": "Tickets still open when the last day of the period ended",
+          "firstReplyMedian": "For tickets created in this period: time from creation to the first public staff reply; half were faster",
+          "firstReplyP90": "Nine in ten tickets got their first public reply within this time"
+        }
+      },
+      "lists": "Gaps and tickets",
+      "showAll": "Show all {count}",
+      "showLess": "Show fewer"
+    },
+    "review": {
+      "viewLabel": "Candidate view",
+      "view": {
+        "table": "Table",
+        "cards": "Card review"
+      },
+      "queue": "Candidate queue",
+      "queueCount": "{count} to review",
+      "keys": "J / K to move · Ctrl+Enter to submit",
+      "pickOne": "Pick a candidate on the left to start.",
+      "asks": "{count} asks",
+      "lastSeen": "Last {when}",
+      "short": {
+        "new_faq": "New card",
+        "follow_up": "Follow-up",
+        "update_faq": "Edit card",
+        "add_phrasing": "Add wording",
+        "retire_faq": "Retire"
+      },
+      "aiTag": "AI suggests",
+      "aCard": "a card",
+      "say": {
+        "new_faq": "Write a new card for this question.",
+        "follow_up": "Add a follow-up under \"{card}\".",
+        "update_faq": "Edit \"{card}\": users saw it and were still stuck.",
+        "add_phrasing": "Add the users' {count} wordings to \"{card}\" so it is found next time.",
+        "retire_faq": "Retire \"{card}\" (archived, not deleted).",
+        "no_change": "No change: the existing cards already cover this."
+      },
+      "userAsks": "Users ask: ",
+      "facts": {
+        "asks": "Asks",
+        "users": "Who asked",
+        "usersMore": "See details",
+        "net": "Expected effect",
+        "netParts": "+{gains} answered · −{steals} taken"
+      },
+      "notYet": "Not yet",
+      "evidence": "Evidence",
+      "tabs": {
+        "said": "What users said ({count})",
+        "similar": "Similar cards ({count})",
+        "users": "Who asked"
+      },
+      "saidHint": "Users' own words, redacted by Portal, and what the AI did then.",
+      "saidPickHint": "Ticked wordings are added to the card and become eval cases. Lines with hidden personal details cannot be ticked.",
+      "locale": {
+        "en-GB": "English",
+        "zh-CN": "Simplified",
+        "zh-TW": "Traditional"
+      },
+      "shownCard": "Card shown then: {question}",
+      "unknownCard": "(no longer in the working copy)",
+      "noCardShown": "No card was shown",
+      "similarHint": "Same place first, then by similarity.",
+      "source": {
+        "text": "(text similarity)",
+        "vectors": "(vector similarity)"
+      },
+      "reviewMissing": "Review data is not available yet: {error}",
+      "noSimilar": "No similar existing cards.",
+      "scoreTitle": "Similarity",
+      "samePlace": "Same place",
+      "closeMatch": "Very close: compare the answers",
+      "closeMatchHint": "Same place and a very similar question: may be a duplicate, a contradiction, or a different question in another situation.",
+      "wasShown": "Shown then",
+      "pick": {
+        "target": "Use this",
+        "parent": "Add under this",
+        "chosen": "Chosen",
+        "moveTo": "Move wording here"
+      },
+      "states": {
+        "title": "State of the users who asked",
+        "total": "{total} users",
+        "share": "{count} · {percent}%",
+        "none": "Not available yet. Portal does not send user state yet.",
+        "bucket": {
+          "paid_active": "Paid",
+          "trial_active": "On trial",
+          "cancelling": "Cancelling",
+          "payment_failed": "Payment failed",
+          "ended": "Ended",
+          "never_had_plan": "Registered only",
+          "unknown": "Unknown"
+        }
+      },
+      "net": {
+        "title": "Expected effect",
+        "gains": "Gained",
+        "steals": "Taken from other cards",
+        "net": "Net",
+        "basis": "From the eval of release {version}, {cases} cases.",
+        "negative": "Negative: this card takes more hits from other cards than it adds.",
+        "none": "Not available yet. This card has not been through a release build."
+      },
+      "decision": "Your decision",
+      "rejectTitle": "Reject this candidate",
+      "mergeTitle": "Merge with another candidate",
+      "howLabel": "What to do",
+      "group": {
+        "add": "Add",
+        "update": "Change a card",
+        "retire": "Retire",
+        "none": "No change"
+      },
+      "action": {
+        "new_faq": "New card",
+        "follow_up": "Follow-up under a card",
+        "update_faq": "Edit the card",
+        "add_phrasing": "Only add the wording to a card",
+        "retire_faq": "Retire a card",
+        "no_change": "No change"
+      },
+      "editor": {
+        "title": "Card content (edit here)",
+        "titleUpdate": "Card content (edit here; saved to the working copy)",
+        "language": "Language",
+        "zh": "中文",
+        "en": "English",
+        "hasError": "has missing fields",
+        "sources": "Reference: replies from resolved tickets ({count})",
+        "insert": "Insert into the answer",
+        "verify": "Draft, to be checked: verify every fact after inserting.",
+        "full": "Open in the full editor (keywords, signals…)",
+        "unchanged": "Nothing changed yet: edit first, or switch to \"Only add the wording to a card\".",
+        "current": "The card as it is now",
+        "editInstead": "Edit this card's content instead"
+      },
+      "targetLabel": "Which card",
+      "parentLabel": "Under which card",
+      "noTarget": "Not chosen yet",
+      "fromSimilar": "Pick from similar cards",
+      "search": "Search",
+      "needTarget": "Choose a card.",
+      "needPlace": "Choose where it goes.",
+      "mapMissing": "The process map could not be loaded: {error}",
+      "moveToLabel": "Move wording to (optional)",
+      "noMoveTo": "Not moving",
+      "moveToSelf": "Cannot move wording to the card being retired.",
+      "note": "Note (optional)",
+      "noteHint": "Do not paste personal details: notes are redacted. Up to 500 characters.",
+      "confirmRetire": "Retire \"{question}\"? It will be archived, not deleted.",
+      "approve": {
+        "new_faq": "Save card and approve",
+        "follow_up": "Save follow-up and approve",
+        "update_faq": "Save changes and approve",
+        "add_phrasing": "Approve: add {count} wordings",
+        "retire_faq": "Approve retiring",
+        "no_change": "Confirm no change",
+        "confirmRetire": "Confirm retiring"
+      },
+      "afterApprove": "Approved changes go to the working copy and go live after the next release passes eval.",
+      "reject": "Reject",
+      "merge": "Merge",
+      "noMergeTargets": "No other open candidates in the queue.",
+      "confirmReject": "Reject candidate",
+      "mergeInto": "Merge into",
+      "mergePlaceholder": "Choose a candidate",
+      "mergeHint": "Merge when both candidates are about the same thing: this one's wording joins the other.",
+      "needMerge": "Choose a candidate.",
+      "confirmMerge": "Merge",
+      "readOnly": "Your role can only view.",
+      "decided": {
+        "accepted": "Approved: {as} · {when}",
+        "dismissed": "Rejected: {reason} · {when}",
+        "merged": "Merged into another candidate · {when}"
+      },
+      "done": {
+        "new_faq": "New card saved to the working copy; candidate approved.",
+        "follow_up": "Follow-up saved to the working copy; candidate approved.",
+        "update_faq": "Card changes saved to the working copy; candidate approved.",
+        "add_phrasing": "Wording added to the working copy.",
+        "retire_faq": "Card retired (working copy).",
+        "no_change": "Recorded as no change.",
+        "rejected": "Candidate rejected.",
+        "merged": "Candidate merged."
+      },
+      "savedNotAccepted": "The card is saved, but the candidate was not approved. Clicking again only retries the approval.",
+      "place": {
+        "legendRequired": "Where it goes",
+        "legendOptional": "Move it (optional)",
+        "other": "Other place…",
+        "treeTitle": "Choose a place",
+        "search": "Search places",
+        "tree": "Process tree and rule table",
+        "noMatch": "No matching place.",
+        "suggestedRegion": "Suggested area",
+        "cards": "{count} cards",
+        "kind": {
+          "stage": "Stage",
+          "step": "Step",
+          "deviation": "Deviation",
+          "object": "Object",
+          "cell": "Rule cell"
+        }
+      },
+      "shortcut": "Ctrl ↵",
+      "assist": {
+        "versions": "Versions",
+        "previous": "Previous version",
+        "next": "Next version",
+        "versionOf": "Version {n} of {total}",
+        "startDraft": "AI draft",
+        "startCard": "Current card",
+        "manual": "Your edit",
+        "byAi": "AI: “{instruction}”",
+        "label": "Tell AI how to change this card",
+        "placeholder": "Tell AI how to change this card…",
+        "working": "AI is editing…",
+        "send": "Send",
+        "quick": "Quick instructions",
+        "quickLabel": {
+          "shorter": "Shorter",
+          "friendlier": "Friendlier",
+          "steps": "As steps",
+          "translate": "Fill the other language"
+        },
+        "quickText": {
+          "shorter": "Make the answer shorter, answer first, remove repetition",
+          "friendlier": "Make the tone friendlier and more patient, without adding promises",
+          "steps": "Rewrite the answer as numbered steps",
+          "translate": "Fill in or update the other language from this one, keeping the meaning the same"
+        },
+        "onlySelection": "Only the selection: “{text}”",
+        "wholeCard": "Change the whole card",
+        "hint": "Enter to send · each AI change is a new version you can switch back from",
+        "tooLong": "At most {max} characters.",
+        "noChange": "AI made no change. Try saying it another way.",
+        "changedHere": "AI changed this",
+        "changedOther": "AI also changed the other language",
+        "checkThese": "Please check"
+      }
+    },
+    "faqReview": {
+      "viewLabel": "FAQ view",
+      "view": {
+        "table": "Table",
+        "review": "Review one by one"
+      },
+      "queue": "Review queue",
+      "stateLabel": "Filter by review status",
+      "filter": {
+        "unreviewed": "Not reviewed",
+        "needs_change": "Needs changes",
+        "ok": "Reviewed",
+        "all": "All"
+      },
+      "count": "{count} cards",
+      "popular": "Popular",
+      "state": {
+        "unreviewed": "Not reviewed",
+        "needs_change": "Needs changes",
+        "ok": "Reviewed",
+        "changedSince": "Edited, review again"
+      },
+      "empty": {
+        "unreviewed": "All reviewed. Check “Needs changes” for cards still to fix.",
+        "needs_change": "No cards are marked as needing changes.",
+        "ok": "No cards reviewed yet.",
+        "all": "No cards match the search or filter."
+      },
+      "card": "This card",
+      "status": "Review",
+      "never": "Nobody has reviewed this card yet.",
+      "someone": "A staff member",
+      "last": {
+        "ok": "{by} marked it fine on {when} (version {version})",
+        "needs_change": "{by} marked it as needing changes on {when} (version {version})"
+      },
+      "noteLabel": "What needs to change",
+      "notePlaceholder": "For example: the price is last year’s, use the current one",
+      "needNote": "Say what needs to change.",
+      "history": "Change log",
+      "action": {
+        "create": "created this card (version {version})",
+        "update": "edited this card (version {version})",
+        "archive": "took this card offline",
+        "review_ok": "marked it fine (version {version})",
+        "review_needs_change": "marked it as needing changes (version {version})",
+        "place_create": "placed this card at “{place}”",
+        "place_update": "changed this card’s place at “{place}”",
+        "place_delete": "removed this card from “{place}”"
+      },
+      "changed": "Changed: {fields}",
+      "fields": {
+        "questionZh": "Chinese question",
+        "answerZh": "Chinese answer",
+        "questionEn": "English question",
+        "answerEn": "English answer",
+        "category": "Category",
+        "popular": "Popular",
+        "keywords": "Keywords",
+        "signals": "User situations",
+        "key": "Card key",
+        "type": "Type",
+        "entry": "Entry point",
+        "status": "Status"
+      },
+      "needsChange": "Needs changes",
+      "archive": "Take offline",
+      "ok": "Looks fine",
+      "saveAndOk": "Save changes and mark reviewed",
+      "confirmNeedsChange": "Mark as needing changes",
+      "confirmArchive": "Users will no longer see this card; its change log is kept. Take it offline?",
+      "confirmArchiveButton": "Take offline",
+      "afterOk": "If it looks fine, press the button on the right. To change it, edit on the left or tell AI.",
+      "afterSave": "You edited this card: saving marks it reviewed and logs who changed it.",
+      "editsNotSaved": "Your edits on the left are not saved; only “needs changes” is recorded.",
+      "readOnly": "You can view only. Reviewing needs full Help Desk access.",
+      "savedNotReviewed": "Your changes are saved, but the card is not marked reviewed yet. Press “Looks fine” again.",
+      "done": {
+        "ok": "Marked fine. Next card.",
+        "saved": "Saved and marked reviewed. Next card.",
+        "needsChange": "Marked as needing changes. Next card.",
+        "archived": "Taken offline. Next card."
+      },
+      "historyEmpty": "Nothing recorded yet.",
+      "pageOf": "Page {page} of {pages}, {total} cards",
+      "changedAfter": "Version {version} was reviewed, then the card changed (now version {now}). Review it again.",
+      "warning": {
+        "number": "{field} has a number that is not in the card or the instruction: “{text}”. Please check it.",
+        "link": "{field} has a link that is not in the card or the instruction: “{text}”. Please check it.",
+        "email": "{field} has an email that is not in the card or the instruction: “{text}”. Please check it.",
+        "dropped": {
+          "empty": "AI left {field} empty, so the original is kept.",
+          "too_long": "AI made {field} too long, so the original is kept.",
+          "language": "AI changed the language of {field}, so the original is kept."
+        }
       }
     },
     "changes": {
@@ -1555,5 +1962,292 @@
         "loading": "Loading…"
       }
     }
+  },
+  "students": {
+    "title": "Student Management",
+    "subtitle": "View student accounts, subscriptions and individual learning access.",
+    "featureSettings": "Feature Access Settings",
+    "countTotal": "Total Students",
+    "countActive": "Active Accounts",
+    "countInactive": "Inactive Accounts",
+    "searchPlaceholder": "Search name or email",
+    "searchLabel": "Search students",
+    "statusFilter": "Status",
+    "subscriptionFilter": "Subscription",
+    "specialFilter": "Special access",
+    "status": {
+      "all": "All statuses",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "subscriptionOption": {
+      "all": "All subscriptions",
+      "current": "With a subscription",
+      "none": "No subscription",
+      "grace": "Payment issue (grace period)",
+      "ending": "Cancelled, still active"
+    },
+    "specialOption": {
+      "all": "Any special access",
+      "any": "Has an individual override",
+      "none": "No individual override",
+      "improve_tutor": "Improve Tutor",
+      "ai_support_assistant": "AI Support Assistant"
+    },
+    "reset": "Reset filters",
+    "col": {
+      "student": "Student",
+      "email": "Email",
+      "status": "Status",
+      "subscription": "Subscription",
+      "special": "Special Access",
+      "registered": "Registered",
+      "action": "Action"
+    },
+    "view": "View",
+    "viewStudent": "View {name}",
+    "none": "None",
+    "noSubscription": "No subscription",
+    "subscriptionsCount": "{count} subscriptions",
+    "featuresEnabled": "{count} overrides",
+    "denied": "{feature} (Deny)",
+    "noEmail": "No email",
+    "pendingShort": "Pending verification",
+    "loading": "Loading students…",
+    "empty": "No students match these filters.",
+    "emptyAll": "No students have registered yet.",
+    "loadError": "Students could not be loaded.",
+    "retry": "Retry",
+    "notConnected": "Student Management is not connected to Portal yet (PORTAL_HELPDESK_BASE_URL / PORTAL_HELPDESK_TOKEN).",
+    "accountStatus": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "subState": {
+      "active": "Active",
+      "cancel_at_period_end": "Cancelled",
+      "grace": "Grace period",
+      "expired": "Ended",
+      "trial_canceled": "Trial cancelled"
+    },
+    "feature": {
+      "improve_tutor": "Improve Tutor",
+      "ai_support_assistant": "AI Support Assistant"
+    },
+    "featureHint": {
+      "improve_tutor": "Review evidence and suggest better answers.",
+      "ai_support_assistant": "Answer platform questions using FAQs."
+    }
+  },
+  "studentDrawer": {
+    "title": "Student Details",
+    "close": "Close",
+    "studentId": "Student ID: {id}",
+    "copyId": "Copy ID",
+    "copied": "Copied",
+    "registered": "Registered {date}",
+    "emailState": {
+      "verified": "Email verified",
+      "pending": "Email pending verification",
+      "admin_exempt": "Email Admin-exempt"
+    },
+    "emailChanged": "Email changed by {name} on {date} · {reference}",
+    "exemptBy": "Ownership attested by {name} on {date} · {reference}",
+    "profile": "Profile",
+    "country": "Country / Region",
+    "ageRange": "Age range",
+    "education": "Education",
+    "interests": "Areas of interest",
+    "language": "Language",
+    "signIn": "Sign-in methods",
+    "notProvided": "Not provided",
+    "signInMethod": {
+      "email": "Email",
+      "google": "Google",
+      "wechat": "WeChat"
+    },
+    "noPassword": "no password set",
+    "languageName": {
+      "en-GB": "English (UK)",
+      "zh-CN": "Chinese (Simplified)"
+    },
+    "subscription": "Subscription",
+    "subscriptionCount": "Subscription ({count})",
+    "noSubscription": "No current subscription.",
+    "renews": "Renews: {date}",
+    "endsOn": "Access ends: {date}",
+    "graceUntil": "Payment failed · access until {date}",
+    "endedOn": "Ended: {date}",
+    "aiTutor": "Unlimited AI Tutor",
+    "coursesOnly": "Courses",
+    "device": {
+      "pc": "PC",
+      "mobile": "Mobile"
+    },
+    "trial": "Trial",
+    "viewReceipt": "View Receipt",
+    "showEnded": "Show {count} ended",
+    "hideEnded": "Hide ended",
+    "access": "Learning Access & Experiments",
+    "accessHint": "Special access overrides the global default; it does not change the subscription.",
+    "override": {
+      "default": "Global default",
+      "allow": "Allow",
+      "deny": "Deny"
+    },
+    "overrideLabel": "{feature} override",
+    "effective": {
+      "on": "Enabled",
+      "off": "Disabled"
+    },
+    "reason": {
+      "account_inactive": "Account inactive",
+      "emergency_off": "Switched off for everyone",
+      "missing_prerequisite": "Needs an AI Tutor subscription",
+      "override_deny": "Deny override",
+      "override_allow": "Allow override",
+      "global_on": "Global default is On",
+      "global_off": "Global default is Off"
+    },
+    "unsaved": "Unsaved changes",
+    "changeReason": "Reason for change",
+    "changeReasonPlaceholder": "e.g. pilot group, ticket number",
+    "overridesKept": "Overrides are kept and apply again after reactivation.",
+    "experiment": "Learning Experiment",
+    "comingSoon": "Coming soon",
+    "actions": "Account Actions",
+    "actionsHint": "Deactivating access does not cancel the student's Stripe subscription.",
+    "sendReset": "Send Password Reset",
+    "sendSetup": "Send Password Setup Link",
+    "resendVerification": "Resend Verification Email",
+    "editEmail": "Edit Email",
+    "deactivate": "Deactivate Account",
+    "activate": "Activate Account",
+    "passwordBlocked": {
+      "inactive": "Activate the account before sending a password link.",
+      "no_email": "This account has no email address.",
+      "email_unverified": "A password link can only go to a verified or Admin-exempt email."
+    },
+    "cancel": "Cancel",
+    "save": "Save Changes",
+    "saving": "Saving…",
+    "saved": "Changes saved. They apply on the student's next request.",
+    "inactiveBanner": "This account is inactive",
+    "inactiveBody": "Deactivated by {name} on {date}. Reason: {reason}. Sign-in and product access are blocked; subscriptions keep billing.",
+    "readOnly": "View only. Your role can see this student but not change it.",
+    "loadError": "Student details could not be loaded.",
+    "notFound": "This student no longer exists.",
+    "discardTitle": "Discard unsaved changes?",
+    "discardBody": "Your Learning Access changes have not been saved.",
+    "discard": "Discard",
+    "keepEditing": "Keep editing",
+    "orderId": "Order {id}"
+  },
+  "studentModal": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "reason": "Reason",
+    "reasonPlaceholder": "What happened and the support reference",
+    "deactivateTitle": "Deactivate {name}?",
+    "deactivateBody": "They will be signed out everywhere and cannot sign in by email, Google or WeChat until activated. Their data and Learning Access overrides are kept.",
+    "deactivateBilling": "Billing is not affected. Subscriptions keep renewing; cancel or refund in Stripe if needed.",
+    "deactivateConfirm": "Deactivate",
+    "activateTitle": "Activate {name}?",
+    "activateBody": "Sign-in and product access are restored. Saved overrides apply again. This does not verify the email or change subscriptions.",
+    "activateConfirm": "Activate",
+    "emailTitle": "Edit primary email",
+    "emailCurrent": "Current: {email}",
+    "emailNew": "New email",
+    "emailReason": "Reason or ticket",
+    "emailStandard": "A verification link is sent to the new email; it stays Pending verification until used. Both addresses are told. The student is signed out.",
+    "emailExempt": "Ownership was verified manually (Admin-exempt)",
+    "emailExemptRef": "Ticket or procedure reference",
+    "emailExemptWarn": "This records a staff attestation, not a click by the student. It is logged as a security event.",
+    "emailSend": "Send verification link",
+    "emailSave": "Confirm and save",
+    "passwordResetTitle": "Send password reset link",
+    "passwordSetupTitle": "Send password setup link",
+    "passwordTo": "To {email}",
+    "passwordResetBody": "The student gets a single-use link that expires. Using it replaces the current password and signs out other sessions.",
+    "passwordSetupBody": "This account has no password yet. The link lets the student create one for email sign-in; Google or WeChat stays linked.",
+    "passwordSend": "Send link",
+    "resendTitle": "Resend verification email",
+    "resendBody": "A new verification link goes to {email}. Earlier links stop working.",
+    "resendSend": "Send",
+    "required": "Required",
+    "invalidEmail": "Enter a valid email address."
+  },
+  "studentNotice": {
+    "deactivate": "Account deactivated.",
+    "activate": "Account activated.",
+    "change_email": "Email changed. Verification link sent.",
+    "change_email_exempt": "Email changed and marked Admin-exempt.",
+    "change_email_unsent": "Email changed, but the verification email was not delivered. Use Resend Verification Email.",
+    "resend_verification": "Verification email sent.",
+    "send_password_link": "Password link sent."
+  },
+  "studentError": {
+    "STUDENTS_NOT_CONNECTED": "Student Management is not connected to Portal yet.",
+    "STUDENTS_UNAVAILABLE": "Portal did not answer. Try again.",
+    "STUDENT_NOT_FOUND": "This student no longer exists.",
+    "VERSION_CONFLICT": "Someone else changed this just now. Reload to see the latest, then try again.",
+    "EMAIL_TAKEN": "This email belongs to another account. Accounts are never merged here; use the account recovery process.",
+    "EMAIL_UNVERIFIED": "The email must be verified or Admin-exempt first.",
+    "ACCOUNT_INACTIVE": "Activate the account first.",
+    "RATE_LIMITED": "A link was sent moments ago. Wait a minute before sending another.",
+    "EMAIL_UNAVAILABLE": "Email sending is not set up in this environment.",
+    "EMAIL_DELIVERY_FAILED": "The email could not be sent. Try again.",
+    "NOT_AUTHORISED": "Your role cannot make this change.",
+    "INVALID_INPUT": "Check the fields and try again.",
+    "default": "Something went wrong. Try again."
+  },
+  "learningAccess": {
+    "title": "Learning Access & Experiments",
+    "subtitle": "Manage feature availability for students. Experiments are coming soon.",
+    "save": "Save Changes",
+    "saving": "Saving…",
+    "discard": "Discard",
+    "unsaved": "Unsaved changes",
+    "featureAccess": "Feature Access",
+    "featureAccessHint": "Choose which features are available to all eligible students.",
+    "globalDefault": "Global Default",
+    "on": "On",
+    "off": "Off",
+    "footnote": "When turned off globally, a feature can still be enabled for individual students in Student Management.",
+    "overrides": "Individual overrides: {allow} Allow · {deny} Deny",
+    "updated": "Last changed by {name} on {date}",
+    "emergencyOff": "Emergency off",
+    "resume": "Resume",
+    "emergencyStatus": "Switched off for everyone",
+    "emergencyBanner": "{feature} is switched off for everyone",
+    "emergencyBody": "By {name} on {date}. Reason: {reason}. This also blocks students with an Allow override. The global default and overrides are kept.",
+    "emergencyTitle": "Switch {feature} off for everyone?",
+    "emergencyConfirmBody": "Every student loses it on their next request, including those with an Allow override. Nothing else changes; Resume brings back the previous behaviour.",
+    "emergencyConfirm": "Switch off",
+    "resumeTitle": "Resume {feature}?",
+    "resumeBody": "Access goes back to the global default and individual overrides.",
+    "resumeConfirm": "Resume",
+    "confirmOnTitle": "Turn on {feature} for everyone eligible?",
+    "confirmOnBody": "About {count} eligible students on Global default will get it on their next request.",
+    "confirmOnDeny": "{deny} students with Deny stay blocked; {allow} with Allow are unchanged.",
+    "confirmOffTitle": "Turn off {feature} by default?",
+    "confirmOffBody": "Students on Global default lose it on their next request. {allow} students with Allow keep it.",
+    "reason": "Reason",
+    "reasonPlaceholder": "Release note or ticket",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "readOnly": "View only. Your role can see these settings but not change them.",
+    "saved": "Settings saved. They apply on each student's next request.",
+    "loadError": "Settings could not be loaded.",
+    "retry": "Retry",
+    "experiments": "Experiments",
+    "comingSoon": "Coming Soon",
+    "experimentsBody": "Explore A/B testing for AI Tutor strategies, banner placements and subscription pricing. Stay tuned!",
+    "experimentTags": {
+      "tutor": "AI Tutor strategies",
+      "banner": "Banner placements",
+      "pricing": "Subscription pricing"
+    },
+    "feature": "Feature"
   }
 }

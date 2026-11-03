@@ -75,6 +75,13 @@ export type HelpdeskQaCandidate = {
   blocks?: FaqBlock[];
   optionOf?: string[];
   relation?: 'child' | 'sibling' | 'search';
+  /** 精排分数（ai/helpdesk/rerank.ts，只在开了 HELPDESK_RERANK_MODEL 时有），越大越相关。 */
+  rerankScore?: number;
+  /**
+   * 追问卡片：它跟在哪张卡片下面（发布版本里那张父卡片的问题，同一语言）。追问的问题是接着父卡片问的
+   * （如「手机上也有吗？」），单独看缺上下文；HELPDESK_CARD_CONTEXT=on 时给精排和挑卡模型一起看。
+   */
+  under?: string;
 };
 
 export type HelpdeskQaSearch = {
@@ -96,6 +103,11 @@ export type HelpdeskQaSearch = {
   entryOnly?: boolean;
   types?: FaqNodeType[];
   deepReserved?: number;
+  /**
+   * 前文（HELPDESK_QUERY_CONTEXT）：学员的上一条原文。只给向量与精排那一路用（另按「前文 → 本句」再查一次，
+   * 取两次中更高的分），字词检索不看它：「微信支付呢」「要多久」这种短追问单看找不到卡。
+   */
+  context?: string;
 };
 
 /** 热门已发布 FAQ（v3 §1「你可能想问」：检索不到候选时的兜底）。 */
@@ -129,6 +141,16 @@ export interface HelpdeskQaSource {
    * 可选：旧的实现与单测的假来源不必提供。
    */
   releaseVersion?(): Promise<number | null>;
+  /**
+   * 分级 L1 的向量那一路（精排开着时才用）：发布版本里和问题最像的至多 limit 个 answer / choice 节点
+   * （含非入口），按相似度从高到低，score 为相似度。没有向量模型、还没算好、失败或超时 → []。
+   * 可选：没有向量检索的来源不必提供。
+   */
+  findVectorCandidates?(search: {
+    locale: string;
+    text: string;
+    limit: number;
+  }): Promise<HelpdeskQaCandidate[]>;
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-02 ｜ Portal 投影 v1.2：试看截止点 + Range 媒体 + 「在 Portal 中预览」可试播
+
+- **用户拍板**：（1）「在 Portal 中预览」必须严格走 `docs/Portal_Projection_API.md` 定义的 Admin 课程投影接口，
+  因为它的目的就是验证后续正式 Portal 课程页要消费的同一份契约；（2）预览必须能看正文/视频（可试播）；
+  （3）三个入口（课程编辑、学员视角预览、在 Portal 中预览）与正式 Portal 必须读同一个 S3 课程资产，不产生副本。
+- **变更清单**：
+  - `storage.service.ts`：`StorageDriver` 增加 `getRange`（S3 `Range` / 本地 `fd.read`）与 `size`（HEAD / stat）；
+    `CourseStorageService` 暴露 `getMediaRange` / `mediaSize`。
+  - 新增 `media-stream.ts`：统一媒体输出，支持 HTTP `Range` → `206` + `Content-Range` + `Accept-Ranges: bytes`，
+    单次最多 8MB，超出按分段返回；正式 Portal、Admin 预览、编辑预览共用同一实现。
+  - `portal-courses.controller.ts` / `commerce-courses.controller.ts`：媒体端点改为通过 `sendMedia` 输出；
+    投影服务不再把整份 Buffer 读进内存，只返回 `storageKey / extension / size`。
+  - 新增预览媒体端点：`GET /api/backoffice/courses/:id/portal-preview/cover?token=` 与
+    `GET /api/backoffice/courses/:id/portal-preview/media/:assetId?token=`（员工会话 + preview token，
+    不要求课程 `ONLINE`，读的是同一个 `CourseMediaAsset.storageKey`）。
+  - `portal-projection.service.ts`：`toDetail` 增加 `sections[].lessons[].trial`
+    （`videoCutoffSeconds` 按内容语言、`textCutoffLearningPointId`、`textCutoffCode`）；
+    新增 `getPreviewCoverBytes` / `getPreviewMediaBytes`。
+  - `PortalCoursePreviewPage.tsx`：渲染视频 `<video controls>` 与文本正文、展品节点，媒体 URL 映射到预览端点；
+    移除「课时正文与视频请在学员视角预览中查看」的旧提示。
+  - 文档：`docs/Portal_Projection_API.md` 升级 v1.2（端点表、Range 说明、预览媒体、契约一致性要求、OpenAPI schema）。
+- **自测证据**：
+  - server：`node node_modules/typescript/bin/tsc -p tsconfig.build.json --noEmit` 通过；
+    `jest --config test/jest-e2e.json --testPathPatterns portal-projection` 8/8 通过
+    （新增覆盖：预览封面/视频读取、`Range` 返回 `206` + `e2e-` 4 字节、跨课程 token 401、`trial` 截止点字段）。
+  - client：`tsc -p tsconfig.app.json --noEmit` 通过。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：未提交，未推送。
+- **下一步**：正式 Portal 课程页改为消费 `/api/portal/v1/courses/:id` + `/api/portal/v1/media/**`（带 `X-API-Key` 与 origin 拼接）；
+  Portal 侧按 `sections[].lessons[].trial` 裁剪视频/正文；确认 `/api/portal/v1` 的 `AUTH_TOKEN` 与 Portal 环境一致。
+
+---
+
 ## 2026-10-30 ｜ Course P1b：Draft → Publish → Version / History / Operations / Stripe / 学员预览（Admin server + client）
 
 - **用户拍板**：依据 `docs/Course_Management_PRD_v2_Aligned_Design.md`（Final，2026-10-30）§12 路线开始 P1b 开发；设计中待确认事项按 PRD 默认规则落地（History 只记录 PRD §21 明确的 6 类操作 + Operations Publish + Create course；Lesson 软删除新增 `archivedAt`；Popular/Banner 各自 Publish）。

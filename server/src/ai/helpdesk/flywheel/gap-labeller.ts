@@ -75,7 +75,7 @@ export type ModelGapLabellerDeps = {
 };
 
 /** 只收 costUsd 的事件日志（不落库）。 */
-function costCollector(): AgentEventLog & { total(): number | null } {
+export function costCollector(): AgentEventLog & { total(): number | null } {
   let total: number | null = null;
   return {
     append(_runId: string, events: NewAgentEvent[]) {
@@ -89,6 +89,7 @@ function costCollector(): AgentEventLog & { total(): number | null } {
     read: () => Promise.resolve([]),
     chain: () => Promise.resolve([]),
     purgeLearnerText: () => Promise.resolve(0),
+    stepHealth: () => Promise.resolve([]),
     total: () => total,
   };
 }

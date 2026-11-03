@@ -3,11 +3,16 @@ import { useNavigate } from 'react-router-dom'
 
 import { useEmployee } from '../ShellRoute'
 import type { CourseList } from '../contracts/course'
+import { useResizableColumns } from '../components/resizableColumns'
+import { Pagination, usePageSize } from '../components/Pagination'
 import { boRequest } from '../lib/api'
+import { categoryLabel } from '../lib/categoryLabel'
+import { uploadFileWithProgress } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
 import { MenuGuard } from './ModulePages'
+import { languageLabel, learningModeLabel } from './course-editor/shared'
 
 type JobView = {
   jobId: string
@@ -17,46 +22,35 @@ type JobView = {
   error: string | null
   courseId: string | null
   package: { courseCode: string; lessons: number; mediaFiles: number; incomplete: boolean } | null
+  conflict?: { existingCourseCode: string; existingCourseId: string; live: boolean } | null
   report: { errors: Array<{ code: string; message: string }>; warnings: Array<{ code: string; message: string }> }
 }
 
-type UploadResult<T> = { success: true; data: T } | { success: false; error: string; errorMessage?: string }
-
-/**
- * 带上传进度的文件上传（fetch 无法获取上传进度，改用 XHR 的 upload.onprogress）。
- * error 为稳定码：NETWORK_ERROR / ABORTED / 或后端信封里的错误码。
- */
-function uploadFileWithProgress<T>(url: string, file: File, onProgress: (pct: number) => void): Promise<UploadResult<T>> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
-    xhr.withCredentials = true
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
-    }
-    xhr.onload = () => {
-      try {
-        const body = JSON.parse(xhr.responseText) as { success?: boolean; data?: T; error?: { code?: string; message?: string } | null }
-        if (body?.success === true) resolve({ success: true, data: body.data as T })
-        else resolve({ success: false, error: body?.error?.code ?? 'INTERNAL_ERROR', errorMessage: body?.error?.message })
-      } catch {
-        resolve({ success: false, error: 'INTERNAL_ERROR' })
-      }
-    }
-    xhr.onerror = () => resolve({ success: false, error: 'NETWORK_ERROR' })
-    xhr.onabort = () => resolve({ success: false, error: 'ABORTED' })
-    const form = new FormData()
-    form.append('file', file)
-    xhr.send(form)
-  })
+type ConfirmOutcome = {
+  courseId?: string
+  requiresOverwrite?: boolean
+  existingCourseCode?: string
+  existingCourseId?: string
+  refused?: string
+  message?: string
 }
 
 function uploadErrorText(code: string, detail?: string): string {
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
-    return '上传中断（文件较大或服务被重启/网络中断）。请确认本地服务稳定后重试。'
+    return '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。'
+  }
+  if (code === 'TIMEOUT') {
+    return '上传超时（网络过慢或服务无响应）。请重试。'
   }
   if (detail && detail.trim()) return `导入失败：${detail}`
   return `导入失败：${code}`
+}
+
+function formatWhen(value: string | null | undefined, locale: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
 /**
@@ -79,59 +73,121 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const canPublish = employee.role === 'ADMIN' || employee.role === 'OPERATION_ADMIN'
   const [list, setList] = useState<CourseList | null>(null)
   const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = usePageSize('course-list')
   const [importJob, setImportJob] = useState<JobView | null>(null)
+  const [confirmNotice, setConfirmNotice] = useState<{ kind: 'overwrite' | 'refused'; courseCode?: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [actionMenuId, setActionMenuId] = useState<string | null>(null)
+  const [statusCourse, setStatusCourse] = useState<CourseList['courses'][number] | null>(null)
+  const [statusTarget, setStatusTarget] = useState<'ONLINE' | 'HIDDEN' | 'OFFLINE'>('ONLINE')
+  const [statusReason, setStatusReason] = useState('')
+  const [packageFile, setPackageFile] = useState<File | null>(null)
   const [uploadPct, setUploadPct] = useState<number | null>(null)
   const [categoryId, setCategoryId] = useState('')
+  const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [createCategoryId, setCreateCategoryId] = useState('')
+  const [createMode, setCreateMode] = useState('VIDEO_AND_TEXT')
+  const [createLanguages, setCreateLanguages] = useState<string[]>([locale.startsWith('zh') ? 'zh-CN' : 'en-GB'])
   const [exportingId, setExportingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
+  const courseTable = useResizableColumns({
+    storageKey: 'course-list',
+    defaultWidths: [300, 104, 120, 160, 130, 136, 176],
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
-    const query = new URLSearchParams({ page: '1', pageSize: '50' })
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (categoryId) query.set('categoryId', categoryId)
     const result = await boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`)
     setLoading(false)
-    if (result.success) setList(result.data)
-    else setMessage(t(locale, 'common.sessionUnavailable'))
-  }, [locale, categoryId])
+    if (!result.success) {
+      setMessage(t(locale, 'common.sessionUnavailable'))
+      return
+    }
+    // 筛选/删除后总页数变少时把越界页码拉回最后一页，避免停在空白页
+    if (result.data.pages > 0 && page > result.data.pages) {
+      setPage(result.data.pages)
+      return
+    }
+    setList(result.data)
+  }, [locale, categoryId, page, pageSize])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  useEffect(() => {
+    void (async () => {
+      const result = await boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`)
+      if (result.success) setCatalogCategories(result.data)
+    })()
+  }, [])
+
   const categories = useMemo(() => {
     const map = new Map<string, string>()
+    for (const category of catalogCategories) map.set(category.id, categoryLabel(locale, category.name))
+    // 当前页出现的分类即使目录接口没返回（如已停用）也保留，避免已选筛选值丢失
     for (const course of list?.courses ?? []) {
-      if (course.category) map.set(course.category.id, course.category.name)
+      if (course.category) map.set(course.category.id, categoryLabel(locale, course.category.name))
     }
     return [...map.entries()]
-  }, [list])
+  }, [catalogCategories, list, locale])
 
   async function createCourse(form: FormData) {
+    const titleEn = String(form.get('titleEn') || '').trim()
+    const titleZh = String(form.get('titleZh') || '').trim()
+    if (!titleEn || !titleZh) {
+      setMessage(L('英文和中文课程名称均为必填。', 'English and Chinese course titles are both required.'))
+      return
+    }
+    if (!createCategoryId) {
+      setMessage(L('请选择分类。', 'Category is required.'))
+      return
+    }
+    if (createLanguages.length === 0) {
+      setMessage(L('请至少选择一种学习语言。', 'Select at least one learning language.'))
+      return
+    }
+    const defaultLanguage = createLanguages.includes('en-GB') ? 'en-GB' : createLanguages[0]
+    const defaultTitle = defaultLanguage === 'zh-CN' ? titleZh : titleEn
     setBusy(true)
     const result = await boRequest<{ id: string }>('/api/backoffice/courses', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        code: String(form.get('code')),
-        title: String(form.get('title')),
+        code: String(form.get('code') || '').trim() || undefined,
+        title: defaultTitle,
         slug: String(form.get('slug') || ''),
-        language: locale,
-        defaultContentLanguage: locale,
-        learningLanguages: [locale],
+        language: defaultLanguage,
+        defaultContentLanguage: defaultLanguage,
+        learningLanguages: createLanguages,
+        learningMode: createMode,
+        categoryId: createCategoryId,
       }),
     })
+    if (!result.success) {
+      setBusy(false)
+      setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+      return
+    }
+    const otherLanguage = defaultLanguage === 'zh-CN' ? 'en-GB' : 'zh-CN'
+    const otherTitle = otherLanguage === 'zh-CN' ? titleZh : titleEn
+    await boRequest(`/api/backoffice/courses/${result.data.id}/localizations/${otherLanguage}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: otherTitle }),
+    })
     setBusy(false)
-    if (result.success) {
-      setShowCreate(false)
-      await load()
-      openCourse(result.data.id)
-    } else setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+    setShowCreate(false)
+    await load()
+    openCourse(result.data.id)
   }
 
   // 轮询后台导入作业，直到校验完成 / 失败 / 取消（异步导入：上传即返回，处理在后台）
@@ -156,20 +212,54 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   async function onPickRawFile(file: File) {
     setBusy(true)
     setMessage(null)
+    setConfirmNotice(null)
     setUploadPct(0)
-    const result = await uploadFileWithProgress<JobView>(
-      `/api/backoffice/courses/import/raw`,
-      file,
-      setUploadPct,
+    // 大素材包单次 POST 会被 CloudFront/App Runner 中途切断，改为分块上传：
+    // 先开会话拿 jobId + 块大小，再把文件切成小块逐块 PUT，最后 complete。
+    const init = await boRequest<{ jobId: string; chunkSize: number }>(
+      `/api/backoffice/courses/import/raw/session`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, bytesTotal: file.size }),
+      },
     )
-    setUploadPct(null)
-    if (!result.success) {
+    if (!init.success) {
       setBusy(false)
-      setMessage(uploadErrorText(result.error, result.errorMessage))
+      setMessage(uploadErrorText(init.error, init.message))
       return
     }
-    setMessage(L('素材已上传，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
-    const job = await pollImportJob(result.data)
+    const { jobId } = init.data
+    const total = file.size
+    const size = Math.max(1, init.data.chunkSize || 5 * 1024 * 1024)
+    let sent = 0
+    for (let index = 0; sent < total; index++) {
+      const start = index * size
+      const blob = file.slice(start, Math.min(start + size, total))
+      const res = await uploadFileWithProgress<{ jobId: string; progress: number }>(
+        `/api/backoffice/courses/import/${jobId}/chunk?index=${index}`,
+        blob,
+        (pct) => setUploadPct(Math.min(99, Math.round(((sent + (blob.size * pct) / 100) / total) * 100))),
+        { field: 'chunk', method: 'PUT' },
+      )
+      if (!res.success) {
+        setBusy(false)
+        setUploadPct(null)
+        setMessage(uploadErrorText(res.error, res.errorMessage))
+        return
+      }
+      sent += blob.size
+      setUploadPct(Math.min(99, Math.round((sent / total) * 100)))
+    }
+    setUploadPct(null)
+    setMessage(L('上传完成，正在后台解析并校验…', 'Uploaded. Parsing and validating in the background…'))
+    const comp = await boRequest<JobView>(`/api/backoffice/courses/import/${jobId}/complete`, { method: 'POST' })
+    if (!comp.success) {
+      setBusy(false)
+      setMessage(uploadErrorText(comp.error, comp.message))
+      return
+    }
+    const job = await pollImportJob(comp.data)
     setBusy(false)
     setImportJob(job)
     if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
@@ -181,6 +271,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (dir === null) return
     setBusy(true)
     setMessage(null)
+    setConfirmNotice(null)
     const result = await boRequest<JobView>(`/api/backoffice/courses/import/local`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -238,7 +329,25 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     setMessage(L('导出超时，请稍后在课程详情页重试。', 'Export timed out. Retry from the course detail page.'))
   }
 
+  async function changeCourseStatus() {
+    if (!statusCourse || !statusReason.trim()) return
+    setBusy(true)
+    const result = await boRequest(`/api/backoffice/courses/${statusCourse.id}/live-status`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: statusTarget, reason: statusReason }),
+    })
+    setBusy(false)
+    if (result.success) {
+      setStatusCourse(null)
+      setStatusReason('')
+      await load()
+    } else setMessage(L(`状态更新失败：${result.message ?? result.error}`, `Status update failed: ${result.message ?? result.error}`))
+  }
+
   async function onPickFile(file: File) {
+    setPackageFile(file)
+    setShowImport(true)
     const lower = file.name.toLowerCase()
     if (!lower.endsWith('.zip') && !lower.endsWith('.lgcourse.zip')) {
       setMessage(L('只能导入 .lgcourse.zip 课程包。', 'Only .lgcourse.zip course packages can be imported.'))
@@ -257,23 +366,51 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     } else setMessage(uploadErrorText(result.error, result.errorMessage))
   }
 
-  async function confirmImport(onConflict: string) {
+  async function confirmImport(onConflict: string, overwriteDraft = false) {
     if (!importJob) return
     setBusy(true)
-    const result = await boRequest<{ courseId: string }>(`/api/backoffice/courses/import/${importJob.jobId}/confirm`, {
+    setConfirmNotice(null)
+    const result = await boRequest<ConfirmOutcome>(`/api/backoffice/courses/import/${importJob.jobId}/confirm`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ onConflict, reassignCodes: true }),
+      body: JSON.stringify({ onConflict, reassignCodes: false, overwriteDraft }),
     })
     setBusy(false)
-    if (result.success) {
-      setImportJob(null)
-      if (fileRef.current) fileRef.current.value = ''
-      await load()
-      openCourse(result.data.courseId)
-    } else {
-      setMessage(L(`确认导入失败：${result.error}`, `Confirm failed: ${result.error}`))
+    if (!result.success) {
+      setMessage(L(`确认导入失败：${result.message ?? result.error}`, `Confirm failed: ${result.message ?? result.error}`))
+      return
     }
+    const outcome = result.data
+    if (outcome.requiresOverwrite) {
+      // 同 Course ID 的草稿课程已存在 → 询问是否覆盖（覆盖仅影响沙盒草稿）
+      setConfirmNotice({ kind: 'overwrite', courseCode: outcome.existingCourseCode })
+      return
+    }
+    if (outcome.refused) {
+      // 同 Course ID 的课程已上线 → 拒绝导入
+      setConfirmNotice({ kind: 'refused', courseCode: outcome.existingCourseCode })
+      return
+    }
+    setImportJob(null)
+    setConfirmNotice(null)
+    if (fileRef.current) fileRef.current.value = ''
+    setShowImport(false)
+    setPackageFile(null)
+    if (outcome.courseId) openCourse(outcome.courseId)
+  }
+
+  // 忽略：不覆盖同 Course ID 的草稿课程，直接取消该导入作业。
+  async function ignoreImport() {
+    if (!importJob) return
+    setBusy(true)
+    await boRequest(`/api/backoffice/courses/import/${importJob.jobId}/cancel`, { method: 'POST' })
+    setBusy(false)
+    setImportJob(null)
+    setConfirmNotice(null)
+    if (fileRef.current) fileRef.current.value = ''
+    setShowImport(false)
+    setPackageFile(null)
+    setMessage(L('已忽略该课程包（未覆盖同名草稿）。', 'Package ignored (existing draft left untouched).'))
   }
 
   return (
@@ -304,21 +441,11 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
             <button type="button" className="button buttonGhost" disabled={busy} onClick={() => void importFromServerFolder()}>
               {L('本地目录导入', 'Import from server folder')}
             </button>
-            <button type="button" className="button" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <button type="button" className="button" disabled={busy} onClick={() => setShowImport(true)}>
               {L('导入课程包', 'Import course package')}
             </button>
           </div>
         )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".zip,.lgcourse.zip"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) void onPickFile(file)
-          }}
-        />
         <input
           ref={rawFileRef}
           type="file"
@@ -334,7 +461,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
         <label style={{ fontSize: 13 }}>
           {L('分类', 'Category')}{' '}
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} style={{ padding: 7, borderRadius: 8 }}>
+          <select
+            value={categoryId}
+            onChange={(event) => {
+              setCategoryId(event.target.value)
+              setPage(1)
+            }}
+            style={{ padding: 7, borderRadius: 8 }}
+          >
             <option value="">{L('全部分类', 'All categories')}</option>
             {categories.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
@@ -365,82 +499,293 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       )}
 
       {showCreate && (
-        <form action={(form) => void createCourse(form)} style={{ marginTop: 12, padding: 16, border: '1px solid #E8EDF5', borderRadius: 12, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-          <label>{L('课程标题', 'Course title')}<input name="title" required style={{ display: 'block', padding: 8 }} /></label>
-          <label>{L('课程 ID', 'Course ID')}<input name="code" required style={{ display: 'block', padding: 8 }} /></label>
-          <label>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', padding: 8 }} /></label>
-          <button className="button" disabled={busy}>{L('创建并编辑', 'Create and edit')}</button>
-          <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
-        </form>
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowCreate(false)
+          }}
+          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-course-title"
+            action={(form) => void createCourse(form)}
+            style={{ width: 'min(640px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+              <div>
+                <h2 id="create-course-title" style={{ margin: 0, fontSize: 20 }}>{L('新建课程', 'Create course')}</h2>
+                <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>{L('创建后会进入课程编辑页，可继续填写内容、试看和价格。', 'After creating, you will enter the course editor to continue with content, trial and pricing.')}</p>
+              </div>
+              <button type="button" aria-label={L('关闭', 'Close')} onClick={() => setShowCreate(false)} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（英文）', 'Course title (English)')} *<input name="titleEn" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（中文）', 'Course title (Chinese)')} *<input name="titleZh" required style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID（留空自动生成）', 'Course ID (auto if blank)')}<input name="code" pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')} *<select required value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('请选择分类', 'Select a category')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
+            </div>
+            <fieldset style={{ border: '1px solid #D5DCE8', borderRadius: 8, padding: 12, marginTop: 14 }}>
+              <legend style={{ fontSize: 13, fontWeight: 600, padding: '0 4px' }}>{L('学习语言', 'Learning languages')} *</legend>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
+                {[['en-GB', 'English'], ['zh-CN', '中文']].map(([code, label]) => (
+                  <label key={code} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={createLanguages.includes(code)}
+                      onChange={(event) => setCreateLanguages((current) => event.target.checked
+                        ? [...new Set([...current, code])]
+                        : current.filter((language) => language !== code))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>{L('学习语言创建后只能增加，不能删除。', 'Learning languages can only be added later, not removed.')}</div>
+            </fieldset>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
+              <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
+              <button className="button" disabled={busy}>{busy ? L('创建中…', 'Creating…') : L('创建并编辑', 'Create and edit')}</button>
+            </div>
+          </form>
+        </div>
       )}
 
-      {importJob && (
-        <ImportPanel
-          job={importJob}
-          busy={busy}
-          locale={locale}
-          codeExists={Boolean(list?.courses.some((c) => c.code === importJob.package?.courseCode))}
-          onConfirm={confirmImport}
-        />
+      {(showImport || importJob) && (
+        <div
+          role="presentation"
+          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) {
+              setShowImport(false)
+              setImportJob(null)
+              setPackageFile(null)
+              if (fileRef.current) fileRef.current.value = ''
+            }
+          }}
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby="import-package-title" style={{ width: 'min(760px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+              <div>
+                <h2 id="import-package-title" style={{ margin: 0, fontSize: 20 }}>{L('导入课程包', 'Import course package')}</h2>
+                <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>{L('上传 .lgcourse.zip 或 .zip 课程包，系统会校验结构、课时、媒体和学习点。', 'Upload a .lgcourse.zip or .zip package. The system validates structure, lessons, media and learning points.')}</p>
+              </div>
+              <button type="button" aria-label={L('关闭', 'Close')} disabled={busy} onClick={() => { setShowImport(false); setImportJob(null); setPackageFile(null); if (fileRef.current) fileRef.current.value = '' }} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: busy ? 'not-allowed' : 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+
+            {!importJob && (
+              <div
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const file = event.dataTransfer.files?.[0]
+                  if (file) void onPickFile(file)
+                }}
+                style={{ border: '2px dashed #B7C3D8', borderRadius: 12, padding: 28, textAlign: 'center', background: '#F7F9FC' }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{packageFile ? packageFile.name : L('拖拽文件到此处，或点击选择文件', 'Drag a file here, or click to choose')}</div>
+                <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>{L('支持 .zip / .lgcourse.zip', 'Supports .zip / .lgcourse.zip')}</div>
+                <button type="button" className="button" disabled={busy} style={{ marginTop: 14 }} onClick={() => fileRef.current?.click()}>{L('选择文件', 'Choose file')}</button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".zip,.lgcourse.zip"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void onPickFile(file)
+                  }}
+                />
+              </div>
+            )}
+
+            {importJob && (
+              <ImportPanel
+                job={importJob}
+                busy={busy}
+                locale={locale}
+                notice={confirmNotice}
+                onConfirm={confirmImport}
+                onIgnore={ignoreImport}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {statusCourse && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setStatusCourse(null) }}
+          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby="change-status-title" style={{ width: 'min(520px, 100%)', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}>
+            <h2 id="change-status-title" style={{ margin: 0, fontSize: 20 }}>{L('更改状态', 'Change status')}</h2>
+            <p style={{ margin: '8px 0 0', fontSize: 13, opacity: 0.7 }}>{statusCourse.code} · {statusCourse.title}</p>
+            <p style={{ margin: '8px 0 0', fontSize: 12, opacity: 0.65 }}>{L('更改状态不会生成新版本。', 'Changing the status does not create a version.')}</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+              {(['ONLINE', 'HIDDEN', 'OFFLINE'] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setStatusTarget(status)}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: 8,
+                    border: '1px solid ' + (statusTarget === status ? '#2B58C8' : '#D5DCE8'),
+                    background: statusTarget === status ? '#EEF3FF' : '#fff',
+                    color: statusTarget === status ? '#2B58C8' : '#25314C',
+                    fontWeight: statusTarget === status ? 700 : 400,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {status === 'ONLINE' ? L('在线', 'Online') : status === 'HIDDEN' ? L('已隐藏', 'Hidden') : L('已下线', 'Offline')}
+                  {statusCourse.liveStatus === status ? ` · ${L('当前', 'Current')}` : ''}
+                </button>
+              ))}
+            </div>
+            <label style={{ display: 'block', marginTop: 14, fontSize: 13, fontWeight: 600 }}>
+              {L('原因', 'Reason')} *
+              <textarea rows={3} value={statusReason} onChange={(event) => setStatusReason(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8', resize: 'vertical' }} />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+              <button type="button" className="button buttonGhost" onClick={() => setStatusCourse(null)}>{L('取消', 'Cancel')}</button>
+              <button type="button" className="button" disabled={busy || !statusReason.trim()} onClick={() => void changeCourseStatus()}>
+                {busy ? L('更新中…', 'Updating…') : L('更改状态', 'Change status')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {loading && <p className="cardBody">{t(locale, 'common.loading')}</p>}
 
       {list && (
-        <table className="table" style={{ width: '100%', marginTop: 16 }}>
-          <thead>
-            <tr>
-              <th>{L('课程 ID', 'Course ID')}</th>
-              <th>{L('课程', 'Course')}</th>
-              <th>{L('分类', 'Category')}</th>
-              <th>{L('课时', 'Lessons')}</th>
-              <th>{L('草稿', 'Draft')}</th>
-              <th>{L('在线', 'Live')}</th>
-              <th>{L('操作', 'Actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.courses.map((course) => (
-              <tr key={course.id}>
-                <td>{course.code}</td>
-                <td>
-                  <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
-                  <div style={{ opacity: 0.7, fontSize: 12 }}>
-                    {course.learningMode} · {course.learningLanguages.join(', ')}
-                  </div>
-                </td>
-                <td>{course.category?.name ?? '—'}</td>
-                <td>{course.lessonCount}</td>
-                <td>{course.hasDraft ? <span style={{ color: '#9A6B00', fontWeight: 600 }}>{L('草稿', 'Draft')}</span> : '—'}</td>
-                <td>
-                  {course.published
-                    ? <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>{course.liveStatus}</span>
-                    : <span style={{ opacity: 0.7 }}>{L('未发布', 'Not published')}</span>}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button className="button buttonGhost" onClick={() => openCourse(course.id)}>{L('打开', 'Open')}</button>
-                    <button
-                      className="button buttonGhost"
-                      disabled={busy || exportingId !== null}
-                      onClick={() => void exportCourse(course)}
-                    >
-                      {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {list.courses.length === 0 && (
+        <div className="tableWrap" style={{ marginTop: 16 }}>
+          <table className="table" style={courseTable.tableStyle}>
+            {courseTable.colGroup}
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
-                  {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
-                </td>
+                <th>{L('课程', 'Course')}{courseTable.resizeHandle(0)}</th>
+                <th>{L('课程 ID', 'Course ID')}{courseTable.resizeHandle(1)}</th>
+                <th>{L('分类', 'Category')}{courseTable.resizeHandle(2)}</th>
+                <th>{L('版本', 'Version')}{courseTable.resizeHandle(3)}</th>
+                <th>{L('状态', 'Status')}{courseTable.resizeHandle(4)}</th>
+                <th>{L('更新时间', 'Updated')}{courseTable.resizeHandle(5)}</th>
+                <th>{L('操作', 'Actions')}{courseTable.resizeHandle(6)}</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.courses.map((course) => (
+                <tr key={course.id}>
+                  <td>
+                    <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
+                    <div style={{ opacity: 0.7, fontSize: 12 }}>
+                      {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessonCount} {L('课时', 'lessons')}
+                      {course.trialEnabled ? ` · ${L('含试看', 'trial')}` : ''}
+                    </div>
+                  </td>
+                  <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{course.code}</td>
+                  <td>{course.category ? categoryLabel(locale, course.category.name) : '—'}</td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontWeight: 600 }}>{course.liveVersionLabel ?? '—'}</span>
+                      {course.hasDraft ? <span style={{ fontSize: 11, color: '#9A6B00' }}>{L('有未发布草稿', 'Draft not published')}</span> : <span style={{ fontSize: 11, opacity: 0.6 }}>{L('无草稿', 'No draft')}</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {course.published ? (
+                        <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>
+                          {course.liveStatus === 'ONLINE' ? L('在线', 'Online') : course.liveStatus === 'HIDDEN' ? L('已隐藏', 'Hidden') : course.liveStatus === 'OFFLINE' ? L('已下线', 'Offline') : course.liveStatus}
+                        </span>
+                      ) : (
+                        <span style={{ opacity: 0.65 }}>{L('未发布', 'Not published')}</span>
+                      )}
+                      {course.published && course.liveVersionWentLiveAt && <span style={{ fontSize: 11, opacity: 0.65 }}>{formatWhen(course.liveVersionWentLiveAt, locale)}</span>}
+                    </div>
+                  </td>
+                  <td style={{ fontSize: 12, opacity: 0.8 }}>{formatWhen(course.updatedAt, locale)}</td>
+                  <td>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <button
+                        type="button"
+                        className="button buttonGhost"
+                        onClick={() => setActionMenuId((current) => (current === course.id ? null : course.id))}
+                      >
+                        {L('操作', 'Actions')} ▾
+                      </button>
+                      {actionMenuId === course.id && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 'calc(100% + 4px)',
+                            zIndex: 20,
+                            minWidth: 170,
+                            background: '#fff',
+                            border: '1px solid #D5DCE8',
+                            borderRadius: 10,
+                            boxShadow: '0 12px 32px rgba(16, 24, 40, 0.18)',
+                            padding: 6,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                          }}
+                        >
+                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); openCourse(course.id) }}>{L('编辑内容', 'Edit content')}</button>
+                          <button type="button" className="button buttonGhost" style={{ justifyContent: 'flex-start' }} onClick={() => { setActionMenuId(null); openCourse(course.id) }}>{L('版本', 'Versions')}</button>
+                          <button
+                            type="button"
+                            className="button buttonGhost"
+                            disabled={!course.published}
+                            style={{ justifyContent: 'flex-start' }}
+                            onClick={() => { setActionMenuId(null); if (course.published) setStatusCourse(course) }}
+                            title={!course.published ? L('请先发布', 'Publish first') : undefined}
+                          >
+                            {L('更改状态', 'Change status')}
+                          </button>
+                          <button
+                            type="button"
+                            className="button buttonGhost"
+                            disabled={busy || exportingId !== null}
+                            style={{ justifyContent: 'flex-start' }}
+                            onClick={() => { setActionMenuId(null); void exportCourse(course) }}
+                          >
+                            {exportingId === course.id ? L('导出中…', 'Exporting…') : L('导出', 'Export')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {list.courses.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 24, opacity: 0.7 }}>
+                    {L('还没有课程。可以新建课程或导入课程包。', 'No courses yet. Create a course or import a course package.')}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
+
+      <Pagination
+        locale={locale}
+        page={list?.page ?? page}
+        pageSize={pageSize}
+        total={list ? list.total : null}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size)
+          setPage(1)
+        }}
+      />
     </section>
   )
 }
@@ -449,18 +794,30 @@ function ImportPanel({
   job,
   busy,
   locale,
-  codeExists,
+  notice,
   onConfirm,
+  onIgnore,
 }: {
   job: JobView
   busy: boolean
   locale: string
-  codeExists: boolean
-  onConfirm: (onConflict: string) => void
+  notice: { kind: 'overwrite' | 'refused'; courseCode?: string } | null
+  onConfirm: (onConflict: string, overwriteDraft?: boolean) => void
+  onIgnore: () => void
 }) {
   const zh = locale.startsWith('zh')
   const errors = job.report?.errors ?? []
   const warnings = job.report?.warnings ?? []
+  // 后端在 AWAITING_CONFIRM 阶段就已预判 Course ID 是否已存在：
+  // 在点「导入课程」之前就提示「覆盖草稿 / 已上线拒绝」，而不是点了之后才报错。
+  const conflictNotice =
+    job.status === 'AWAITING_CONFIRM' && job.conflict
+      ? {
+          kind: job.conflict.live ? ('refused' as const) : ('overwrite' as const),
+          courseCode: job.conflict.existingCourseCode,
+        }
+      : null
+  const effectiveNotice = notice ?? conflictNotice
   return (
     <div style={{ marginTop: 16, padding: 16, border: '1px solid #E8EDF5', borderRadius: 12 }}>
       <h3 style={{ margin: 0 }}>{zh ? '导入校验' : 'Import validation'}</h3>
@@ -487,23 +844,43 @@ function ImportPanel({
       )}
       {job.status === 'AWAITING_CONFIRM' && (
         <div style={{ marginTop: 12 }}>
-          {codeExists && (
-            <p style={{ fontSize: 13, color: '#9A6B00', background: '#FFF6E5', padding: '8px 12px', borderRadius: 8 }}>
-              {zh
-                ? `课程 ${job.package?.courseCode} 已存在。请点击「导入为新课程」，会生成一门新课程（Course ID 自动顺延）。`
-                : `Course ${job.package?.courseCode} already exists. Click "Import as new course" to create a new course with a new Course ID.`}
-            </p>
-          )}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="button" disabled={busy} onClick={() => onConfirm('CREATE_NEW_COURSE')}>
-              {zh ? '导入为新课程' : 'Import as new course'}
-            </button>
-            {!codeExists && (
-              <button className="button buttonGhost" disabled={busy} onClick={() => onConfirm('ABORT')}>
-                {zh ? '导入（冲突则中止）' : 'Import (abort on conflict)'}
+          {effectiveNotice?.kind === 'overwrite' ? (
+            <div style={{ fontSize: 13, background: '#FFF6E5', padding: '10px 12px', borderRadius: 8 }}>
+              <p style={{ margin: 0, color: '#9A6B00' }}>
+                {zh
+                  ? `课程 ${effectiveNotice?.courseCode} 已存在（草稿状态，从未上线）。是否用本课程包覆盖其沙盒草稿？覆盖只影响草稿，线上内容不受影响。`
+                  : `Course ${effectiveNotice?.courseCode} already exists as a draft (never published). Overwrite its sandbox draft with this package? Only the draft is replaced; live content is unaffected.`}
+              </p>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button className="button" disabled={busy} onClick={() => onConfirm('ABORT', true)}>
+                  {zh ? '覆盖草稿' : 'Overwrite draft'}
+                </button>
+                <button className="button buttonGhost" disabled={busy} onClick={onIgnore}>
+                  {zh ? '忽略' : 'Ignore'}
+                </button>
+              </div>
+            </div>
+          ) : effectiveNotice?.kind === 'refused' ? (
+            <div style={{ fontSize: 13, color: '#b42318', background: '#FDECEC', padding: '10px 12px', borderRadius: 8 }}>
+              <p style={{ margin: 0 }}>
+                {zh
+                  ? `课程 ${effectiveNotice?.courseCode} 已上线，导入被拒绝。只能覆盖状态为草稿（从未发布）的课程，已上线课程的内容不受影响。`
+                  : `Course ${effectiveNotice?.courseCode} is already live, so the import is refused. Only draft (never published) courses can be overwritten; live content is never affected.`}
+              </p>
+              <button className="button buttonGhost" style={{ marginTop: 10 }} disabled={busy} onClick={onIgnore}>
+                {zh ? '知道了' : 'OK'}
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="button" disabled={busy} onClick={() => onConfirm('ABORT')}>
+                {zh ? '导入课程' : 'Import course'}
+              </button>
+              <button className="button buttonGhost" disabled={busy} onClick={onIgnore}>
+                {zh ? '取消本次导入' : 'Cancel import'}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

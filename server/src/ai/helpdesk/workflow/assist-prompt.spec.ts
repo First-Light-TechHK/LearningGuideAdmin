@@ -44,13 +44,55 @@ describe('pick_faq v5 system prompt', () => {
     );
   });
 
-  it('never lets the model write the opening or closing: it only picks a tone', () => {
+  it('never lets the model write the opening or closing, or pick their tone', () => {
     // sincerity review 2026-10-30: model-written openings promised ("usually quick to sort out",
-    // "這通常很快就能解決") or answered for the card ("你的学习进度会保留的"); the user chose fixed lines
+    // "這通常很快就能解決") or answered for the card ("你的学习进度会保留的"); the user chose fixed lines.
+    // Recorded thinking 2026-10-30: 29 of 34 long traces went back and forth on the tone, so code picks it
     expect(PICK_FAQ_V5_SYSTEM).not.toContain('usually quick to sort out');
     expect(PICK_FAQ_V5_SYSTEM).not.toContain('opening is one warm line');
+    expect(PICK_FAQ_V5_SYSTEM).not.toMatch(/\btone\b/);
+  });
+
+  it('decides each field once, in a fixed order', () => {
+    // recorded thinking 2026-10-30: long traces kept reopening decisions ("Hmm", "Wait", "Actually" grew with the
+    // token count, r = 0.97): clarify or a new question, a real answer or a shared topic, sure or unsure
+    const steps = PICK_FAQ_V5_SYSTEM.split('\n').filter((line) =>
+      /^\d\. /.test(line),
+    );
+    expect(steps.map((line) => line.split(':')[0])).toEqual([
+      '1. intent',
+      '2. faqId',
+      '3. confidence',
+      '4. blocks',
+    ]);
     expect(PICK_FAQ_V5_SYSTEM).toContain(
-      'tone: only with a picked answer, what kind of message it is, so the system can add its fixed lines before and after the card: steps = they ask how to do something; problem = they report something not working or sound worried; explain = they ask what, why, whether or when; otherwise none.',
+      'Decide in this order, each step once: once a step is decided, do not go back to it.',
+    );
+  });
+
+  it('picks a card only when a sentence in its answer answers the message, and is sure only when one card has one', () => {
+    expect(PICK_FAQ_V5_SYSTEM).toContain(
+      '2. faqId: for question or own_account, the candidate with a sentence in its answer that answers what they ask now',
+    );
+    expect(PICK_FAQ_V5_SYSTEM).toContain(
+      '"none" when you would have to infer the answer, or a candidate only shares words or a topic with the message.',
+    );
+    expect(PICK_FAQ_V5_SYSTEM).toContain(
+      '3. confidence: sure when exactly one candidate has such a sentence; unsure when two or more do, or you are guessing.',
+    );
+  });
+
+  it('explains the quoted part of the shown card', () => {
+    expect(PICK_FAQ_V5_SYSTEM).toContain(
+      '"shown.quoted", when present, is the part of the shown answer that the message repeats word for word: they are asking about that part of the card.',
+    );
+  });
+
+  it('treats a question about how something works for another person as question', () => {
+    // recorded thinking 2026-10-30: 「does she pay anything during the trial」 went back and forth between
+    // someone_else and question while a follow-up card answered it
+    expect(PICK_FAQ_V5_SYSTEM).toContain(
+      "someone_else = asks you to look at or change another person's account (a question about how Learning Guide works for another person is question);",
     );
   });
 

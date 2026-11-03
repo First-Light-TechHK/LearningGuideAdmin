@@ -6,6 +6,17 @@ import {
   type AgentRun,
   type CandidateDetail,
   type CandidateList,
+  type CandidateReview,
+  type FaqMap,
+  type FaqRewriteBody,
+  type FaqRewriteResult,
+  type FaqHistory,
+  type FaqReviewBody,
+  type FaqReviewFilter,
+  type FaqReviewList,
+  type FaqReviewState,
+  type MergeCandidateBody,
+  type MergeCandidateResult,
   type DismissCandidateBody,
   type EnquiryDetail,
   type EnquiryList,
@@ -36,6 +47,7 @@ import {
   type PhrasingLocale,
   type PortalJobRunResult,
   type PortalJobRuns,
+  type TicketStats,
 } from '../contracts/helpdesk'
 import { changeQuery, type ChangeFilters } from './helpdeskChanges'
 import { faqQuery, type FaqFilters } from './helpdeskFaqs'
@@ -264,6 +276,20 @@ export function dismissCandidate(candidateId: string, body: DismissCandidateBody
 }
 
 /** 「转成 FAQ 候选」：201 新建，200 这张工单已经转过（那一个）。 */
+/** 审核数据：相似卡、建议位置、提问用户的状态、净值（只读，不调模型）。 */
+export function getCandidateReview(candidateId: string) {
+  return request<CandidateReview>(`${candidatePath(candidateId)}/review`)
+}
+
+/** 编辑区里的流程树和规则表（选位置用）。 */
+export function getFaqMap() {
+  return request<FaqMap>('/api/helpdesk/faq-map')
+}
+
+export function mergeCandidate(candidateId: string, body: MergeCandidateBody, idempotencyKey: string) {
+  return sendJson<MergeCandidateResult>('POST', `${candidatePath(candidateId)}/merge`, body, idempotencyKey)
+}
+
 export function ticketToCandidate(ticketId: string) {
   return sendJson<FromTicketResult>('POST', `${ticketPath(ticketId)}/faq-candidate`, {})
 }
@@ -288,6 +314,36 @@ export function listRetentionRuns() {
 
 export function runRetentionNow(idempotencyKey: string) {
   return sendJson<PortalJobRunResult>('POST', '/api/helpdesk/jobs/assist-retention/run', {}, idempotencyKey)
+}
+
+/** AI 按指令改卡（不保存）：失败时界面保留原文，只提示。 */
+/* --------------------------- 卡片全表逐张审核（api-spec 第 8、9 节） --------------------------- */
+
+export type FaqReviewQuery = { status: FaqReviewFilter; q: string; category: string; page: number; pageSize?: number }
+
+export function listFaqReviews(query: FaqReviewQuery) {
+  const params = new URLSearchParams({ status: query.status, page: String(query.page), pageSize: String(query.pageSize ?? 50) })
+  if (query.q) params.set('q', query.q)
+  if (query.category && query.category !== 'all') params.set('category', query.category)
+  return request<FaqReviewList>(`/api/helpdesk/faq-reviews?${params.toString()}`)
+}
+
+/** 一次审核结论：没问题 / 需要改（要写为什么）；带卡的版本，重试带同一个 Idempotency-Key。 */
+export function reviewFaq(faqId: string, body: FaqReviewBody, idempotencyKey: string) {
+  return sendJson<{ review: FaqReviewState; replayed: boolean }>('POST', `${faqPath(faqId)}/review`, body, idempotencyKey)
+}
+
+export function getFaqHistory(faqId: string) {
+  return request<FaqHistory>(`${faqPath(faqId)}/history`)
+}
+
+export function rewriteFaq(body: FaqRewriteBody) {
+  return sendJson<FaqRewriteResult>('POST', '/api/helpdesk/faqs/rewrite', body)
+}
+
+/** 工单每日数字：Portal 没接上或是旧版本 → 503 HELPDESK_NOT_CONNECTED。一次至多 92 天。 */
+export function getTicketStats(input: { from: string; to: string }) {
+  return request<TicketStats>(`/api/helpdesk/flywheel/ticket-stats?${new URLSearchParams(input).toString()}`)
 }
 
 export function getFlywheelMetrics(input: { granularity: MetricsGranularity; from: string; to: string; split: MetricsSplit }) {

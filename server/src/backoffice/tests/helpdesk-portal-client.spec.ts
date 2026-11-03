@@ -223,6 +223,58 @@ describe('Portal HelpDesk client', () => {
       expect(result.counts).toEqual({ OPEN: 1 });
     });
 
+    it('reads the daily ticket numbers for a UTC day range and refuses a reply that is not the contract shape', async () => {
+      const day = {
+        day: '2026-10-30',
+        created: 3,
+        resolved: 1,
+        cancelled: 0,
+        openAtEnd: 5,
+        firstReplies: 2,
+        firstReplyMedianMinutes: 12.5,
+        firstReplyP90Minutes: 40,
+      };
+      const totals = {
+        created: 3,
+        resolved: 1,
+        cancelled: 0,
+        firstReplies: 2,
+        firstReplyMedianMinutes: 12.5,
+        firstReplyP90Minutes: 40,
+      };
+      const fetchImpl = jest
+        .fn()
+        .mockResolvedValueOnce(
+          json(200, {
+            from: '2026-10-30',
+            to: '2026-10-30',
+            timeZone: 'UTC',
+            days: [day],
+            totals,
+          }),
+        )
+        .mockResolvedValueOnce(
+          json(200, { days: [{ ...day, created: -1 }], totals }),
+        );
+      const stats = await client(fetchImpl).ticketStats({
+        from: '2026-10-30',
+        to: '2026-10-30',
+      });
+      expect(call(fetchImpl).url).toBe(
+        'http://portal.test/api/integration/helpdesk/ticket-stats?from=2026-10-30&to=2026-10-30',
+      );
+      expect(stats).toEqual({
+        from: '2026-10-30',
+        to: '2026-10-30',
+        timeZone: 'UTC',
+        days: [day],
+        totals,
+      });
+      await expect(
+        client(fetchImpl).ticketStats({ from: '2026-10-30', to: '2026-10-30' }),
+      ).rejects.toMatchObject({ status: 502, code: 'HELPDESK_UNAVAILABLE' });
+    });
+
     it('sends the v2 flagged and learnerId filters', async () => {
       const fetchImpl = jest
         .fn()

@@ -1,8 +1,8 @@
 ﻿import { createHash, randomUUID } from "node:crypto";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
-import { MarkItDown } from "markitdown-ts";
 import { PACKAGE_FORMAT, PACKAGE_FORMAT_VERSION } from "./contracts/manifest";
+import { convertDocxToHtml } from "./docx-to-html";
 import { mp4DurationSeconds } from "./media-duration";
 import type {
   ExhibitType,
@@ -18,7 +18,6 @@ import type {
 } from "./contracts/manifest";
 
 const LANG = "en-GB";
-const mdConverter = new MarkItDown();
 
 function sha(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -37,27 +36,6 @@ function hasSheet(wb: XLSX.WorkBook, name: string): boolean {
 function cell(v: unknown): string {
   return v === null || v === undefined ? "" : String(v).trim();
 }
-
-function mdToHtml(markdown: string): string {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const out: string[] = [];
-  let para: string[] = [];
-  const flush = () => { if (para.length) { out.push("<p>" + esc(para.join(" ")) + "</p>"); para = []; } };
-  for (const raw of markdown.split(/\r?\n/)) {
-    const line = raw.trimEnd();
-    if (!line.trim()) { flush(); continue; }
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) { flush(); out.push("<h" + h[1].length + ">" + esc(h[2].trim()) + "</h" + h[1].length + ">"); continue; }
-    para.push(line.trim());
-  }
-  flush();
-  return out.join("\n") || "<p></p>";
-}
-
-const mdConverterDone = async (bytes: Buffer): Promise<string> => {
-  try { const r = await mdConverter.convertBuffer(bytes, { file_extension: ".docx" }); return mdToHtml(r?.markdown ?? ""); }
-  catch { return ""; }
-};
 
 /** 把 "mm:ss" / "hh:mm:ss" / Excel 时间小数（以天为单位）都换算成秒。 */
 export function toSeconds(value: unknown): number | null {
@@ -121,6 +99,15 @@ function parseCourseInfo(rows: unknown[][]): Map<string, string> {
   const info = new Map<string, string>();
   for (const row of rows) { const k = cell(row?.[0]); if (k) info.set(k, cell(row?.[1])); }
   return info;
+}
+
+/** 在 Checklist/Course info 等 key→value 表里按标签取值（忽略大小写与首尾空白）。 */
+function readChecklistValue(info: Map<string, string>, label: string): string | undefined {
+  const target = label.trim().toLowerCase();
+  for (const [key, value] of info.entries()) {
+    if (key.trim().toLowerCase() === target && value && value.trim()) return value.trim();
+  }
+  return undefined;
 }
 
 function parseReadings(rows: unknown[][]): Map<number, PackageReading[]> {
@@ -352,7 +339,8 @@ function mapReadingType(value: string): PackageReading["type"] {
 }
 
 interface ExhibitRow {
-  lessonId: string;
+  refId: string;
+  lessonLabel: string;
   code: string;
   type: string;
   titleEn: string;
@@ -368,12 +356,21 @@ function parseExhibitRows(rows: unknown[][]): ExhibitRow[] {
   const out: ExhibitRow[] = [];
   for (const row of rows) {
     if (!row) continue;
-    const lessonId = cell(row[0]).toUpperCase();
-    if (!/^L\d+/i.test(lessonId)) continue;
-    const code = cell(row[2]).toUpperCase();
+    const refId = cell(row[0]).toUpperCase();
+    const codeRaw = cell(row[2]).toUpperCase();
+    // 跳过表头 / 说明行（如 "Exhibit ID / Exhibit ID"）
+    if (/^EXHIBIT\s*ID$/.test(refId) || /^EXHIBIT\s*ID$/.test(codeRaw)) continue;
+    if (!refId && !codeRaw) continue;
+    // 展品编号优先取第 3 列；没有则从第一列全 ID 末尾推导（SCI001-L01-E01 -> E01）
+    let code = codeRaw;
+    if (!code) {
+      const m = /([A-Za-z]*\d+)$/.exec(refId);
+      code = m ? m[1] : "";
+    }
     if (!code) continue;
     out.push({
-      lessonId,
+      refId,
+      lessonLabel: cell(row[1]),
       code,
       type: cell(row[3]),
       titleEn: cell(row[4]),
@@ -436,7 +433,10 @@ async function buildNewTemplatePackage(
   const titleEn = info["course title"]?.en || checklist.get("Course title") || "Imported Course";
   const titleZh = info["course title"]?.zh;
   const category = info["category"]?.en || "Uncategorised";
-  const courseCode = (options.courseCode || checklist.get("Course ID") || "C001").trim().toUpperCase();
+  // Course ID 必须优先取 Excel Checklist 里的值（SCI001 等）；options.courseCode 只是
+  // 「模板里没有 Course ID」时的兜底编号（TEMP001…），绝不能反过来覆盖 Excel 里的真实编号。
+  const checklistCourseId = readChecklistValue(checklist, "Course ID");
+  const courseCode = (checklistCourseId || options.courseCode || "C001").trim().toUpperCase();
   const slug = (options.slug || slugify(titleEn)).trim().toLowerCase();
 
   // 封面
@@ -480,8 +480,10 @@ async function buildNewTemplatePackage(
 
     // 文本正文：优先同目录 docx
     const docx = findMedia(media, (n) => isDocxName(n) && lessonNameMatch(n, lessonId, def.no) && isZhName(n) === false);
-    const html = docx ? await mdConverterDone(docx.bytes) : "";
+    const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
+    const html = converted?.html ?? "";
     if (!docx) warnings.push(`Lesson ${def.no} 缺少文本课件 DOCX`);
+    if (converted) for (const message of converted.warnings) warnings.push(`Lesson ${def.no} 文本课件：${message}`);
 
     for (const lang of languages) {
       const isZh = lang === "zh-CN";
@@ -501,8 +503,19 @@ async function buildNewTemplatePackage(
         warnings.push(`Lesson ${def.no} 缺少 ${lang} 视频文件`);
       }
 
-      const textLps: PackageTextLearningPoint[] = defsTextPoints(def.points, isZh)
-        .map((p) => ({ code: `T-${p.code}`, heading: p.title, level: 1 }));
+      const textLps: PackageTextLearningPoint[] = (
+        converted?.headings.length
+          ? converted.headings.map((heading, index) => ({
+              code: `T-${heading.code || index + 1}`,
+              heading: heading.title,
+              level: 1,
+            }))
+          : defsTextPoints(def.points, isZh).map((p) => ({
+              code: `T-${p.code}`,
+              heading: p.title,
+              level: 1,
+            }))
+      );
 
       localized[lang] = {
         title,
@@ -513,18 +526,31 @@ async function buildNewTemplatePackage(
     }
 
     // 展品
-    const lessonExhibitRows = exhibitRows.filter((r) => r.lessonId === lessonId);
+    const lessonExhibitRows = exhibitRows.filter((r) => {
+      if (r.refId.startsWith(lessonId.toUpperCase())) return true;
+      const m = /lesson\s*(\d+)/i.exec(r.lessonLabel);
+      return m ? Number(m[1]) === def.no : false;
+    });
     const usedCodes = new Set<string>();
     const exhibits: PackageExhibit[] = [];
     for (const ex of lessonExhibitRows) {
       let code = ex.code;
       if (usedCodes.has(code)) { let n = 2; while (usedCodes.has(`${ex.code}-${n}`)) n++; code = `${ex.code}-${n}`; warnings.push(`Lesson ${def.no} 展品编号 ${ex.code} 重复，已改为 ${code}`); }
       usedCodes.add(code);
-      const image = findMedia(media, (n) => (isImageName(n) || isVideoName(n) || isModelName(n)) && !/缩略图|thumb/.test(n) && baseStartsWith(n, ex.code));
-      let file: string | undefined;
-      if (image) { file = `media/exhibits/${code}${extOf(image.name)}`; pkg.add(file, image.bytes); }
-      else warnings.push(`Lesson ${def.no} 展品「${ex.titleEn || ex.code}」缺少媒体文件`);
-      const thumb = findMedia(media, (n) => isImageName(n) && /缩略图|thumb/.test(n) && baseStartsWith(n, ex.code));
+      // 媒体匹配：按“课时号 + 展品号”匹配（lesson1-exhibit-1.png / lesson1-exhibit1缩略图.png 等）
+      const exNum = Number((/\d+/.exec(ex.code) || [])[0] || 0);
+      const lessonNoRe = new RegExp(`lesson\\s*0*${def.no}(?!\\d)`, "i");
+      const exhibitRe = exNum ? new RegExp(`exhibit[\\s_-]?0*${exNum}(?!\\d)`, "i") : null;
+      const matchExhibitMedia = (n: string) => {
+        const base = (n.split("/").pop() ?? n).toLowerCase();
+        if (!lessonNoRe.test(base)) return false;
+        return exhibitRe ? exhibitRe.test(base) : /exhibit/i.test(base);
+      };
+      const image = findMedia(media, (n) => (isImageName(n) || isVideoName(n) || isModelName(n)) && !/缩略图|thumb/.test(n) && matchExhibitMedia(n));
+      if (!image) { warnings.push(`Lesson ${def.no} 展品「${ex.titleEn || ex.code}」缺少媒体文件，已跳过`); continue; }
+      const file = `media/exhibits/${code}${extOf(image.name)}`;
+      pkg.add(file, image.bytes);
+      const thumb = findMedia(media, (n) => isImageName(n) && /缩略图|thumb/.test(n) && matchExhibitMedia(n));
       let thumbnail: string | undefined;
       if (thumb) { thumbnail = `media/exhibits/${code}.thumb${extOf(thumb.name)}`; pkg.add(thumbnail, thumb.bytes); }
       const localizedEx: PackageExhibit["localized"] = {};
@@ -627,11 +653,6 @@ function defsTextPoints(points: NewLessonRow[], isZh: boolean): { code: string; 
   return out;
 }
 
-function baseStartsWith(name: string, code: string): boolean {
-  const base = (name.split("/").pop() ?? name).toLowerCase();
-  return base.startsWith(code.toLowerCase());
-}
-
 function extOf(name: string): string {
   const m = /\.([a-z0-9]+)$/i.exec(name);
   return m ? "." + m[1].toLowerCase() : ".bin";
@@ -640,6 +661,24 @@ function extOf(name: string): string {
 function slugify(text: string): string {
   const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
   return slug || `course-${Date.now().toString(36)}`;
+}
+
+/**
+ * 旧模板（course info 表）里可选读取课程编号：兼容 "Course ID" / "课程 ID" /
+ * "Course ID/课程 ID" / "课程ID" / "课程编号" / "Course Code" 等写法。
+ * 用“包含”匹配（忽略大小写、空格、分隔符），因此也能识别一个单元格里
+ * 同时写了中英文的标签（如 "Course ID/课程 ID"）。找不到或为空返回 undefined。
+ */
+function readLegacyCourseId(info: Map<string, string>): string | undefined {
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_\-:：/()（）]/g, "");
+  const tokens = ["courseid", "coursecode", "课程id", "课程编号", "课程代码"];
+  for (const [k, v] of info.entries()) {
+    const key = norm(k);
+    if (!tokens.some((t) => key.includes(t))) continue;
+    const val = String(v ?? "").trim();
+    if (val) return val;
+  }
+  return undefined;
 }
 
 // ===== 旧模板（modeling life课程信息.xlsx，单语） =====
@@ -667,8 +706,9 @@ async function buildLegacyPackage(
   const readings = parseReadings(sheetRows(wb, "exploration-reading list"));
   const knowledge = parseKnowledge(sheetRows(wb, "knowledge test"));
   const applications = parseApplications(sheetRows(wb, "application test"));
-  const courseCode = (options.courseCode || "C001").trim().toUpperCase();
-  const slug = (options.slug || "modeling-life").trim().toLowerCase();
+  const excelCode = readLegacyCourseId(info);
+  const courseCode = (excelCode || options.courseCode || "C001").trim().toUpperCase();
+  const slug = (options.slug || slugify(courseCode)).trim().toLowerCase();
 
   const cover = findMedia(media, (n) => n.includes("课程封面") && n.endsWith(".png"));
   const coverPath = cover ? "media/cover.png" : undefined;
@@ -679,8 +719,10 @@ async function buildLegacyPackage(
     const code = `L${String(lesson.no).padStart(3, "0")}`;
     const docx = findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("文本课件") && n.endsWith(".docx"))
       || findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("文本") && n.endsWith(".docx"));
-    const html = docx ? await mdConverterDone(docx.bytes) : "";
+    const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
+    const html = converted?.html ?? "";
     if (!docx) warnings.push(`Lesson ${lesson.no} 缺少文本课件 DOCX`);
+    if (converted) for (const message of converted.warnings) warnings.push(`Lesson ${lesson.no} 文本课件：${message}`);
     const video = findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("视频课件") && n.endsWith(".mp4"));
     let videoPath: string | undefined;
     let videoDuration: number | null = null;
@@ -706,7 +748,9 @@ async function buildLegacyPackage(
       exhibits.push({ code: exCode, type: "IMAGE", file: imagePath, thumbnail: thumbnailPath, localized: { [LANG]: { title: meta.title, description: meta.description || undefined } } });
     }
 
-    const textLearningPoints: PackageTextLearningPoint[] = lesson.textLps.map((heading, i) => ({ code: `T-${lesson.no}.${i + 1}`, heading, level: 1 }));
+    const textLearningPoints: PackageTextLearningPoint[] = converted?.headings.length
+      ? converted.headings.map((heading, i) => ({ code: `T-${lesson.no}.${heading.code || i + 1}`, heading: heading.title, level: 1 }))
+      : lesson.textLps.map((heading, i) => ({ code: `T-${lesson.no}.${i + 1}`, heading, level: 1 }));
     const videoLearningPoints: PackageVideoLearningPoint[] = video ? lesson.videoLps.map((lp, i) => ({ code: `V-${lesson.no}.${i + 1}`, timeSeconds: lp.timeSeconds, title: lp.title })) : [];
     const loc = {
       title: lesson.title || `Lesson ${lesson.no}`,

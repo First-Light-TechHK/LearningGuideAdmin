@@ -25,35 +25,16 @@ import { PublishingService } from './publishing.service';
 import { TrialService } from './trial.service';
 import { PricingService } from './pricing.service';
 import { PreviewService } from './preview.service';
+import { CourseAuthoringService } from './course-authoring.service';
+import { MediaUploadService } from './media-upload.service';
+import { PortalPreviewService } from './portal-preview.service';
+import { PortalProjectionService } from './portal-projection.service';
+import { sendMedia } from './media-stream';
+import { CourseStorageService } from './storage.service';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
   return request.employee?.employeeId ?? null;
-}
-
-function contentTypeFor(extension: string): string {
-  const ext = (extension || '').toLowerCase().replace(/^\./, '');
-  switch (ext) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    case 'gif':
-      return 'image/gif';
-    case 'mp4':
-      return 'video/mp4';
-    case 'webm':
-      return 'video/webm';
-    case 'mp3':
-      return 'audio/mpeg';
-    case 'pdf':
-      return 'application/pdf';
-    default:
-      return 'application/octet-stream';
-  }
 }
 
 function wrap<T>(fn: () => Promise<T>): Promise<T> {
@@ -79,6 +60,11 @@ export class CommerceCoursesController {
     private readonly trial: TrialService,
     private readonly pricing: PricingService,
     private readonly preview: PreviewService,
+    private readonly authoring: CourseAuthoringService,
+    private readonly mediaUploads: MediaUploadService,
+    private readonly portalPreview: PortalPreviewService,
+    private readonly portalProjection: PortalProjectionService,
+    private readonly storage: CourseStorageService,
   ) {}
 
   @Get()
@@ -120,10 +106,21 @@ export class CommerceCoursesController {
     return this.courses.createCourse(body, actor(request));
   }
 
+  @Get('categories')
+  categories() {
+    return this.authoring.listCategories();
+  }
+
   // 只读诊断：确认媒体存储驱动（S3 桶/前缀 或 本地路径），便于核对 S3 是否生效。需声明在 :id 之前。
   @Get('storage-info')
   storageInfo() {
     return this.jobs.storageInfo();
+  }
+
+  // 上传上限：前端在「上传视频/展品/封面」处直接展示，避免用户选完大文件才被拒。需声明在 :id 之前。
+  @Get('media-limits')
+  mediaLimits() {
+    return this.mediaUploads.limits();
   }
 
   @Get(':id')
@@ -161,15 +158,100 @@ export class CommerceCoursesController {
     return this.preview.preview(id, versionId || undefined);
   }
 
+  /** 生成短时效课程预览链接（Admin 自建 Portal 风格预览页）。 */
+  @Get(':id/portal-preview')
+  portalPreviewLink(
+    @Param('id') id: string,
+    @Query('versionId') versionId?: string,
+    @Query('locale') locale?: string,
+  ) {
+    return this.portalPreview.createLink(
+      id,
+      versionId || undefined,
+      locale || undefined,
+    );
+  }
+
+  /**
+   * 预览页数据：员工会话 + 预览 token 双重要求。
+   * 返回与 Portal 投影一致的详情结构（草稿或指定版本），供 Admin 预览页渲染。
+   */
+  @Get(':id/portal-preview/content')
+  async portalPreviewContent(
+    @Param('id') id: string,
+    @Query('token') token?: string,
+  ) {
+    const payload = this.portalPreview.verifyToken(token ?? '');
+    if (payload.courseId !== id)
+      throw new PackageError(
+        'INVALID_PREVIEW_TOKEN',
+        401,
+        'Preview token does not match this course.',
+      );
+    const course = await this.portalProjection.getPreviewCourse(
+      id,
+      payload.versionId ?? undefined,
+    );
+    if (!course)
+      throw new PackageError('COURSE_NOT_FOUND', 404, 'Course not found.');
+    return course;
+  }
+
+  /**
+   * 预览页媒体：员工会话 + 预览 token 双重校验。
+   * 与正式 Portal 媒体端点读同一个存储对象，只是允许草稿/指定版本课程
+   * （不要求已 ONLINE），并支持 HTTP Range 供视频试播。
+   */
+  @Get(':id/portal-preview/cover')
+  async portalPreviewCover(
+    @Param('id') id: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const payload = this.portalPreview.verifyToken(token ?? '');
+    if (payload.courseId !== id) {
+      throw new PackageError(
+        'INVALID_PREVIEW_TOKEN',
+        401,
+        'Preview token does not match this course.',
+      );
+    }
+    const media = await this.portalProjection.getPreviewCoverBytes(id);
+    if (!media || !(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
+    }
+  }
+  @Get(':id/portal-preview/media/:assetId')
+  async portalPreviewMedia(
+    @Param('id') id: string,
+    @Param('assetId') assetId: string,
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const payload = this.portalPreview.verifyToken(token ?? '');
+    if (payload.courseId !== id) {
+      throw new PackageError(
+        'INVALID_PREVIEW_TOKEN',
+        401,
+        'Preview token does not match this course.',
+      );
+    }
+    const media = await this.portalProjection.getPreviewMediaBytes(id, assetId);
+    if (!media || !(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
+    }
+  }
+
   // ===== 预览媒体（Admin 课程页展示封面 / 视频 / 展品图） =====
   @Get(':id/cover')
   async cover(@Param('id') id: string, @Res() res: Response) {
     const media = await this.courses.getCoverBytes(id);
-    if (!media)
+    if (!media) {
       throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
-    res.setHeader('Content-Type', contentTypeFor(media.extension));
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.send(media.bytes);
+    }
+    if (!(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Cover not found.');
+    }
   }
 
   @Get(':id/media/:assetId')
@@ -179,11 +261,12 @@ export class CommerceCoursesController {
     @Res() res: Response,
   ) {
     const media = await this.courses.getMediaBytes(id, assetId);
-    if (!media)
+    if (!media) {
       throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
-    res.setHeader('Content-Type', contentTypeFor(media.extension));
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.send(media.bytes);
+    }
+    if (!(await sendMedia(res, this.storage, media))) {
+      throw new PackageError('COURSE_MEDIA_NOT_FOUND', 404, 'Media not found.');
+    }
   }
 
   // ===== 编辑工作区（第一版） =====
@@ -200,6 +283,7 @@ export class CommerceCoursesController {
       learningLanguages?: string[];
       subtitle?: string | null;
       level?: string | null;
+      categoryId?: string | null;
     },
   ) {
     return this.courses.updateCourse(id, body);
@@ -262,6 +346,291 @@ export class CommerceCoursesController {
   @HttpCode(200)
   deleteLesson(@Param('id') id: string, @Param('lessonId') lessonId: string) {
     return this.courses.deleteLesson(id, lessonId);
+  }
+
+  // ===== 课程内容创作（CM05–CM07）=====
+  @Post(':id/media')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadMedia(
+    @Param('id') id: string,
+    @UploadedFile()
+    file:
+      { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.uploadMedia(id, file);
+  }
+
+  // ===== 大文件分块上传（视频可达数百 MB，单请求会被边缘切断）=====
+  @Post(':id/media/session')
+  @HttpCode(200)
+  createMediaUploadSession(
+    @Param('id') id: string,
+    @Body() body: { fileName?: string; bytesTotal?: number },
+  ) {
+    return this.mediaUploads.createSession(id, body ?? {});
+  }
+
+  @Get(':id/media/sessions/:sessionId')
+  mediaUploadSession(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.mediaUploads.status(id, sessionId);
+  }
+
+  @Put(':id/media/sessions/:sessionId/chunk')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('chunk'))
+  uploadMediaChunk(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+    @Query('index') index: string | undefined,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ) {
+    return this.mediaUploads.appendChunk(
+      id,
+      sessionId,
+      Number(index),
+      file?.buffer,
+    );
+  }
+
+  @Post(':id/media/sessions/:sessionId/complete')
+  @HttpCode(200)
+  completeMediaUpload(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.mediaUploads.complete(id, sessionId);
+  }
+
+  @Delete(':id/media/sessions/:sessionId')
+  @HttpCode(200)
+  cancelMediaUpload(
+    @Param('id') id: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.mediaUploads.cancel(id, sessionId);
+  }
+
+  @Post(':id/cover')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadCover(
+    @Param('id') id: string,
+    @UploadedFile()
+    file:
+      { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.uploadCover(id, file);
+  }
+
+  @Delete(':id/cover')
+  @HttpCode(200)
+  deleteCover(@Param('id') id: string) {
+    return this.authoring.deleteCover(id);
+  }
+
+  @Put(':id/lessons/:lessonId/video')
+  @HttpCode(200)
+  setLessonVideo(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body() body: { language: string; assetId: string },
+  ) {
+    return this.authoring.setLessonVideo(
+      id,
+      lessonId,
+      body.language,
+      body.assetId,
+    );
+  }
+
+  @Put(':id/lessons/:lessonId/learning-points')
+  @HttpCode(200)
+  saveLearningPoints(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      language: string;
+      points: Array<{ code?: string; title: string; timeSeconds: number }>;
+    },
+  ) {
+    return this.authoring.saveVideoLearningPoints(
+      id,
+      lessonId,
+      body.language,
+      body.points ?? [],
+    );
+  }
+
+  @Put(':id/lessons/:lessonId/triggers')
+  @HttpCode(200)
+  saveTriggers(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      language: string;
+      triggers: Array<{ exhibitId: string; timeSeconds: number }>;
+    },
+  ) {
+    return this.authoring.saveTriggers(
+      id,
+      lessonId,
+      body.language,
+      body.triggers ?? [],
+    );
+  }
+
+  @Post(':id/lessons/:lessonId/exhibits')
+  @HttpCode(201)
+  createExhibit(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      code?: string;
+      type: string;
+      mediaAssetId?: string | null;
+      thumbnailAssetId?: string | null;
+      sourceText?: string | null;
+      localized?: unknown;
+    },
+  ) {
+    return this.authoring.createExhibit(id, lessonId, body);
+  }
+
+  @Put(':id/lessons/:lessonId/exhibits/:exhibitId')
+  @HttpCode(200)
+  updateExhibit(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Param('exhibitId') exhibitId: string,
+    @Body()
+    body: {
+      type?: string;
+      mediaAssetId?: string | null;
+      thumbnailAssetId?: string | null;
+      sourceText?: string | null;
+      localized?: unknown;
+    },
+  ) {
+    return this.authoring.updateExhibit(id, lessonId, exhibitId, body);
+  }
+
+  @Delete(':id/lessons/:lessonId/exhibits/:exhibitId')
+  @HttpCode(200)
+  deleteExhibit(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Param('exhibitId') exhibitId: string,
+  ) {
+    return this.authoring.deleteExhibit(id, lessonId, exhibitId);
+  }
+
+  @Put(':id/lessons/:lessonId/readings')
+  @HttpCode(200)
+  saveReadings(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      language: string;
+      readings: Array<{
+        type: string;
+        title: string;
+        author: string;
+        whyRecommended: string;
+      }>;
+    },
+  ) {
+    return this.authoring.saveReadings(
+      id,
+      lessonId,
+      body.language,
+      body.readings ?? [],
+    );
+  }
+
+  @Post(':id/docx')
+  @UseInterceptors(FileInterceptor('file'))
+  parseDocx(
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+  ): Promise<{
+    html: string;
+    messages: Array<{ type: string; message: string }>;
+  }> {
+    return this.authoring.parseDocx(file);
+  }
+
+  @Post(':id/readings/import')
+  @UseInterceptors(FileInterceptor('file'))
+  importReadings(
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.importReadings(id, file);
+  }
+
+  @Put(':id/lessons/:lessonId/knowledge-test')
+  @HttpCode(200)
+  saveKnowledgeTest(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      enabled: boolean;
+      questions: Array<{
+        code?: string;
+        question: string;
+        referenceAnswer: string;
+      }>;
+    },
+  ) {
+    return this.authoring.saveKnowledgeTest(
+      id,
+      lessonId,
+      Boolean(body.enabled),
+      body.questions ?? [],
+    );
+  }
+
+  @Put(':id/lessons/:lessonId/application-test')
+  @HttpCode(200)
+  saveApplicationTest(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: { enabled: boolean; scenario?: string; referenceAnswer?: string },
+  ) {
+    return this.authoring.saveApplicationTest(id, lessonId, body);
+  }
+
+  @Post(':id/understanding/import')
+  @UseInterceptors(FileInterceptor('file'))
+  importUnderstanding(
+    @Param('id') id: string,
+    @Body() body: { language?: string; lessonId?: string },
+    @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
+  ) {
+    return this.authoring.importUnderstanding(
+      id,
+      body.language || 'en-GB',
+      file,
+      body.lessonId,
+    );
+  }
+
+  @Get(':id/understanding/template')
+  async understandingTemplate(@Param('id') id: string, @Res() res: Response) {
+    const csv = await this.authoring.downloadUnderstandingTemplate(id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="understanding-template.csv"',
+    );
+    res.send(csv);
   }
 
   // ===== 草稿 / 发布 / 版本（PRD §15）=====
@@ -391,6 +760,51 @@ export class CommerceCoursesController {
     );
   }
 
+  // ===== 原始素材分块上传（大包：前端切块，逐块上传，规避边缘单请求限制）=====
+  @Post('import/raw/session')
+  @HttpCode(200)
+  createRawUploadSession(
+    @Body() body: { fileName?: string; bytesTotal?: number },
+    @Req() request: BackofficeRequest,
+  ) {
+    const idempotencyKey =
+      typeof request.headers['idempotency-key'] === 'string'
+        ? request.headers['idempotency-key']
+        : undefined;
+    return wrap(() =>
+      this.jobs.createRawUploadSession(
+        {
+          name: body?.fileName || 'raw.zip',
+          bytesTotal: Number(body?.bytesTotal) || 0,
+        },
+        actor(request),
+        idempotencyKey,
+      ),
+    );
+  }
+
+  @Put('import/:jobId/chunk')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('chunk'))
+  uploadRawChunk(
+    @Param('jobId') jobId: string,
+    @Query('index') chunkIndex: string | undefined,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ) {
+    if (!file?.buffer) {
+      throw new PackageError('INVALID_INPUT', 400, 'No chunk uploaded.');
+    }
+    return wrap(() =>
+      this.jobs.appendRawChunk(jobId, Number(chunkIndex), file.buffer),
+    );
+  }
+
+  @Post('import/:jobId/complete')
+  @HttpCode(200)
+  completeRawUpload(@Param('jobId') jobId: string) {
+    return wrap(() => this.jobs.completeRawUpload(jobId));
+  }
+
   // ===== 本地目录导入（服务端直接读取仓库内 docs 素材，规避浏览器上传大文件中断） =====
   @Post('import/local')
   @HttpCode(201)
@@ -516,6 +930,7 @@ export class CommerceCoursesController {
     body: {
       onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
       reassignCodes?: boolean;
+      overwriteDraft?: boolean;
     },
     @Req() request: BackofficeRequest,
   ) {
@@ -536,13 +951,7 @@ export class CommerceCoursesController {
     @Body() body: { version?: string },
     @Req() request: BackofficeRequest,
   ) {
-    return wrap(() =>
-      this.jobs.startExport(
-        id,
-        actor(request),
-        body?.version,
-      ),
-    );
+    return wrap(() => this.jobs.startExport(id, actor(request), body?.version));
   }
 
   @Get('export/:jobId')

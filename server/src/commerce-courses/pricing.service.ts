@@ -43,6 +43,16 @@ export function stripeLookupKey(
   return `${courseCode}_${termMonths}m`;
 }
 
+/** Stripe 同一 lookup key 只允许一个有效 Price；把 Stripe 原文翻成可操作的提示。 */
+export function describeStripeSyncError(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : 'Stripe sync failed.';
+  if (/lookup key/i.test(message)) {
+    return `${message} (another plan already uses this lookup key in Stripe — give each plan a different billing period)`;
+  }
+  return message;
+}
+
 /**
  * Pricing（PRD §14）。
  * - 价格不属于版本快照；保存不生成版本。
@@ -53,6 +63,8 @@ export function stripeLookupKey(
 @Injectable()
 export class PricingService {
   private readonly logger = new Logger(PricingService.name);
+  // 同一进程内串行化“为一门课创建 Stripe Product”，避免首次保存多套餐时并发创建多个 Product。
+  private readonly productLocks = new Map<string, Promise<string>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -94,6 +106,20 @@ export class PricingService {
           message: 'Amount must be greater than 0.',
         });
       }
+    }
+
+    const lookupKeys = input.map(
+      (plan) =>
+        plan.lookupKey?.trim() || stripeLookupKey(course.code, plan.termMonths),
+    );
+    const duplicatedKey = lookupKeys.find(
+      (key, index) => lookupKeys.indexOf(key) !== index,
+    );
+    if (duplicatedKey) {
+      throw new ConflictException({
+        code: 'PLAN_LOOKUP_KEY_DUPLICATE',
+        message: `Two plans share the lookup key "${duplicatedKey}". Stripe requires a unique lookup key per price, so give each plan a different billing period.`,
+      });
     }
 
     const existing = await this.prisma.coursePlan.findMany({
@@ -172,8 +198,10 @@ export class PricingService {
     }
 
     try {
-      const productId =
-        plan.stripeProductId ?? (await this.ensureProduct(course));
+      const productId = await this.ensureCourseProduct(
+        course,
+        plan.stripeProductId,
+      );
       let priceId = plan.stripePriceId;
       const recurring = stripeRecurring(plan.termMonths);
       const lookupKey =
@@ -186,6 +214,7 @@ export class PricingService {
           plan.amountMinor,
           plan.currency,
           recurring,
+          lookupKey,
         ));
       if (needsNewPrice) {
         if (priceId) await this.deactivatePrice(priceId);
@@ -197,6 +226,7 @@ export class PricingService {
           lookupKey,
           planId: plan.id,
           courseCode: course.code,
+          previousPriceId: priceId,
         });
       }
 
@@ -212,8 +242,7 @@ export class PricingService {
       });
       return { planId: plan.id, status: 'SYNCED', productId, priceId };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Stripe sync failed.';
+      const message = describeStripeSyncError(error);
       this.logger.error(
         `Stripe sync failed for plan ${plan.id}: ${message}`,
         error instanceof Error ? error.stack : undefined,
@@ -239,16 +268,64 @@ export class PricingService {
     return course;
   }
 
-  private async ensureProduct(course: {
-    id: string;
-    code: string;
-  }): Promise<string> {
-    const product = await this.stripe('POST', '/v1/products', {
-      name: course.code,
-      'metadata[course_id]': course.id,
-      'metadata[course_code]': course.code,
+  /**
+   * 每门课只允许一个 Stripe Product（PRD §14.2）。
+   * 优先复用课程下任一套餐已有的 product id；没有则创建一次，并挂到所有尚未同步的套餐上。
+   */
+  private async ensureCourseProduct(
+    course: { id: string; code: string },
+    preferred?: string | null,
+  ): Promise<string> {
+    if (preferred) return preferred;
+
+    const existing = await this.prisma.coursePlan.findFirst({
+      where: {
+        courseId: course.id,
+        active: true,
+        stripeProductId: { not: null },
+      },
+      select: { stripeProductId: true },
     });
-    return String(product.id);
+    if (existing?.stripeProductId) return existing.stripeProductId;
+
+    const inflight = this.productLocks.get(course.id);
+    if (inflight) return inflight;
+
+    const task = (async () => {
+      // 锁内再查一次，覆盖并发请求在等待期间已完成创建的情况。
+      const again = await this.prisma.coursePlan.findFirst({
+        where: {
+          courseId: course.id,
+          active: true,
+          stripeProductId: { not: null },
+        },
+        select: { stripeProductId: true },
+      });
+      if (again?.stripeProductId) return again.stripeProductId;
+
+      const product = await this.stripe('POST', '/v1/products', {
+        name: course.code,
+        'metadata[course_id]': course.id,
+        'metadata[course_code]': course.code,
+      });
+      const productId = String(product.id);
+      await this.prisma.coursePlan.updateMany({
+        where: {
+          courseId: course.id,
+          active: true,
+          stripeProductId: null,
+        },
+        data: { stripeProductId: productId },
+      });
+      return productId;
+    })();
+
+    this.productLocks.set(course.id, task);
+    try {
+      return await task;
+    } finally {
+      this.productLocks.delete(course.id);
+    }
   }
 
   private async priceChanged(
@@ -256,6 +333,7 @@ export class PricingService {
     amountMinor: number,
     currency: string,
     recurring: { interval: string; interval_count: number },
+    lookupKey: string,
   ): Promise<boolean> {
     try {
       const price = (await this.stripe(
@@ -265,13 +343,15 @@ export class PricingService {
         unit_amount?: number;
         currency?: string;
         recurring?: { interval?: string; interval_count?: number };
+        lookup_key?: string | null;
       };
       return (
         Number(price.unit_amount) !== amountMinor ||
         String(price.currency).toLowerCase() !== currency.toLowerCase() ||
         price.recurring?.interval !== recurring.interval ||
         Number(price.recurring?.interval_count ?? 1) !==
-          recurring.interval_count
+          recurring.interval_count ||
+        (price.lookup_key ?? '') !== lookupKey
       );
     } catch {
       return true;
@@ -284,6 +364,40 @@ export class PricingService {
     });
   }
 
+  /**
+   * Stripe 的 lookup key 在有效 Price 之间必须唯一。套餐改周期或删除后，旧 Price
+   * 仍占用这个 key，直接新建会报 "Lookup key has already been used"。
+   * 这里只停用同一个套餐（metadata.course_plan_id 相同）遗留的旧 Price；停用不影响已有订阅。
+   */
+  private async releaseLookupKey(
+    lookupKey: string,
+    planId: string,
+    keepPriceId: string | null,
+  ): Promise<void> {
+    try {
+      const list = (await this.stripe(
+        'GET',
+        `/v1/prices?active=true&limit=10&lookup_keys[]=${encodeURIComponent(lookupKey)}`,
+      )) as {
+        data?: Array<{ id?: string; metadata?: { course_plan_id?: string } }>;
+      };
+      for (const price of list.data ?? []) {
+        if (!price.id || price.id === keepPriceId) continue;
+        if (price.metadata?.course_plan_id !== planId) continue;
+        await this.deactivatePrice(price.id);
+        this.logger.warn(
+          `Deactivated Stripe price ${price.id} left over from plan ${planId} on lookup key ${lookupKey}.`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not release lookup key ${lookupKey}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
   private async createPrice(input: {
     productId: string;
     amountMinor: number;
@@ -292,7 +406,13 @@ export class PricingService {
     lookupKey: string;
     planId: string;
     courseCode: string;
+    previousPriceId?: string | null;
   }): Promise<string> {
+    await this.releaseLookupKey(
+      input.lookupKey,
+      input.planId,
+      input.previousPriceId ?? null,
+    );
     const price = await this.stripe('POST', '/v1/prices', {
       product: input.productId,
       currency: input.currency,

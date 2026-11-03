@@ -179,6 +179,36 @@ describe('planning a night (G3 steps 2-5)', () => {
     );
   });
 
+  it('suggests updating the node when learners were shown that very card and it still did not help', async () => {
+    const shown = [
+      '付款后会员没有生效',
+      '付款后会员一直没生效',
+      '付了款会员没有生效',
+    ].map((text) =>
+      miningTurn(
+        turn({
+          text,
+          kind: 'answer',
+          vote: 'not_helpful',
+          nodeId: NODE_ACTIVATE,
+        }),
+      ),
+    );
+    const plan = await planMining({
+      turns: [...shown, ...other],
+      nodes,
+      candidates: [],
+      similarity,
+    });
+    expect(plan.create).toHaveLength(1);
+    expect(plan.create[0]).toMatchObject({
+      suggestion: 'update_faq',
+      relatedNodeId: NODE_ACTIVATE,
+      shownNodeId: NODE_ACTIVATE,
+      sourceMix: { not_helpful: 3 },
+    });
+  });
+
   it('suggests a new follow-up under the node where learners got stuck, and records the card they were shown', async () => {
     const stuck = [
       '那要等多久才能开通',

@@ -56,7 +56,7 @@ import {
  * 不调 Admin（graph design §4：点击只由代码处理）；学员明说要人工（v4 的关键词，Portal 代码判）也不调 Admin。
  *
  * 文件格式（JSONL，一行一段对话；--conversations 给一个文件或一个目录，目录里的 *.jsonl 全读）：
- *   {"id":"mt-0001","set":"multi_turn"|"casual","locale":"zh-CN"|"zh-TW"|"en-GB","language":"mixed"?,
+ *   {"id":"mt-0001","set":"multi_turn"|"casual"|"single","locale":"zh-CN"|"zh-TW"|"en-GB","language":"mixed"?,
  *    "persona":"user","flow":"clarify_clause"?,"note":"…"?,
  *    "turns":[{"message":"…","expect":{"kind":"answer","faqId":"<uuid>"}},
  *             {"message":"没看懂","expect":{"kind":"clarify","faqId":"<uuid>","covered":true}},
@@ -71,7 +71,8 @@ import {
  * LLM 评审单独打分（不在这里）。假模型（没有 key）的数字只说明评测能跑。
  */
 
-export const CONVERSATION_SETS = ['multi_turn', 'casual'] as const;
+/** single：S650 单句集（每张卡 4 条首句 + 反例，2026-10-30）。 */
+export const CONVERSATION_SETS = ['multi_turn', 'casual', 'single'] as const;
 export type ConversationSet = (typeof CONVERSATION_SETS)[number];
 
 export const EXPECTED_KINDS = [
@@ -271,8 +272,15 @@ export function isHandoverRequest(message: string): boolean {
 export const UNSOLVED_HANDOVER_STREAK = 2;
 
 export type GotTurn = {
-  /** Admin 的 kind；handover = Portal 按关键词直接转人工；click = 点追问 / 选项。 */
+  /**
+   * Admin 的 kind；handover = 只给转人工卡（关键词那一轮 Admin 没给答案卡）；click = 点追问 / 选项。
+   */
   kind: SuggestKind | 'handover' | 'click';
+  /**
+   * Portal（bc0aa9d 起）：消息含转人工关键词时照样问 Admin，答案卡在前、转人工卡接在回复末尾；
+   * 没有答案卡（无卡 / 寒暄 / 追问 / 选项 / 出错）就只给转人工卡（kind = handover）。
+   */
+  handover?: boolean;
   intent: SuggestIntent | null;
   nodeId: string | null;
   covered: boolean | null;
@@ -283,6 +291,8 @@ export type GotTurn = {
   /** 复核用（agent 事件里取）：检索给模型的候选 id（按顺序）与 pick_faq 的 confidence。 */
   candidateIds?: string[];
   confidence?: string | null;
+  /** 开思考时回答出自哪一路（thinking 或不思考的后备 quick）；没有后备为 null。 */
+  branch?: 'thinking' | 'quick' | null;
   /** 复核用：学员看到的模型短句（诚恳度复核要读原话）；没有的字段不写。 */
   said?: Partial<
     Record<'opening' | 'closing' | 'reply' | 'explanation', string>
@@ -307,6 +317,8 @@ export type TurnResult = {
   wrongFaq: boolean;
   /** 期望的是追问，出的是通向它的入口卡片（算对，单独数）。 */
   viaEntry: boolean;
+  /** R3（用户 2026-10-30）：期望寒暄或转人工却出了卡片：不算答错卡，单独数「多给卡片」（也不算答对）。 */
+  extraCard: boolean;
   /** 出了解释（covered）时它是否接地；没有解释为 null。 */
   grounded: boolean | null;
   /** 展示出去却没过守卫的字段（应当永远为空）。 */
@@ -381,11 +393,16 @@ function sameSmalltalk(
   );
 }
 
-function score(
+export function score(
   expect: TurnExpectation,
   got: GotTurn,
   streak: number,
-): { right: boolean; wrongFaq: boolean; viaEntry?: boolean } {
+): {
+  right: boolean;
+  wrongFaq: boolean;
+  viaEntry?: boolean;
+  extraCard?: boolean;
+} {
   const shownCard = got.kind === 'answer' ? got.nodeId : null;
   const wrong = (allowed: string[]) =>
     shownCard !== null && !allowed.includes(shownCard);
@@ -416,7 +433,8 @@ function score(
           got.kind === 'smalltalk' &&
           (expect.intent === undefined ||
             sameSmalltalk(got.intent, expect.intent)),
-        wrongFaq: shownCard !== null,
+        wrongFaq: false,
+        extraCard: shownCard !== null,
       };
     case 'no_match':
       return {
@@ -429,9 +447,12 @@ function score(
       return {
         right:
           got.kind === 'handover' ||
+          got.handover === true ||
           (got.kind === 'clarify' && got.covered === false) ||
           (got.kind === 'no_match' && streak >= UNSOLVED_HANDOVER_STREAK),
-        wrongFaq: shownCard !== null,
+        wrongFaq: false,
+        // 关键词那一轮先给答案卡、末尾再给转人工卡：用户 2026-10-30「转人工也先尽量用卡片解决」，不算多给
+        extraCard: shownCard !== null && got.handover !== true,
       };
   }
 }
@@ -460,12 +481,24 @@ function escapesOf(
   return out;
 }
 
-/** 从这一轮的 agent 事件里取检索候选与 pick_faq 的 confidence（只用于复核）。 */
-function stepDetails(log: { type: string; data: Record<string, unknown> }[]): {
+/**
+ * 从这一轮的 agent 事件里取检索候选与 pick_faq 的 confidence（只用于复核），只看给出回答的那一路
+ * （turn/end.branch；后备那一路的步骤带 branch quick）。
+ */
+export function stepDetails(
+  log: { type: string; data: Record<string, unknown> }[],
+): {
   candidateIds: string[];
   confidence: string | null;
+  branch: 'thinking' | 'quick' | null;
 } {
-  const ends = log.filter((e) => e.type === 'step/end');
+  const used = log.find((e) => e.type === 'turn/end')?.data.branch;
+  const branch = used === 'thinking' || used === 'quick' ? used : null;
+  const ends = log.filter(
+    (e) =>
+      e.type === 'step/end' &&
+      (e.data.branch === 'quick') === (branch === 'quick'),
+  );
   const retrieve = ends.find((e) => e.data.name === 'retrieve')?.data.output as
     { candidates?: { id?: unknown }[] } | undefined;
   const pick = ends.find((e) => e.data.name === 'pick_faq')?.data.args as
@@ -475,6 +508,7 @@ function stepDetails(log: { type: string; data: Record<string, unknown> }[]): {
       .map((c) => c.id)
       .filter((id): id is string => typeof id === 'string'),
     confidence: typeof pick?.confidence === 'string' ? pick.confidence : null,
+    branch,
   };
 }
 
@@ -539,6 +573,7 @@ export async function runConversations(
           right: null,
           wrongFaq: false,
           viaEntry: false,
+          extraCard: false,
           grounded: null,
           escapes: [],
           unsolvedStreak: streak,
@@ -550,27 +585,6 @@ export async function runConversations(
         continue;
       }
       const expect = turn.expect ?? null;
-      if (isHandoverRequest(turn.message)) {
-        const got: GotTurn = { ...none, kind: 'handover' };
-        turns.push({
-          ...base,
-          message: turn.message,
-          expect,
-          got,
-          right: expect ? score(expect, got, streak).right : null,
-          wrongFaq: false,
-          viaEntry: false,
-          grounded: null,
-          escapes: [],
-          unsolvedStreak: streak,
-          latencyMs: 0,
-          costUsd: 0,
-          unpricedCalls: 0,
-          calledAdmin: false,
-        });
-        said.push(turn.message);
-        continue;
-      }
       const runId = uuidv7();
       rootRunId ??= runId;
       const started = performance.now();
@@ -602,7 +616,7 @@ export async function runConversations(
       ).length;
       const costUsd = replies.reduce((sum, e) => sum + num(e.data.costUsd), 0);
       const unpricedCalls = Math.max(0, requests - priced);
-      const got: GotTurn = {
+      const asked: GotTurn = {
         kind: reply.kind ?? (reply.suggestion ? 'answer' : 'no_match'),
         intent: reply.intent ?? null,
         nodeId: reply.nodeId ?? reply.suggestion?.faqId ?? null,
@@ -621,14 +635,20 @@ export async function runConversations(
           ),
         ),
       };
+      const got: GotTurn = !isHandoverRequest(turn.message)
+        ? asked
+        : asked.kind === 'answer'
+          ? { ...asked, handover: true }
+          : { ...asked, kind: 'handover', nodeId: null, handover: true };
       const unsolved =
         got.kind === 'no_match' ||
         (got.kind === 'clarify' && got.covered === false);
       if (unsolved) streak += 1;
       else if (got.kind !== 'smalltalk') streak = 0;
+      // Admin 真正解释的那张卡（handover 的话会把 got 改成 handover，卡片 id 要从 asked 取）
       const shownAnswer =
-        got.kind === 'clarify' && got.nodeId
-          ? ((await options.qa.findPublished(got.nodeId, locale))?.answer ??
+        asked.kind === 'clarify' && asked.nodeId
+          ? ((await options.qa.findPublished(asked.nodeId, locale))?.answer ??
             null)
           : null;
       const grounded =
@@ -645,6 +665,7 @@ export async function runConversations(
         right: scored ? scored.right : null,
         wrongFaq: scored ? scored.wrongFaq : false,
         viaEntry: scored?.viaEntry ?? false,
+        extraCard: scored?.extraCard ?? false,
         grounded,
         escapes: escapesOf(reply, turn.message, locale, shownAnswer),
         unsolvedStreak: streak,
@@ -778,6 +799,9 @@ export type ConversationReport = {
     guardEscapes: number;
     /** 期望追问、出的是通向它的入口卡片的轮次（算对）。 */
     answeredViaEntry: number;
+    /** R3：期望寒暄或转人工却出了卡片的轮次（不计入 wrongFaqRate）与占问 Admin 的打分轮次之比。 */
+    extraCards: number;
+    extraCardRate: number | null;
     guardFallbackRate: number | null;
     latencyMs: { p50: number; p95: number };
     costUsd: number;
@@ -883,6 +907,11 @@ export function summarizeConversations(input: {
     clarifyExplanations: explanations.length,
     guardEscapes: results.reduce((sum, r) => sum + r.escapes.length, 0),
     answeredViaEntry: results.filter((r) => r.right && r.viaEntry).length,
+    extraCards: adminScored.filter((r) => r.extraCard).length,
+    extraCardRate: share(
+      adminScored.filter((r) => r.extraCard).length,
+      adminScored.length,
+    ),
     guardFallbackRate: share(
       guarded.filter((r) => r.got.guard?.result === 'fallback').length,
       guarded.length,
@@ -995,6 +1024,7 @@ export function markdownConversationReport(report: ConversationReport): string {
     `| Clarify grounded | ${pct(m.clarifyGrounded)} (${m.clarifyExplanations} explanations) |`,
     `| Guard escapes | ${m.guardEscapes} |`,
     `| Follow-up expected, its entry card shown (counted right) | ${m.answeredViaEntry} |`,
+    `| Small talk or handover expected, a card shown (R3: not a wrong FAQ) | ${m.extraCards} (${pct(m.extraCardRate)}) |`,
     `| Guard fallback rate | ${pct(m.guardFallbackRate)} |`,
     `| Latency p50 / p95 | ${m.latencyMs.p50} / ${m.latencyMs.p95} ms |`,
     `| Cost | $${m.costUsd} |`,

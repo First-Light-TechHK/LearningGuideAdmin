@@ -1,4 +1,5 @@
 import { FAQ_LIMITS } from './faqContracts';
+import { mapProblems } from './faqMap';
 import type {
   FaqReleaseSnapshot,
   FaqSnapshotEdge,
@@ -19,7 +20,8 @@ import type {
  * - follow_ups：answer 节点至多 6 条 follow_up 边（展示 4 条）；
  * - language：两种语言的问题与答案都在；边的覆盖文字要么两种语言都给、要么都不给；
  * - label_length：解析后的选项文字 ≤ 24 中文字 / 40 英文字符，追问文字 ≤ 200；
- * - answer_blocks：answer 节点两种语言都切得出至少一个块。
+ * - answer_blocks：answer 节点两种语言都切得出至少一个块；
+ * - map_shape / map_placement / map_primary：快照里有流程树与对象表时，见 faqMap.ts mapProblems。
  * 「归档一个还有父节点的节点」在编辑时就拒绝（faqService.archive），不在这里。
  */
 export const GRAPH_RULES = [
@@ -36,6 +38,9 @@ export const GRAPH_RULES = [
   'language',
   'label_length',
   'answer_blocks',
+  'map_shape',
+  'map_placement',
+  'map_primary',
 ] as const;
 export type GraphRule = (typeof GRAPH_RULES)[number];
 
@@ -300,6 +305,10 @@ export function checkFaqGraph(
         edge,
       );
   }
+
+  if (snapshot.map)
+    for (const problem of mapProblems(snapshot.map, (id) => keyOf(id)))
+      problems.push(problem);
 
   return {
     passed: problems.length === 0,

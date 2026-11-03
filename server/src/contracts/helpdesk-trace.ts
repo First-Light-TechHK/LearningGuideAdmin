@@ -64,10 +64,41 @@ export type TraceEventDetail = {
   derived: ExportedAgentEvent[];
 };
 
+/**
+ * 模型输出健康（每一步）：校验没过就降级（挑卡 → 没找到，解释 → 转人工卡），学员看不到坏输出，
+ * 但降级多了就是模型或 provider 出了问题。这里按步骤数出来，超过阈值就报警。
+ * - invalid：agent 步的调用没过格式校验（键、枚举、类型不对；pi-step-runner 的 no_call）；
+ * - guardFallbacks：模型写的短句被守卫拦下（语言、编造的数字链接、套话、过长等；不含「卡片没讲到」）；
+ * - failures：provider 出错或超时。
+ */
+export type ModelStepHealth = {
+  step: string;
+  kind: 'agent' | 'code';
+  total: number;
+  invalid: number;
+  guardFallbacks: number;
+  failures: number;
+  invalidRate: number;
+  guardFallbackRate: number;
+  failureRate: number;
+  /** 样本够（≥ minSample）且任一比例超过阈值。 */
+  alert: boolean;
+};
+
+export type ModelHealthReport = {
+  since: string;
+  hours: number;
+  threshold: number;
+  minSample: number;
+  steps: ModelStepHealth[];
+};
+
 export const HELPDESK_TRACE_SOURCE = Symbol('HELPDESK_TRACE_SOURCE');
 
 /** BackOffice 读链路（只读，导出副本）。 */
 export interface HelpdeskTraceSource {
   readRun(runId: string): Promise<TraceRun | null>;
   traceEvent(runId: string, seq: number): Promise<TraceEventDetail | null>;
+  /** 最近 hours 小时每一步的模型输出健康（1 ≤ hours ≤ MODEL_HEALTH.hoursMax）。 */
+  modelHealth(hours: number): Promise<ModelHealthReport>;
 }

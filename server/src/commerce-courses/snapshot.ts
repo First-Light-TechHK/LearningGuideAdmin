@@ -55,6 +55,7 @@ type LessonRow = Lesson & {
     enabled: boolean;
   } | null;
   learningPoints: {
+    id: string;
     language: string;
     code: string;
     title: string;
@@ -242,12 +243,20 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
       };
     });
 
+  const lpCodeById = new Map<string, string>();
+  for (const lesson of agg.lessons) {
+    for (const lp of lesson.learningPoints ?? []) {
+      lpCodeById.set(lp.id, lp.code);
+    }
+  }
   const trial: PackageTrial = {
-    enabled: agg.trialRows.length > 0,
+    enabled: agg.trialEnabled,
     lessons: agg.trialRows.map((t) => ({
       lessonRef: lessonCodeById(agg.lessons, t.lessonId),
       videoCutoffSeconds: t.videoCutoffSeconds,
-      textCutoffLearningPoint: t.textCutoffLearningPointId,
+      textCutoffLearningPoint: t.textCutoffLearningPointId
+        ? (lpCodeById.get(t.textCutoffLearningPointId) ?? null)
+        : null,
       status: t.status as PackageTrial['lessons'][number]['status'],
     })),
   };

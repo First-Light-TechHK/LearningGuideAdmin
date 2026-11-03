@@ -34,20 +34,39 @@ export type LessonLocalization = {
   description: string | null;
   textHtml: string | null;
   videoAssetId?: string | null;
-  video: { id: string } | null;
+  video: {
+    id: string;
+    originalName?: string | null;
+    size?: number | null;
+    mimeType?: string | null;
+    extension?: string | null;
+    createdAt?: string | null;
+  } | null;
   videoDurationSeconds: number | null;
+};
+
+export type ExhibitMedia = {
+  id: string;
+  kind?: string;
+  originalName?: string;
+  mimeType?: string;
+  extension?: string;
+  size?: number;
 };
 
 export type Exhibit = {
   id: string;
   code: string;
   type: string;
-  media: { id: string } | null;
-  thumbnail: { id: string } | null;
+  mediaAssetId?: string | null;
+  thumbnailAssetId?: string | null;
+  sourceText?: string | null;
+  media: ExhibitMedia | null;
+  thumbnail: ExhibitMedia | null;
   localized: Record<string, { title?: string; description?: string }>;
 };
 
-export type Reading = { type: string; title: string; author: string | null; whyRecommended: string | null };
+export type Reading = { type: string; title: string; author: string | null; whyRecommended: string | null; language?: string };
 export type Question = { id?: string; code: string; question: string; referenceAnswer: string | null; enabled?: boolean };
 export type ApplicationTest = { scenario: string; referenceAnswer: string | null; enabled?: boolean };
 
@@ -60,7 +79,17 @@ export type Lesson = {
   readings: Reading[];
   questions: Question[];
   applicationTest: ApplicationTest | null;
-  learningPoints: Array<{ language: string; code: string; title: string; source: string; timeSeconds: number | null }>;
+  learningPoints: Array<{
+    id?: string;
+    language: string;
+    code: string;
+    title: string;
+    source: string;
+    timeSeconds: number | null;
+    sortOrder?: number;
+    anchorHeading?: string | null;
+  }>;
+  triggers?: Array<{ id?: string; language: string; exhibitId: string; timeSeconds: number }>;
 };
 
 export type CoursePlan = {
@@ -160,6 +189,8 @@ export type CourseSummary = {
   lifecycleStatus: string;
   liveStatus: string;
   liveVersionId: string | null;
+  liveVersionLabel?: string | null;
+  liveVersionWentLiveAt?: string | null;
   hasDraft: boolean;
   trialEnabled: boolean;
   published: boolean;
@@ -221,6 +252,73 @@ export type PreviewCourse = {
   trial: { enabled: boolean; available: boolean; rows: TrialRow[] };
   plans: CoursePlan[];
   completeness: CourseCompleteness;
+};
+
+export type PortalPreviewLink = {
+  url: string;
+  token: string;
+  expiresAt: string;
+  source: 'draft' | 'version';
+  courseId: string;
+  versionId: string | null;
+};
+
+/** Admin 自建 Portal 风格预览页读取的投影详情（与 Portal v1 投影同构）。 */
+export type PortalPreviewDetail = {
+  id: string;
+  slug: string;
+  code: string;
+  title: string;
+  subtitle: string | null;
+  shortDescription: string | null;
+  description: string | null;
+  category: string | null;
+  level: string | null;
+  tags: unknown;
+  coverUrl: string | null;
+  learningMode: string | null;
+  learningLanguages: string[];
+  defaultContentLanguage: string | null;
+  whatYouLearn: unknown;
+  provides: unknown;
+  lessonCount: number;
+  totalDurationSeconds: number;
+  trial?: { enabled: boolean; lessonIds: string[] };
+  plans: Array<{
+    id: string;
+    name: string;
+    termMonths: number;
+    amountMinor: number;
+    currency: string;
+    lookupKey: string | null;
+    trialEligible: boolean;
+  }>;
+  sections: Array<{
+    id: string;
+    title: string;
+    lessons: Array<{
+      id: string;
+      title: string;
+      summary: string | null;
+      durationSeconds: number | null;
+      isPublic: boolean;
+      trial?: {
+        videoCutoffSeconds: number | null;
+        textCutoffLearningPointId: string | null;
+        textCutoffCode: string | null;
+      } | null;
+      contents: Array<{
+        id: string;
+        title?: string;
+        type: string;
+        mode?: string;
+        url?: string;
+        html?: string;
+        nodes?: Array<{ id: string; title: string; triggerTime?: number; url?: string; type?: string }>;
+      }>;
+    }>;
+  }>;
+  preview: { source: 'draft' | 'version'; versionLabel: string | null };
 };
 
 export type EnvironmentInfo = {

@@ -85,6 +85,7 @@ function fakeClient(): jest.Mocked<PortalHelpdeskClient> {
     getTicket: jest.fn().mockResolvedValue(detail()),
     postMessage: jest.fn().mockResolvedValue(detail({ sequence: 2 })),
     postAction: jest.fn().mockResolvedValue(detail({ sequence: 2 })),
+    ticketStats: jest.fn(),
     getAttachment: jest.fn().mockResolvedValue({
       contentType: 'image/png',
       data: Buffer.from('x'),

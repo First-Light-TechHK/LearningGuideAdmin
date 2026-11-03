@@ -67,6 +67,11 @@ export type HelpdeskFaq = {
   entry: boolean;
   category: FaqCategory;
   popular: boolean;
+  /**
+   * 热门里的顺序（产品 2026-11-02）：1 排最前；null = 没排（排在有顺序的热门之后，再按更新时间）。
+   * 只在 popular 为 true 时起作用；迁移 20261102120000。
+   */
+  popularRank: number | null;
   questionEn: string;
   /** Markdown 子集（**粗体**、1. 有序、- 无序、[链接](https://… / mailto:)、段落）。 */
   answerEn: string;

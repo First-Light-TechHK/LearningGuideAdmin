@@ -15,6 +15,7 @@ import {
 } from '../../src/backoffice/modules/helpdesk/faqs/faqReleaseService';
 import { createPgFaqRepository } from '../../src/backoffice/modules/helpdesk/faqs/faqRepository';
 import { createFaqService } from '../../src/backoffice/modules/helpdesk/faqs/faqService';
+import { createEnvFaqVectorIndexer } from '../../src/backoffice/modules/helpdesk/faqs/faqVectors';
 
 /**
  * 从 FAQ 库文件导入问题树并建发布版本 v1（helpdesk-v5-faq-graph-design §8.2）：
@@ -37,6 +38,9 @@ async function main(): Promise<void> {
   const repository = createPgFaqRepository();
   const graph = createPgFaqGraphRepository();
   const releaseSource = createPgFaqReleaseSource(graph);
+  // 新版本的向量（配了 HELPDESK_EMBED_MODEL 才算）在关连接池之前算完
+  const indexer = createEnvFaqVectorIndexer();
+  const indexing: Promise<unknown>[] = [];
   try {
     const report = await seedFaqLibrary(
       {
@@ -47,14 +51,25 @@ async function main(): Promise<void> {
         }),
         repository,
         graph: createFaqGraphService({ graph }),
-        releases: createFaqReleaseService({ graph }),
+        releases: createFaqReleaseService({
+          graph,
+          vectors: {
+            index(version) {
+              const done = indexer.index(version);
+              indexing.push(done);
+              return done;
+            },
+          },
+        }),
       },
       library,
       { actor: { employeeId }, release: args.release },
     );
+    await Promise.all(indexing);
     console.log(JSON.stringify(report, null, 2));
     process.exitCode = seedExitCode(report);
   } finally {
+    await Promise.allSettled(indexing);
     await closePool();
   }
 }

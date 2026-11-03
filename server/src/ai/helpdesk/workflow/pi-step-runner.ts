@@ -79,6 +79,17 @@ export type ModelSource = (
 };
 
 const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+/**
+ * OpenRouter 的 provider 路由：先用最便宜的、且收下我们发的全部参数（工具、reasoning）的 provider。
+ * 2026-10-31 owner 选了「只选最便宜」：按吞吐排时最快的几家比最便宜的贵 10 到 20 倍（3,499 轮实花约
+ * 5.4 美元，按目录价只记 0.7 美元）；最便宜的慢一些（九成 4.5 秒内），慢的由 6.3 秒切换兜住。
+ * 只写排序规则，不写 provider 名字（模型任意）。按价格排时目录价接近实付，costUsd 也就接近真花费。
+ */
+export const OPENROUTER_ROUTING = {
+  sort: 'price',
+  require_parameters: true,
+} as const;
 let openRouterModels: ReturnType<PiModules['ai']['createModels']> | undefined;
 
 /**
@@ -92,12 +103,18 @@ export const openRouterSource: ModelSource = (pi, target) => {
     openRouterModels.setProvider(pi.openrouter.openrouterProvider());
   }
   const known = openRouterModels.getModel('openrouter', target.model);
-  const thinks = target.thinking !== undefined;
+  // 价目里写明不会思考的模型（如 qwen3-30b-a3b-instruct-2507、mistral-small-3.2）关思考时不发 reasoning：
+  // 发了 effort none，require_parameters 会把它所有 provider 都筛掉（OpenRouter 404，2026-11-02 实测）
+  const thinks =
+    target.thinking !== undefined &&
+    !(target.thinking === 'off' && known !== undefined && !known.reasoning);
+  const routing = { openRouterRouting: { ...OPENROUTER_ROUTING } };
   const model: Model<Api> =
     known?.api === 'openai-completions'
       ? {
           ...known,
           baseUrl: target.baseUrl,
+          compat: { ...known.compat, ...routing },
           ...(thinks ? { reasoning: true } : {}),
         }
       : {
@@ -111,6 +128,7 @@ export const openRouterSource: ModelSource = (pi, target) => {
           cost: known?.cost ?? NO_COST,
           contextWindow: known?.contextWindow ?? 128_000,
           maxTokens: known?.maxTokens ?? 4_096,
+          compat: routing,
         };
   return { models: openRouterModels, model, priced: known !== undefined };
 };

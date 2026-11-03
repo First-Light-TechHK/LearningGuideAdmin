@@ -76,27 +76,54 @@ function actionFor(method: string, segments: string[]): ActionKind {
 }
 
 /**
- * /api/backoffice/courses/** 的操作类型：
+ * /api/backoffice/courses/** 的操作类型（REQ-0236：Course=Edit 可查看及编辑已有 Course
+ * 内容，但不能新增、删除或发布 Course）：
  * - GET 一律 VIEW；
- * - import/export/confirm/publish-uat/approve/go-live/live-status/restore = PUBLISH；
- * - 其余写操作按 CREATE。
+ * - 新建课程（POST /courses）= CREATE；
+ * - 导入/导出/确认/发布/删草稿/上下线/恢复 = PUBLISH（导入会整门新建或覆盖课程）；
+ * - 价格、试看与 Stripe 同步属商业配置，不是课程内容，按 CREATE（只有 Full 可用）；
+ * - 其余写操作都在某门已有课程（/courses/:id/...）之内，改的是课程内容
+ *   （基本信息、多语言、课时增删排序、视频、展品、阅读、测验、封面、媒体上传），= EDIT_EXISTING；
+ * - 未在此登记的写接口按 CREATE，避免新接口默认放开。
  */
+const COURSE_PUBLISH_SEGMENTS = new Set([
+  'import',
+  'export',
+  'confirm',
+  'cancel',
+  'publish',
+  'delete-draft',
+  'live-status',
+  'restore',
+]);
+const COURSE_COMMERCIAL_SEGMENTS = new Set(['plans', 'trial', 'sync-stripe']);
+const COURSE_CONTENT_SEGMENTS = new Set([
+  'localizations',
+  'lessons',
+  'media',
+  'cover',
+  'docx',
+  'readings',
+  'understanding',
+]);
+
 function backofficeCourseAction(
   method: string,
   segments: string[],
 ): ActionKind {
   if (method === 'GET' || method === 'HEAD') return 'VIEW';
-  const publishSegments = new Set([
-    'import',
-    'export',
-    'confirm',
-    'cancel',
-    'publish',
-    'delete-draft',
-    'live-status',
-    'restore',
-  ]);
-  if (segments.some((seg) => publishSegments.has(seg))) return 'PUBLISH';
+  // segments: ['backoffice', 'courses', ...rest]
+  const rest = segments.slice(2);
+  if (rest.length === 0) return 'CREATE';
+  // 整包导入 / 导出（/courses/import/**、/courses/export/**）
+  if (rest[0] === 'import' || rest[0] === 'export') return 'PUBLISH';
+  // 对一门课的发布级动作（/courses/:id/publish、/courses/:id/import ...）
+  if (rest.length === 2 && COURSE_PUBLISH_SEGMENTS.has(rest[1]))
+    return 'PUBLISH';
+  if (rest.some((seg) => COURSE_COMMERCIAL_SEGMENTS.has(seg))) return 'CREATE';
+  if (rest.length === 1 && method === 'PUT') return 'EDIT_EXISTING';
+  if (rest.length >= 2 && COURSE_CONTENT_SEGMENTS.has(rest[1]))
+    return 'EDIT_EXISTING';
   return 'CREATE';
 }
 
@@ -132,6 +159,23 @@ export function routeAccess(method: string, path: string): RouteAccess {
       kind: 'menu',
       menus: ['helpDesk'],
       action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'CREATE',
+    };
+  }
+  // 学生管理（Student Management PRD §2）：读 = VIEW（所有能看 Student 菜单的角色），
+  // 改单人访问、停用 / 启用、改邮箱、发链接都按 CREATE 处理，只有 Student 为 Full 的角色（Admin、Operation Admin）可用
+  if (first === 'students') {
+    return {
+      kind: 'menu',
+      menus: ['student'],
+      action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'CREATE',
+    };
+  }
+  // Settings › Learning Access & Experiments（PRD §7）：只读角色可看；全局开关与紧急关闭只给 Settings 为 Full 的角色
+  if (first === 'learning-access') {
+    return {
+      kind: 'menu',
+      menus: ['settings'],
+      action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
     };
   }
   if (first === 'backoffice') {

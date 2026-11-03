@@ -355,7 +355,7 @@ describe('FAQ graph checks (§2.3, pure)', () => {
   });
 
   it('names every rule it can report', () => {
-    expect(GRAPH_RULES).toHaveLength(13);
+    expect(GRAPH_RULES).toHaveLength(16);
   });
 });
 
@@ -368,6 +368,7 @@ function faq(id: string, overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'other',
     popular: false,
+    popularRank: null,
     questionEn: 'Q?',
     answerEn: 'First paragraph.\n\n- one\n- two',
     questionZh: '问？',

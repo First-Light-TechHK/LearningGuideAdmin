@@ -18,6 +18,7 @@ import { summaryLine } from '../lib/helpdeskMarkdown'
 import { longDate, resyncQuery } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
+import { FaqCardReview } from './FaqCardReview'
 import { HdSearchIcon } from './icons'
 
 /**
@@ -25,6 +26,7 @@ import { HdSearchIcon } from './icons'
  * 筛选与页码都在地址栏（?tab=faqs&q=&category=&popular=&page=），刷新 / 分享不丢。
  * 写操作（Edit）只给 FULL；Preview 所有能进 Help Desk 的角色都能用。
  * 地址栏的 q 变了（返回 / 前进）搜索框跟着变；页码超过最后一页（删掉最后一页唯一一行、旧书签）时换到最后一页。
+ * 「逐张审核」视图（?view=review，FaqCardReview.tsx，待视觉验收）：同一个搜索和分类，一张一张审；表格不变，仍是缺省视图。
  */
 
 const POPULAR_FILTERS: PopularFilter[] = ['all', 'popular', 'not_popular']
@@ -36,12 +38,17 @@ type Props = {
   refreshKey: number
   onEdit: (faq: HelpdeskFaq) => void
   onPreview: (faq: HelpdeskFaq) => void
+  /** 逐张审核里改了、审了或下线了一张卡（表格回来时要重新读）。 */
+  onChanged?: () => void
 }
+
+type View = 'table' | 'review'
 
 type Loaded = { faqs: HelpdeskFaq[]; total: number }
 
-export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Props) {
+export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview, onChanged }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const view: View = searchParams.get('view') === 'review' ? 'review' : 'table'
   const filters = readFaqFilters(searchParams)
   // 只在筛选真的变了时重新请求（地址栏里别的参数变化不算）
   const filterKey = JSON.stringify(filters)
@@ -58,6 +65,8 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
   const clampToPage = useRef<(page: number) => void>(() => undefined)
 
   useEffect(() => {
+    // 逐张审核自己读队列
+    if (view === 'review') return
     const id = ++request.current
     void listFaqs(JSON.parse(filterKey) as FaqFilters).then((result) => {
       if (id !== request.current) return
@@ -77,7 +86,7 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
       }
       setSettledFor(`${filterKey}#${refreshKey}`)
     })
-  }, [filterKey, refreshKey])
+  }, [filterKey, refreshKey, view])
 
   // 地址栏的 q 变了（返回 / 前进）：搜索框跟着变，正在输入时不打断
   useEffect(() => {
@@ -109,6 +118,16 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
     clampToPage.current = (page) => update({ page }, true)
   })
 
+  /** 视图在地址栏：切视图不丢搜索和分类；切回表格时去掉审核的参数。 */
+  function setView(next: View) {
+    if (next === view) return
+    const params = new URLSearchParams(latestParams.current)
+    if (next === 'review') params.set('view', 'review')
+    else for (const key of ['view', 'card', 'rstate']) params.delete(key)
+    latestParams.current = params
+    setSearchParams(params)
+  }
+
   function onSearch(value: string) {
     setSearch(value)
     if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -125,9 +144,25 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
   const filtered = filters.q !== '' || filters.category !== 'all' || filters.popular !== 'all'
   const zh = locale === 'zh-CN'
 
+  const views = (
+    <div className="hdReviewViews" role="group" aria-label={t(locale, 'helpDesk.faqReview.viewLabel')}>
+      {(['table', 'review'] as const).map((key) => (
+        <button
+          key={key}
+          type="button"
+          className={`hdReviewView${view === key ? ' hdReviewViewOn' : ''}`}
+          aria-pressed={view === key}
+          onClick={() => setView(key)}
+        >
+          {t(locale, `helpDesk.faqReview.view.${key}`)}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
-    <div className="hdFaqs">
-      <div className="hdFaqFilters">
+    <div className={`hdFaqs${view === 'review' ? ' hdReviewMode hdFaqsReview' : ''}`}>
+      <div className={`hdFaqFilters${view === 'review' ? ' hdReviewFilters' : ''}`}>
         <label className="hdFaqSearch">
           <HdSearchIcon size={10} className="hdFaqSearchIcon" />
           <input
@@ -152,159 +187,176 @@ export function FaqsView({ locale, canWrite, refreshKey, onEdit, onPreview }: Pr
             </option>
           ))}
         </select>
-        <select
-          className="hdFaqSelect hdFaqSelectPopular"
-          aria-label={t(locale, 'helpDesk.faqs.columns.popular')}
-          value={filters.popular}
-          onChange={(event) => update({ popular: event.target.value as PopularFilter })}
-        >
-          {POPULAR_FILTERS.map((value) => (
-            <option key={value} value={value}>
-              {t(locale, `helpDesk.faqs.popularFilter.${value}`)}
-            </option>
-          ))}
-        </select>
-        {loaded ? (
+        {view === 'table' ? (
+          <select
+            className="hdFaqSelect hdFaqSelectPopular"
+            aria-label={t(locale, 'helpDesk.faqs.columns.popular')}
+            value={filters.popular}
+            onChange={(event) => update({ popular: event.target.value as PopularFilter })}
+          >
+            {POPULAR_FILTERS.map((value) => (
+              <option key={value} value={value}>
+                {t(locale, `helpDesk.faqs.popularFilter.${value}`)}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {loaded && view === 'table' ? (
           <span className="hdFaqCount" aria-live="polite">
             {total === 1 ? t(locale, 'helpDesk.faqs.countOne') : t(locale, 'helpDesk.faqs.count', { count: total })}
           </span>
         ) : null}
+        {views}
       </div>
 
-      {errorCode ? (
-        <div className="hdNotice hdFaqError" role="alert">
-          {errorMessage(locale, errorCode)}
-        </div>
-      ) : null}
+      {view === 'review' ? (
+        <FaqCardReview
+          locale={locale}
+          canWrite={canWrite}
+          q={filters.q}
+          category={filters.category}
+          refreshKey={refreshKey}
+          onChanged={() => onChanged?.()}
+          onPreview={onPreview}
+        />
+      ) : (
+        <>
+          {errorCode ? (
+            <div className="hdNotice hdFaqError" role="alert">
+              {errorMessage(locale, errorCode)}
+            </div>
+          ) : null}
 
-      <div className="hdFaqTableWrap" aria-busy={loading}>
-        <table className="hdFaqTable">
-          <colgroup>
-            <col className="hdFaqColQuestion" />
-            <col className="hdFaqColCategory" />
-            <col className="hdFaqColPopular" />
-            <col className="hdFaqColUpdated" />
-            <col className="hdFaqColAction" />
-          </colgroup>
-          <thead>
-            <tr>
-              {(['question', 'category', 'popular', 'updated', 'action'] as const).map((column) => (
-                <th key={column} scope="col">
-                  {t(locale, `helpDesk.faqs.columns.${column}`)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((faq) => {
-              const question = zh ? faq.questionZh : faq.questionEn
-              const swatch = FAQ_CATEGORY_SWATCH[faq.category] ?? FAQ_CATEGORY_SWATCH.other
-              return (
-                <tr key={faq.id}>
-                  <td>
-                    <div className="hdFaqQuestion">
-                      {question}
-                      {/* v5 问题树：选择题 / 非入口的追问在问题旁标出（待视觉验收） */}
-                      {faq.type === 'choice' ? <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.choiceTag')}</span> : null}
-                      {faq.entry === false ? <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.followUpTag')}</span> : null}
-                    </div>
-                    <div className="hdFaqSummary">{summaryLine(zh ? faq.answerZh : faq.answerEn)}</div>
-                  </td>
-                  <td>
-                    <span
-                      className="hdFaqChip"
-                      data-category={faq.category}
-                      style={{ background: swatch.bg, color: swatch.fg }}
-                    >
-                      {faqCategoryLabel(locale, faq.category)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`hdFaqChip ${faq.popular ? 'hdFaqChipYes' : 'hdFaqChipNo'}`}>
-                      {t(locale, faq.popular ? 'helpDesk.faqs.yes' : 'helpDesk.faqs.no')}
-                    </span>
-                  </td>
-                  <td className="hdFaqDate">{longDate(faq.updatedAt, locale)}</td>
-                  <td>
-                    <div className="hdFaqActions">
-                      {canWrite ? (
-                        <button
-                          type="button"
-                          className="hdFaqEdit"
-                          aria-label={t(locale, 'helpDesk.faqs.editLabel', { question })}
-                          onClick={() => onEdit(faq)}
-                        >
-                          {t(locale, 'helpDesk.faqs.edit')}
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="hdFaqPreview"
-                        aria-label={t(locale, 'helpDesk.faqs.previewLabel', { question })}
-                        onClick={() => onPreview(faq)}
-                      >
-                        {t(locale, 'helpDesk.faqs.preview')}
-                      </button>
-                    </div>
-                  </td>
+          <div className="hdFaqTableWrap" aria-busy={loading}>
+            <table className="hdFaqTable">
+              <colgroup>
+                <col className="hdFaqColQuestion" />
+                <col className="hdFaqColCategory" />
+                <col className="hdFaqColPopular" />
+                <col className="hdFaqColUpdated" />
+                <col className="hdFaqColAction" />
+              </colgroup>
+              <thead>
+                <tr>
+                  {(['question', 'category', 'popular', 'updated', 'action'] as const).map((column) => (
+                    <th key={column} scope="col">
+                      {t(locale, `helpDesk.faqs.columns.${column}`)}
+                    </th>
+                  ))}
                 </tr>
-              )
-            })}
-            {loaded && rows.length === 0 && !errorCode ? (
-              <tr>
-                <td colSpan={5} className="hdFaqEmpty">
-                  {t(locale, filtered ? 'helpDesk.faqs.emptyFiltered' : 'helpDesk.faqs.empty')}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {rows.map((faq) => {
+                  const question = zh ? faq.questionZh : faq.questionEn
+                  const swatch = FAQ_CATEGORY_SWATCH[faq.category] ?? FAQ_CATEGORY_SWATCH.other
+                  return (
+                    <tr key={faq.id}>
+                      <td>
+                        <div className="hdFaqQuestion">
+                          {question}
+                          {/* v5 问题树：选择题 / 非入口的追问在问题旁标出（待视觉验收） */}
+                          {faq.type === 'choice' ? (
+                            <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.choiceTag')}</span>
+                          ) : null}
+                          {faq.entry === false ? (
+                            <span className="hdGraphTag hdFaqNodeTag">{t(locale, 'helpDesk.faqs.followUpTag')}</span>
+                          ) : null}
+                        </div>
+                        <div className="hdFaqSummary">{summaryLine(zh ? faq.answerZh : faq.answerEn)}</div>
+                      </td>
+                      <td>
+                        <span className="hdFaqChip" data-category={faq.category} style={{ background: swatch.bg, color: swatch.fg }}>
+                          {faqCategoryLabel(locale, faq.category)}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`hdFaqChip ${faq.popular ? 'hdFaqChipYes' : 'hdFaqChipNo'}`}>
+                          {t(locale, faq.popular ? 'helpDesk.faqs.yes' : 'helpDesk.faqs.no')}
+                        </span>
+                      </td>
+                      <td className="hdFaqDate">{longDate(faq.updatedAt, locale)}</td>
+                      <td>
+                        <div className="hdFaqActions">
+                          {canWrite ? (
+                            <button
+                              type="button"
+                              className="hdFaqEdit"
+                              aria-label={t(locale, 'helpDesk.faqs.editLabel', { question })}
+                              onClick={() => onEdit(faq)}
+                            >
+                              {t(locale, 'helpDesk.faqs.edit')}
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="hdFaqPreview"
+                            aria-label={t(locale, 'helpDesk.faqs.previewLabel', { question })}
+                            onClick={() => onPreview(faq)}
+                          >
+                            {t(locale, 'helpDesk.faqs.preview')}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {loaded && rows.length === 0 && !errorCode ? (
+                  <tr>
+                    <td colSpan={5} className="hdFaqEmpty">
+                      {t(locale, filtered ? 'helpDesk.faqs.emptyFiltered' : 'helpDesk.faqs.empty')}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
 
-      {total > 0 ? (
-        <footer className="hdFaqFooter">
-          <span>{t(locale, 'helpDesk.faqs.showing', { from: range.from, to: range.to, total })}</span>
-          <nav className="hdFaqPages" aria-label={t(locale, 'helpDesk.faqs.pagination')}>
-            {filters.page > 1 ? (
-              <button
-                type="button"
-                className="hdFaqPageStep"
-                aria-label={t(locale, 'helpDesk.faqs.previous')}
-                onClick={() => update({ page: filters.page - 1 })}
-              >
-                ‹
-              </button>
-            ) : null}
-            {pageWindow(Math.min(filters.page, totalPages), totalPages).map((item, index) =>
-              item === 'gap' ? (
-                <span key={`gap-${index}`} className="hdFaqPageGap" aria-hidden="true">
-                  …
-                </span>
-              ) : (
+          {total > 0 ? (
+            <footer className="hdFaqFooter">
+              <span>{t(locale, 'helpDesk.faqs.showing', { from: range.from, to: range.to, total })}</span>
+              <nav className="hdFaqPages" aria-label={t(locale, 'helpDesk.faqs.pagination')}>
+                {filters.page > 1 ? (
+                  <button
+                    type="button"
+                    className="hdFaqPageStep"
+                    aria-label={t(locale, 'helpDesk.faqs.previous')}
+                    onClick={() => update({ page: filters.page - 1 })}
+                  >
+                    ‹
+                  </button>
+                ) : null}
+                {pageWindow(Math.min(filters.page, totalPages), totalPages).map((item, index) =>
+                  item === 'gap' ? (
+                    <span key={`gap-${index}`} className="hdFaqPageGap" aria-hidden="true">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      className={`hdFaqPage${item === filters.page ? ' hdFaqPageActive' : ''}`}
+                      aria-label={t(locale, 'helpDesk.faqs.page', { page: item })}
+                      aria-current={item === filters.page ? 'page' : undefined}
+                      onClick={() => (item === filters.page ? undefined : update({ page: item }))}
+                    >
+                      {item}
+                    </button>
+                  ),
+                )}
                 <button
-                  key={item}
                   type="button"
-                  className={`hdFaqPage${item === filters.page ? ' hdFaqPageActive' : ''}`}
-                  aria-label={t(locale, 'helpDesk.faqs.page', { page: item })}
-                  aria-current={item === filters.page ? 'page' : undefined}
-                  onClick={() => (item === filters.page ? undefined : update({ page: item }))}
+                  className="hdFaqPageStep"
+                  aria-label={t(locale, 'helpDesk.faqs.next')}
+                  disabled={filters.page >= totalPages}
+                  onClick={() => update({ page: filters.page + 1 })}
                 >
-                  {item}
+                  ›
                 </button>
-              ),
-            )}
-            <button
-              type="button"
-              className="hdFaqPageStep"
-              aria-label={t(locale, 'helpDesk.faqs.next')}
-              disabled={filters.page >= totalPages}
-              onClick={() => update({ page: filters.page + 1 })}
-            >
-              ›
-            </button>
-          </nav>
-        </footer>
-      ) : null}
+              </nav>
+            </footer>
+          ) : null}
+        </>
+      )}
     </div>
   )
 }

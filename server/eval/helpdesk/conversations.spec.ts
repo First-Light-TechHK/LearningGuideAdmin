@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { Pool } from 'pg';
 
 import type {
+  AgentStepContext,
   AgentStepOutcome,
   AgentStepRunner,
   AgentStepSpec,
@@ -24,8 +25,12 @@ import {
   markdownConversationReport,
   runConversations,
   summarizeConversations,
+  score,
+  stepDetails,
   type ConversationOutcome,
   type EvalConversation,
+  type GotTurn,
+  type TurnExpectation,
   type TurnResult,
 } from './conversations';
 import {
@@ -190,11 +195,16 @@ function scriptedRunner(script: {
 }) {
   const prompts: Record<string, unknown>[] = [];
   const runner: AgentStepRunner = {
-    run(spec: AgentStepSpec): Promise<AgentStepOutcome> {
+    run(
+      spec: AgentStepSpec,
+      context: AgentStepContext,
+    ): Promise<AgentStepOutcome> {
       const prompt = JSON.parse(spec.prompt) as Record<string, unknown> & {
         candidates?: { id: string }[];
         shown?: { id: string } | null;
       };
+      // 缺省不思考（分级方案）：每步只发一次请求，没有后备那一路
+      expect(context.model.thinking).toBe('off');
       prompts.push(prompt);
       if (spec.tool.name === 'explain') {
         const e = script.explain?.[prompt.followUp as string] ?? {
@@ -204,8 +214,8 @@ function scriptedRunner(script: {
         if (e.explanation) texts.explanation = e.explanation;
         return Promise.resolve({
           kind: 'called',
-          args: {},
-          extras: { lists: {}, texts, flags: { covered: e.covered } },
+          args: { covered: e.covered ? 'yes' : 'no' },
+          extras: { lists: {}, texts, flags: {} },
         });
       }
       const s = script.pick[prompt.message as string] ?? {
@@ -236,7 +246,91 @@ const ENV = {
   OPENROUTER_API_KEY: 'fake-key-local-only',
   OPENROUTER_BASE_URL: 'http://fake-model.invalid/api/v1',
   HELPDESK_SUGGEST_MODEL: 'fake/scripted',
+  // 精排缺省开（会发 /rerank 请求）；这里只看对话怎样送到 Admin
+  HELPDESK_RERANK_MODEL: 'off',
 };
+
+describe('scoring a turn', () => {
+  const got = (kind: GotTurn['kind'], nodeId: string | null = null) => ({
+    kind,
+    intent: null,
+    nodeId,
+    covered: null,
+    guard: null,
+    blocks: [],
+  });
+
+  it.each([
+    [{ kind: 'smalltalk', intent: 'greeting' }],
+    [{ kind: 'smalltalk', intent: 'off_topic' }],
+    [{ kind: 'handover' }],
+  ] as TurnExpectation[][])(
+    'R3: a card where %j was expected is not a wrong FAQ but an extra card, and not right either',
+    (wanted) => {
+      // 用户 2026-10-30 16:52：期望寒暄或转人工时给卡片不算错（转人工也先尽量用卡片解决），单独记「多给卡片」
+      expect(score(wanted, got('answer', FAQ(13)), 0)).toEqual({
+        right: false,
+        wrongFaq: false,
+        extraCard: true,
+      });
+      expect(score(wanted, got('no_match'), 0)).toMatchObject({
+        wrongFaq: false,
+        extraCard: false,
+      });
+    },
+  );
+
+  it('still counts a card where no_match or clarify was expected as a wrong FAQ', () => {
+    expect(score({ kind: 'no_match' }, got('answer', FAQ(13)), 0)).toEqual({
+      right: false,
+      wrongFaq: true,
+    });
+    expect(
+      score(
+        { kind: 'clarify', faqId: FAQ(13), covered: true },
+        got('answer', FAQ(12)),
+        0,
+      ),
+    ).toMatchObject({ wrongFaq: true });
+  });
+});
+
+describe('which branch answered', () => {
+  // 开思考的聊天同时跑两路：复核要看给出回答的那一路的候选与 confidence
+  const step = (name: string, data: Record<string, unknown>) => ({
+    type: 'step/end',
+    data: { name, ...data },
+  });
+  const log = (branch?: string) => [
+    step('retrieve', {
+      branch: 'quick',
+      output: { candidates: [{ id: 'q1' }] },
+    }),
+    step('retrieve', { output: { candidates: [{ id: 't1' }, { id: 't2' }] } }),
+    step('pick_faq', { branch: 'quick', args: { confidence: 'sure' } }),
+    step('pick_faq', { args: { confidence: 'unsure' } }),
+    { type: 'turn/end', data: branch ? { branch } : {} },
+  ];
+
+  it.each([
+    ['thinking', ['t1', 't2'], 'unsure'],
+    ['quick', ['q1'], 'sure'],
+  ])('reads the steps of the %s branch', (branch, candidateIds, confidence) => {
+    expect(stepDetails(log(branch))).toEqual({
+      candidateIds,
+      confidence,
+      branch,
+    });
+  });
+
+  it('reads the only branch when there is no backup', () => {
+    expect(stepDetails(log().slice(1))).toEqual({
+      candidateIds: ['t1', 't2'],
+      confidence: 'unsure',
+      branch: null,
+    });
+  });
+});
 
 describe('running conversations like the Portal chat', () => {
   const conversation: EvalConversation = {
@@ -279,6 +373,7 @@ describe('running conversations like the Portal chat', () => {
       },
       'and with PayPal?': { intent: 'clarify', faqId: 'shown' },
       'still lost': { intent: 'question', faqId: 'none' },
+      'I want a human': { intent: 'question', faqId: 'none' },
       bye: { intent: 'farewell', faqId: 'none' },
     },
     explain: {
@@ -290,7 +385,7 @@ describe('running conversations like the Portal chat', () => {
     },
   };
 
-  it('sends the shown card, the session and the earlier words; clicks and handover words never reach Admin', async () => {
+  it('sends the shown card, the session and the earlier words; clicks never reach Admin, handover words do (Portal bc0aa9d)', async () => {
     const { runner, prompts } = scriptedRunner(script);
     const outcome = await runConversations({
       conversations: [conversation],
@@ -315,13 +410,15 @@ describe('running conversations like the Portal chat', () => {
     const picks = prompts.filter((p) => 'message' in p);
     expect(
       picks.map((p) => (p.shown as { id: string } | null)?.id ?? null),
-    ).toEqual([null, null, FAQ(13), FAQ(12), FAQ(12), FAQ(12)]);
+    ).toEqual([null, null, FAQ(13), FAQ(12), FAQ(12), FAQ(12), FAQ(12)]);
     expect(picks[3].recentTurns).toEqual([
       'hello',
       'can I get a refund',
       'what does fewer than two lessons mean?',
     ]);
-    expect(results.filter((r) => r.calledAdmin)).toHaveLength(6);
+    expect(results.filter((r) => r.calledAdmin)).toHaveLength(7);
+    // no answer card on the handover-word turn → the handover card alone
+    expect(results[6].got).toMatchObject({ handover: true, nodeId: null });
     // two unsolved in a row (the uncovered clarify, then a no_match) → the handover card is offered
     expect(results[5].unsolvedStreak).toBe(2);
     expect(results[2].grounded).toBe(true);
@@ -333,6 +430,53 @@ describe('running conversations like the Portal chat', () => {
     expect(results[2].got.said?.explanation).toEqual(expect.any(String));
     expect(results.every((r) => r.escapes.length === 0)).toBe(true);
     expect(outcome).toMatchObject({ conversationsRun: 1, stopped: null });
+  });
+
+  it('checks an explanation given on a handover-word turn against the card Admin explained, not as an escape', async () => {
+    const { runner } = scriptedRunner({
+      pick: {
+        'can I get a refund': { intent: 'question', faqId: FAQ(13) },
+        'I want a human, what does fewer than two lessons mean?': {
+          intent: 'clarify',
+          faqId: 'shown',
+        },
+      },
+      explain: {
+        'I want a human, what does fewer than two lessons mean?': {
+          covered: true,
+          explanation:
+            'No problem: if you have finished at most one lesson, you can still ask within 14 days.',
+        },
+      },
+    });
+    const outcome = await runConversations({
+      conversations: [
+        {
+          ...conversation,
+          id: 'c-handover-clarify',
+          turns: [
+            {
+              message: 'can I get a refund',
+              expect: { kind: 'answer', faqId: FAQ(13) },
+            },
+            {
+              message: 'I want a human, what does fewer than two lessons mean?',
+              expect: { kind: 'handover' },
+            },
+          ],
+        },
+      ],
+      qa: memoryQaSource(faqs),
+      runner,
+      env: ENV,
+      budgetUsd: 1,
+      paid: false,
+    });
+    const handover = outcome.results[1];
+    expect(handover.got).toMatchObject({ kind: 'handover', handover: true });
+    expect(handover.right).toBe(true);
+    expect(handover.grounded).toBe(true);
+    expect(handover.escapes).toEqual([]);
   });
 
   it('scores a wrong card, an ungrounded explanation and a wrong small-talk intent', async () => {
@@ -397,8 +541,66 @@ describe('running conversations like the Portal chat', () => {
     ]);
   });
 
-  it('counts a card shown where small talk or a handover was expected as a wrong card', async () => {
-    // any card answers some other question here: the learner wanted to say thanks, or a person
+  it('a handover word still asks Admin: an answer card comes first and the handover card ends the reply (neither wrong nor extra)', async () => {
+    const { runner } = scriptedRunner({
+      pick: {
+        'can I get a refund or must I ask 客服?': {
+          intent: 'question',
+          faqId: FAQ(13),
+        },
+        'I want a human about my refund': {
+          intent: 'question',
+          faqId: FAQ(13),
+        },
+      },
+    });
+    const outcome = await runConversations({
+      conversations: [
+        {
+          ...conversation,
+          flow: undefined,
+          turns: [
+            {
+              message: 'can I get a refund or must I ask 客服?',
+              expect: { kind: 'answer', faqId: FAQ(13) },
+            },
+          ],
+        },
+        {
+          ...conversation,
+          id: 'c2',
+          flow: undefined,
+          turns: [
+            {
+              message: 'I want a human about my refund',
+              expect: { kind: 'handover' },
+            },
+          ],
+        },
+      ],
+      qa: memoryQaSource(faqs),
+      runner,
+      env: ENV,
+      budgetUsd: 1,
+      paid: false,
+    });
+    expect(
+      outcome.results.map((r) => [
+        r.got.kind,
+        r.got.handover,
+        r.right,
+        r.wrongFaq,
+        r.extraCard,
+        r.calledAdmin,
+      ]),
+    ).toEqual([
+      ['answer', true, true, false, false, true],
+      ['answer', true, true, false, false, true],
+    ]);
+  });
+
+  it('R3: counts a card shown where small talk or a handover was expected as an extra card, not a wrong one', async () => {
+    // 用户 2026-10-30 16:52：想道谢或要人工时出了卡片，不算答错卡（转人工也先尽量用卡片解决），单独数
     const { runner } = scriptedRunner({
       pick: {
         'thanks for the refund help, bye': {
@@ -442,11 +644,28 @@ describe('running conversations like the Portal chat', () => {
       paid: false,
     });
     expect(
-      outcome.results.map((r) => [r.got.kind, r.right, r.wrongFaq]),
+      outcome.results.map((r) => [
+        r.got.kind,
+        r.right,
+        r.wrongFaq,
+        r.extraCard,
+      ]),
     ).toEqual([
-      ['answer', false, true],
-      ['answer', false, true],
+      ['answer', false, false, true],
+      ['answer', false, false, true],
     ]);
+    const report = summarizeConversations({
+      outcome,
+      totalConversations: 2,
+      model: { kind: 'fake', model: 'fake/x' },
+      retrieval: 'memory',
+      budgetUsd: 1,
+    });
+    expect(report.metrics).toMatchObject({
+      wrongFaqRate: 0,
+      extraCards: 2,
+      extraCardRate: 1,
+    });
   });
 
   it('stops at the budget before the next conversation', async () => {
@@ -490,6 +709,7 @@ describe('v5 conversation report and gate', () => {
       right: true,
       wrongFaq: false,
       viaEntry: false,
+      extraCard: false,
       grounded: null,
       escapes: [],
       unsolvedStreak: 0,
