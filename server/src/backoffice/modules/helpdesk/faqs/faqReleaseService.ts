@@ -249,6 +249,17 @@ export function createFaqReleaseService(
         '[helpdesk] FAQ release check failed:',
         error instanceof Error ? error.message : error,
       ));
+  // 版本列表变了（开始 / 进度 / 结果 / 发布）：通知这个进程里开着的长连接（faqReleaseStream.ts）
+  const listeners = new Set<() => void>();
+  const changed = () => {
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch {
+        // 一个连接出错不影响别的
+      }
+    }
+  };
   const summary = (
     release: FaqReleaseRow,
     publishedVersion: number | null,
@@ -302,14 +313,14 @@ export function createFaqReleaseService(
         metrics: {},
         misses: [],
       };
-      return (
-        (await graph.setStatus(
-          release.version,
-          ['draft', 'evaluating', 'rejected'],
-          'rejected',
-          report,
-        )) ?? release
+      const rejected = await graph.setStatus(
+        release.version,
+        ['draft', 'evaluating', 'rejected'],
+        'rejected',
+        report,
       );
+      changed();
+      return rejected ?? release;
     }
     const runId = uuidv7();
     const at = now();
@@ -326,6 +337,7 @@ export function createFaqReleaseService(
         'FAQ_RELEASE_EVALUATING',
         `v${release.version} is being checked right now; wait for the result`,
       );
+    changed();
     const work = runEval(release, runId);
     if (background) {
       work.catch(onBackgroundError);
@@ -372,6 +384,7 @@ export function createFaqReleaseService(
               .evalHeartbeat(release.version, runId, now(), progress)
               .catch(() => true);
             if (!alive) controller.abort();
+            else changed();
             return alive;
           },
         })),
@@ -390,13 +403,15 @@ export function createFaqReleaseService(
     } finally {
       clearInterval(timer);
     }
-    return graph.finishEval(
+    const finished = await graph.finishEval(
       release.version,
       runId,
       report.passed ? 'draft' : 'rejected',
       report,
       now(),
     );
+    changed();
+    return finished;
   }
 
   async function publish(
@@ -427,6 +442,7 @@ export function createFaqReleaseService(
       );
     // published / already：这一版就是上线的
     indexVectors(result.release.version);
+    changed();
     return summary(result.release, result.release.version);
   }
 
@@ -435,6 +451,12 @@ export function createFaqReleaseService(
   }
 
   return {
+    /** 订阅版本列表的变化（只在这个进程里；别的实例上的变化由长连接自己定时对数据库补上）。 */
+    onChange(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+
     async list(): Promise<{
       releases: FaqReleaseSummary[];
       published: number | null;

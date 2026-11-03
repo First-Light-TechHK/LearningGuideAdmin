@@ -3,7 +3,7 @@ import './support/dom'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import type {
   FaqEdgeView,
@@ -606,6 +606,50 @@ describe('chat preview (graph design §5.3)', () => {
   })
 })
 
+/* ------------------------------- EventSource（jsdom 没有） ------------------------------- */
+
+type FakeSource = { url: string; closed: boolean; push: (event: string, data: unknown) => void; emit: (event: string, raw: string) => void }
+const realEventSource = (globalThis as { EventSource?: unknown }).EventSource
+
+function installFakeEventSource(): FakeSource[] {
+  const sources: FakeSource[] = []
+  class FakeEventSource {
+    url: string
+    closed = false
+    private listeners = new Map<string, ((event: MessageEvent<string>) => void)[]>()
+    constructor(url: string) {
+      this.url = url
+      const isClosed = () => this.closed
+      sources.push({
+        url,
+        get closed() {
+          return isClosed()
+        },
+        push: (event, data) => this.dispatch(event, JSON.stringify(data)),
+        emit: (event, raw) => this.dispatch(event, raw),
+      })
+    }
+    addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
+    }
+    close() {
+      this.closed = true
+    }
+    private dispatch(type: string, data: string) {
+      act(() => {
+        for (const listener of this.listeners.get(type) ?? []) listener({ data } as MessageEvent<string>)
+      })
+    }
+  }
+  ;(globalThis as { EventSource?: unknown }).EventSource = FakeEventSource
+  return sources
+}
+
+function uninstallFakeEventSource() {
+  if (realEventSource === undefined) delete (globalThis as { EventSource?: unknown }).EventSource
+  else (globalThis as { EventSource?: unknown }).EventSource = realEventSource
+}
+
 /* ---------------------------------- 发布页 ---------------------------------- */
 
 function release(version: number, patch: Partial<FaqRelease> = {}): FaqRelease {
@@ -741,48 +785,76 @@ describe('publish a new version (graph design §5.4)', () => {
     assert.ok(within(dialog).getByText('Old question'))
   })
 
-  test('a background check shows its progress and refreshes until the result is in; an interrupted one can be checked again', async () => {
-    const running = release(3, {
-      status: 'evaluating',
-      publishedAt: null,
-      evalReport: null,
-      evaluation: { state: 'running', startedAt: '2026-11-03T10:00:00Z', progress: { stage: 'model', done: 120, total: 300 } },
-    })
-    const { dialog, set } = await openReleases('ADMIN', [release(1), release(2, { status: 'published' }), running])
-    assert.ok(within(dialog).getByText('Checking: live-pipeline sample 120 / 300'))
-    assert.ok(within(dialog).getByText('Checking'))
-    // still running: no second check can be started
-    absent(within(dialog).queryByRole('button', { name: /^Check again/ }))
-    const model = {
-      kind: 'model',
-      passed: true,
-      summary: 'Live-pipeline sample passed (model): …',
-      ranAt: '2026-11-03T10:04:00Z',
-      metrics: { wrongRate: 0.01, cases: 300, costUsd: 0.12 },
-      misses: [],
-    } as const
-    set([
-      release(1),
-      release(2, { status: 'published' }),
-      release(3, {
-        status: 'draft',
-        publishable: true,
+  test('a background check shows its progress; the open drawer stays connected and the server pushes the result (no re-reading)', async () => {
+    const sources = installFakeEventSource()
+    try {
+      const running = release(3, {
+        status: 'evaluating',
         publishedAt: null,
-        evalReport: {
-          kind: 'combined',
-          passed: true,
-          summary: '',
-          ranAt: '2026-11-03T10:04:00Z',
-          metrics: { recallAt8: 0.9871 },
-          misses: [],
-          parts: [{ kind: 'retrieval', passed: true, summary: '', ranAt: '2026-11-03T10:01:00Z', metrics: { recallAt8: 0.9871 }, misses: [] }, model],
-        },
-        evaluation: null,
-      }),
-    ])
-    // the drawer reads the list again by itself (every 3 s) and shows the model line
-    await within(dialog).findByText(/^Live-pipeline sample Passed: wrong card 1\.0%, 300 questions, about ¥0\.86/, undefined, { timeout: 10_000 })
-    absent(within(dialog).queryByText(/^Checking: /))
+        evalReport: null,
+        evaluation: { state: 'running', startedAt: '2026-11-03T10:00:00Z', progress: { stage: 'model', done: 120, total: 300 } },
+      })
+      const { dialog } = await openReleases('ADMIN', [release(1), release(2, { status: 'published' }), running])
+      assert.ok(within(dialog).getByText('Checking: live-pipeline sample 120 / 300'))
+      assert.ok(within(dialog).getByText('Checking'))
+      // still running: no second check can be started
+      absent(within(dialog).queryByRole('button', { name: /^Check again/ }))
+      // one long connection to the release stream
+      assert.deepEqual(
+        sources.map((source) => source.url),
+        ['/api/helpdesk/faq-releases/stream'],
+      )
+      const model = {
+        kind: 'model',
+        passed: true,
+        summary: 'Live-pipeline sample passed (model): …',
+        ranAt: '2026-11-03T10:04:00Z',
+        metrics: { wrongRate: 0.01, cases: 300, costUsd: 0.12 },
+        misses: [],
+      } as const
+      const reads = server.callsTo('GET', '/api/helpdesk/faq-releases').length
+      sources[0].push('releases', {
+        releases: [running, release(2, { status: 'published' }), release(1)].map((r) =>
+          r.version === 3 ? { ...r, evaluation: { ...r.evaluation!, progress: { stage: 'model', done: 210, total: 300 } } } : r,
+        ),
+        published: 2,
+      })
+      await within(dialog).findByText('Checking: live-pipeline sample 210 / 300')
+      sources[0].push('releases', {
+        releases: [
+          release(3, {
+            status: 'draft',
+            publishable: true,
+            publishedAt: null,
+            evaluation: null,
+            evalReport: {
+              kind: 'combined',
+              passed: true,
+              summary: '',
+              ranAt: '2026-11-03T10:04:00Z',
+              metrics: { recallAt8: 0.9871 },
+              misses: [],
+              parts: [{ kind: 'retrieval', passed: true, summary: '', ranAt: '2026-11-03T10:01:00Z', metrics: { recallAt8: 0.9871 }, misses: [] }, model],
+            },
+          }),
+          release(2, { status: 'published' }),
+          release(1),
+        ],
+        published: 2,
+      })
+      await within(dialog).findByText(/^Live-pipeline sample Passed: wrong card 1\.0%, 300 questions, about ¥0\.86/)
+      absent(within(dialog).queryByText(/^Checking: /))
+      // pushed, not re-read
+      assert.equal(server.callsTo('GET', '/api/helpdesk/faq-releases').length, reads)
+      // a broken frame is ignored
+      sources[0].emit('releases', '{not json')
+      assert.ok(within(dialog).getByText(/^Live-pipeline sample Passed/))
+      // closing the drawer closes the connection
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+      await waitFor(() => assert.equal(sources[0].closed, true))
+    } finally {
+      uninstallFakeEventSource()
+    }
   })
 
   test('a check whose heartbeat stopped shows Check interrupted and can be checked again', async () => {

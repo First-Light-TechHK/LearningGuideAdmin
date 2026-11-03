@@ -150,7 +150,13 @@ describeDb('FAQ release checks run in the background (PostgreSQL)', () => {
       background: true,
       onBackgroundError: (error) => errors.push(error),
     });
+    // 长连接（faqReleaseStream.ts）靠这个立刻推：开始、进度、结果各通知一次
+    let changes = 0;
+    const unsubscribe = service.onChange(() => {
+      changes += 1;
+    });
     const { release, created } = await service.create(actor);
+    expect(changes).toBe(1);
     expect(created).toBe(true);
     expect(release).toMatchObject({
       status: 'evaluating',
@@ -165,6 +171,7 @@ describeDb('FAQ release checks run in the background (PostgreSQL)', () => {
       total: 300,
     };
     await expect(pending[0].input.progress?.(progress)).resolves.toBe(true);
+    expect(changes).toBe(2);
     expect((await service.get(release.version)).evaluation).toMatchObject({
       state: 'running',
       progress,
@@ -182,6 +189,8 @@ describeDb('FAQ release checks run in the background (PostgreSQL)', () => {
       evaluation: null,
       evalReport: { kind: 'model', passed: true, baselineVersion: null },
     });
+    expect(changes).toBe(3);
+    unsubscribe();
     expect(errors).toEqual([]);
   });
 

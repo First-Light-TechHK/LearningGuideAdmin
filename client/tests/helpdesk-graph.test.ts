@@ -26,7 +26,6 @@ import {
   previewTurn,
   releaseActions,
   releaseStatusKey,
-  checksRunning,
   modelReport,
   validateLabelDraft,
   validatePhrasing,
@@ -249,8 +248,6 @@ describe('release actions', () => {
     assert.equal(releaseActions(stopped, 2).recheck, true)
     assert.equal(releaseStatusKey(running), 'evaluating')
     assert.equal(releaseStatusKey(stopped), 'interrupted')
-    assert.equal(checksRunning([stopped]), false)
-    assert.equal(checksRunning([stopped, running]), true)
     for (const messages of [enGB, zhCN]) {
       const releases = (messages as unknown as { helpDesk: { releases: Record<string, unknown> } }).helpDesk.releases
       assert.equal(typeof (releases.status as Record<string, string>).interrupted, 'string')
