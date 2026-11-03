@@ -33,6 +33,13 @@ function keyTaken(): Error {
  * 冲突时什么都不改、Idempotency-Key 只建一条）。检索只做简单的包含匹配；真实 SQL 由
  * helpdesk-faqs-repository.pg.spec.ts 覆盖。
  */
+/** 与 SQL 一样：热门里有顺序的按顺序在前，没排的（和不是热门的）不分先后。 */
+function popularOrder(faq: HelpdeskFaq): number {
+  return faq.popular && faq.popularRank !== null
+    ? faq.popularRank
+    : Number.MAX_SAFE_INTEGER;
+}
+
 export function createMemoryFaqRepository(seed: MemoryFaqSeed[] = []) {
   const rows = new Map<string, HelpdeskFaq>();
   /** 与迁移的触发器一样：base、base-2、base-3……第一个空闲的。 */
@@ -209,6 +216,7 @@ export function createMemoryFaqRepository(seed: MemoryFaqSeed[] = []) {
           .sort(
             (a, b) =>
               Number(b.popular) - Number(a.popular) ||
+              popularOrder(a) - popularOrder(b) ||
               Number(b.category === filter.boost) -
                 Number(a.category === filter.boost) ||
               newestFirst(a, b),

@@ -118,6 +118,7 @@ function card(index: number, key: string): HelpdeskFaq {
     entry: true,
     category: 'account_technical',
     popular: false,
+    popularRank: null,
     questionEn: `Question ${key}`,
     answerEn: 'Answer',
     questionZh: `问题 ${key}`,

@@ -55,6 +55,7 @@ function faq(n: number, fields: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'payments_subscriptions',
     popular: false,
+    popularRank: null,
     questionEn: `Question ${n}?`,
     answerEn: `Answer ${n}.`,
     questionZh: `问题${n}？`,

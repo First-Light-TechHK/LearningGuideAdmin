@@ -493,6 +493,7 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
       entry: true,
       category: faq.category as never,
       popular: faq.popular === true,
+      popularRank: null,
       questionEn: text(faq.question),
       answerEn: text(faq.answer),
       questionZh: '如何重置密码？',

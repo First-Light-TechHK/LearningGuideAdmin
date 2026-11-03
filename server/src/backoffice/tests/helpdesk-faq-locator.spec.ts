@@ -412,6 +412,7 @@ function faq(n: number, question: string): HelpdeskFaq {
     entry: true,
     category: 'payments_subscriptions',
     popular: false,
+    popularRank: null,
     questionEn: question,
     answerEn: 'Answer.',
     questionZh: '问题',

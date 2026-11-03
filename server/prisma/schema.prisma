@@ -427,6 +427,8 @@ model HelpdeskFaq {
   id             String   @id @db.Uuid
   category       String
   popular        Boolean  @default(false)
+  /// 热门里的顺序（1 最前，null 没排）；迁移 20261102120000
+  popularRank    Int?     @map("popular_rank")
   questionEn     String   @map("question_en")
   answerEn       String   @map("answer_en")
   questionZh     String   @map("question_zh")
@@ -585,6 +587,7 @@ model HelpdeskFaqReleaseNode {
   entry          Boolean
   category       String
   popular        Boolean
+  popularRank    Int?     @map("popular_rank")
   questionEn     String   @map("question_en")
   answerEn       String   @map("answer_en")
   questionZh     String   @map("question_zh")

@@ -46,6 +46,7 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'account_technical',
     popular: false,
+    popularRank: null,
     questionEn: `Question ${counter}`,
     answerEn: 'Answer',
     questionZh: `问题 ${counter}`,

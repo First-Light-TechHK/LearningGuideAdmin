@@ -27,6 +27,7 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'account_technical',
     popular: false,
+    popularRank: null,
     questionEn: 'How do I reset my password?',
     answerEn: 'Use **Forgot password** on the sign-in page.',
     questionZh: '如何重置密码？',
@@ -281,6 +282,81 @@ describe('FAQs: edit with an optimistic version', () => {
         code: 'FAQ_NOT_FOUND',
       });
     }
+  });
+});
+
+describe('FAQs: the order of popular FAQs (product 2026-11-02)', () => {
+  it('stores popularRank, keeps it when an older BackOffice leaves it out, and clears it with null', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, {
+      ...validInput,
+      popularRank: 3,
+    });
+    expect(created.popularRank).toBe(3);
+    const textOnly = await service.update(employee, created.id, {
+      ...validInput,
+      questionEn: 'Still cannot log in',
+      version: created.version,
+    });
+    expect(textOnly.popularRank).toBe(3);
+    const cleared = await service.update(employee, created.id, {
+      ...validInput,
+      questionEn: 'Still cannot log in',
+      popularRank: null,
+      version: textOnly.version,
+    });
+    expect(cleared.popularRank).toBeNull();
+    const plain = await service.create(employee, {
+      ...validInput,
+      questionEn: 'Another one',
+    });
+    expect(plain.popularRank).toBeNull();
+  });
+
+  it('refuses a rank that is not a whole number from 1 to 999', async () => {
+    const { service } = setup();
+    for (const popularRank of [0, 1000, 1.5, '2', -1])
+      expect(
+        await rejection(
+          service.create(employee, { ...validInput, popularRank }),
+        ),
+      ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+
+  it('lists popular FAQs in their order first, then the unordered popular ones by newest', async () => {
+    const id = (n: number) =>
+      `0192eeee-0000-7000-8000-${String(n).padStart(12, '0')}`;
+    const { service } = setup([
+      faq({
+        id: id(1),
+        popular: true,
+        popularRank: 2,
+        updatedAt: '2026-10-05T00:00:00.000Z',
+      }),
+      faq({
+        id: id(2),
+        popular: true,
+        popularRank: null,
+        updatedAt: '2026-10-09T00:00:00.000Z',
+      }),
+      faq({
+        id: id(3),
+        popular: true,
+        popularRank: 1,
+        updatedAt: '2026-10-01T00:00:00.000Z',
+      }),
+      faq({
+        id: id(4),
+        popular: false,
+        popularRank: null,
+        updatedAt: '2026-10-10T00:00:00.000Z',
+      }),
+    ]);
+    const { body } = await service.published({
+      locale: 'en-GB',
+      popular: 'true',
+    });
+    expect(body.faqs.map((f) => f.id)).toEqual([id(3), id(1), id(2)]);
   });
 });
 

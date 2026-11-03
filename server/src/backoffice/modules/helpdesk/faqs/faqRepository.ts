@@ -104,6 +104,7 @@ export type FaqPatch = Partial<
     | 'entry'
     | 'category'
     | 'popular'
+    | 'popularRank'
     | 'questionEn'
     | 'answerEn'
     | 'questionZh'
@@ -151,7 +152,7 @@ export type FaqRepository = {
   ) => Promise<HelpdeskFaq | null>;
 };
 
-const COLUMNS = `id, key, node_type, entry, category, popular, question_en, answer_en,
+const COLUMNS = `id, key, node_type, entry, category, popular, popular_rank, question_en, answer_en,
   question_zh, answer_zh, keywords, signals, status, version, created_by, updated_by,
   created_at, updated_at`;
 /** 员工端读卡的列（FAQ 审核队列 faqReview.ts 复用，和 toFaq 配套）。 */
@@ -163,6 +164,7 @@ const PATCH_COLUMNS: Record<keyof FaqPatch, string> = {
   entry: 'entry',
   category: 'category',
   popular: 'popular',
+  popularRank: 'popular_rank',
   questionEn: 'question_en',
   answerEn: 'answer_en',
   questionZh: 'question_zh',
@@ -196,6 +198,13 @@ function nodeTypeOf(value: unknown): FaqNodeType {
     : 'answer';
 }
 
+function rankOf(value: unknown): number | null {
+  const rank = Number(value);
+  return value === null || value === undefined || !Number.isInteger(rank)
+    ? null
+    : rank;
+}
+
 export function toFaq(row: Row): HelpdeskFaq {
   return {
     id: String(row.id),
@@ -204,6 +213,7 @@ export function toFaq(row: Row): HelpdeskFaq {
     entry: row.entry !== false,
     category: row.category as FaqCategory,
     popular: row.popular === true,
+    popularRank: rankOf(row.popular_rank),
     questionEn: String(row.question_en),
     answerEn: String(row.answer_en),
     questionZh: String(row.question_zh),
@@ -483,9 +493,9 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
           `INSERT INTO helpdesk_faqs
              (id, category, popular, question_en, answer_en, question_zh, answer_zh,
               keywords, status, version, idempotency_key, created_by, updated_by, signals,
-              key, node_type, entry)
+              key, node_type, entry, popular_rank)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, 1, $10, $11, $11, $12::text[],
-                   $13, $14, $15)
+                   $13, $14, $15, $16)
            ON CONFLICT (idempotency_key) DO NOTHING
            RETURNING ${COLUMNS}`,
           [
@@ -505,6 +515,7 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
             faq.key === '' ? null : faq.key,
             faq.type,
             faq.entry,
+            faq.popularRank,
           ],
         );
         if (rows.length === 0) {
@@ -604,7 +615,9 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
             AND NOT (id::text = ANY ($5::text[]))
             AND ($6::boolean IS NOT TRUE OR entry)
             AND node_type = ANY ($7::text[])
-          ORDER BY popular DESC, (category = $4::text) IS TRUE DESC,
+          ORDER BY popular DESC,
+                   CASE WHEN popular THEN popular_rank END ASC NULLS LAST,
+                   (category = $4::text) IS TRUE DESC,
                    updated_at DESC, id DESC
           LIMIT $3`,
         params,

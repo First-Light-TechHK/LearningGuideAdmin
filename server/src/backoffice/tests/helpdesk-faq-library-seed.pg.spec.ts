@@ -10,6 +10,7 @@ import {
   seedExitCode,
   seedFaqLibrary,
   seedIdempotencyKey,
+  syncLibraryPopular,
   type SeedDeps,
   type SeedReport,
 } from '../modules/helpdesk/faqs/faqLibrarySeed';
@@ -183,8 +184,22 @@ describe('seed command line (eval/helpdesk/seed-faq-library.ts)', () => {
 
   it('exits 1 when anything was skipped or failed, or the release was not published', () => {
     const clean: SeedReport = {
-      nodes: { created: ['a'], updated: [], unchanged: 0, skipped: [] },
-      edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
+      nodes: {
+        created: ['a'],
+        updated: [],
+        unchanged: 0,
+        kept: [],
+        skipped: [],
+      },
+      edges: {
+        created: 0,
+        existing: 0,
+        relabelled: 0,
+        removed: 0,
+        reordered: 0,
+        kept: [],
+        failed: [],
+      },
       phrasings: { created: 0, existing: 0, failed: [] },
       release: {
         version: 1,
@@ -334,12 +349,16 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       ],
       updated: ['how-do-i-reset-my-password'],
       unchanged: 0,
+      kept: [],
       skipped: [],
     });
     expect(first.edges).toEqual({
       created: 6,
       existing: 0,
       relabelled: 0,
+      removed: 0,
+      reordered: 0,
+      kept: [],
       failed: [],
     });
     expect(first.phrasings).toEqual({ created: 5, existing: 0, failed: [] });
@@ -388,6 +407,7 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       created: [],
       updated: [],
       unchanged: 7,
+      kept: [],
       skipped: [],
     });
     expect(second.edges).toMatchObject({ created: 0, existing: 6 });
@@ -480,6 +500,9 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
       created: 1,
       existing: 5,
       relabelled: 1,
+      removed: 0,
+      reordered: 0,
+      kept: [],
       failed: [],
     });
     expect(second.release).toEqual({
@@ -503,5 +526,275 @@ describeDb('FAQ library seed (PostgreSQL)', () => {
           e.childId === ids.get('contact-support'),
       ),
     ).toHaveLength(1);
+  });
+  it('keepStaffEdits: a changed library updates the cards still as the seed left them, keeps the ones staff edited, and publishes once', async () => {
+    const seed = { employeeId: null };
+    await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor: seed,
+      release: true,
+    });
+    // a staff member edits one card in BackOffice (updatedBy is set)
+    const staff = { employeeId: '0192f0e0-0000-7000-8000-00000000e001' };
+    const support = (await deps().repository.getByKey('contact-support'))!;
+    await deps().faqs.update(staff, support.id, {
+      key: support.key,
+      category: support.category,
+      popular: support.popular,
+      questionEn: support.questionEn,
+      answerEn: 'Edited in BackOffice.',
+      questionZh: support.questionZh,
+      answerZh: support.answerZh,
+      keywords: support.keywords,
+      version: support.version,
+    });
+    // the library fixes two answers (grounding check), one of them on the edited card
+    const fixed = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    const byKey = (key: string) => fixed.faqs.find((f) => f.key === key)!;
+    byKey('contact-support').answerEn = 'The library fix.';
+    byKey('paid-not-active').answerEn = 'Corrected answer.';
+    const library = parseFaqLibrary(fixed);
+
+    const synced = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(synced.nodes).toEqual({
+      created: [],
+      updated: ['paid-not-active'],
+      unchanged: 5,
+      kept: ['contact-support'],
+      skipped: [],
+    });
+    expect(synced.release).toEqual({
+      version: 2,
+      status: 'published',
+      created: true,
+      published: true,
+    });
+    expect(
+      (await deps().repository.getByKey('contact-support'))!.answerEn,
+    ).toBe('Edited in BackOffice.');
+    const en = publicRelease((await deps().source.current())!, 'en-GB');
+    expect(en.nodes.find((n) => n.key === 'paid-not-active')!.answer).toBe(
+      'Corrected answer.',
+    );
+    expect(en.nodes.find((n) => n.key === 'contact-support')!.answer).toBe(
+      'Edited in BackOffice.',
+    );
+    // the links of a kept card are still there
+    expect(
+      en.edges.filter(
+        (e) =>
+          e.childId === en.nodes.find((n) => n.key === 'contact-support')!.id,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    const again = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(again.nodes).toMatchObject({
+      updated: [],
+      kept: ['contact-support'],
+    });
+    expect(again.release).toMatchObject({ version: 2, created: false });
+  });
+
+  it("keepStaffEdits: follow-ups follow the library (dropped links go, labels and order follow the file) unless staff changed that card's follow-ups", async () => {
+    const seed = { employeeId: null };
+    await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor: seed,
+      release: true,
+    });
+    // a staff member renames one option of payment-problem in BackOffice
+    const staff = { employeeId: '0192f0e0-0000-7000-8000-00000000e001' };
+    const problem = (await deps().repository.getByKey('payment-problem'))!;
+    const { children } = await deps().graph.edges(problem.id);
+    await deps().graph.updateEdge(staff, children[1].edge.id, {
+      labelEn: 'Staff label',
+      labelZh: '员工标签',
+    });
+    // the library's follow-ups change (grounding check)
+    const fixed = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    const byKey = (key: string) => fixed.faqs.find((f) => f.key === key)!;
+    const failedCard = byKey('payment-failed');
+    const [retry] = failedCard.followUps as unknown[];
+    // labelled chip, and the order turns round
+    failedCard.followUps = [
+      { key: 'contact-support', labelEn: 'Talk to us', labelZh: '联系我们' },
+      retry,
+    ];
+    // contact-support is no longer a follow-up of paid-not-active
+    byKey('paid-not-active').followUps = [];
+    // still-not-active loses its chip text: the chip shows its question again
+    delete byKey('still-not-active').labelEn;
+    delete byKey('still-not-active').labelZh;
+    // ignored: staff changed payment-problem's options
+    (byKey('payment-problem').options as Record<string, unknown>[])[1].labelEn =
+      'Charged, plan not active';
+    const library = parseFaqLibrary(fixed);
+
+    const synced = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(synced.edges).toEqual({
+      created: 0,
+      existing: 1,
+      relabelled: 2,
+      removed: 1,
+      reordered: 1,
+      kept: ['payment-problem'],
+      failed: [],
+    });
+    expect(synced.release).toMatchObject({ version: 2, published: true });
+    const en = publicRelease((await deps().source.current())!, 'en-GB');
+    const id = (key: string) => en.nodes.find((n) => n.key === key)!.id;
+    const chips = (key: string) =>
+      en.edges.filter((e) => e.parentId === id(key)).map((e) => e.label);
+    expect(chips('payment-failed')).toEqual([
+      'Talk to us',
+      en.nodes.find((n) => n.key === 'retry-charged-twice')!.question,
+    ]);
+    expect(chips('paid-not-active')).toEqual([
+      en.nodes.find((n) => n.key === 'still-not-active')!.question,
+    ]);
+    expect(chips('payment-problem')).toEqual([
+      'The payment failed',
+      'Staff label',
+    ]);
+
+    const again = await seedFaqLibrary(deps(), library, {
+      actor: seed,
+      release: true,
+      keepStaffEdits: true,
+    });
+    expect(again.edges).toEqual({
+      created: 0,
+      existing: 3,
+      relabelled: 0,
+      removed: 0,
+      reordered: 0,
+      kept: ['payment-problem'],
+      failed: [],
+    });
+    expect(again.release).toMatchObject({ version: 2, created: false });
+  });
+
+  it('syncs only the popular flags: BackOffice edits stay, one new release is published, and a second run changes nothing', async () => {
+    const actor = { employeeId: null };
+    await seedFaqLibrary(deps(), parseFaqLibrary(SAMPLE), {
+      actor,
+      release: true,
+    });
+    // edited in BackOffice after the seed: the popular sync must not put the library text back
+    const support = (await deps().repository.getByKey('contact-support'))!;
+    await deps().faqs.update(actor, support.id, {
+      key: support.key,
+      category: support.category,
+      popular: support.popular,
+      questionEn: support.questionEn,
+      answerEn: 'Edited in BackOffice.',
+      questionZh: support.questionZh,
+      answerZh: support.answerZh,
+      keywords: support.keywords,
+      version: support.version,
+    });
+    const picked = JSON.parse(JSON.stringify(SAMPLE)) as {
+      faqs: Record<string, unknown>[];
+    };
+    // two picks, in the product's order: contact-support first, then paid-not-active
+    for (const faq of picked.faqs) {
+      faq.popular =
+        faq.key === 'paid-not-active' || faq.key === 'contact-support';
+      if (faq.key === 'contact-support') faq.popularRank = 1;
+      if (faq.key === 'paid-not-active') faq.popularRank = 2;
+    }
+    const library = parseFaqLibrary(picked);
+
+    const first = await syncLibraryPopular(deps(), library, {
+      actor,
+      release: true,
+    });
+    expect(first).toEqual({
+      on: ['paid-not-active', 'contact-support'],
+      off: ['how-do-i-reset-my-password'],
+      reordered: [],
+      missing: [],
+      failed: [],
+      release: {
+        version: 2,
+        status: 'published',
+        created: true,
+        published: true,
+      },
+    });
+    const after = (await deps().repository.getByKey('contact-support'))!;
+    expect(after.answerEn).toBe('Edited in BackOffice.');
+    expect(after).toMatchObject({ popular: true, popularRank: 1 });
+    expect(await deps().repository.getByKey('paid-not-active')).toMatchObject({
+      popular: true,
+      popularRank: 2,
+    });
+    const release = await deps().source.current();
+    expect(release!.version).toBe(2);
+    // the release lists the popular nodes first, in the product's order (Portal's popular chips follow it)
+    expect(
+      publicRelease(release!, 'en-GB')
+        .nodes.filter((n) => n.popular)
+        .map((n) => n.key),
+    ).toEqual(['contact-support', 'paid-not-active']);
+    // and the Help Centre list (release scope) is in the same order
+    const listed = await createPgFaqRepository(db).listPublished({
+      popular: true,
+      limit: 10,
+      release: 2,
+      entryOnly: false,
+    });
+    expect(listed.map((f) => f.key)).toEqual([
+      'contact-support',
+      'paid-not-active',
+    ]);
+
+    const again = await syncLibraryPopular(deps(), library, {
+      actor,
+      release: true,
+    });
+    expect(again).toEqual({
+      on: [],
+      off: [],
+      reordered: [],
+      missing: [],
+      failed: [],
+      release: null,
+    });
+
+    // only the order changes: the two swap places, and one more release is published
+    for (const faq of picked.faqs) {
+      if (faq.key === 'contact-support') faq.popularRank = 2;
+      if (faq.key === 'paid-not-active') faq.popularRank = 1;
+    }
+    const swapped = await syncLibraryPopular(deps(), parseFaqLibrary(picked), {
+      actor,
+      release: true,
+    });
+    expect(swapped).toMatchObject({
+      on: [],
+      off: [],
+      reordered: ['paid-not-active', 'contact-support'],
+      release: { version: 3, published: true },
+    });
+    expect(
+      publicRelease((await deps().source.current())!, 'zh-CN')
+        .nodes.filter((n) => n.popular)
+        .map((n) => n.key),
+    ).toEqual(['paid-not-active', 'contact-support']);
   });
 });

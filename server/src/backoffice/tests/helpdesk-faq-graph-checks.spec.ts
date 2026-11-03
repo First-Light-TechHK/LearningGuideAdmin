@@ -368,6 +368,7 @@ function faq(id: string, overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'other',
     popular: false,
+    popularRank: null,
     questionEn: 'Q?',
     answerEn: 'First paragraph.\n\n- one\n- two',
     questionZh: '问？',
