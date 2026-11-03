@@ -25,6 +25,9 @@ import {
   previewStarts,
   previewTurn,
   releaseActions,
+  releaseStatusKey,
+  checksRunning,
+  modelReport,
   validateLabelDraft,
   validatePhrasing,
 } from '../src/backoffice/lib/helpdeskGraph'
@@ -239,6 +242,33 @@ describe('release actions', () => {
     assert.deepEqual(releaseActions(release(3, { status: 'rejected', sourceVersion: 1 }), 2), { publish: false, recheck: false, rollback: false })
   })
 
+  test('a check running in the background cannot be started again; an interrupted one can (owner 2026-11-03)', () => {
+    const running = release(3, { status: 'evaluating', evaluation: { state: 'running', startedAt: null, progress: { stage: 'model', done: 120, total: 300 } } })
+    const stopped = release(4, { status: 'evaluating', evaluation: { state: 'interrupted', startedAt: null, progress: null } })
+    assert.equal(releaseActions(running, 2).recheck, false)
+    assert.equal(releaseActions(stopped, 2).recheck, true)
+    assert.equal(releaseStatusKey(running), 'evaluating')
+    assert.equal(releaseStatusKey(stopped), 'interrupted')
+    assert.equal(checksRunning([stopped]), false)
+    assert.equal(checksRunning([stopped, running]), true)
+    for (const messages of [enGB, zhCN]) {
+      const releases = (messages as unknown as { helpDesk: { releases: Record<string, unknown> } }).helpDesk.releases
+      assert.equal(typeof (releases.status as Record<string, string>).interrupted, 'string')
+      assert.equal(typeof (releases.progress as Record<string, string>).model, 'string')
+    }
+    assert.equal(zhCN.helpDesk.releases.create, '生成新版本', 'the button only creates a version (en: Create new version)')
+    assert.doesNotMatch(JSON.stringify(zhCN.helpDesk.releases), /学员/)
+  })
+
+  test('the live-pipeline sample report is found inside a combined report', () => {
+    const model = { kind: 'model', passed: true, summary: 'ok', ranAt: '', metrics: { wrongRate: 0.006, cases: 312, costUsd: 0.13 }, misses: [] }
+    const combined = { kind: 'combined', passed: true, summary: '', ranAt: '', metrics: { recallAt8: 0.97 }, misses: [], parts: [{ ...model, kind: 'retrieval' }, model] }
+    assert.equal(modelReport(combined), model)
+    assert.equal(modelReport(model), model)
+    assert.equal(modelReport({ ...model, kind: 'retrieval' }), null)
+    assert.equal(modelReport(null), null)
+  })
+
   test('roll back to a release that was live before, unless what is live now is that one or a copy of it', () => {
     const live = release(4, { status: 'published', sourceVersion: 1 })
     assert.deepEqual(releaseActions(release(2, { status: 'superseded' }), 4, live), { publish: false, recheck: false, rollback: true })
@@ -271,13 +301,13 @@ describe('copy for every rule and status (en-GB and zh-CN)', () => {
     }
   })
 
-  test('the zh-CN section title is the spec wording 追问与选项; publishing is 发布新版本', () => {
+  test('the zh-CN section title is the spec wording 追问与选项; creating a version is 生成新版本', () => {
     assert.equal(get(zhCN, 'helpDesk.graph.title'), '追问与选项')
     assert.equal(get(zhCN, 'helpDesk.graph.addExisting'), '添加已有问题')
     assert.equal(get(zhCN, 'helpDesk.graph.addNew'), '新建追问')
     assert.equal(get(zhCN, 'helpDesk.tree.alsoIn'), '也出现在 {count} 处')
     assert.equal(get(zhCN, 'helpDesk.chatPreview.title'), '对话预览')
-    assert.equal(get(zhCN, 'helpDesk.releases.create'), '发布新版本')
+    assert.equal(get(zhCN, 'helpDesk.releases.create'), '生成新版本')
     assert.equal(get(zhCN, 'helpDesk.releases.rollback'), '回滚到此版本')
   })
 })

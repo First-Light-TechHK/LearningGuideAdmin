@@ -701,7 +701,7 @@ describe('publish a new version (graph design §5.4)', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Publish v3' }))
     const confirm = await screen.findByRole('alertdialog')
-    assert.equal(confirm.textContent?.startsWith('Publish v3? Learners will start seeing it'), true)
+    assert.equal(confirm.textContent?.startsWith('Publish v3? Users will start seeing it'), true)
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => absent(screen.queryByRole('alertdialog')))
     assert.equal(server.callsTo('POST', /\/publish$/).length, 0)
@@ -739,6 +739,68 @@ describe('publish a new version (graph design §5.4)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Changes in v2' }))
     assert.ok(await within(dialog).findByText('Questions removed (1)'))
     assert.ok(within(dialog).getByText('Old question'))
+  })
+
+  test('a background check shows its progress and refreshes until the result is in; an interrupted one can be checked again', async () => {
+    const running = release(3, {
+      status: 'evaluating',
+      publishedAt: null,
+      evalReport: null,
+      evaluation: { state: 'running', startedAt: '2026-11-03T10:00:00Z', progress: { stage: 'model', done: 120, total: 300 } },
+    })
+    const { dialog, set } = await openReleases('ADMIN', [release(1), release(2, { status: 'published' }), running])
+    assert.ok(within(dialog).getByText('Checking: live-pipeline sample 120 / 300'))
+    assert.ok(within(dialog).getByText('Checking'))
+    // still running: no second check can be started
+    absent(within(dialog).queryByRole('button', { name: /^Check again/ }))
+    const model = {
+      kind: 'model',
+      passed: true,
+      summary: 'Live-pipeline sample passed (model): …',
+      ranAt: '2026-11-03T10:04:00Z',
+      metrics: { wrongRate: 0.01, cases: 300, costUsd: 0.12 },
+      misses: [],
+    } as const
+    set([
+      release(1),
+      release(2, { status: 'published' }),
+      release(3, {
+        status: 'draft',
+        publishable: true,
+        publishedAt: null,
+        evalReport: {
+          kind: 'combined',
+          passed: true,
+          summary: '',
+          ranAt: '2026-11-03T10:04:00Z',
+          metrics: { recallAt8: 0.9871 },
+          misses: [],
+          parts: [{ kind: 'retrieval', passed: true, summary: '', ranAt: '2026-11-03T10:01:00Z', metrics: { recallAt8: 0.9871 }, misses: [] }, model],
+        },
+        evaluation: null,
+      }),
+    ])
+    // the drawer reads the list again by itself (every 3 s) and shows the model line
+    await within(dialog).findByText(/^Live-pipeline sample Passed: wrong card 1\.0%, 300 questions, about ¥0\.86/, undefined, { timeout: 10_000 })
+    absent(within(dialog).queryByText(/^Checking: /))
+  })
+
+  test('a check whose heartbeat stopped shows Check interrupted and can be checked again', async () => {
+    const interrupted = release(3, {
+      status: 'evaluating',
+      publishedAt: null,
+      evalReport: null,
+      evaluation: { state: 'interrupted', startedAt: '2026-11-03T10:00:00Z', progress: { stage: 'model', done: 40, total: 300 } },
+    })
+    const { dialog } = await openReleases('ADMIN', [release(1), release(2, { status: 'published' }), interrupted])
+    assert.ok(within(dialog).getByText('Check interrupted'))
+    assert.ok(within(dialog).getByText(/^The check did not finish/))
+    server.on('POST', /\/faq-releases\/3\/check$/, {
+      data: release(3, { status: 'evaluating', publishedAt: null, evalReport: null, evaluation: { state: 'running', startedAt: '2026-11-03T10:10:00Z', progress: null } }),
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Check again/ }))
+    await waitFor(() => assert.equal(server.callsTo('POST', /\/faq-releases\/3\/check$/).length, 1))
+    assert.ok(await within(dialog).findByText('v3 is being checked again.'))
   })
 
   test('VIEW roles see the versions and the changes but no Create, Publish, Check again or Roll back', async () => {
