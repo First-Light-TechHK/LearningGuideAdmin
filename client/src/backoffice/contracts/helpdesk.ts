@@ -750,3 +750,68 @@ export type FlywheelMetrics = {
   topGaps: GapGroupRow[];
   ticketFaqs: TicketFaqRow[];
 };
+
+/* ------------------------- FAQ 修改记录（Change Log，Figma 草案 2.6–2.9） ------------------------- */
+
+/** 与服务端 faqChangeLog.ts 一致。 */
+export const FAQ_CHANGE_SUBJECTS = ["faq", "follow_up", "option", "phrasing", "release"] as const;
+export type FaqChangeSubject = (typeof FAQ_CHANGE_SUBJECTS)[number];
+
+export type FaqChangeAction =
+  | "created"
+  | "edited"
+  | "archived"
+  | "added"
+  | "changed"
+  | "reordered"
+  | "removed"
+  | "version_created"
+  | "published"
+  | "rolled_back";
+
+export type FaqFieldChange = { field: string; before: unknown; after: unknown };
+
+export type FaqChangeNode = {
+  id: string;
+  key: string;
+  questionEn: string;
+  questionZh: string;
+  status: "published" | "archived";
+};
+
+/** name = 登录邮箱 @ 之前（与会话显示名一致）；空 = 账号已不在。 */
+export type FaqChangePerson = { id: string; name: string; role: string | null; email: string | null };
+
+export type FaqChange = {
+  id: string;
+  at: string;
+  /** null = 种子脚本 / 系统写入。 */
+  employee: FaqChangePerson | null;
+  subject: FaqChangeSubject;
+  action: FaqChangeAction;
+  faq: FaqChangeNode | null;
+  child: FaqChangeNode | null;
+  phrasing: { locale: string; text: string; source: string } | null;
+  release: { version: number; status: FaqReleaseStatus; sourceVersion: number | null; problems: number } | null;
+  version: { from: number | null; to: number } | null;
+  changes: FaqFieldChange[];
+  /** 学员是否已看到（版本事件为 null）。 */
+  learners: "live" | "pending" | null;
+  liveIn: number | null;
+};
+
+export type FaqChangePage = {
+  changes: FaqChange[];
+  total: number;
+  page: number;
+  pageSize: number;
+  people: FaqChangePerson[];
+};
+
+export type FaqHistoryPage = {
+  changes: FaqChange[];
+  total: number;
+  page: number;
+  pageSize: number;
+  truncated: boolean;
+};

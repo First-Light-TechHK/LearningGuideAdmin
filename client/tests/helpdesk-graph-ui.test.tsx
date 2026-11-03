@@ -98,6 +98,8 @@ async function openEditor(item: HelpdeskFaq = PARENT_FAQ, extra: HelpdeskFaq[] =
   fireEvent.click(await screen.findByRole('button', { name: `Edit ${item.questionEn}` }))
   const dialog = await screen.findByRole('dialog', { name: 'Edit FAQ' })
   await waitFor(() => assert.ok(server.callsTo('GET', /\/phrasings$/).length >= 1))
+  // 追问、选项与问法在抽屉的第二个页签（Figma 草案 2.9）
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Follow-ups & phrasings' }))
   return dialog
 }
 

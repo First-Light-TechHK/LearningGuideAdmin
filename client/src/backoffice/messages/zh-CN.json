@@ -522,7 +522,8 @@
       "enquiries": "工单",
       "faqs": "常见问题",
       "candidates": "FAQ 候选",
-      "data": "HelpDesk 数据"
+      "data": "HelpDesk 数据",
+      "changes": "修改记录"
     },
     "searchPlaceholder": "搜索学员或工单...",
     "filter": "筛选工单",
@@ -910,6 +911,13 @@
         "english": "英文",
         "chinese": "中文",
         "drafted": "草稿 待核实：保存前请核实每一个事实。保存即发布。"
+      },
+      "tabs": {
+        "details": "详情",
+        "graph": "追问与问法",
+        "history": "修改历史",
+        "historyCount": "修改历史（{count}）",
+        "label": "FAQ 分区"
       }
     },
     "preview": {
@@ -1393,6 +1401,158 @@
         "locale": "按语言",
         "entry": "按渠道",
         "signal": "按信号"
+      }
+    },
+    "changes": {
+      "note": "FAQ、追问、选项、问法和版本的每一次改动都记在这里：谁改的、什么时候改的、改了什么。记录不能修改或删除。",
+      "search": "搜索问题、key 或文字...",
+      "everyone": "所有人",
+      "system": "系统",
+      "systemHint": "种子数据或自动写入",
+      "formerEmployee": "已不在的员工",
+      "byLabel": "修改人",
+      "typeLabel": "改动类型",
+      "rangeLabel": "时间范围",
+      "types": {
+        "all": "全部改动",
+        "faq": "FAQ",
+        "follow_up": "追问",
+        "option": "选项",
+        "phrasing": "问法",
+        "release": "版本"
+      },
+      "ranges": {
+        "all": "全部时间",
+        "today": "今天",
+        "7d": "最近 7 天",
+        "30d": "最近 30 天",
+        "90d": "最近 90 天"
+      },
+      "count": "{count} 条改动",
+      "countOne": "1 条改动",
+      "columns": {
+        "when": "时间",
+        "by": "修改人",
+        "what": "改了什么",
+        "change": "改动",
+        "action": "操作"
+      },
+      "viewDetails": "查看详情",
+      "viewDetailsLabel": "查看详情：{action}，{title}",
+      "showing": "第 {from}–{to} 条，共 {total} 条改动",
+      "empty": "还没有改动记录。",
+      "emptyFiltered": "没有符合搜索或筛选条件的改动。",
+      "faqFilter": "只看这条 FAQ：{question}",
+      "faqFilterUnknown": "只看一条 FAQ",
+      "clearFaq": "看全部 FAQ",
+      "subjects": {
+        "faq": "FAQ",
+        "follow_up": "追问",
+        "option": "选项",
+        "phrasing": "问法",
+        "release": "版本"
+      },
+      "actions": {
+        "created": "新建",
+        "edited": "修改",
+        "archived": "删除",
+        "added": "添加",
+        "changed": "改文字",
+        "reordered": "调整顺序",
+        "removed": "移除",
+        "version_created": "新建版本",
+        "published": "发布",
+        "rolled_back": "回滚"
+      },
+      "version": "版本 {version}",
+      "popular": "热门",
+      "empty_value": "（空）",
+      "status": {
+        "published": "在用",
+        "archived": "已删除"
+      },
+      "fields": {
+        "key": "Key",
+        "type": "卡片类型",
+        "entry": "入口问题",
+        "category": "分类",
+        "popular": "热门 FAQ",
+        "questionEn": "问题（英文）",
+        "answerEn": "答案（英文）",
+        "questionZh": "问题（中文）",
+        "answerZh": "答案（中文）",
+        "keywords": "关键词",
+        "signals": "用户情境",
+        "status": "状态",
+        "kind": "类型",
+        "position": "位置",
+        "labelEn": "显示文字（英文）",
+        "labelZh": "显示文字（中文）"
+      },
+      "summary": {
+        "archived": "已从帮助中心和 AI 客服中移除",
+        "noFields": "保存了，但没有字段变化",
+        "shown": "排在{position}",
+        "unlinked": "不再出现在这张卡片之后",
+        "moved": "从{from}移到{to}",
+        "customText": "自定义文字：{text}",
+        "questionText": "显示问题本身",
+        "phrasing": "“{text}”（{language}）",
+        "published": "用户现在看到版本 {version}",
+        "rolledBack": "复制版本 {version}，并立即发布",
+        "checksPassed": "检查通过",
+        "problems": "检查发现 {count} 个问题"
+      },
+      "learners": {
+        "title": "用户是否已看到",
+        "live": "已看到",
+        "pending": "还没有",
+        "pendingHint": "下一次发布版本后生效",
+        "rolledBack": "版本 {version} 起上线过，后来被回滚撤下。下一次发布后重新生效。",
+        "liveIn": "从版本 {version} 起上线",
+        "liveNow": "保存即生效（还没有发布过版本）"
+      },
+      "details": {
+        "title": "改动详情",
+        "whoWhen": "谁、什么时候",
+        "changedBy": "修改人",
+        "timeZone": "{zone} 时间",
+        "what": "改了什么",
+        "whatCount": "改了什么（{count} 个字段）",
+        "whatOne": "改了什么（1 个字段）",
+        "before": "改前",
+        "after": "改后",
+        "legend": "没变的字段不显示。红色 = 删掉的，绿色 = 加上的。",
+        "listChanges": "{field}的变化",
+        "openFaq": "打开这条 FAQ",
+        "close": "关闭",
+        "versionLine": "版本 {from} → {to}",
+        "newVersion": "版本 {to}",
+        "phrasing": "问法",
+        "language": "语言",
+        "source": "来源",
+        "sources": {
+          "staff": "BackOffice",
+          "flywheel": "FAQ 候选"
+        },
+        "parent": "出现在",
+        "child": "问题",
+        "release": "版本",
+        "releaseFrom": "复制自",
+        "problems": "检查发现的问题",
+        "faqGone": "这条 FAQ 后来被删除了。"
+      },
+      "history": {
+        "hint": "这条 FAQ、它的追问和问法每一次保存的改动，新的在前。",
+        "wentLive": "上线",
+        "wentLiveLine": "随版本 {version} 发布",
+        "view": "查看改动",
+        "hide": "收起改动",
+        "openLog": "在修改记录中打开",
+        "empty": "还没有改动。",
+        "truncated": "这里只列出最新的 {count} 条，完整记录请在修改记录中查看。",
+        "more": "显示更多",
+        "loading": "加载中…"
       }
     }
   }

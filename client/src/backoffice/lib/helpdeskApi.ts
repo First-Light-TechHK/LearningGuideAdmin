@@ -10,12 +10,14 @@ import {
   type EnquiryDetail,
   type EnquiryList,
   type FaqBody,
+  type FaqChangePage,
   type FaqCandidate,
   type FaqCandidateDraft,
   type FaqEdgeRow,
   type FaqEdges,
   type FaqEdgeView,
   type FaqGraphPreview,
+  type FaqHistoryPage,
   type FaqPage,
   type FaqPhrasing,
   type FaqRelease,
@@ -35,6 +37,7 @@ import {
   type PortalJobRunResult,
   type PortalJobRuns,
 } from '../contracts/helpdesk'
+import { changeQuery, type ChangeFilters } from './helpdeskChanges'
 import { faqQuery, type FaqFilters } from './helpdeskFaqs'
 import { candidateQuery, metricsQuery, type CandidateFilters } from './helpdeskFlywheel'
 import { enquiryQuery, type EnquiryFilters } from './helpdeskView'
@@ -289,4 +292,14 @@ export function runRetentionNow(idempotencyKey: string) {
 
 export function getFlywheelMetrics(input: { granularity: MetricsGranularity; from: string; to: string; split: MetricsSplit }) {
   return request<FlywheelMetrics>(`/api/helpdesk/flywheel/metrics?${metricsQuery(input)}`)
+}
+
+/* ------------------------------ 修改记录（Change Log） ------------------------------ */
+
+export function listFaqChanges(filters: ChangeFilters, now = new Date()) {
+  return request<FaqChangePage>(`/api/helpdesk/faq-changes?${changeQuery(filters, now)}`)
+}
+
+export function listFaqHistory(faqId: string, page: number, pageSize = 50) {
+  return request<FaqHistoryPage>(`${faqPath(faqId)}/changes?page=${page}&pageSize=${pageSize}`)
 }

@@ -3,9 +3,11 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { App } from '../../components/ui'
 import '../helpdesk.css'
-import type { HelpdeskFaq } from '../contracts/helpdesk'
+import type { FaqChange, HelpdeskFaq } from '../contracts/helpdesk'
 import { CandidateDrawer, type Compose } from '../helpdesk/CandidateDrawer'
 import { CandidatesView } from '../helpdesk/CandidatesView'
+import { ChangeDetailsDrawer } from '../helpdesk/ChangeDetailsDrawer'
+import { ChangeLogView } from '../helpdesk/ChangeLogView'
 import { EnquiriesView } from '../helpdesk/EnquiriesView'
 import { FaqDrawer } from '../helpdesk/FaqDrawer'
 import { FaqPreview } from '../helpdesk/FaqPreview'
@@ -14,7 +16,8 @@ import { FaqTreeDrawer } from '../helpdesk/FaqTreeDrawer'
 import { FaqsView } from '../helpdesk/FaqsView'
 import { FlywheelDataView } from '../helpdesk/FlywheelDataView'
 import { TraceDrawer } from '../helpdesk/TraceDrawer'
-import { acceptCandidate, newIdempotencyKey } from '../lib/helpdeskApi'
+import { acceptCandidate, getFaq, newIdempotencyKey } from '../lib/helpdeskApi'
+import { changeLogHref } from '../lib/helpdeskChanges'
 import { afterFaqSave, type FaqDrawerResult } from '../lib/helpdeskFaqs'
 import { errorMessage } from '../lib/helpdeskFormat'
 import { helpDeskPageControls } from '../lib/helpdeskView'
@@ -33,16 +36,19 @@ import { useWorkspaceAccess } from '../lib/workspaceAccess'
  * 页头「版本发布」打开发布新版本 / 版本历史抽屉（所有角色能看，写操作只给 FULL）。
  * v5 Part G（待视觉验收）：「FAQ 候选」Tab（?tab=candidates，详情 ?candidate=<id>）与「HelpDesk 数据」Tab
  *（?tab=data）。候选的「新 FAQ / 加成追问」在这一层打开预填的 FAQ 抽屉，保存成功后用新 FAQ 的 id 接受候选。
+ * 修改记录（Figma 草案 2.6–2.9，用户 2026-10-30 确认）：「Change Log」Tab（?tab=changes，所有角色只读），
+ * 「查看详情」在这一层打开改动详情抽屉；详情里「Open this FAQ」FULL 打开编辑抽屉、VIEW 打开预览；
+ * FAQ 抽屉 History 的「Open in Change Log」关掉抽屉，去 Change Log 只看这一条。
  */
 
-type TabKey = 'enquiries' | 'faqs' | 'candidates' | 'data'
-const TABS: readonly TabKey[] = ['enquiries', 'faqs', 'candidates', 'data']
+type TabKey = 'enquiries' | 'faqs' | 'candidates' | 'data' | 'changes'
+const TABS: readonly TabKey[] = ['enquiries', 'faqs', 'candidates', 'data', 'changes']
 type Editing = { faq: HelpdeskFaq | null; compose?: Compose } | null
 
 function tabOf(param: string | null, ticketId: string | undefined): TabKey {
   if (ticketId) return 'enquiries'
   if (param === 'faqs' || param === 'questions') return 'faqs'
-  if (param === 'candidates' || param === 'data') return param
+  if (param === 'candidates' || param === 'data' || param === 'changes') return param
   return 'enquiries'
 }
 
@@ -66,10 +72,19 @@ export default function HelpDeskPage() {
   const [treeReturn, setTreeReturn] = useState<HTMLElement | null>(null)
   const [releasesOpen, setReleasesOpen] = useState(false)
   const [candidatesVersion, setCandidatesVersion] = useState(0)
+  const [changeOf, setChangeOf] = useState<FaqChange | null>(null)
+  const [changeReturn, setChangeReturn] = useState<HTMLElement | null>(null)
+  const [changesVersion, setChangesVersion] = useState(0)
   const candidateId = tab === 'candidates' ? searchParams.get('candidate') : null
   const drawerOpen = Boolean(editing && controls.faqDrawer)
   const modal =
-    drawerOpen || previewing !== null || tracing !== null || treeOf !== null || releasesOpen || candidateId !== null
+    drawerOpen ||
+    previewing !== null ||
+    tracing !== null ||
+    treeOf !== null ||
+    releasesOpen ||
+    candidateId !== null ||
+    changeOf !== null
 
   // v1 的 Common Questions 链接（?tab=questions）换成 ?tab=faqs，其它参数保留
   useEffect(() => {
@@ -126,11 +141,32 @@ export default function HelpDeskPage() {
     else message.error(t(locale, 'helpDesk.candidates.faqNotAccepted', { error: errorMessage(locale, result.code) }))
   }
 
+  /** 改动详情里的「Open this FAQ」：FULL 编辑，VIEW 预览；FAQ 已不在 → 提示。 */
+  async function openFaqFromChange(faqId: string) {
+    setChangeOf(null)
+    const result = await getFaq(faqId)
+    if (!result.ok) {
+      message.error(errorMessage(locale, result.code))
+      return
+    }
+    if (controls.faqDrawer) setEditing({ faq: result.data })
+    else setPreviewing(result.data)
+  }
+
+  /** FAQ 抽屉 History 的「Open in Change Log」（没保存的修改抽屉里已确认放弃）。 */
+  function openChangeLog(faqId: string) {
+    setEditing(null)
+    navigate(changeLogHref(locale, faqId))
+  }
+
   function onDrawerDone(result: FaqDrawerResult, saved?: HelpdeskFaq) {
     // Enquiries Tab 上看不到列表，靠提示告诉员工结果
     const next = afterFaqSave(result)
     const composed = editing?.compose
-    if (next.refresh) setFaqsVersion((value) => value + 1)
+    if (next.refresh) {
+      setFaqsVersion((value) => value + 1)
+      setChangesVersion((value) => value + 1)
+    }
     if (next.close) setEditing(null)
     if (composed && result === 'saved' && saved) void acceptComposed(composed, saved.id)
     else if (next.toast === 'saved') message.success(t(locale, 'helpDesk.faqs.saved'))
@@ -197,6 +233,16 @@ export default function HelpDeskPage() {
               onOpen={(id) => !modal && openCandidate(id)}
               onRefresh={() => setCandidatesVersion((value) => value + 1)}
             />
+          ) : tab === 'changes' ? (
+            <ChangeLogView
+              locale={locale}
+              refreshKey={changesVersion}
+              onOpen={(change, opener) => {
+                if (modal) return
+                setChangeReturn(opener)
+                setChangeOf(change)
+              }}
+            />
           ) : tab === 'data' ? (
             <FlywheelDataView
               locale={locale}
@@ -221,7 +267,12 @@ export default function HelpDeskPage() {
             initial={editing.compose?.initial}
             fromCandidate={editing.compose?.candidate.topic ?? null}
             draftSources={editing.compose?.draftSources}
-            onClose={() => setEditing(null)}
+            onOpenChangeLog={openChangeLog}
+            onClose={() => {
+              setEditing(null)
+              // 抽屉里的追问 / 问法是立即保存的：关掉后 Change Log 重新读
+              setChangesVersion((value) => value + 1)
+            }}
             onDone={onDrawerDone}
           />
         ) : null}
@@ -236,6 +287,17 @@ export default function HelpDeskPage() {
             onChanged={() => setCandidatesVersion((value) => value + 1)}
             onCompose={compose}
             onOpenCandidate={(id) => openCandidate(id)}
+          />
+        ) : null}
+
+        {changeOf ? (
+          <ChangeDetailsDrawer
+            key={changeOf.id}
+            locale={locale}
+            change={changeOf}
+            returnFocus={changeReturn}
+            onClose={() => setChangeOf(null)}
+            onOpenFaq={(faqId) => void openFaqFromChange(faqId)}
           />
         ) : null}
 

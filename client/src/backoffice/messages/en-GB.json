@@ -522,7 +522,8 @@
       "enquiries": "Enquiries",
       "faqs": "FAQs",
       "candidates": "FAQ candidates",
-      "data": "HelpDesk data"
+      "data": "HelpDesk data",
+      "changes": "Change Log"
     },
     "searchPlaceholder": "Search students or enquiries...",
     "filter": "Filter enquiries",
@@ -910,6 +911,13 @@
         "english": "English",
         "chinese": "Chinese",
         "drafted": "Draft, to be verified: check every fact before you save. Saving publishes the FAQ."
+      },
+      "tabs": {
+        "details": "Details",
+        "graph": "Follow-ups & phrasings",
+        "history": "History",
+        "historyCount": "History ({count})",
+        "label": "FAQ sections"
       }
     },
     "preview": {
@@ -1393,6 +1401,158 @@
         "locale": "By locale",
         "entry": "By channel",
         "signal": "By signal"
+      }
+    },
+    "changes": {
+      "note": "Every change to FAQs, follow-ups, options, phrasings and releases is recorded here: who changed it, when, and what changed. Records cannot be edited or deleted.",
+      "search": "Search by question, key or text...",
+      "everyone": "Everyone",
+      "system": "System",
+      "systemHint": "Seed or automatic",
+      "formerEmployee": "Former employee",
+      "byLabel": "Changed by",
+      "typeLabel": "Change type",
+      "rangeLabel": "Date range",
+      "types": {
+        "all": "All changes",
+        "faq": "FAQs",
+        "follow_up": "Follow-ups",
+        "option": "Options",
+        "phrasing": "Phrasings",
+        "release": "Releases"
+      },
+      "ranges": {
+        "all": "All time",
+        "today": "Today",
+        "7d": "Last 7 days",
+        "30d": "Last 30 days",
+        "90d": "Last 90 days"
+      },
+      "count": "{count} changes",
+      "countOne": "1 change",
+      "columns": {
+        "when": "When",
+        "by": "Changed by",
+        "what": "What changed",
+        "change": "Change",
+        "action": "Action"
+      },
+      "viewDetails": "View details",
+      "viewDetailsLabel": "View details: {action}, {title}",
+      "showing": "Showing {from}–{to} of {total} changes",
+      "empty": "No changes recorded yet.",
+      "emptyFiltered": "No changes match your search or filters.",
+      "faqFilter": "Changes to: {question}",
+      "faqFilterUnknown": "Changes to one FAQ",
+      "clearFaq": "Show all FAQs",
+      "subjects": {
+        "faq": "FAQ",
+        "follow_up": "Follow-up",
+        "option": "Option",
+        "phrasing": "Phrasing",
+        "release": "Release"
+      },
+      "actions": {
+        "created": "Created",
+        "edited": "Edited",
+        "archived": "Deleted",
+        "added": "Added",
+        "changed": "Text changed",
+        "reordered": "Reordered",
+        "removed": "Removed",
+        "version_created": "Version created",
+        "published": "Published",
+        "rolled_back": "Rolled back"
+      },
+      "version": "Version {version}",
+      "popular": "Popular",
+      "empty_value": "(empty)",
+      "status": {
+        "published": "Live",
+        "archived": "Deleted"
+      },
+      "fields": {
+        "key": "Key",
+        "type": "Card type",
+        "entry": "Entry question",
+        "category": "Category",
+        "popular": "Popular FAQ",
+        "questionEn": "Question (English)",
+        "answerEn": "Answer (English)",
+        "questionZh": "Question (Chinese)",
+        "answerZh": "Answer (Chinese)",
+        "keywords": "Keywords",
+        "signals": "Learner situations",
+        "status": "Status",
+        "kind": "Kind",
+        "position": "Position",
+        "labelEn": "Text shown (English)",
+        "labelZh": "Text shown (Chinese)"
+      },
+      "summary": {
+        "archived": "Removed from Help Centre and AI Support",
+        "noFields": "Saved with no field changed",
+        "shown": "Shown {position}",
+        "unlinked": "No longer shown after this card",
+        "moved": "Moved {from} → {to}",
+        "customText": "Custom text: {text}",
+        "questionText": "Shows the question itself",
+        "phrasing": "“{text}” ({language})",
+        "published": "Learners now see version {version}",
+        "rolledBack": "Copy of version {version}, published straight away",
+        "checksPassed": "Checks passed",
+        "problems": "{count} problems found"
+      },
+      "learners": {
+        "title": "Learners see it",
+        "live": "Yes",
+        "pending": "Not yet",
+        "pendingHint": "Goes live with the next published release",
+        "rolledBack": "Was live from version {version}, then taken back by a rollback. Goes live again with the next release.",
+        "liveIn": "Live since version {version}",
+        "liveNow": "Live as soon as it was saved (no release published yet)"
+      },
+      "details": {
+        "title": "Change details",
+        "whoWhen": "Who and when",
+        "changedBy": "Changed by",
+        "timeZone": "{zone} time",
+        "what": "What changed",
+        "whatCount": "What changed ({count} fields)",
+        "whatOne": "What changed (1 field)",
+        "before": "Before",
+        "after": "After",
+        "legend": "Unchanged fields are not shown. Red = removed, green = added.",
+        "listChanges": "{field} changes",
+        "openFaq": "Open this FAQ",
+        "close": "Close",
+        "versionLine": "Version {from} → {to}",
+        "newVersion": "Version {to}",
+        "phrasing": "Phrasing",
+        "language": "Language",
+        "source": "Added from",
+        "sources": {
+          "staff": "BackOffice",
+          "flywheel": "FAQ candidates"
+        },
+        "parent": "Shown after",
+        "child": "Question",
+        "release": "Release",
+        "releaseFrom": "Copied from",
+        "problems": "Problems found by the checks",
+        "faqGone": "This FAQ has since been deleted."
+      },
+      "history": {
+        "hint": "Every saved change to this FAQ, its follow-ups and its phrasings. Newest first.",
+        "wentLive": "Went live",
+        "wentLiveLine": "Published in release version {version}",
+        "view": "View changes",
+        "hide": "Hide changes",
+        "openLog": "Open in Change Log",
+        "empty": "No changes yet.",
+        "truncated": "Only the latest {count} changes are listed here. Open the Change Log to see them all.",
+        "more": "Show more",
+        "loading": "Loading…"
       }
     }
   }

@@ -3318,3 +3318,462 @@
   height: 100%;
   background: var(--hd-blue);
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * 修改记录（Change Log Tab、改动详情、FAQ 抽屉的页签与 History；Figma 草案 2.6–2.9，用户 2026-10-30 确认）
+ * ---------------------------------------------------------------------------------------------- */
+
+.hdVisuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* 2.6 顶上的说明：浅蓝底、蓝点 */
+.hdChangesNote {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid #d6e4fc;
+  border-radius: 8px;
+  background: #f0f6ff;
+  font-size: 12px;
+  line-height: 18px;
+  color: #344964;
+}
+
+.hdChangesNoteDot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hd-blue);
+}
+
+.hdChangesFaqFilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #20324f;
+}
+
+.hdChangesSearch {
+  flex: 0 1 470px;
+}
+
+.hdChangesSelect {
+  flex: 0 0 190px;
+  width: 190px;
+}
+
+/* Figma 列宽 180 / 220 / 470 / 333 / 100（共 1303） */
+.hdChangesColWhen {
+  width: 13.8%;
+}
+
+.hdChangesColBy {
+  width: 16.9%;
+}
+
+.hdChangesColWhat {
+  width: 36%;
+}
+
+.hdChangesColChange {
+  width: 25.6%;
+}
+
+.hdChangesColAction {
+  width: 7.7%;
+}
+
+.hdChangesTable td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  vertical-align: middle;
+}
+
+.hdChangesTable td:first-child {
+  vertical-align: middle;
+}
+
+.hdChangesStrong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #203250;
+  overflow-wrap: anywhere;
+}
+
+.hdChangesDate {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.hdChangesSub {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 15px;
+  color: #73849a;
+  overflow-wrap: anywhere;
+}
+
+.hdChangesKind {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #73849a;
+}
+
+.hdChangesSummary {
+  color: #667790;
+}
+
+.hdChangesView {
+  white-space: nowrap;
+}
+
+.hdChangesActionCell {
+  text-align: right;
+  padding-right: 20px !important;
+}
+
+/* 动作小标签（2.6 的 Chip/*） */
+.hdChangeChip {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.hdChangeChip-neutral {
+  background: #f2f5f9;
+  color: #69778b;
+}
+
+.hdChangeChip-green {
+  background: #e8f8ef;
+  color: #1d8c50;
+}
+
+.hdChangeChip-blue {
+  background: #eaf3ff;
+  color: #2468df;
+}
+
+.hdChangeChip-purple {
+  background: #f0ebff;
+  color: #7655c1;
+}
+
+.hdChangeChip-orange {
+  background: #fff4e5;
+  color: #c2620c;
+}
+
+.hdChangeChip-red {
+  background: #feecec;
+  color: #c43030;
+}
+
+/* FAQ 抽屉的页签（2.8 / 2.9 Drawer tabs）：标题下、内容上 */
+.hdDrawerTabs {
+  display: flex;
+  gap: 24px;
+  padding: 14px 24px 0;
+  border-bottom: 1px solid #e7ecf3;
+}
+
+.hdDrawerTab {
+  padding: 0 0 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 17px;
+  color: #63738b;
+  cursor: pointer;
+}
+
+.hdDrawerTabActive {
+  border-bottom-color: #146dff;
+  font-weight: 600;
+  color: #146dff;
+}
+
+.hdDrawerTab:focus-visible {
+  outline: 2px solid var(--hd-blue);
+  outline-offset: 2px;
+}
+
+.hdDrawerPanel {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+
+.hdDrawerPanel[hidden] {
+  display: none;
+}
+
+/* 2.7 改动详情 */
+.hdChangeBody {
+  gap: 16px;
+}
+
+.hdChangeCard {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.hdChangeHeading {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #243654;
+}
+
+.hdChangeFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  margin: 0;
+}
+
+.hdChangeFact dt {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #7b8ba2;
+}
+
+.hdChangeFact dd {
+  margin: 0;
+}
+
+.hdChangeFact .hdChangeChip + .hdChangesSub {
+  margin-top: 6px;
+}
+
+.hdChangeLegend {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: #73849a;
+}
+
+.hdDiff {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hdDiffLabel {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #243654;
+}
+
+.hdDiffText {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #f6f8fc;
+}
+
+.hdDiffText + .hdDiffText {
+  margin-top: 6px;
+}
+
+.hdDiffSide {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #7b8ba2;
+}
+
+.hdDiffBody,
+.hdDiffValue {
+  margin: 0;
+  font-size: 12px;
+  line-height: 19px;
+  color: #243654;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hdDiffRemoved {
+  background: #feecec;
+  color: #c43030;
+  text-decoration: line-through;
+}
+
+.hdDiffAdded {
+  background: #e8f8ef;
+  color: #1d8c50;
+  text-decoration: none;
+}
+
+.hdDiffArrow {
+  color: #7b8ba2;
+}
+
+.hdDiffChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdDiffChip {
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: #f2f5f9;
+  font-size: 11px;
+  line-height: 15px;
+  color: #69778b;
+}
+
+.hdDiffChip del,
+.hdDiffChip ins {
+  text-decoration: none;
+}
+
+.hdDiffChipRemoved {
+  background: #feecec;
+  color: #c43030;
+}
+
+.hdDiffChipRemoved del {
+  text-decoration: line-through;
+}
+
+.hdDiffChipAdded {
+  background: #e8f8ef;
+  color: #1d8c50;
+}
+
+/* 2.8 History 时间线 */
+.hdHistory {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hdHistoryList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hdHistoryItem {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 0 0 18px;
+}
+
+/* 竖线连着每一条的圆点 */
+.hdHistoryItem::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: #e2e8f0;
+}
+
+.hdHistoryItem:last-child::before {
+  display: none;
+}
+
+.hdHistoryDot {
+  position: relative;
+  flex: 0 0 11px;
+  width: 11px;
+  height: 11px;
+  margin-top: 3px;
+  border: 2px solid #cbd5e1;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.hdHistoryLive .hdHistoryDot {
+  border-color: var(--hd-blue);
+  background: var(--hd-blue);
+}
+
+.hdHistoryMain {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hdHistoryLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.hdHistoryLine .hdChangesSub {
+  margin-top: 0;
+}
+
+.hdHistorySummary {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #344964;
+  overflow-wrap: anywhere;
+}
+
+.hdHistoryToggle {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.hdHistoryDiff {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f8fc;
+}
+
+.hdHistoryDiff .hdDiffText {
+  background: #fff;
+}
+
+@media (max-width: 720px) {
+  .hdChangeFacts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hdChangesSelect {
+    flex: 1 1 160px;
+    width: auto;
+  }
+
+  .hdDrawerTabs {
+    gap: 16px;
+    overflow-x: auto;
+  }
+}
