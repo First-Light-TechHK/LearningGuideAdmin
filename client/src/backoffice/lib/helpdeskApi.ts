@@ -212,6 +212,27 @@ export function listReleases() {
   return request<FaqReleaseList>('/api/helpdesk/faq-releases')
 }
 
+/** 版本列表的长连接（SSE，服务端 faqReleaseStream.ts）。 */
+export const RELEASE_STREAM_PATH = '/api/helpdesk/faq-releases/stream'
+
+/**
+ * 订阅版本列表（owner 2026-11-03：长时间等待不靠刷新，连接常连）：连上先收到一次，之后列表变了服务端就推；
+ * 断了浏览器的 EventSource 自己重连（服务端给 retry 3 秒），重连后先收到最新的。返回关闭连接的函数；
+ * 没有 EventSource（很旧的浏览器）→ null，页面只在打开和每次操作后读一次。
+ */
+export function watchReleases(onList: (list: FaqReleaseList) => void): (() => void) | null {
+  if (typeof EventSource === 'undefined') return null
+  const source = new EventSource(RELEASE_STREAM_PATH)
+  source.addEventListener('releases', (event) => {
+    try {
+      onList(JSON.parse((event as MessageEvent<string>).data) as FaqReleaseList)
+    } catch {
+      // 坏的一帧丢掉，等下一次推送
+    }
+  })
+  return () => source.close()
+}
+
 /** 工作副本的检查与它和当前上线版本的差异（只读）。 */
 export function getWorkingCopy() {
   return request<FaqWorkingCopy>('/api/helpdesk/faq-releases/working')

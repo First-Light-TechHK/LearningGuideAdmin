@@ -1,7 +1,9 @@
 // 浏览器 E2E（真 Chromium + Vite dev server，API 全部在浏览器里假装）：锁住发布前的后台检查（owner 2026-11-03
 // 选「抽样跑测试集」）在版本历史里 jsdom 测不到的部分：
 // ① 检查中：状态「Checking」，结果栏显示进度（真流程抽样 n / 300），表格不横向滚动；不能再开一次检查；
-// ② 抽屉自己每 3 秒重读一次，出结果后显示真流程抽样那一行（错卡率、题数、约 ¥）；
+// ② 抽屉开着一直连着版本列表的长连接（SSE，真的 EventSource），服务端推进度与结果，页面不重读列表；
+//    出结果后显示真流程抽样那一行（错卡率、题数、约 ¥）。这里每次连接答一帧就断，浏览器按 retry 自己重连，
+//    所以也锁住了「断了会自己连回来」；
 // ③ 心跳停了：「Check interrupted」+ 提示，可以「Check again」。
 // 运行：npm run test:e2e:helpdesk（本地跑，CI 不装浏览器）。E2E_SHOTS=<目录> 时保存截图。
 import assert from 'node:assert/strict'
@@ -55,12 +57,17 @@ const WORKING = { published: 2, checks, diff: { nodes: { added: [], removed: [],
 
 async function open(third, locale = 'en-GB') {
   const page = await browser.newPage({ viewport: { width: 1672, height: 941 } })
-  const state = { third, reads: 0 }
+  const state = { third, reads: 0, streams: 0 }
   await page.route((url) => url.pathname.startsWith('/api/'), (route) => {
     const url = new URL(route.request().url())
     if (url.pathname === '/api/session') return route.fulfill(ok({ employee: JACK, sidebarState: 'expanded' }))
     if (url.pathname === '/api/helpdesk/tickets') return route.fulfill(ok({ tickets: [], nextCursor: null, counts: {} }))
     if (url.pathname === '/api/helpdesk/faqs') return route.fulfill(ok({ faqs: [], total: 0, page: 1, pageSize: 10 }))
+    if (url.pathname === '/api/helpdesk/faq-releases/stream') {
+      state.streams += 1
+      const body = JSON.stringify({ releases: [state.third, release(2, { status: 'published' }), release(1)], published: 2 })
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `retry: 200\n\nevent: releases\ndata: ${body}\n\n` })
+    }
     if (url.pathname === '/api/helpdesk/faq-releases') {
       state.reads += 1
       return route.fulfill(ok({ releases: [state.third, release(2, { status: 'published' }), release(1)], published: 2 }))
@@ -89,7 +96,7 @@ async function shot(page, name) {
 
 const noSideScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
 
-test('a running check shows its progress, refreshes by itself, then shows the live-pipeline sample line', async () => {
+test('a running check shows its progress; the stream pushes the next progress and the result without re-reading the list', async () => {
   const { page, dialog, state } = await open(running(120))
   const row = v3(page, dialog)
   await row.getByText('Checking: live-pipeline sample 120 / 300').waitFor()
@@ -97,12 +104,16 @@ test('a running check shows its progress, refreshes by itself, then shows the li
   assert.equal(await row.getByRole('button', { name: /^Check again/ }).count(), 0)
   assert.equal(await noSideScroll(page), true)
   await shot(page, 'release-check-running')
-  // 服务端往前走了：抽屉自己重读（每 3 秒），不用点任何东西
+  const readsAtOpen = state.reads // 打开时读的（开发模式 StrictMode 会读两次）
+  // 服务端往前走了：推过来，不用点任何东西
   state.third = running(210)
   await row.getByText('Checking: live-pipeline sample 210 / 300').waitFor({ timeout: 8000 })
   state.third = finished
   await row.getByText(/^Live-pipeline sample Passed: wrong card 1\.0%, 300 questions, about ¥0\.94/).waitFor({ timeout: 8000 })
   assert.equal(await row.locator('.hdReleaseStatus').textContent(), 'Ready')
+  // 打开之后列表一次都没再读，全靠长连接（还重连过）
+  assert.equal(state.reads, readsAtOpen)
+  assert.ok(state.streams >= 2, `stream connections: ${state.streams}`)
   await shot(page, 'release-check-finished')
   await page.close()
 })

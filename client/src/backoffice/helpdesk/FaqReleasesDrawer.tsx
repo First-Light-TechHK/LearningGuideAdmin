@@ -18,11 +18,11 @@ import {
   listReleases,
   publishRelease,
   rollbackRelease,
+  watchReleases,
   type HelpdeskResult,
 } from '../lib/helpdeskApi'
 import { errorMessage } from '../lib/helpdeskFormat'
 import {
-  checksRunning,
   diffTotal,
   evalRecall,
   modelReport,
@@ -41,8 +41,8 @@ import { useModal } from './useModal'
  * -「发布新版本」冻结工作副本 → 图检查 → 评测门（服务端），结果写进版本历史；工作副本没变 → 不新建；
  * - 版本历史：状态、检查、评测（recall@8）、每个版本的改动；能发布的「发布 vN」，曾经上线过的「回滚到此版本」
  *  （发布与回滚都先确认）；draft / rejected 可「重新检查」。
- * 检查在后台跑（owner 2026-11-03：检索检查 + 真流程抽样，约 3–5 分钟）：有版本在检查时每 3 秒重读一次，
- * 显示进度；心跳停了显示「检查中断」，可以重新检查。
+ * 检查在后台跑（owner 2026-11-03：检索检查 + 真流程抽样，约 3–5 分钟）：抽屉开着时一直连着版本列表的
+ * 长连接（SSE，watchReleases），进度和结果由服务端推，不定时重读；心跳停了显示「检查中断」，可以重新检查。
  * 写操作只给 helpDesk = FULL（服务端同样拒绝）；VIEW 只看。没有 Figma 画板：沿用 FAQ 抽屉、表格与确认框的
  * 样式（待视觉验收）。模态层同 FAQ 抽屉（useModal）。
  */
@@ -56,9 +56,6 @@ function ruleText(locale: Locale, problem: GraphProblem): string {
   const text = t(locale, key)
   return text === key ? problem.detail : text
 }
-
-/** 后台检查时多久重读一次。 */
-export const POLL_MS = 3_000
 
 const when = (iso: string | null, locale: Locale) => (iso ? `${longDate(iso, locale)} ${cardTime(iso, locale)}` : '—')
 
@@ -129,15 +126,8 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 有版本在后台检查：每 3 秒重读一次，直到都出结果（关掉抽屉就停）
-  const running = list ? checksRunning(list.releases) : false
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setTimeout(() => void load(), POLL_MS)
-    return () => window.clearTimeout(timer)
-    // list 每次重读都是新对象，所以每次都会排下一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, list])
+  // 抽屉开着就连着：后台检查的进度、结果、中断都由服务端推过来（关掉抽屉就断开）
+  useEffect(() => watchReleases(setList) ?? undefined, [])
 
   const nameOf = (node: { questionEn: string; questionZh: string }) => (zh ? node.questionZh : node.questionEn)
 

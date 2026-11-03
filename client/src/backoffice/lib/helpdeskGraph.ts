@@ -242,11 +242,6 @@ export function modelReport(report: FaqReleaseEvalReport | null): FaqReleaseEval
   return report.parts?.find((part) => part.kind === 'model') ?? null
 }
 
-/** 还有检查在跑（界面每隔几秒重读一次）。 */
-export function checksRunning(releases: FaqRelease[]): boolean {
-  return releases.some((release) => release.status === 'evaluating' && release.evaluation?.state === 'running')
-}
-
 /** 列表上的状态：evaluating 且心跳停了 → interrupted。 */
 export function releaseStatusKey(release: FaqRelease): string {
   return release.status === 'evaluating' && release.evaluation?.state === 'interrupted' ? 'interrupted' : release.status
