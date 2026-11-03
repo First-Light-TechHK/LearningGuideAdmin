@@ -124,7 +124,7 @@ describe('route ordering against the SPA fallback', () => {
     const app = express();
     app.use(express.static(dir, { index: false }));
     registerVersionRoute(app as never, version);
-    app.get(/^\/(?!api(?:\/|$)|health$).*/, (_req, res: never) => {
+    app.get(/^\/(?!api(?:\/|$)|health$).*/, (_req: unknown, res: never) => {
       const out = res as unknown as { setHeader: (n: string, v: string) => void; sendFile: (p: string) => void };
       setNoStore(out as never);
       out.sendFile(join(dir, 'index.html'));

@@ -150,7 +150,7 @@ describe('PackageInspector', () => {
     await expect(inspector().inspect(buf)).rejects.toMatchObject({
       code: 'PACKAGE_NOT_A_COURSE',
       status: 422,
-      message: expect.stringContaining('Word/Office document'),
+      message: expect.stringContaining('Word/Office document') as unknown,
     });
   });
 
