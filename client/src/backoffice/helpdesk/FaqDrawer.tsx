@@ -1,7 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import { FAQ_CATEGORIES, type FaqCategory, type HelpdeskFaq } from '../contracts/helpdesk'
-import { archiveFaq, createFaq, getFaq, newIdempotencyKey, updateFaq } from '../lib/helpdeskApi'
+import { archiveFaq, createFaq, getFaq, getFaqEdges, newIdempotencyKey, updateFaq } from '../lib/helpdeskApi'
 import {
   FAQ_LIMITS,
   applyBold,
@@ -25,6 +25,8 @@ import { errorMessage, faqCategoryLabel } from '../lib/helpdeskFormat'
 import { isImeComposing } from '../lib/helpdeskView'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
+import { FaqLinksEditor, FaqNodeFields } from './FaqGraphSection'
+import { FaqHistory } from './FaqHistory'
 import { useModal } from './useModal'
 
 /**
@@ -33,10 +35,20 @@ import { useModal } from './useModal'
  * 版本冲突时载入最新版本、保留草稿。Delete（归档）与「未保存的修改」确认在 Figma 里没有画板，
  * 沿用同一套样式（待视觉验收）。抽屉是模态层（useModal）：Tab 不出抽屉（确认框打开时不出确认框），
  * Escape 在哪儿按都算、输入法组字时不算；保存失败或版本冲突的提示会拿到焦点，滚到哪儿都看得见。
+ * v5 Part G4（待视觉验收）：从 FAQ 候选新建时带预填（问题、分类、是否入口；答案留空由员工写），抽屉顶上
+ * 写明来自哪个候选；有已解决工单里人写的回复时多一块「草稿 待核实」，「起草」把那条回复放进对应语言的
+ * 答案框，并在框下一直提示核实（保存即发布）。保存成功把新 FAQ 交给 onDone，页面再接受候选。
+ * 修改记录（Figma 草案 2.8 / 2.9，用户 2026-10-30 确认）：抽屉分三个页签——Details（上面这些字段）、
+ * Follow-ups & phrasings（卡片类型、入口、情境随「保存」；追问 / 选项 / 问法立即存进工作副本）、History（N）
+ *（只有已存在的 FAQ 才有）。三个页签都挂着、只是隐藏，切换不丢草稿也不重新加载；保存时字段没填好就切回 Details
+ * 并把焦点给第一个错的字段。History 页签底部「Open in Change Log」：有没保存的修改先确认放弃，再去 Change Log
+ * 只看这一条。
  */
 
 type AnswerField = 'answerEn' | 'answerZh'
 type Confirm = 'delete' | 'discard' | null
+type DrawerTab = 'details' | 'graph' | 'history'
+const DRAWER_TABS: readonly DrawerTab[] = ['details', 'graph', 'history']
 type LinkTarget = { field: AnswerField; start: number; end: number } | null
 
 type Props = {
@@ -44,8 +56,19 @@ type Props = {
   /** null = 新增。 */
   faq: HelpdeskFaq | null
   onClose: () => void
-  onDone: (result: FaqDrawerResult) => void
+  /** saved：保存成功时服务端返回的 FAQ（从候选新建时页面用它的 id 接受候选）。 */
+  onDone: (result: FaqDrawerResult, saved?: HelpdeskFaq) => void
+  /** 新增时的预填（FAQ 候选）；不带 = 空白。 */
+  initial?: FaqDraft
+  /** 预填来自哪个候选（话题），显示在抽屉顶上。 */
+  fromCandidate?: string | null
+  /** 「草稿 待核实」：已解决工单里人写的回复（已脱敏）。 */
+  draftSources?: readonly string[]
+  /** History 页签的「Open in Change Log」（没保存的修改已确认放弃）。 */
+  onOpenChangeLog?: (faqId: string) => void
 }
+
+const HAN = /\p{Script=Han}/u
 
 function fieldErrorText(locale: Locale, field: FaqField, error: FaqFieldError): string {
   if (error === 'tooLong') {
@@ -56,7 +79,16 @@ function fieldErrorText(locale: Locale, field: FaqField, error: FaqFieldError): 
   return t(locale, `helpDesk.drawer.errors.${error}`)
 }
 
-export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
+export function FaqDrawer({
+  locale,
+  faq,
+  onClose,
+  onDone,
+  initial,
+  fromCandidate = null,
+  draftSources = [],
+  onOpenChangeLog,
+}: Props) {
   const uid = useId()
   const ids = {
     title: `${uid}-title`,
@@ -69,13 +101,22 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     keywords: `${uid}-keywords`,
     link: `${uid}-link`,
     confirm: `${uid}-confirm`,
+    graph: `${uid}-graph`,
+    draft: `${uid}-draft`,
+    tab: (key: DrawerTab) => `${uid}-tab-${key}`,
+    panel: (key: DrawerTab) => `${uid}-panel-${key}`,
   }
   const [base, setBase] = useState<HelpdeskFaq | null>(faq)
-  const [original, setOriginal] = useState<FaqDraft>(() => (faq ? draftFromFaq(faq) : emptyFaqDraft()))
+  const [original, setOriginal] = useState<FaqDraft>(() => (faq ? draftFromFaq(faq) : (initial ?? emptyFaqDraft())))
+  // 用「草稿 待核实」起草过的答案框：框下一直提示核实
+  const [drafted, setDrafted] = useState<AnswerField[]>([])
   const [draft, setDraft] = useState<FaqDraft>(original)
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
   const [errorCode, setErrorCode] = useState<string | null>(null)
+  // 删除被拒（FAQ_HAS_PARENTS）：列出还在用它的已发布父问题（graph design §2.3「拒绝，并列出父节点」；
+  // 沿用提示框与 hdTreeWarnings 列表样式，没有 Figma 画板，待视觉验收）
+  const [parentQuestions, setParentQuestions] = useState<string[]>([])
   const [conflict, setConflict] = useState(false)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [linkTarget, setLinkTarget] = useState<LinkTarget>(null)
@@ -93,9 +134,46 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
   const alertRef = useRef<HTMLDivElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
   const [noticeShown, setNoticeShown] = useState(0)
+  const [tab, setTab] = useState<DrawerTab>('details')
+  const [historyTotal, setHistoryTotal] = useState<number | null>(null)
+  // 每次切到 History 都重新读（Follow-ups 页签里的改动是立即保存的）
+  const [historyKey, setHistoryKey] = useState(0)
+  const tabRefs = useRef<Partial<Record<DrawerTab, HTMLButtonElement | null>>>({})
+  // 「放弃修改」确认之后去哪儿：关抽屉，或去 Change Log
+  const afterDiscard = useRef<() => void>(onClose)
+  // 字段没填好：切回 Details 之后（面板可见了）再把焦点给它
+  const focusAfterTab = useRef<string | null>(null)
 
   const errors = submitted ? validateFaqDraft(draft) : {}
   const editing = base !== null
+  const tabs = editing ? DRAWER_TABS : DRAWER_TABS.filter((key) => key !== 'history')
+
+  useLayoutEffect(() => {
+    const id = focusAfterTab.current
+    if (!id || tab !== 'details') return
+    focusAfterTab.current = null
+    document.getElementById(id)?.focus()
+  })
+
+  function openTab(next: DrawerTab, focus = false) {
+    if (next === 'history' && next !== tab) setHistoryKey((value) => value + 1)
+    setTab(next)
+    if (focus) tabRefs.current[next]?.focus()
+  }
+
+  /** 页签的键盘操作（WAI-ARIA Tabs）：左右切换，Home / End 到头尾。 */
+  function onTabKey(event: KeyboardEvent, current: DrawerTab) {
+    const at = tabs.indexOf(current)
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      openTab(event.key === 'Home' ? tabs[0] : tabs[tabs.length - 1], true)
+      return
+    }
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
+    if (step === 0) return
+    event.preventDefault()
+    openTab(tabs[(at + step + tabs.length) % tabs.length], true)
+  }
 
   // 打开时把焦点放进抽屉，关闭时还给打开它的按钮
   useEffect(() => {
@@ -173,10 +251,15 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     applyEdit(field, edit)
   }
 
-  function requestClose() {
+  function leave(then: () => void) {
     if (saving) return
+    afterDiscard.current = then
     if (isDraftDirty(draft, original)) setConfirm('discard')
-    else onClose()
+    else then()
+  }
+
+  function requestClose() {
+    leave(onClose)
   }
 
   async function save() {
@@ -185,7 +268,11 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     const found = validateFaqDraft(draft)
     const firstInvalid = (Object.keys(found) as FaqField[])[0]
     if (firstInvalid) {
-      document.getElementById(ids[firstInvalid])?.focus()
+      if (tab === 'details') document.getElementById(ids[firstInvalid])?.focus()
+      else {
+        focusAfterTab.current = ids[firstInvalid]
+        setTab('details')
+      }
       return
     }
     const body = toFaqBody(draft)
@@ -199,7 +286,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
       result = await createFaq(body, keyRef.current.key)
     }
     const outcome = faqSaveOutcome(result)
-    if (outcome === 'saved') return onDone('saved')
+    if (outcome === 'saved') return onDone('saved', result.ok ? result.data : undefined)
     if (outcome === 'gone') return onDone('gone')
     if (outcome === 'conflict' && base) {
       const latest = await getFaq(base.id)
@@ -224,6 +311,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
     if (!base || saving) return
     setSaving(true)
     setErrorCode(null)
+    setParentQuestions([])
     const result = await archiveFaq(base.id, base.version)
     if (result.ok) return onDone('deleted')
     if (result.code === 'FAQ_NOT_FOUND') return onDone('gone')
@@ -236,9 +324,26 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
       }
     } else {
       setErrorCode(result.code)
+      if (result.code === 'FAQ_HAS_PARENTS') {
+        const edges = await getFaqEdges(base.id)
+        if (edges.ok)
+          setParentQuestions(
+            edges.data.parents
+              .filter((view) => view.node?.status === 'published')
+              .map((view) => (locale === 'zh-CN' ? view.node!.questionZh : view.node!.questionEn)),
+          )
+      }
     }
     setNoticeShown((value) => value + 1)
     setSaving(false)
+  }
+
+  /** 「起草」：把一条人写的回复放进它那种语言的答案框（框里已有文字时接在后面）。 */
+  function draftFrom(source: string) {
+    const field: AnswerField = HAN.test(source) ? 'answerZh' : 'answerEn'
+    setDraft((current) => ({ ...current, [field]: current[field].trim() ? `${current[field]}\n\n${source}` : source }))
+    setDrafted((current) => (current.includes(field) ? current : [...current, field]))
+    answers[field].current?.focus()
   }
 
   function errorFor(field: FaqField): ReactNode {
@@ -340,6 +445,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
           />
         </div>
         {errorFor(field)}
+        {drafted.includes(field) ? <p className="hdDraftWarning">{t(locale, 'helpDesk.drawer.draft.drafted')}</p> : null}
       </div>
     )
   }
@@ -360,7 +466,34 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
           </button>
         </header>
 
+        <div className="hdDrawerTabs" role="tablist" aria-label={t(locale, 'helpDesk.drawer.tabs.label')}>
+          {tabs.map((key) => (
+            <button
+              key={key}
+              ref={(node) => {
+                tabRefs.current[key] = node
+              }}
+              id={ids.tab(key)}
+              type="button"
+              role="tab"
+              aria-selected={key === tab}
+              aria-controls={ids.panel(key)}
+              tabIndex={key === tab ? 0 : -1}
+              className={`hdDrawerTab${key === tab ? ' hdDrawerTabActive' : ''}`}
+              onClick={() => openTab(key)}
+              onKeyDown={(event) => onTabKey(event, key)}
+            >
+              {key === 'history' && historyTotal !== null
+                ? t(locale, 'helpDesk.drawer.tabs.historyCount', { count: historyTotal })
+                : t(locale, `helpDesk.drawer.tabs.${key}`)}
+            </button>
+          ))}
+        </div>
+
         <div className="hdDrawerBody">
+          {fromCandidate !== null && !editing ? (
+            <p className="hdNotice hdDrawerNotice hdDrawerOrigin">{t(locale, 'helpDesk.drawer.fromCandidate', { topic: fromCandidate })}</p>
+          ) : null}
           {conflict ? (
             <div ref={statusRef} className="hdNotice hdDrawerNotice" role="status" tabIndex={-1}>
               {t(locale, 'helpDesk.drawer.conflict')}
@@ -369,86 +502,169 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
           {errorCode ? (
             <div ref={alertRef} className="hdNotice hdDrawerNotice hdDrawerAlert" role="alert" tabIndex={-1}>
               {errorMessage(locale, errorCode)}
+              {errorCode === 'FAQ_HAS_PARENTS' && parentQuestions.length > 0 ? (
+                <ul className="hdTreeWarnings">
+                  {parentQuestions.map((question, at) => (
+                    <li key={`${at}-${question}`}>{question}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
 
-          <div className="hdDrawerRow">
-            <div className="hdField hdFieldCategory">
-              {label('category', 'helpDesk.drawer.category')}
-              <select
-                id={ids.category}
-                ref={firstField}
-                className="hdDrawerSelect"
-                value={draft.category ?? ''}
-                onChange={(event) => set('category', (event.target.value || null) as FaqCategory | null)}
-                {...invalidProps('category')}
-              >
-                <option value="" disabled>
-                  {t(locale, 'helpDesk.drawer.categoryPlaceholder')}
-                </option>
-                {FAQ_CATEGORIES.map((category) => (
-                  <option key={category} value={category}>
-                    {faqCategoryLabel(locale, category)}
+          <div
+            id={ids.panel('details')}
+            role="tabpanel"
+            aria-labelledby={ids.tab('details')}
+            hidden={tab !== 'details'}
+            className="hdDrawerPanel"
+          >
+            {!editing && draftSources.length > 0 ? (
+              <section className="hdGraphSection hdDraftPanel" aria-labelledby={ids.draft}>
+                <h3 className="hdGraphTitle" id={ids.draft}>
+                  {t(locale, 'helpDesk.drawer.draft.title')}
+                </h3>
+                <p className="hdGraphHint">{t(locale, 'helpDesk.drawer.draft.hint')}</p>
+                <ol className="hdDraftSources">
+                  {draftSources.map((source, index) => (
+                    <li key={`${index}-${source.slice(0, 16)}`} className="hdDraftSource">
+                      <blockquote className="hdDraftQuote" aria-label={t(locale, 'helpDesk.drawer.draft.reply', { n: index + 1 })}>
+                        {source}
+                      </blockquote>
+                      <button
+                        type="button"
+                        className="hdDrawerButton"
+                        aria-label={t(locale, 'helpDesk.drawer.draft.useLabel', {
+                          n: index + 1,
+                          language: t(locale, HAN.test(source) ? 'helpDesk.drawer.draft.chinese' : 'helpDesk.drawer.draft.english'),
+                        })}
+                        onClick={() => draftFrom(source)}
+                      >
+                        {t(locale, 'helpDesk.drawer.draft.use')}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+
+            <div className="hdDrawerRow">
+              <div className="hdField hdFieldCategory">
+                {label('category', 'helpDesk.drawer.category')}
+                <select
+                  id={ids.category}
+                  ref={firstField}
+                  className="hdDrawerSelect"
+                  value={draft.category ?? ''}
+                  onChange={(event) => set('category', (event.target.value || null) as FaqCategory | null)}
+                  {...invalidProps('category')}
+                >
+                  <option value="" disabled>
+                    {t(locale, 'helpDesk.drawer.categoryPlaceholder')}
                   </option>
-                ))}
-              </select>
-              {errorFor('category')}
+                  {FAQ_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {faqCategoryLabel(locale, category)}
+                    </option>
+                  ))}
+                </select>
+                {errorFor('category')}
+              </div>
+              <label className="hdCheck" htmlFor={ids.popular}>
+                <input
+                  id={ids.popular}
+                  type="checkbox"
+                  className="hdCheckInput"
+                  checked={draft.popular}
+                  onChange={(event) => set('popular', event.target.checked)}
+                />
+                <span>{t(locale, 'helpDesk.drawer.popular')}</span>
+              </label>
             </div>
-            <label className="hdCheck" htmlFor={ids.popular}>
+
+            <div className="hdField">
+              {label('questionEn', 'helpDesk.drawer.questionEn')}
               <input
-                id={ids.popular}
-                type="checkbox"
-                className="hdCheckInput"
-                checked={draft.popular}
-                onChange={(event) => set('popular', event.target.checked)}
+                id={ids.questionEn}
+                className="hdDrawerInput"
+                value={draft.questionEn}
+                onChange={(event) => set('questionEn', event.target.value)}
+                {...invalidProps('questionEn')}
               />
-              <span>{t(locale, 'helpDesk.drawer.popular')}</span>
-            </label>
+              {errorFor('questionEn')}
+            </div>
+            {editor('answerEn', 'helpDesk.drawer.answerEn', 'Large')}
+
+            <div className="hdField">
+              {label('questionZh', 'helpDesk.drawer.questionZh')}
+              <input
+                id={ids.questionZh}
+                className="hdDrawerInput"
+                lang="zh-CN"
+                value={draft.questionZh}
+                onChange={(event) => set('questionZh', event.target.value)}
+                {...invalidProps('questionZh')}
+              />
+              {errorFor('questionZh')}
+            </div>
+            {editor('answerZh', 'helpDesk.drawer.answerZh', 'Small')}
+
+            <div className="hdField">
+              {label('keywords', 'helpDesk.drawer.keywords', false)}
+              <input
+                id={ids.keywords}
+                className="hdDrawerInput hdDrawerInputSmall"
+                value={draft.keywords}
+                placeholder={t(locale, 'helpDesk.drawer.keywordsPlaceholder')}
+                onChange={(event) => set('keywords', event.target.value)}
+                {...invalidProps('keywords')}
+              />
+              {errorFor('keywords')}
+            </div>
           </div>
 
-          <div className="hdField">
-            {label('questionEn', 'helpDesk.drawer.questionEn')}
-            <input
-              id={ids.questionEn}
-              className="hdDrawerInput"
-              value={draft.questionEn}
-              onChange={(event) => set('questionEn', event.target.value)}
-              {...invalidProps('questionEn')}
-            />
-            {errorFor('questionEn')}
+          <div
+            id={ids.panel('graph')}
+            role="tabpanel"
+            aria-labelledby={ids.tab('graph')}
+            hidden={tab !== 'graph'}
+            className="hdDrawerPanel"
+          >
+            {/* v5「追问与选项」（graph design §5.1）：没有 Figma 画板，沿用抽屉的样式，待视觉验收 */}
+            <section className="hdGraphSection" aria-labelledby={ids.graph}>
+              <h3 className="hdGraphTitle" id={ids.graph}>
+                {t(locale, 'helpDesk.graph.title')}
+              </h3>
+              <p className="hdGraphHint">{t(locale, editing ? 'helpDesk.graph.hint' : 'helpDesk.graph.newHint')}</p>
+              <FaqNodeFields locale={locale} draft={draft} onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} />
+              {base ? <FaqLinksEditor key={base.id} locale={locale} faq={base} /> : null}
+            </section>
           </div>
-          {editor('answerEn', 'helpDesk.drawer.answerEn', 'Large')}
 
-          <div className="hdField">
-            {label('questionZh', 'helpDesk.drawer.questionZh')}
-            <input
-              id={ids.questionZh}
-              className="hdDrawerInput"
-              lang="zh-CN"
-              value={draft.questionZh}
-              onChange={(event) => set('questionZh', event.target.value)}
-              {...invalidProps('questionZh')}
-            />
-            {errorFor('questionZh')}
-          </div>
-          {editor('answerZh', 'helpDesk.drawer.answerZh', 'Small')}
-
-          <div className="hdField">
-            {label('keywords', 'helpDesk.drawer.keywords', false)}
-            <input
-              id={ids.keywords}
-              className="hdDrawerInput hdDrawerInputSmall"
-              value={draft.keywords}
-              placeholder={t(locale, 'helpDesk.drawer.keywordsPlaceholder')}
-              onChange={(event) => set('keywords', event.target.value)}
-              {...invalidProps('keywords')}
-            />
-            {errorFor('keywords')}
-          </div>
+          {base ? (
+            <div
+              id={ids.panel('history')}
+              role="tabpanel"
+              aria-labelledby={ids.tab('history')}
+              hidden={tab !== 'history'}
+              className="hdDrawerPanel"
+            >
+              <FaqHistory locale={locale} faqId={base.id} refreshKey={historyKey} onTotal={setHistoryTotal} />
+            </div>
+          ) : null}
         </div>
 
         <footer className="hdDrawerFoot">
-          {editing ? (
+          {editing && tab === 'history' && onOpenChangeLog && base ? (
+            <button
+              type="button"
+              className="hdLinkButton hdDrawerDelete"
+              disabled={saving}
+              onClick={() => leave(() => onOpenChangeLog(base.id))}
+            >
+              {t(locale, 'helpDesk.changes.history.openLog')}
+            </button>
+          ) : editing ? (
             <button
               type="button"
               className="hdLinkButton hdLinkDanger hdDrawerDelete"
@@ -482,7 +698,7 @@ export function FaqDrawer({ locale, faq, onClose, onDone }: Props) {
                     {t(locale, 'helpDesk.drawer.deleteYes')}
                   </button>
                 ) : (
-                  <button type="button" className="hdDrawerButton hdDrawerDanger" onClick={onClose}>
+                  <button type="button" className="hdDrawerButton hdDrawerDanger" onClick={() => afterDiscard.current()}>
                     {t(locale, 'helpDesk.drawer.discardYes')}
                   </button>
                 )}

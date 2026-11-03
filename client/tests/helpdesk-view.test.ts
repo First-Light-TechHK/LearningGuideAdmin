@@ -25,6 +25,7 @@ import {
   markReadInput,
   mergeTickets,
   normalizeTag,
+  ratingValue,
   readEnquiryFilters,
   shouldMarkRead,
   splitThread,
@@ -89,15 +90,15 @@ describe('avatar and tag colours (Figma 1324:2)', () => {
     for (const colour of used) assert.ok(FIGMA_AVATARS.some(([bg]) => bg === colour))
   })
 
-  test('tag colours are exactly the three Figma tag colours and are stable, case-insensitively', () => {
+  test('tag colours are exactly the three Figma tag colours, in the Figma order by position (blue, orange, green, blue)', () => {
     assert.deepEqual(TAG_PALETTE.map((c) => [c.bg, c.fg]), [
       ['#eff6ff', '#146eff'],
       ['#fff7ed', '#ea580c'],
       ['#f0fdf4', '#16a34a'],
     ])
-    assert.deepEqual(tagColor('login issue'), tagColor('Login Issue'))
-    assert.deepEqual(tagColor(' payment '), tagColor('payment'))
-    assert.ok(TAG_PALETTE.some((c) => c.bg === tagColor('anything').bg))
+    // Figma 1324:2: login issue blue, account access orange, payment green, material access blue
+    assert.deepEqual([0, 1, 2, 3].map((index) => tagColor(index).fg), ['#146eff', '#ea580c', '#16a34a', '#146eff'])
+    assert.deepEqual(tagColor(-1), TAG_PALETTE[2])
   })
 })
 
@@ -335,6 +336,11 @@ describe('student timeline (Figma 1324:2 middle column)', () => {
     assert.equal(assistFeedbackTone('declined'), 'negative')
     assert.equal(assistFeedbackTone('edited'), null)
     assert.equal(assistFeedbackTone(null), null)
+  })
+
+  test('v3 §2 rating: only an integer 1-5 counts, anything else is no rating', () => {
+    for (const n of [1, 2, 3, 4, 5]) assert.equal(ratingValue(n), n)
+    for (const bad of [0, 6, 3.5, -1, Number.NaN, '4', null, undefined, {}]) assert.equal(ratingValue(bad), null, String(bad))
   })
 })
 

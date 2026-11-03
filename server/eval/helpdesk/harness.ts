@@ -4,15 +4,24 @@ import { performance } from 'node:perf_hooks';
 
 import { Pool } from 'pg';
 
+import { entryAncestorsOf } from './v5-sets';
+
 import {
   HelpdeskSuggestService,
   SUGGEST_CANDIDATES,
   suggestModel,
+  suggestThinking,
 } from '../../src/ai/helpdesk/helpdesk-suggest.service';
 import type { HelpdeskSuggestionLog } from '../../src/ai/helpdesk/helpdesk-suggestion.store';
 import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-event.store';
-import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
-import { initialFaqState } from '../../src/ai/helpdesk/workflow/faq-workflow';
+import type {
+  AgentStepRunner,
+  ThinkingSetting,
+} from '../../src/ai/helpdesk/workflow/engine';
+import {
+  initialFaqState,
+  PICK_FAQ_MAX_TOKENS,
+} from '../../src/ai/helpdesk/workflow/faq-workflow';
 import {
   loadPi,
   openRouterSource,
@@ -21,9 +30,9 @@ import {
 } from '../../src/ai/helpdesk/workflow/pi-step-runner';
 import { MemoryRateLimitStore } from '../../src/ai/rate-limit.service';
 import type { HelpdeskFaq } from '../../src/backoffice/modules/helpdesk/faqs/faqContracts';
+import { createPgHelpdeskQaSource } from '../../src/backoffice/modules/helpdesk/faqs/faqQaSource';
 import {
   createPgFaqRepository,
-  createPgHelpdeskQaSource,
   type SqlDb,
 } from '../../src/backoffice/modules/helpdesk/faqs/faqRepository';
 import { uuidv7 } from '../../src/common/uuidv7';
@@ -90,7 +99,7 @@ export type EvalCase = {
   acceptableFaqIds?: string[];
   /** 数据集说明（例如为什么检索够不着）。 */
   note?: string;
-  /** 学员角色（parent、teacher、attacker …），只用于按角色拆分。 */
+  /** 用户画像（new_user、low_tech、attacker …；不按学生 / 家长分，产品面向全年龄段），只用于按角色拆分。 */
   role?: string;
   /** 多轮对话：同一个 conversationId 的用例按 turn（1 起）排列；评测仍逐条单独打分，不带上文。 */
   conversationId?: string;
@@ -253,6 +262,24 @@ export function memoryQaSource(faqs: SeedFaq[]): HelpdeskQaSource {
       scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       return Promise.resolve(scored.slice(0, search.limit));
     },
+    // 热门 FAQ：同类在前，其余按文件顺序（种子库没有更新时间）
+    findPopular(search) {
+      const popular = faqs.filter(
+        (faq) => faq.popular && !search.excludeIds.includes(faq.id),
+      );
+      const ordered = [
+        ...popular.filter((faq) => faq.category === search.category),
+        ...popular.filter((faq) => faq.category !== search.category),
+      ];
+      return Promise.resolve(
+        ordered.slice(0, search.limit).map((faq) => ({
+          id: faq.id,
+          category: faq.category,
+          ...localised(faq, search.locale),
+          score: 0,
+        })),
+      );
+    },
     findPublished(id, locale) {
       const faq = faqs.find((item) => item.id === id);
       return Promise.resolve(
@@ -323,6 +350,13 @@ export async function pgQaSource(
     for (const faq of faqs) {
       await repository.insert(
         {
+          // v5 Part A: the eval library carries no signals yet; v5 graph: every eval FAQ is an
+          // entry answer, and the database derives its key from the English question
+          signals: [],
+          popularRank: null,
+          key: '',
+          type: 'answer',
+          entry: true,
           ...faq,
           status: 'published',
           version: 1,
@@ -335,9 +369,61 @@ export async function pgQaSource(
         null,
       );
     }
-    return { qa: createPgHelpdeskQaSource(repository), close };
+    return { qa: createPgHelpdeskQaSource(repository, db), close };
   } catch (error) {
     await close();
+    throw error;
+  }
+}
+
+/**
+ * --release：直接用 --pg 那个库里已经导入并发布的 FAQ（seed-faq-library.ts 建的发布版本），和生产同一个
+ * 来源（发布快照里的节点与边：追问、兄弟节点都在候选里）。只读，不建 schema、不写 FAQ。
+ * idOfKey：FAQ key → id，给按 key 标注的评测集用。
+ */
+export async function pgReleaseQaSource(url: string): Promise<{
+  qa: HelpdeskQaSource;
+  release: number;
+  idOfKey: Map<string, string>;
+  entryAncestors: Map<string, string[]>;
+  close: () => Promise<void>;
+}> {
+  const pool = new Pool({ connectionString: url });
+  try {
+    const db: SqlDb = {
+      query: async (sql, params = []) =>
+        (await pool.query<Record<string, unknown>>(sql, params as unknown[]))
+          .rows,
+      withTransaction: () =>
+        Promise.reject(new Error('the released library is read-only here')),
+    };
+    const published = await pool.query<{
+      version: number;
+      snapshot: {
+        nodes: { id: string; entry: boolean }[];
+        edges: { parentId: string; childId: string }[];
+      };
+    }>(
+      "SELECT version, snapshot FROM helpdesk_faq_releases WHERE status = 'published'",
+    );
+    const release = published.rows[0]?.version;
+    if (release === undefined)
+      throw new Error('--release: the database has no published FAQ release');
+    const keys = await pool.query<{ key: string; id: string }>(
+      'SELECT key, id FROM helpdesk_faqs',
+    );
+    return {
+      qa: createPgHelpdeskQaSource(undefined, db),
+      release,
+      idOfKey: new Map(keys.rows.map((row) => [row.key, row.id])),
+      entryAncestors: entryAncestorsOf(
+        published.rows[0].snapshot.nodes,
+        published.rows[0].snapshot.edges,
+      ),
+      close: () => pool.end(),
+    };
+  } catch (error) {
+    await pool.end();
     throw error;
   }
 }
@@ -345,16 +431,86 @@ export async function pgQaSource(
 /* ---------------------------------- 模型 ---------------------------------- */
 
 export type EvalModel =
-  { kind: 'real'; model: string } | { kind: 'fake'; model: string };
+  | {
+      kind: 'real';
+      model: string;
+      thinking?: ThinkingSetting;
+      /** 评测放宽的总期限（HELPDESK_EVAL_DEADLINE_MS）；没有 = 线上的期限。 */
+      deadlineMs?: number;
+      /** 评测改的思考截断（HELPDESK_EVAL_CUTOFF_MS，0 = 不发后备）；没有 = 线上的截断。只有聊天。 */
+      cutoffMs?: number;
+    }
+  | { kind: 'fake'; model: string };
 
 export const FAKE_MODEL_ID = 'fake/top-candidate';
+
+/** 报告与日志里真模型的思考档位（没设 = off）。 */
+export function thinkingLabel(model: {
+  kind: string;
+  thinking?: ThinkingSetting;
+  deadlineMs?: number;
+  cutoffMs?: number;
+}): string {
+  if (model.kind !== 'real') return '';
+  const deadline = model.deadlineMs ? `, deadline ${model.deadlineMs} ms` : '';
+  const cutoff =
+    model.cutoffMs === undefined
+      ? ''
+      : model.cutoffMs === 0
+        ? ', no backup'
+        : `, cut-off ${model.cutoffMs} ms`;
+  return `, thinking ${model.thinking ?? 'off'}${deadline}${cutoff}`;
+}
+
+/**
+ * 评测才有的总期限（HELPDESK_EVAL_DEADLINE_MS，毫秒）：看思考档位不截时限时的质量与延迟，
+ * 慢的那些线上会超时，报告里按延迟另算。不给就是线上的期限。
+ */
+export function evalDeadline(env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env.HELPDESK_EVAL_DEADLINE_MS?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0 || value > 600_000)
+    throw new Error(
+      'HELPDESK_EVAL_DEADLINE_MS must be a whole number of milliseconds, 1 to 600000',
+    );
+  return value;
+}
+
+/**
+ * 评测才有的思考截断（HELPDESK_EVAL_CUTOFF_MS，毫秒）：线上思考截在 6.3 秒、同时发不思考的后备；
+ * 0 = 只跑思考那一路、不发后备（配合 HELPDESK_EVAL_DEADLINE_MS 看不截断的质量）。不给就是线上的截断。
+ */
+export function evalCutoff(env: NodeJS.ProcessEnv): number | undefined {
+  const raw = env.HELPDESK_EVAL_CUTOFF_MS?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 600_000)
+    throw new Error(
+      'HELPDESK_EVAL_CUTOFF_MS must be a whole number of milliseconds, 0 to 600000',
+    );
+  return value;
+}
+
+/** 放宽期限时，模型那一步的时限也一起放宽；思考截断照给。 */
+export function deadlineDeps(env: NodeJS.ProcessEnv): {
+  deadlineMs?: number;
+  timeoutMs?: number;
+  cutoffMs?: number;
+} {
+  const deadlineMs = evalDeadline(env);
+  const cutoffMs = evalCutoff(env);
+  return {
+    ...(deadlineMs ? { deadlineMs, timeoutMs: deadlineMs } : {}),
+    ...(cutoffMs !== undefined ? { cutoffMs } : {}),
+  };
+}
 
 /**
  * 一次 pick_faq 请求最多多少 token 的提示：系统提示 + 学员原文（≤ 2000 字）+ 主题 + 8 个候选
  *（问题 + ≤ 600 字答案）约一万字；按最坏的一字一 token 计。
  */
 export const CALL_PROMPT_TOKENS_MAX = 10_000;
-const CALL_OUTPUT_TOKENS_MAX = 80;
 
 /**
  * 一次请求的费用上限（美元），按 pi 价目里的模型价格；不在价目里为 null（价格未知）。
@@ -371,32 +527,57 @@ export async function callCeilingUsd(model: string): Promise<number | null> {
   if (known === false) return null;
   return (
     (priced.cost.input * CALL_PROMPT_TOKENS_MAX +
-      priced.cost.output * CALL_OUTPUT_TOKENS_MAX) /
+      priced.cost.output * PICK_FAQ_MAX_TOKENS) /
     1e6
   );
 }
 
-/** 有 OPENROUTER_API_KEY 就用真模型（和生产选同一个：suggestModel），否则用假模型。 */
-export function chooseModel(env: NodeJS.ProcessEnv): EvalModel {
-  if (env.OPENROUTER_API_KEY?.trim())
-    return { kind: 'real', model: suggestModel(env) };
+/**
+ * 有 OPENROUTER_API_KEY 就用真模型（和生产选同一个：suggestModel），否则用假模型。思考档位也和生产
+ * 一样：聊天（v5 对话集）按 suggestThinking，提交工单那条路（用例集）不思考。
+ */
+export function chooseModel(
+  env: NodeJS.ProcessEnv,
+  surface: 'chat' | 'ticket' = 'chat',
+): EvalModel {
+  if (env.OPENROUTER_API_KEY?.trim()) {
+    const deadlineMs = evalDeadline(env);
+    const cutoffMs = evalCutoff(env);
+    return {
+      kind: 'real',
+      model: suggestModel(env),
+      ...(surface === 'chat' ? { thinking: suggestThinking(env) } : {}),
+      ...(deadlineMs ? { deadlineMs } : {}),
+      ...(surface === 'chat' && cutoffMs !== undefined ? { cutoffMs } : {}),
+    };
+  }
   return { kind: 'fake', model: FAKE_MODEL_ID };
 }
 
-/** 从 pick_faq 的提示里取出候选 id（按检索顺序）。 */
-function candidateIds(prompt: string): string[] {
+/** 提示是哪一种：v2 的 pick_faq（enquiry）、v5 的 pick_faq（message）、v5 的 explain（card）。 */
+type PromptShape = { kind: 'pick' | 'pick_v5' | 'explain'; ids: string[] };
+
+/** 从提示里取出候选 id（按检索顺序）与提示的种类。 */
+function promptShape(prompt: string): PromptShape {
   try {
-    const body = JSON.parse(prompt) as { candidates?: { id?: unknown }[] };
-    return (body.candidates ?? [])
+    const body = JSON.parse(prompt) as {
+      candidates?: { id?: unknown }[];
+      card?: unknown;
+      message?: unknown;
+    };
+    const ids = (body.candidates ?? [])
       .map((item) => item.id)
       .filter((id): id is string => typeof id === 'string');
+    if (body.card !== undefined) return { kind: 'explain', ids };
+    return { kind: body.message !== undefined ? 'pick_v5' : 'pick', ids };
   } catch {
-    return [];
+    return { kind: 'pick', ids: [] };
   }
 }
 
 /**
- * 假模型：pi 自带的 faux provider，每一步都调用 pick_faq 选第一个候选（检索排第一的那条）。
+ * 假模型：pi 自带的 faux provider，每一步都调用 pick_faq 选第一个候选（检索排第一的那条），confidence sure；
+ * v5 的提示（请求带 context）同样选第一个、tone none（于是用默认的开头结尾），explain 一律 covered false。
  * 走的是同一个 PiStepRunner（同样的工具、枚举、闸），只是不连网、不花钱。
  */
 export async function fakeTopCandidateSource(): Promise<ModelSource> {
@@ -413,16 +594,17 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
           typeof content === 'string'
             ? content
             : content.map((part) => ('text' in part ? part.text : '')).join('');
-        const [first] = candidateIds(prompt);
-        return pi.ai.fauxAssistantMessage(
-          [
-            pi.ai.fauxToolCall('pick_faq', {
-              intent: 'question',
-              faqId: first ?? 'none',
-            }),
-          ],
-          { stopReason: 'toolUse' },
-        );
+        const shape = promptShape(prompt);
+        const [first] = shape.ids;
+        const call =
+          shape.kind === 'explain'
+            ? pi.ai.fauxToolCall('explain', { covered: 'no' })
+            : pi.ai.fauxToolCall('pick_faq', {
+                intent: 'question',
+                faqId: first ?? 'none',
+                confidence: 'sure',
+              });
+        return pi.ai.fauxAssistantMessage([call], { stopReason: 'toolUse' });
       },
     ]);
     return { models, model: handle.getModel() };
@@ -457,6 +639,8 @@ export type CaseResult = {
   validCall: boolean;
   /** 发出了却没有带价格回复的请求（被 abort、或模型不在价目里）。 */
   unpricedCalls: number;
+  /** 你可能想问（v3 §1）：没有答案时给学员的 FAQ，按给出的顺序。 */
+  alternativeIds: string[];
 };
 
 export type RunOptions = {
@@ -502,6 +686,7 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
     log: noopLog,
     events,
     env: () => options.env,
+    ...deadlineDeps(options.env),
   });
   const done: (CaseResult | undefined)[] = [];
   let spentUsd = 0;
@@ -568,6 +753,7 @@ export async function runCases(options: RunOptions): Promise<RunOutcome> {
         toolResults.length === 1 &&
         toolResults[0].data.error === undefined,
       unpricedCalls: Math.max(0, requests - priced),
+      alternativeIds: answer.alternatives.map((a) => a.faqId),
     };
     done[index] = result;
     const ceiling = options.callCeilingUsd ?? null;
@@ -646,6 +832,15 @@ export type EvalReport = {
     retrievalRecall: number | null;
     /** 上一项里模型答对的比例：只衡量模型。 */
     modelRecall: number | null;
+    /**
+     * 你可能想问的召回（v3 §1）：该有答案却没答（gotFaqId 为 null）的用例里，期望的 FAQ
+     * （或可接受的）在 alternatives 中的比例。
+     */
+    alternativesRecall: number | null;
+    /** 上一项的分子：期望的 FAQ 在 alternatives 中的用例数。 */
+    alternativesOffered: number;
+    /** 上一项的分母：该有答案却没答的用例数。 */
+    unansweredAnswerable: number;
     /** 该是 none、也是 none，但模型根本没被问到（检索没有候选）。 */
     noneWithoutModel: number;
     /** 问了模型、没出错，却没有恰好一次合法调用。 */
@@ -699,6 +894,11 @@ const isReachable = (r: CaseResult) =>
   r.expectedFaqId !== null &&
   [r.expectedFaqId, ...r.acceptableFaqIds].some((id) =>
     r.candidateIds.includes(id),
+  );
+const isOffered = (r: CaseResult) =>
+  r.expectedFaqId !== null &&
+  [r.expectedFaqId, ...r.acceptableFaqIds].some((id) =>
+    r.alternativeIds.includes(id),
   );
 const round = (value: number, digits = 4) =>
   Math.round(value * 10 ** digits) / 10 ** digits;
@@ -769,6 +969,9 @@ export function summarize(input: {
     (r) => r.gotFaqId === null && r.expectedFaqId === null,
   ).length;
   const latencies = results.map((r) => r.latencyMs);
+  const unanswered = results.filter(
+    (r) => r.expectedFaqId !== null && r.gotFaqId === null,
+  );
   const metrics: EvalReport['metrics'] = {
     accuracy: n ? round(results.filter(isRight).length / n) : 0,
     wrongAnswerRate: n ? round(results.filter(isWrong).length / n) : 0,
@@ -798,6 +1001,12 @@ export function summarize(input: {
       results.filter((r) => isReachable(r) && isRight(r)).length,
       results.filter(isReachable).length,
     ),
+    alternativesRecall: share(
+      unanswered.filter(isOffered).length,
+      unanswered.length,
+    ),
+    alternativesOffered: unanswered.filter(isOffered).length,
+    unansweredAnswerable: unanswered.length,
     noneWithoutModel: results.filter(
       (r) => r.expectedFaqId === null && r.gotFaqId === null && !r.asked,
     ).length,
@@ -895,7 +1104,7 @@ export function markdownReport(report: EvalReport): string {
     `# Helpdesk suggestion eval`,
     '',
     `- Generated: ${report.generatedAt}`,
-    `- Model: ${report.model.kind} \`${report.model.model}\`${report.model.note ? ` (${report.model.note})` : ''}`,
+    `- Model: ${report.model.kind} \`${report.model.model}\`${thinkingLabel(report.model)}${report.model.note ? ` (${report.model.note})` : ''}`,
     `- Retrieval: ${report.retrieval}`,
     `- Cases: ${report.cases.run} of ${report.cases.total}`,
     `- Budget: $${report.budget.spentUsd.toFixed(4)} of $${report.budget.capUsd.toFixed(2)}${report.budget.stopped ? ` (stopped: ${report.budget.stopped})` : ''}`,
@@ -921,6 +1130,7 @@ export function markdownReport(report: EvalReport): string {
     `| Model asked | ${report.metrics.modelAsked} of ${report.cases.run} |`,
     `| Retrieval recall@8 | ${pct(report.metrics.retrievalRecall)} |`,
     `| Model recall (FAQ retrieved) | ${pct(report.metrics.modelRecall)} |`,
+    `| Alternatives recall (answerable, no answer) | ${pct(report.metrics.alternativesRecall)} (${report.metrics.alternativesOffered} of ${report.metrics.unansweredAnswerable}) |`,
     `| none without the model | ${report.metrics.noneWithoutModel} |`,
     `| Invalid tool calls | ${report.metrics.invalidCalls} |`,
     `| Ended in error / timeout | ${report.metrics.failedRuns} |`,

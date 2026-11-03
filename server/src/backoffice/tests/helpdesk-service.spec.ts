@@ -59,6 +59,7 @@ function summary(overrides: Partial<TicketSummary> = {}): TicketSummary {
     closeReason: null,
     rating: null,
     flagged: false,
+    orderId: null,
     ...overrides,
   };
 }
@@ -68,6 +69,7 @@ function detail(overrides: Partial<TicketDetail> = {}): TicketDetail {
     ...summary(),
     student: null,
     subscription: null,
+    order: null,
     messages: [],
     events: [],
     aiAssist: [],
@@ -83,11 +85,15 @@ function fakeClient(): jest.Mocked<PortalHelpdeskClient> {
     getTicket: jest.fn().mockResolvedValue(detail()),
     postMessage: jest.fn().mockResolvedValue(detail({ sequence: 2 })),
     postAction: jest.fn().mockResolvedValue(detail({ sequence: 2 })),
+    ticketStats: jest.fn(),
     getAttachment: jest.fn().mockResolvedValue({
       contentType: 'image/png',
       data: Buffer.from('x'),
       fileName: null,
     }),
+    insights: jest.fn(),
+    assistRetentionRuns: jest.fn(),
+    runAssistRetention: jest.fn(),
   };
 }
 

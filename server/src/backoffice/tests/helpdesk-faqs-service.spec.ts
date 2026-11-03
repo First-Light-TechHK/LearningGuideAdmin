@@ -22,13 +22,18 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
   counter += 1;
   return {
     id: `0192bbbb-0000-7000-8000-${String(counter).padStart(12, '0')}`,
+    key: `faq-${counter}`,
+    type: 'answer',
+    entry: true,
     category: 'account_technical',
     popular: false,
+    popularRank: null,
     questionEn: 'How do I reset my password?',
     answerEn: 'Use **Forgot password** on the sign-in page.',
     questionZh: '如何重置密码？',
     answerZh: '在登录页点击“忘记密码”。',
     keywords: ['password'],
+    signals: [],
     status: 'published',
     version: 1,
     createdBy: null,
@@ -280,6 +285,81 @@ describe('FAQs: edit with an optimistic version', () => {
   });
 });
 
+describe('FAQs: the order of popular FAQs (product 2026-11-02)', () => {
+  it('stores popularRank, keeps it when an older BackOffice leaves it out, and clears it with null', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, {
+      ...validInput,
+      popularRank: 3,
+    });
+    expect(created.popularRank).toBe(3);
+    const textOnly = await service.update(employee, created.id, {
+      ...validInput,
+      questionEn: 'Still cannot log in',
+      version: created.version,
+    });
+    expect(textOnly.popularRank).toBe(3);
+    const cleared = await service.update(employee, created.id, {
+      ...validInput,
+      questionEn: 'Still cannot log in',
+      popularRank: null,
+      version: textOnly.version,
+    });
+    expect(cleared.popularRank).toBeNull();
+    const plain = await service.create(employee, {
+      ...validInput,
+      questionEn: 'Another one',
+    });
+    expect(plain.popularRank).toBeNull();
+  });
+
+  it('refuses a rank that is not a whole number from 1 to 999', async () => {
+    const { service } = setup();
+    for (const popularRank of [0, 1000, 1.5, '2', -1])
+      expect(
+        await rejection(
+          service.create(employee, { ...validInput, popularRank }),
+        ),
+      ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+
+  it('lists popular FAQs in their order first, then the unordered popular ones by newest', async () => {
+    const id = (n: number) =>
+      `0192eeee-0000-7000-8000-${String(n).padStart(12, '0')}`;
+    const { service } = setup([
+      faq({
+        id: id(1),
+        popular: true,
+        popularRank: 2,
+        updatedAt: '2026-10-05T00:00:00.000Z',
+      }),
+      faq({
+        id: id(2),
+        popular: true,
+        popularRank: null,
+        updatedAt: '2026-10-09T00:00:00.000Z',
+      }),
+      faq({
+        id: id(3),
+        popular: true,
+        popularRank: 1,
+        updatedAt: '2026-10-01T00:00:00.000Z',
+      }),
+      faq({
+        id: id(4),
+        popular: false,
+        popularRank: null,
+        updatedAt: '2026-10-10T00:00:00.000Z',
+      }),
+    ]);
+    const { body } = await service.published({
+      locale: 'en-GB',
+      popular: 'true',
+    });
+    expect(body.faqs.map((f) => f.id)).toEqual([id(3), id(1), id(2)]);
+  });
+});
+
 describe('FAQs: delete (archive)', () => {
   it('archives with the version and writes an archive revision; the FAQ leaves every list', async () => {
     const existing = faq();
@@ -416,7 +496,16 @@ describe('FAQs: what Portal reads (§2, published only, by locale, ETag)', () =>
       'Reset password',
     ]);
     expect(Object.keys(en.body.faqs[0]).sort()).toEqual(
-      ['answer', 'category', 'id', 'popular', 'question', 'updatedAt'].sort(),
+      // v5 Part A: signals is part of the public shape (contract fixture v6)
+      [
+        'answer',
+        'category',
+        'id',
+        'popular',
+        'question',
+        'signals',
+        'updatedAt',
+      ].sort(),
     );
     const zh = await service.published({ locale: 'zh-CN' });
     expect(zh.body.faqs[1]).toMatchObject({
@@ -529,5 +618,210 @@ describe('FAQs: what Portal reads (§2, published only, by locale, ETag)', () =>
     expect(
       await rejection(service.publishedOne(rows[0].id, { locale: 'de' })),
     ).toMatchObject({ status: 400 });
+  });
+});
+
+describe('FAQs: situation signals (v5 Part A)', () => {
+  it('stores the signals staff pick, deduped in the chip priority order, and Portal reads them', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, {
+      ...validInput,
+      signals: ['recent_purchase', 'payment_failed', 'recent_purchase'],
+    });
+    expect(created.signals).toEqual(['payment_failed', 'recent_purchase']);
+    const read = await service.published({ locale: 'en-GB' });
+    expect(read.body.faqs[0].signals).toEqual([
+      'payment_failed',
+      'recent_purchase',
+    ]);
+    await expect(
+      service.publishedOne(created.id, { locale: 'zh-CN' }),
+    ).resolves.toMatchObject({
+      signals: ['payment_failed', 'recent_purchase'],
+    });
+  });
+
+  it('defaults to none, and a save without signals (an older BackOffice) keeps the stored ones', async () => {
+    const { service } = setup();
+    const plain = await service.create(employee, validInput);
+    expect(plain.signals).toEqual([]);
+    const tagged = await service.create(employee, {
+      ...validInput,
+      questionEn: 'Payment failed',
+      signals: ['payment_failed'],
+    });
+    const saved = await service.update(employee, tagged.id, {
+      ...validInput,
+      questionEn: 'Payment failed',
+      answerEn: 'Try another card.',
+      version: tagged.version,
+    });
+    expect(saved.signals).toEqual(['payment_failed']);
+    expect(saved.version).toBe(2);
+    const cleared = await service.update(employee, tagged.id, {
+      ...validInput,
+      questionEn: 'Payment failed',
+      answerEn: 'Try another card.',
+      signals: [],
+      version: saved.version,
+    });
+    expect(cleared.signals).toEqual([]);
+    expect(cleared.version).toBe(3);
+  });
+
+  it('a signals-only change is a real change (new version), the same signals again are not', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, validInput);
+    const tagged = await service.update(employee, created.id, {
+      ...validInput,
+      signals: ['email_unverified'],
+      version: 1,
+    });
+    expect(tagged.version).toBe(2);
+    const again = await service.update(employee, created.id, {
+      ...validInput,
+      signals: ['email_unverified'],
+      version: 1,
+    });
+    expect(again.version).toBe(2);
+  });
+
+  it('refuses unknown signals, open_ticket_waiting (not an FAQ) and a non-list with 400', async () => {
+    const { service } = setup();
+    for (const signals of [
+      ['payment_failed', 'nope'],
+      ['open_ticket_waiting'],
+      'payment_failed',
+      [1],
+    ]) {
+      expect(
+        await rejection(service.create(employee, { ...validInput, signals })),
+      ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+    }
+  });
+});
+
+describe('FAQs: v5 question-tree node fields (graph design §2.1)', () => {
+  it('creates with a key derived from the English question, as an answer entry, unless given', async () => {
+    const { service } = setup();
+    const derived = await service.create(employee, validInput);
+    expect(derived).toMatchObject({
+      key: 'cannot-log-in',
+      type: 'answer',
+      entry: true,
+    });
+    const given = await service.create(employee, {
+      ...validInput,
+      key: ' Login.Help ',
+      type: 'choice',
+      entry: false,
+      answerEn: 'Which one is it?',
+      answerZh: '是哪一种？',
+    });
+    expect(given).toMatchObject({
+      key: 'login.help',
+      type: 'choice',
+      entry: false,
+    });
+    expect(
+      await rejection(
+        service.create(employee, { ...validInput, key: 'login.help' }),
+      ),
+    ).toMatchObject({ status: 409, code: 'FAQ_KEY_TAKEN' });
+    for (const bad of [
+      { key: 'no spaces' },
+      { type: 'quiz' },
+      { entry: 'yes' },
+    ])
+      expect(
+        await rejection(service.create(employee, { ...validInput, ...bad })),
+      ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+
+  it('keeps the node fields when an old BackOffice saves without them; a change to them alone bumps the version', async () => {
+    const { service } = setup();
+    const created = await service.create(employee, {
+      ...validInput,
+      key: 'k1',
+      entry: false,
+    });
+    const same = await service.update(employee, created.id, {
+      ...validInput,
+      version: 1,
+    });
+    expect(same).toMatchObject({ version: 1, key: 'k1', entry: false });
+    const moved = await service.update(employee, created.id, {
+      ...validInput,
+      entry: true,
+      version: 1,
+    });
+    expect(moved).toMatchObject({ version: 2, key: 'k1', entry: true });
+  });
+
+  it('a choice prompt has no digits or links', async () => {
+    const { service } = setup();
+    expect(
+      await rejection(
+        service.create(employee, {
+          ...validInput,
+          type: 'choice',
+          answerEn: 'Is it order 42?',
+          answerZh: '是哪一种？',
+        }),
+      ),
+    ).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+
+  it('refuses to archive a node that live parents still use, naming them', async () => {
+    const repository = createMemoryFaqRepository();
+    const parents = jest.fn(() =>
+      Promise.resolve([
+        {
+          id: 'p',
+          key: 'payment-failed',
+          questionEn: 'Payment failed?',
+          questionZh: '付款失败？',
+        },
+      ]),
+    );
+    const service = createFaqService({ repository, liveParents: parents });
+    const created = await service.create(employee, validInput);
+    const error = await rejection(
+      service.archive(employee, created.id, { version: 1 }),
+    );
+    expect(error).toMatchObject({ status: 409, code: 'FAQ_HAS_PARENTS' });
+    expect(error.message).toContain('"Payment failed?" (payment-failed)');
+    expect(repository.rows.get(created.id)?.status).toBe('published');
+    parents.mockImplementation(() => Promise.resolve([]));
+    expect(
+      (await service.archive(employee, created.id, { version: 1 })).status,
+    ).toBe('archived');
+  });
+
+  it('once a release exists, Portal reads that release (single switch); a choice node is not an article', async () => {
+    const repository = createMemoryFaqRepository();
+    let version: number | null = null;
+    const service = createFaqService({
+      repository,
+      releaseVersion: () => Promise.resolve(version),
+    });
+    const prompt = await service.create(employee, {
+      ...validInput,
+      type: 'choice',
+      answerEn: 'Which one is it?',
+      answerZh: '是哪一种？',
+    });
+    await service.published({ locale: 'en-GB', q: 'log' });
+    expect(repository.searches.at(-1)).not.toHaveProperty('release');
+    version = 4;
+    await service.published({ locale: 'en-GB', q: 'log' });
+    expect(repository.searches.at(-1)).toMatchObject({ release: 4 });
+    expect(
+      await rejection(service.publishedOne(prompt.id, { locale: 'en-GB' })),
+    ).toMatchObject({ status: 404 });
+    // the default list and search leave choice nodes out
+    expect((await service.published({ locale: 'en-GB' })).body.faqs).toEqual(
+      [],
+    );
   });
 });

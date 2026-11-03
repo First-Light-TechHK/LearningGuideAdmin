@@ -140,6 +140,75 @@ export function describeAgentEventLog(
       await expect(log.chain(other)).resolves.toEqual([other]);
     });
 
+    it('counts model output health per step after a time: invalid calls, guard rejections, failures', async () => {
+      // 2031：和别的用例的事件分开（PostgreSQL 实现共用一张表）
+      const t = (s: number) => new Date(Date.UTC(2031, 0, 1, 0, 0, s));
+      const end = (s: number, data: NewAgentEvent['data']): NewAgentEvent => ({
+        type: 'step/end',
+        time: t(s),
+        data,
+      });
+      await log.append(uuidv7(), [
+        end(0, { name: 'zz_explain', kind: 'agent', outcome: 'called' }),
+        end(1, { name: 'zz_explain', kind: 'agent', outcome: 'no_call' }),
+        end(2, { name: 'zz_explain', kind: 'agent', outcome: 'error' }),
+        end(3, { name: 'zz_explain', kind: 'agent', outcome: 'aborted' }),
+        end(4, {
+          name: 'zz_ground',
+          kind: 'code',
+          output: { guard: { result: 'fallback', reason: 'script' } },
+        }),
+        // the model said the card does not cover it: not a guard rejection
+        end(5, {
+          name: 'zz_ground',
+          kind: 'code',
+          output: { guard: { result: 'fallback', reason: 'not_covered' } },
+        }),
+        end(6, {
+          name: 'zz_ground',
+          kind: 'code',
+          output: { guard: { result: 'passed', reason: null } },
+        }),
+        end(7, { name: 'zz_ground', kind: 'code', error: { code: 'x' } }),
+        // not a step end, or without name / kind: ignored
+        {
+          type: 'step/start',
+          time: t(8),
+          data: { name: 'zz_explain', kind: 'agent' },
+        },
+        end(9, { kind: 'agent', outcome: 'no_call' }),
+      ]);
+      // before the window: ignored
+      await log.append(uuidv7(), [
+        {
+          type: 'step/end',
+          time: new Date(Date.UTC(2030, 11, 31)),
+          data: { name: 'zz_explain', kind: 'agent', outcome: 'no_call' },
+        },
+      ]);
+      const rows = (await log.stepHealth(t(0))).filter((r) =>
+        r.step.startsWith('zz_'),
+      );
+      expect(rows).toEqual([
+        {
+          step: 'zz_explain',
+          kind: 'agent',
+          total: 4,
+          invalid: 1,
+          guardFallbacks: 0,
+          failures: 2,
+        },
+        {
+          step: 'zz_ground',
+          kind: 'code',
+          total: 4,
+          invalid: 0,
+          guardFallbacks: 1,
+          failures: 1,
+        },
+      ]);
+    });
+
     it('after 90 days clears only the learner text fields, nothing else', async () => {
       const old = uuidv7();
       const fresh = uuidv7();
@@ -168,7 +237,11 @@ export function describeAgentEventLog(
         {
           type: 'turn/end',
           time: new Date('2026-01-01T00:00:02Z'),
-          data: { turn: 1, reason: 'no_match' },
+          data: {
+            turn: 1,
+            reason: 'answered',
+            output: { opening: 'echo of the learner' },
+          },
         },
       ]);
       await log.append(fresh, [
@@ -181,7 +254,7 @@ export function describeAgentEventLog(
       const cleared = await log.purgeLearnerText(
         new Date('2026-08-01T00:00:00Z'),
       );
-      expect(cleared).toBe(2);
+      expect(cleared).toBe(3);
       const events = await log.read(old);
       expect(events.map((e) => e.seq)).toEqual([1, 2, 3]);
       expect(events[0].data).toEqual({ turn: 1, source: 'chat' });
@@ -190,7 +263,8 @@ export function describeAgentEventLog(
         step: 2,
         usage: { inputTokens: 1 },
       });
-      expect(events[2].data).toEqual({ turn: 1, reason: 'no_match' });
+      // v5：turn/end.output（给学员看的短句）同样 90 天后清掉；PostgreSQL 的只追加触发器也得放行
+      expect(events[2].data).toEqual({ turn: 1, reason: 'answered' });
       expect((await log.read(fresh))[0].data).toEqual(start);
       await expect(
         log.purgeLearnerText(new Date('2026-08-01T00:00:00Z')),

@@ -29,17 +29,30 @@ export function validateCourseContent(
   const structureErrors: PackageValidationIssue[] = [];
 
   // 课程级
-  if (!course.cover) warn('COURSE_COVER_MISSING', 'course has no cover', 'course.cover');
+  if (!course.cover)
+    warn('COURSE_COVER_MISSING', 'course has no cover', 'course.cover');
   for (const lang of languages) {
     const loc = course.localized?.[lang];
     if (!loc) {
-      warn('COURSE_LOCALIZATION_MISSING', `missing localization for ${lang}`, `course.localized.${lang}`);
+      warn(
+        'COURSE_LOCALIZATION_MISSING',
+        `missing localization for ${lang}`,
+        `course.localized.${lang}`,
+      );
       continue;
     }
-    if (!loc.title || !loc.title.trim()) err('COURSE_TITLE_MISSING', `course title empty (${lang})`, `course.localized.${lang}.title`);
-    if (!loc.shortDescription?.trim()) warn('COURSE_SHORT_DESC_MISSING', `short description missing (${lang})`);
-    if (!loc.overview?.trim()) warn('COURSE_OVERVIEW_MISSING', `overview missing (${lang})`);
-    if (!loc.whatYouLearn || loc.whatYouLearn.length === 0) warn('COURSE_WHAT_YOU_LEARN_MISSING', `whatYouLearn missing (${lang})`);
+    if (!loc.title || !loc.title.trim())
+      err(
+        'COURSE_TITLE_MISSING',
+        `course title empty (${lang})`,
+        `course.localized.${lang}.title`,
+      );
+    if (!loc.shortDescription?.trim())
+      warn('COURSE_SHORT_DESC_MISSING', `short description missing (${lang})`);
+    if (!loc.overview?.trim())
+      warn('COURSE_OVERVIEW_MISSING', `overview missing (${lang})`);
+    if (!loc.whatYouLearn || loc.whatYouLearn.length === 0)
+      warn('COURSE_WHAT_YOU_LEARN_MISSING', `whatYouLearn missing (${lang})`);
   }
   if (!course.lessons || course.lessons.length === 0) {
     err('COURSE_NO_LESSONS', 'course has no lessons', 'course.lessons');
@@ -47,13 +60,21 @@ export function validateCourseContent(
 
   // 课时级
   for (const lesson of course.lessons ?? []) {
-    validateLesson(lesson, languages, course.learningMode, { err, warn, structureErrors });
+    validateLesson(lesson, languages, course.learningMode, {
+      err,
+      warn,
+      structureErrors,
+    });
   }
   if (course.trial?.enabled) {
     const knownLessons = new Set((course.lessons ?? []).map((l) => l.code));
     for (const row of course.trial.lessons ?? []) {
       if (!knownLessons.has(row.lessonRef)) {
-        err('TRIAL_LESSON_UNKNOWN', `trial references unknown lesson ${row.lessonRef}`, 'course.trial');
+        err(
+          'TRIAL_LESSON_UNKNOWN',
+          `trial references unknown lesson ${row.lessonRef}`,
+          'course.trial',
+        );
       }
     }
   }
@@ -64,7 +85,8 @@ export function validateCourseContent(
   const soft: PackageValidationIssue[] = [];
   for (const issue of errors) {
     if (isStructural(issue.code)) blocking.push(issue);
-    else if (forAction === 'approve') blocking.push({ ...issue, level: 'error' });
+    else if (forAction === 'approve')
+      blocking.push({ ...issue, level: 'error' });
     else soft.push({ ...issue, level: 'warning' });
   }
   const allWarnings = [...warnings, ...soft];
@@ -100,14 +122,26 @@ function validateLesson(
   const exhibits = lesson.exhibits ?? [];
   const exhibitCodes = new Set(exhibits.map((e) => e.code));
   if (exhibitCodes.size !== exhibits.length) {
-    out.err('EXHIBIT_DUPLICATE', `duplicate exhibit code in ${lesson.code}`, `lessons.${lesson.code}.exhibits`);
+    out.err(
+      'EXHIBIT_DUPLICATE',
+      `duplicate exhibit code in ${lesson.code}`,
+      `lessons.${lesson.code}.exhibits`,
+    );
   }
   for (const ex of exhibits) {
     if (!ex.localized || Object.keys(ex.localized).length === 0) {
-      out.err('EXHIBIT_NO_LOCALIZED', `exhibit ${ex.code} has no localized content`, `lessons.${lesson.code}.exhibits.${ex.code}`);
+      out.err(
+        'EXHIBIT_NO_LOCALIZED',
+        `exhibit ${ex.code} has no localized content`,
+        `lessons.${lesson.code}.exhibits.${ex.code}`,
+      );
     }
     if ((ex.type === 'VIDEO' || ex.type === 'MODEL3D') && !ex.thumbnail) {
-      out.warn('THUMBNAIL_MISSING', `exhibit ${ex.code} (${ex.type}) requires a thumbnail`, `lessons.${lesson.code}.exhibits.${ex.code}`);
+      out.warn(
+        'THUMBNAIL_MISSING',
+        `exhibit ${ex.code} (${ex.type}) requires a thumbnail`,
+        `lessons.${lesson.code}.exhibits.${ex.code}`,
+      );
     }
   }
 
@@ -117,29 +151,62 @@ function validateLesson(
   for (const lang of languages) {
     const loc = lesson.localized?.[lang];
     if (!loc) {
-      out.warn('LESSON_LOCALIZATION_MISSING', `lesson ${lesson.code} missing localization ${lang}`, `lessons.${lesson.code}.localized.${lang}`);
+      out.warn(
+        'LESSON_LOCALIZATION_MISSING',
+        `lesson ${lesson.code} missing localization ${lang}`,
+        `lessons.${lesson.code}.localized.${lang}`,
+      );
       continue;
     }
-    if (!loc.title?.trim()) out.err('LESSON_TITLE_MISSING', `lesson ${lesson.code} title empty (${lang})`, `lessons.${lesson.code}.localized.${lang}.title`);
+    if (!loc.title?.trim())
+      out.err(
+        'LESSON_TITLE_MISSING',
+        `lesson ${lesson.code} title empty (${lang})`,
+        `lessons.${lesson.code}.localized.${lang}.title`,
+      );
 
     if (needsVideo) {
       if (!loc.video) {
-        out.err('LESSON_VIDEO_MISSING', `lesson ${lesson.code} requires a video (${lang})`, `lessons.${lesson.code}.localized.${lang}.video`);
+        out.err(
+          'LESSON_VIDEO_MISSING',
+          `lesson ${lesson.code} requires a video (${lang})`,
+          `lessons.${lesson.code}.localized.${lang}.video`,
+        );
       } else {
         const seen = new Set<string>();
         for (const lp of loc.video.learningPoints ?? []) {
-          if (seen.has(lp.code)) out.err('LEARNING_POINT_DUPLICATE', `duplicate learning point ${lp.code} (${lesson.code}/${lang})`, `lessons.${lesson.code}.localized.${lang}.video`);
+          if (seen.has(lp.code))
+            out.err(
+              'LEARNING_POINT_DUPLICATE',
+              `duplicate learning point ${lp.code} (${lesson.code}/${lang})`,
+              `lessons.${lesson.code}.localized.${lang}.video`,
+            );
           seen.add(lp.code);
           if (typeof lp.timeSeconds !== 'number' || lp.timeSeconds < 0) {
-            out.err('LEARNING_POINT_INVALID_TIME', `learning point ${lp.code} invalid time`, `lessons.${lesson.code}.localized.${lang}.video`);
+            out.err(
+              'LEARNING_POINT_INVALID_TIME',
+              `learning point ${lp.code} invalid time`,
+              `lessons.${lesson.code}.localized.${lang}.video`,
+            );
           }
         }
-        if (!loc.video.learningPoints || loc.video.learningPoints.length === 0) {
-          out.warn('LESSON_VIDEO_NO_LP', `lesson ${lesson.code} video has no learning points (${lang})`, `lessons.${lesson.code}.localized.${lang}.video`);
+        if (
+          !loc.video.learningPoints ||
+          loc.video.learningPoints.length === 0
+        ) {
+          out.warn(
+            'LESSON_VIDEO_NO_LP',
+            `lesson ${lesson.code} video has no learning points (${lang})`,
+            `lessons.${lesson.code}.localized.${lang}.video`,
+          );
         }
         for (const trg of loc.video.exhibitTriggers ?? []) {
           if (!exhibitCodes.has(trg.exhibitRef)) {
-            out.err('TRIGGER_EXHIBIT_UNKNOWN', `trigger references unknown exhibit ${trg.exhibitRef} (${lesson.code}/${lang})`, `lessons.${lesson.code}.localized.${lang}.video.exhibitTriggers`);
+            out.err(
+              'TRIGGER_EXHIBIT_UNKNOWN',
+              `trigger references unknown exhibit ${trg.exhibitRef} (${lesson.code}/${lang})`,
+              `lessons.${lesson.code}.localized.${lang}.video.exhibitTriggers`,
+            );
           }
         }
       }
@@ -147,9 +214,20 @@ function validateLesson(
 
     if (needsText) {
       if (!loc.text?.html?.trim()) {
-        out.err('LESSON_TEXT_MISSING', `lesson ${lesson.code} requires text (${lang})`, `lessons.${lesson.code}.localized.${lang}.text`);
-      } else if (!loc.text.learningPoints || loc.text.learningPoints.length === 0) {
-        out.warn('LESSON_TEXT_NO_LP', `lesson ${lesson.code} text has no learning points (${lang})`, `lessons.${lesson.code}.localized.${lang}.text`);
+        out.err(
+          'LESSON_TEXT_MISSING',
+          `lesson ${lesson.code} requires text (${lang})`,
+          `lessons.${lesson.code}.localized.${lang}.text`,
+        );
+      } else if (
+        !loc.text.learningPoints ||
+        loc.text.learningPoints.length === 0
+      ) {
+        out.warn(
+          'LESSON_TEXT_NO_LP',
+          `lesson ${lesson.code} text has no learning points (${lang})`,
+          `lessons.${lesson.code}.localized.${lang}.text`,
+        );
       }
     }
 
@@ -160,7 +238,11 @@ function validateLesson(
   for (const [lang, rows] of Object.entries(lesson.recommendedReading ?? {})) {
     for (const r of rows ?? []) {
       if (!r.title?.trim() || !r.type) {
-        out.err('READING_INVALID', `recommended reading invalid (${lesson.code}/${lang})`, `lessons.${lesson.code}.recommendedReading.${lang}`);
+        out.err(
+          'READING_INVALID',
+          `recommended reading invalid (${lesson.code}/${lang})`,
+          `lessons.${lesson.code}.recommendedReading.${lang}`,
+        );
       }
     }
   }

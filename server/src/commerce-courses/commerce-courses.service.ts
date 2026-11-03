@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -6,35 +7,52 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
+import { computeCompleteness } from './completeness';
+import { pickSummaryLocalization, summaryTitle } from './course-summary';
+import { detailToCompletenessInput } from './version-snapshot';
+import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
+import { syncTextLearningPoints } from './course-authoring.service';
 
-/** 课程列表/详情/工作流（v2）。 */
+/** 课程列表/详情/工作流（v2）�?*/
 @Injectable()
 export class CommerceCoursesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: CourseStorageService,
+    private readonly publishing: PublishingService,
   ) {}
 
-  /** 读取课程封面字节（Admin 预览用）。 */
-  async getCoverBytes(id: string): Promise<{ bytes: Buffer; extension: string } | null> {
+  /** 读取课程封面的存储位置（Admin 预览用）。 */
+  async getCoverBytes(
+    id: string,
+  ): Promise<{ storageKey: string; extension: string; size: number | null } | null> {
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      select: { cover: { select: { storageKey: true, extension: true } } },
+      select: { cover: { select: { storageKey: true, extension: true, size: true } } },
     });
     if (!course?.cover) return null;
-    const bytes = await this.storage.getMedia(course.cover.storageKey);
-    return { bytes, extension: course.cover.extension };
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
   }
 
-  /** 读取课程某媒体资产字节（Admin 预览用，仅限该课程内资产）。 */
-  async getMediaBytes(id: string, assetId: string): Promise<{ bytes: Buffer; extension: string } | null> {
+  /** 读取课程某媒体资产的存储位置（Admin 预览用，仅限该课程内资产）。 */
+  async getMediaBytes(
+    id: string,
+    assetId: string,
+  ): Promise<{ storageKey: string; extension: string; size: number | null } | null> {
     const asset = await this.prisma.courseMediaAsset.findUnique({
       where: { id: assetId },
-      select: { courseId: true, storageKey: true, extension: true },
+      select: { courseId: true, storageKey: true, extension: true, size: true },
     });
     if (!asset || asset.courseId !== id) return null;
-    const bytes = await this.storage.getMedia(asset.storageKey);
-    return { bytes, extension: asset.extension };
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
   }
 
   async list(query: {
@@ -47,8 +65,9 @@ export class CommerceCoursesService {
   }) {
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, query.pageSize ?? 10));
-    const where: Prisma.CommerceCourseWhereInput = {};
-    if (query.lifecycleStatus) where.lifecycleStatus = query.lifecycleStatus as never;
+    const where: Prisma.CommerceCourseWhereInput = { archivedAt: null };
+    if (query.lifecycleStatus)
+      where.lifecycleStatus = query.lifecycleStatus as never;
     if (query.liveStatus) where.liveStatus = query.liveStatus as never;
     if (query.categoryId) where.categoryId = query.categoryId;
     if (query.search?.trim()) {
@@ -56,7 +75,11 @@ export class CommerceCoursesService {
       where.OR = [
         { code: { contains: q, mode: 'insensitive' } },
         { slug: { contains: q, mode: 'insensitive' } },
-        { localizations: { some: { title: { contains: q, mode: 'insensitive' } } } },
+        {
+          localizations: {
+            some: { title: { contains: q, mode: 'insensitive' } },
+          },
+        },
       ];
     }
     const [rows, total, counts] = await Promise.all([
@@ -69,14 +92,43 @@ export class CommerceCoursesService {
           category: true,
           localizations: true,
           cover: true,
-          _count: { select: { lessons: true } },
+          _count: { select: { lessons: { where: { archivedAt: null } } } },
         },
       }),
       this.prisma.commerceCourse.count({ where }),
       this.countsByStatus(),
     ]);
+    const liveVersionIds = rows
+      .map((row) => row.liveVersionId)
+      .filter((id): id is string => Boolean(id));
+    const liveVersions = liveVersionIds.length
+      ? await this.prisma.courseVersion.findMany({
+          where: { id: { in: liveVersionIds } },
+          select: {
+            id: true,
+            versionLabel: true,
+            wentLiveAt: true,
+            createdAt: true,
+          },
+        })
+      : [];
+    const liveVersionById = new Map(
+      liveVersions.map((version) => [version.id, version]),
+    );
     return {
-      courses: rows.map((row) => this.toSummary(row)),
+      courses: rows.map((row) => {
+        const liveVersion = row.liveVersionId
+          ? liveVersionById.get(row.liveVersionId)
+          : undefined;
+        return {
+          ...this.toSummary(row),
+          liveVersionLabel: liveVersion?.versionLabel ?? null,
+          liveVersionWentLiveAt:
+            liveVersion?.wentLiveAt?.toISOString() ??
+            liveVersion?.createdAt.toISOString() ??
+            null,
+        };
+      }),
       total,
       page,
       pages: Math.max(1, Math.ceil(total / pageSize)),
@@ -85,19 +137,40 @@ export class CommerceCoursesService {
   }
 
   private async countsByStatus() {
-    const grouped = await this.prisma.commerceCourse.groupBy({
-      by: ['lifecycleStatus'],
-      _count: { _all: true },
-    });
-    const counts = { total: 0, working: 0, inUat: 0, approved: 0, live: 0 };
-    for (const g of grouped) {
-      const n = g._count._all;
-      counts.total += n;
-      if (g.lifecycleStatus === 'WORKING') counts.working = n;
-      if (g.lifecycleStatus === 'IN_UAT') counts.inUat = n;
-      if (g.lifecycleStatus === 'APPROVED') counts.approved = n;
-      if (g.lifecycleStatus === 'LIVE') counts.live = n;
-    }
+    const [grouped, draft, published, online, hidden, offline] =
+      await Promise.all([
+        this.prisma.commerceCourse.groupBy({
+          by: ['lifecycleStatus'],
+          where: { archivedAt: null },
+          _count: { _all: true },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, hasDraft: true },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveVersionId: { not: null } },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveStatus: 'ONLINE' },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveStatus: 'HIDDEN' },
+        }),
+        this.prisma.commerceCourse.count({
+          where: { archivedAt: null, liveStatus: 'OFFLINE' },
+        }),
+      ]);
+    const counts = {
+      total: 0,
+      draft,
+      published,
+      online,
+      hidden,
+      offline,
+      notPublished: 0,
+    };
+    for (const g of grouped) counts.total += g._count._all;
+    counts.notPublished = counts.total - counts.published;
     return counts;
   }
 
@@ -109,7 +182,9 @@ export class CommerceCoursesService {
         cover: true,
         localizations: true,
         trialRows: true,
+        plans: { where: { active: true }, orderBy: { sortOrder: 'asc' } },
         lessons: {
+          where: { archivedAt: null },
           orderBy: { sortOrder: 'asc' },
           include: {
             localizations: { include: { video: true } },
@@ -123,118 +198,42 @@ export class CommerceCoursesService {
         },
       },
     });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    return course;
+    if (!course)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
+    return {
+      ...course,
+      completeness: computeCompleteness(detailToCompletenessInput(course)),
+    };
   }
 
   async assertExists(id: string) {
-    const found = await this.prisma.commerceCourse.findUnique({ where: { id }, select: { id: true } });
-    if (!found) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-  }
-
-  async changeStatus(
-    id: string,
-    body: { status: 'ONLINE' | 'HIDDEN' | 'OFFLINE'; reason?: string },
-  ) {
-    await this.assertExists(id);
-    await this.prisma.commerceCourse.update({
+    const found = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      data: {
-        liveStatus: body.status,
-        ...(body.status === 'OFFLINE' ? { lifecycleStatus: 'WORKING' } : {}),
-      },
+      select: { id: true },
     });
-    return this.detail(id);
+    if (!found)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
   }
 
-  // ===== 工作流 =====
-  async publishUat(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    if (course.archivedAt) throw new ConflictException({ code: 'COURSE_ARCHIVED', message: 'Archived course cannot be published' });
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: {
-        lifecycleStatus: 'IN_UAT',
-        lastUatPublishedAt: new Date(),
-        approvedAt: null,
-        approvedBy: null,
-      },
-    });
-    return this.detail(id);
-  }
-
-  async approve(id: string) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    if (course.lifecycleStatus !== 'IN_UAT') {
-      throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be in UAT before approval' });
-    }
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: { lifecycleStatus: 'APPROVED', approvedAt: new Date() },
-    });
-    return this.detail(id);
-  }
-
-  async goLive(id: string, actorEmployeeId: string | null) {
-    const course = await this.prisma.commerceCourse.findUnique({ where: { id } });
-    if (!course) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Course not found' });
-    if (course.lifecycleStatus !== 'APPROVED') {
-      throw new ConflictException({ code: 'COURSE_INVALID_TRANSITION', message: 'Course must be approved before going live' });
-    }
-    const snapshot = await this.buildSnapshotData(id);
-    const last = await this.prisma.courseVersion.findFirst({
-      where: { courseId: id },
-      orderBy: { versionNo: 'desc' },
-      select: { versionNo: true },
-    });
-    const version = await this.prisma.courseVersion.create({
-      data: {
-        courseId: id,
-        versionNo: (last?.versionNo ?? 0) + 1,
-        snapshotData: snapshot as Prisma.InputJsonValue,
-        wentLiveAt: new Date(),
-        createdBy: actorEmployeeId ?? null,
-      },
-    });
-    await this.prisma.commerceCourse.update({
-      where: { id },
-      data: {
-        lifecycleStatus: 'LIVE',
-        liveStatus: 'ONLINE',
-        liveVersionId: version.id,
-      },
-    });
-    return this.detail(id);
-  }
-
-  async restore(id: string, versionId: string) {
-    const version = await this.prisma.courseVersion.findUnique({ where: { id: versionId } });
-    if (!version || version.courseId !== id) {
-      throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Version not found' });
-    }
-    // 简化：仅返回快照供后续编辑器导入；实际重写工作副本在 P1b 编辑器实现时接入。
-    return { restoredFrom: version.versionNo, snapshot: version.snapshotData };
-  }
-
-  async listVersions(id: string) {
-    return this.prisma.courseVersion.findMany({
-      where: { courseId: id },
-      orderBy: { versionNo: 'desc' },
-      select: { id: true, versionNo: true, wentLiveAt: true, sourceVersionId: true, createdAt: true },
-    });
-  }
-
-  // ===== 编辑工作区（第一版） =====
-  private static readonly LEARNING_MODES = ['VIDEO_ONLY', 'TEXT_ONLY', 'VIDEO_AND_TEXT'];
-
-  private normaliseMode(mode?: string): 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT' {
+  // ===== 编辑工作区（草稿�?=====
+  private static readonly LEARNING_MODES = [
+    'VIDEO_ONLY',
+    'TEXT_ONLY',
+    'VIDEO_AND_TEXT',
+  ];
+  private normaliseMode(
+    mode?: string,
+  ): 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT' {
     const m = (mode ?? '').toUpperCase();
-    return (CommerceCoursesService.LEARNING_MODES.includes(m) ? m : 'VIDEO_AND_TEXT') as
-      | 'VIDEO_ONLY'
-      | 'TEXT_ONLY'
-      | 'VIDEO_AND_TEXT';
+    return (
+      CommerceCoursesService.LEARNING_MODES.includes(m) ? m : 'VIDEO_AND_TEXT'
+    ) as 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT';
   }
 
   private slugify(input: string): string {
@@ -274,9 +273,11 @@ export class CommerceCoursesService {
           slug,
           learningMode: this.normaliseMode(body.learningMode),
           defaultContentLanguage: language,
-          learningLanguages: learningLanguages as Prisma.InputJsonValue,
+          learningLanguages: learningLanguages,
           categoryId: body.categoryId || null,
           subtitle: body.subtitle ?? null,
+          hasDraft: true,
+          lifecycleStatus: 'WORKING',
           localizations: {
             create: {
               language,
@@ -290,6 +291,12 @@ export class CommerceCoursesService {
         },
         select: { id: true },
       });
+      await this.publishing.recordHistory(
+        course.id,
+        HISTORY_ACTIONS.CREATE_COURSE,
+        { code },
+        actorEmployeeId,
+      );
       return this.detail(course.id);
     } catch (error) {
       if (
@@ -315,26 +322,87 @@ export class CommerceCoursesService {
       learningLanguages?: string[];
       subtitle?: string | null;
       level?: string | null;
+      categoryId?: string | null;
     },
   ) {
-    await this.assertExists(id);
+    const current = await this.prisma.commerceCourse.findUnique({
+      where: { id },
+      select: {
+        code: true,
+        learningMode: true,
+        learningLanguages: true,
+        categoryId: true,
+      },
+    });
+    if (!current)
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
+    // Course ID �?Learning mode 创建后不可修改（PRD §22�?
+    if (
+      body.code !== undefined &&
+      body.code.trim() &&
+      body.code.trim().toUpperCase() !== current.code
+    ) {
+      throw new ConflictException({
+        code: 'COURSE_ID_IMMUTABLE',
+        message: 'Course ID cannot be changed.',
+      });
+    }
+    if (
+      body.learningMode !== undefined &&
+      this.normaliseMode(body.learningMode) !== current.learningMode
+    ) {
+      throw new ConflictException({
+        code: 'LEARNING_MODE_LOCKED',
+        message: 'Learning mode cannot be changed after the course is created.',
+      });
+    }
+    // 学习语言只能追加（PRD §22�?
+    const existingLanguages = (current.learningLanguages as string[]) ?? [];
+    const requestedLanguages = body.learningLanguages;
+    if (
+      requestedLanguages &&
+      existingLanguages.some(
+        (language) => !requestedLanguages.includes(language),
+      )
+    ) {
+      throw new ConflictException({
+        code: 'LEARNING_LANGUAGE_REMOVE_FORBIDDEN',
+        message: 'Learning languages can only be added, not removed.',
+      });
+    }
+    if (
+      requestedLanguages &&
+      requestedLanguages.length < existingLanguages.length
+    ) {
+      throw new ConflictException({
+        code: 'LEARNING_LANGUAGE_REMOVE_FORBIDDEN',
+        message: 'Learning languages can only be added, not removed.',
+      });
+    }
     try {
       await this.prisma.commerceCourse.update({
         where: { id },
         data: {
-          ...(body.code !== undefined ? { code: body.code.trim() } : {}),
           ...(body.slug !== undefined ? { slug: body.slug.trim() } : {}),
-          ...(body.learningMode !== undefined
-            ? { learningMode: this.normaliseMode(body.learningMode) }
-            : {}),
           ...(body.defaultContentLanguage !== undefined
             ? { defaultContentLanguage: body.defaultContentLanguage }
             : {}),
-          ...(body.learningLanguages !== undefined
-            ? { learningLanguages: body.learningLanguages as Prisma.InputJsonValue }
+          ...(requestedLanguages !== undefined
+            ? { learningLanguages: requestedLanguages }
             : {}),
           ...(body.subtitle !== undefined ? { subtitle: body.subtitle } : {}),
           ...(body.level !== undefined ? { level: body.level } : {}),
+          ...(body.categoryId !== undefined
+            ? { categoryId: body.categoryId || null }
+            : {}),
+          hasDraft: true,
+          lifecycleStatus: 'WORKING',
+          draftSourceType: null,
+          draftSourceEnvironment: null,
+          draftSourceVersionLabel: null,
         },
       });
       return this.detail(id);
@@ -371,11 +439,17 @@ export class CommerceCoursesService {
       whatYouLearn: (body.whatYouLearn ?? null) as Prisma.InputJsonValue,
       provides: (body.provides ?? null) as Prisma.InputJsonValue,
     };
-    await this.prisma.courseLocalization.upsert({
-      where: { courseId_language: { courseId: id, language } },
-      create: { courseId: id, language, ...data },
-      update: data,
-    });
+    await this.prisma.$transaction([
+      this.prisma.courseLocalization.upsert({
+        where: { courseId_language: { courseId: id, language } },
+        create: { courseId: id, language, ...data },
+        update: data,
+      }),
+      this.prisma.commerceCourse.update({
+        where: { id },
+        data: { hasDraft: true, lifecycleStatus: 'WORKING' },
+      }),
+    ]);
     return this.detail(id);
   }
 
@@ -393,24 +467,29 @@ export class CommerceCoursesService {
         })
       )?.defaultContentLanguage ||
       'en-GB';
-    const last = await this.prisma.lesson.findFirst({
-      where: { courseId: id },
-      orderBy: { sortOrder: 'desc' },
-      select: { sortOrder: true },
-    });
-    const sortOrder = (last?.sortOrder ?? 0) + 1;
-    const code = body.code?.trim() || `L${sortOrder}`;
     try {
-      await this.prisma.lesson.create({
-        data: {
-          courseId: id,
-          code,
-          sortOrder,
-          localizations: {
-            create: { language, title: body.title || code },
+      // 锁住课程行再取下一个序号：同时新建两节课不会拿到同一�?sortOrder / 默认 code
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "CommerceCourse" WHERE id = ${id} FOR UPDATE`;
+        const last = await tx.lesson.findFirst({
+          where: { courseId: id },
+          orderBy: { sortOrder: 'desc' },
+          select: { sortOrder: true },
+        });
+        const sortOrder = (last?.sortOrder ?? 0) + 1;
+        const code = body.code?.trim() || `L${sortOrder}`;
+        await tx.lesson.create({
+          data: {
+            courseId: id,
+            code,
+            sortOrder,
+            localizations: {
+              create: { language, title: body.title || code },
+            },
           },
-        },
+        });
       });
+      await this.touchDraft(id);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -440,10 +519,13 @@ export class CommerceCoursesService {
   ) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { id: true, courseId: true },
+      select: { id: true, courseId: true, archivedAt: true },
     });
-    if (!lesson || lesson.courseId !== id) {
-      throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
+    if (!lesson || lesson.courseId !== id || lesson.archivedAt) {
+      throw new NotFoundException({
+        code: 'LESSON_NOT_FOUND',
+        message: 'Lesson not found',
+      });
     }
     const language =
       body.language ||
@@ -454,33 +536,69 @@ export class CommerceCoursesService {
         })
       )?.defaultContentLanguage ||
       'en-GB';
-    await this.prisma.lesson.update({
-      where: { id: lessonId },
-      data: {
-        ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
-      },
-    });
-    if (
-      body.title !== undefined ||
-      body.description !== undefined ||
-      body.textHtml !== undefined
-    ) {
-      const existing = await this.prisma.lessonLocalization.findUnique({
-        where: { lessonId_language: { lessonId, language } },
-        select: { title: true, description: true, textHtml: true },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.lesson.update({
+          where: { id: lessonId },
+          data: {
+            ...(body.code !== undefined ? { code: body.code.trim() } : {}),
+            ...(body.sortOrder !== undefined
+              ? { sortOrder: body.sortOrder }
+              : {}),
+          },
+        });
+        if (
+          body.title !== undefined ||
+          body.description !== undefined ||
+          body.textHtml !== undefined
+        ) {
+          // 只写本次提交的字段：先读后整行写回会在并发保存（例如标题与正文
+          // 同时提交）时用旧值互相覆盖，把正文 textHtml 清空并连带删除文本学习点。
+          await tx.lessonLocalization.upsert({
+            where: { lessonId_language: { lessonId, language } },
+            create: {
+              lessonId,
+              language,
+              title: body.title ?? 'Untitled',
+              description: body.description ?? null,
+              textHtml: body.textHtml ?? null,
+            },
+            update: {
+              ...(body.title !== undefined ? { title: body.title } : {}),
+              ...(body.description !== undefined
+                ? { description: body.description }
+                : {}),
+              ...(body.textHtml !== undefined
+                ? { textHtml: body.textHtml }
+                : {}),
+            },
+          });
+          if (body.textHtml !== undefined) {
+            await syncTextLearningPoints(tx, lessonId, language, body.textHtml);
+          }
+        }
+        await tx.commerceCourse.update({
+          where: { id },
+          data: {
+            hasDraft: true,
+            lifecycleStatus: 'WORKING',
+            draftSourceType: null,
+            draftSourceEnvironment: null,
+            draftSourceVersionLabel: null,
+          },
+        });
       });
-      const payload = {
-        title: body.title ?? existing?.title ?? 'Untitled',
-        description:
-          body.description !== undefined ? body.description : existing?.description ?? null,
-        textHtml: body.textHtml !== undefined ? body.textHtml : existing?.textHtml ?? null,
-      };
-      await this.prisma.lessonLocalization.upsert({
-        where: { lessonId_language: { lessonId, language } },
-        create: { lessonId, language, ...payload },
-        update: payload,
-      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException({
+          code: 'LESSON_CODE_DUPLICATE',
+          message: 'A lesson with this code already exists in the course.',
+        });
+      }
+      throw error;
     }
     return this.detail(id);
   }
@@ -488,84 +606,128 @@ export class CommerceCoursesService {
   async deleteLesson(id: string, lessonId: string) {
     const lesson = await this.prisma.lesson.findUnique({
       where: { id: lessonId },
-      select: { id: true, courseId: true },
+      select: { id: true, courseId: true, archivedAt: true },
     });
-    if (!lesson || lesson.courseId !== id) {
-      throw new NotFoundException({ code: 'LESSON_NOT_FOUND', message: 'Lesson not found' });
+    if (!lesson || lesson.courseId !== id || lesson.archivedAt) {
+      throw new NotFoundException({
+        code: 'LESSON_NOT_FOUND',
+        message: 'Lesson not found',
+      });
     }
-    await this.prisma.lesson.delete({ where: { id: lessonId } });
+    // 条件软删除：ID 不复用，Publish 后才从线上消失，学员历史保留（PRD §22）；
+    // 重复点击时第二次删不到就�?404 返回
+    const removed = await this.prisma.lesson.updateMany({
+      where: { id: lessonId, courseId: id, archivedAt: null },
+      data: { archivedAt: new Date() },
+    });
+    if (removed.count === 0) {
+      throw new NotFoundException({
+        code: 'LESSON_NOT_FOUND',
+        message: 'Lesson not found',
+      });
+    }
+    await this.prisma.trialSetting.deleteMany({
+      where: { courseId: id, lessonId },
+    });
+    await this.touchDraft(id);
     return this.detail(id);
   }
 
   async reorderLessons(id: string, lessonIds: string[]) {
     await this.assertExists(id);
-    await this.prisma.$transaction(
-      lessonIds.map((lessonId, index) =>
-        this.prisma.lesson.update({
-          where: { id: lessonId },
+    if (
+      !Array.isArray(lessonIds) ||
+      lessonIds.some((lessonId) => typeof lessonId !== 'string') ||
+      new Set(lessonIds).size !== lessonIds.length
+    ) {
+      throw new BadRequestException({
+        code: 'LESSON_ORDER_INVALID',
+        message: 'lessonIds must be a list of distinct lesson ids',
+      });
+    }
+    // 只动本课程的课时：别的课程的课时 id 或不存在�?id 整批拒绝�?04），不留半截排序
+    await this.prisma.$transaction(async (tx) => {
+      for (const [index, lessonId] of lessonIds.entries()) {
+        const moved = await tx.lesson.updateMany({
+          where: { id: lessonId, courseId: id },
           data: { sortOrder: index + 1 },
-        }),
-      ),
-    );
+        });
+        if (moved.count === 0) {
+          throw new NotFoundException({
+            code: 'LESSON_NOT_FOUND',
+            message: 'Lesson not found',
+          });
+        }
+      }
+    });
+    await this.touchDraft(id);
     return this.detail(id);
   }
 
-  private async buildSnapshotData(id: string) {
-    const detail = await this.detail(id);
-    return {
-      course: {
-        id: detail.id,
-        code: detail.code,
-        slug: detail.slug,
-        learningMode: detail.learningMode,
-        defaultContentLanguage: detail.defaultContentLanguage,
-        learningLanguages: detail.learningLanguages,
-        localizations: detail.localizations,
-        lessons: detail.lessons.map((lesson) => ({
-          code: lesson.code,
-          order: lesson.sortOrder,
-          localizations: lesson.localizations,
-          exhibits: lesson.exhibits.map((ex) => ({ code: ex.code, type: ex.type, localized: ex.localized })),
-          readings: lesson.readings,
-          questions: lesson.questions,
-          applicationTest: lesson.applicationTest,
-          learningPoints: lesson.learningPoints,
-          triggers: lesson.triggers,
-        })),
-        trialRows: detail.trialRows,
+  /** 任何内容编辑都只改草稿，并清空导�?恢复来源�?*/
+  private async touchDraft(id: string): Promise<void> {
+    await this.prisma.commerceCourse.update({
+      where: { id },
+      data: {
+        hasDraft: true,
+        lifecycleStatus: 'WORKING',
+        draftSourceType: null,
+        draftSourceEnvironment: null,
+        draftSourceVersionLabel: null,
       },
-      versionedAt: new Date().toISOString(),
-    };
+    });
   }
 
   private toSummary(row: {
     id: string;
     code: string;
     slug: string;
+    defaultContentLanguage: string;
     learningMode: string;
     learningLanguages: unknown;
     lifecycleStatus: string;
     liveStatus: string;
     liveVersionId: string | null;
+    hasDraft: boolean;
+    trialEnabled: boolean;
     updatedAt: Date;
     category: { id: string; name: string } | null;
-    localizations: { language: string; title: string; shortDescription: string | null }[];
+    localizations: {
+      language: string;
+      title: string;
+      shortDescription: string | null;
+    }[];
     _count: { lessons: number };
   }) {
-    const defaultLoc = row.localizations[0];
+    // localizations 的返回顺序不稳定（没有 orderBy，Postgres 堆顺序可能因更新而改变），
+    // 若直接取 [0]，可能拿到「添加学习语言」时以空标题占位的本地化记录，导致列表里
+    // 课程名为空。选择规则见 pickSummaryLocalization。
+    const localized = pickSummaryLocalization(
+      row.localizations,
+      row.defaultContentLanguage,
+    );
+    const title = summaryTitle(row.localizations, row.defaultContentLanguage, {
+      slug: row.slug,
+      code: row.code,
+    });
     return {
       id: row.id,
       code: row.code,
       slug: row.slug,
-      title: defaultLoc?.title ?? row.slug,
-      subtitle: defaultLoc?.shortDescription ?? null,
-      category: row.category ? { id: row.category.id, name: row.category.name } : null,
+      title,
+      subtitle: localized?.shortDescription ?? null,
+      category: row.category
+        ? { id: row.category.id, name: row.category.name }
+        : null,
       learningMode: row.learningMode,
       learningLanguages: row.learningLanguages,
       lessonCount: row._count.lessons,
       lifecycleStatus: row.lifecycleStatus,
       liveStatus: row.liveStatus,
-      liveVersionNo: undefined,
+      liveVersionId: row.liveVersionId,
+      hasDraft: row.hasDraft,
+      trialEnabled: row.trialEnabled,
+      published: Boolean(row.liveVersionId),
       updatedAt: row.updatedAt,
     };
   }

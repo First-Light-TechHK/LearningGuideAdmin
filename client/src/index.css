@@ -275,3 +275,72 @@ body,
 .chat-bubble-user .wmde-markdown {
   color: var(--color-bg-container);
 }
+/* ===== AI Tutor Chat Markdown 扩展样式（2026-10-30，与 Portal 侧对齐）=====
+   由 normalizeTutorMarkdown 预处理出的结构对应的样式：
+   - strong / em：加粗强调（提示词允许每段 ≤2 处）
+   - sup：脚注引用上标 [1]
+   - .markdown-sources：底部 Sources 来源块 */
+.wmde-markdown strong { font-weight: 700; }
+.chat-bubble-user .wmde-markdown strong { color: var(--color-bg-container); }
+.wmde-markdown sup {
+  font-size: 0.75em;
+  line-height: 0;
+  vertical-align: super;
+  padding: 0 1px;
+}
+/* 底部 Sources 来源块：灰色小字 + 左边框，视觉上与正文分离 */
+.wmde-markdown .markdown-sources {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--color-border);
+  border-radius: 0 4px 4px 0;
+  background: rgba(0, 0, 0, 0.03);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--color-text-secondary);
+}
+.wmde-markdown .markdown-sources > p {
+  margin: 0 0 2px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.wmde-markdown .markdown-sources > ul,
+.wmde-markdown .markdown-sources > ol {
+  margin: 0;
+  padding-left: 16px;
+  list-style: none;
+}
+.wmde-markdown .markdown-sources > li { margin: 0; padding: 0; }
+.chat-bubble-user .wmde-markdown .markdown-sources {
+  background: rgba(255, 255, 255, 0.15);
+  border-left-color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.85);
+}
+.chat-bubble-user .wmde-markdown .markdown-sources > p {
+  color: rgba(255, 255, 255, 0.9);
+}
+/* KaTeX 样式必须在应用入口全局引入 katex/dist/katex.min.css。
+   若未引入，公式会渲染为无样式的纯文本 */
+
+/* ===== AI Tutor 对话气泡工具栏（2026-10-30）=====
+   结构：每个 Bubble 下方始终显示一排 icon button
+   AI 侧左对齐，User 侧右对齐，靠 padding 与气泡水平对齐 */
+.chat-bubble-actions { display: flex; gap: 4px; }
+.chat-bubble-actions .ant-btn-text {
+  padding: 2px 6px;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  min-width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+.chat-bubble-actions .ant-btn-text:hover:not(:disabled) {
+  color: var(--color-primary);
+  background: var(--color-bg-subtle);
+}
+.chat-bubble-actions .ant-btn-text:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+/* 按钮在 Dropdown trigger 内：保持与外层同级一致 */
+.chat-bubble-actions > .ant-dropdown-trigger.ant-btn-text { display: inline-flex; }

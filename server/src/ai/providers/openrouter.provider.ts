@@ -2,7 +2,9 @@ import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import {
   LlmMessage,
   LlmProvider,
+  LlmStreamEvent,
   LlmStreamOptions,
+  LlmTimeoutError,
 } from './llm-provider.interface';
 
 /**
@@ -15,18 +17,56 @@ export class OpenRouterProvider implements LlmProvider {
   readonly name = 'openrouter';
 
   async *stream(opts: LlmStreamOptions): AsyncGenerator<string> {
-    const res = await fetch(`${opts.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${opts.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: opts.model,
-        messages: opts.messages satisfies LlmMessage[],
-        stream: true,
-      }),
-    });
+    for await (const event of this.streamEvents(opts)) {
+      if (event.type === 'delta') yield event.content;
+      else opts.onEvent?.(event);
+    }
+  }
+
+  async *streamEvents(opts: LlmStreamOptions): AsyncGenerator<LlmStreamEvent> {
+    if (
+      (opts.temperature !== undefined && !Number.isFinite(opts.temperature)) ||
+      (opts.maxOutputTokens !== undefined &&
+        (!Number.isSafeInteger(opts.maxOutputTokens) ||
+          opts.maxOutputTokens < 1)) ||
+      (opts.timeoutMs !== undefined &&
+        (!Number.isSafeInteger(opts.timeoutMs) || opts.timeoutMs < 1))
+    )
+      throw new TypeError('invalid LLM stream options');
+    const timeoutSignal = opts.timeoutMs
+      ? AbortSignal.timeout(opts.timeoutMs)
+      : undefined;
+    const signal =
+      opts.signal && timeoutSignal
+        ? AbortSignal.any([opts.signal, timeoutSignal])
+        : (opts.signal ?? timeoutSignal);
+    const body = {
+      model: opts.model,
+      messages: opts.messages satisfies LlmMessage[],
+      stream: true,
+      ...(opts.temperature === undefined
+        ? {}
+        : { temperature: opts.temperature }),
+      ...(opts.maxOutputTokens === undefined
+        ? {}
+        : { max_tokens: opts.maxOutputTokens }),
+    };
+    let res: Response;
+    try {
+      res = await fetch(`${opts.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${opts.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      if (timeoutSignal?.aborted && !opts.signal?.aborted)
+        throw new LlmTimeoutError();
+      throw error;
+    }
 
     if (!res.ok || !res.body) {
       // 状态码透传语义：4xx/5xx 均视为上游调用失败（对外消息不带上游细节，§9）
@@ -39,11 +79,26 @@ export class OpenRouterProvider implements LlmProvider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let finishReason: string | null = null;
+    let finishEmitted = false;
 
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      let read: ReadableStreamReadResult<Uint8Array>;
+      try {
+        read = await reader.read();
+      } catch (error) {
+        if (timeoutSignal?.aborted && !opts.signal?.aborted)
+          throw new LlmTimeoutError();
+        throw error;
+      }
+      const { done, value } = read;
+      if (done) {
+        buffer += decoder.decode();
+        if (!buffer.trim()) break;
+        buffer += '\n';
+      } else {
+        buffer += decoder.decode(value, { stream: true });
+      }
       // 按行解析 SSE：仅消费完整行，残段留在 buffer
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
@@ -51,17 +106,60 @@ export class OpenRouterProvider implements LlmProvider {
         const trimmed = line.trim();
         if (!trimmed.startsWith('data:')) continue;
         const payload = trimmed.slice(5).trim();
-        if (payload === '[DONE]') return;
+        if (payload === '[DONE]') {
+          yield { type: 'finish', reason: finishReason };
+          finishEmitted = true;
+          return;
+        }
         try {
           const parsed = JSON.parse(payload) as {
-            choices?: Array<{ delta?: { content?: string } }>;
+            usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+            choices?: Array<{
+              delta?: { content?: string };
+              finish_reason?: unknown;
+            }>;
           };
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) yield delta;
+          const usage = parsed.usage;
+          if (
+            usage &&
+            (usage.prompt_tokens !== undefined ||
+              usage.completion_tokens !== undefined)
+          ) {
+            const inputTokens = usage.prompt_tokens;
+            const outputTokens = usage.completion_tokens;
+            if (
+              (inputTokens === undefined ||
+                (Number.isSafeInteger(inputTokens) &&
+                  (inputTokens as number) >= 0)) &&
+              (outputTokens === undefined ||
+                (Number.isSafeInteger(outputTokens) &&
+                  (outputTokens as number) >= 0))
+            ) {
+              yield {
+                type: 'usage',
+                usage: {
+                  ...(inputTokens === undefined
+                    ? {}
+                    : { inputTokens: inputTokens as number }),
+                  ...(outputTokens === undefined
+                    ? {}
+                    : { outputTokens: outputTokens as number }),
+                },
+              };
+            }
+          }
+          const choice = parsed.choices?.[0];
+          if (typeof choice?.finish_reason === 'string')
+            finishReason = choice.finish_reason;
+          const delta = choice?.delta?.content;
+          if (typeof delta === 'string' && delta)
+            yield { type: 'delta', content: delta };
         } catch {
           // 非 JSON 心跳/注释行：忽略
         }
       }
+      if (done) break;
     }
+    if (!finishEmitted) yield { type: 'finish', reason: finishReason };
   }
 }

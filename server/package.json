@@ -25,15 +25,20 @@
     "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
     "seed:demo": "ts-node prisma/seed-demo.ts",
     "prompts:sync": "ts-node src/ai/sync-prompts.ts",
-    "eval:helpdesk": "ts-node eval/helpdesk/run.ts"
+    "eval:helpdesk": "ts-node eval/helpdesk/run.ts",
+    "seed:helpdesk-faqs": "ts-node eval/helpdesk/seed-faq-library.ts",
+    "seed:helpdesk-faq-map": "ts-node eval/helpdesk/seed-faq-map.ts",
+    "helpdesk:faq-vectors": "ts-node eval/helpdesk/faq-vectors.ts",
+    "seed:helpdesk-demo": "ts-node eval/helpdesk/demo/seed-helpdesk-demo.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1160.0",
     "@aws-sdk/client-sesv2": "^3.1156.0",
-    "@earendil-works/pi-agent-core": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-agent-core": "^1.4.0",
+    "@earendil-works/pi-ai": "^1.4.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -44,9 +49,10 @@
     "class-validator": "^0.15.1",
     "js-yaml": "^4.3.2",
     "jszip": "^3.10.2",
+"mammoth": "^1.13.0",
     "markitdown-ts": "^0.0.10",
     "nodemailer": "^10.2.1",
-    "opencc-js": "1.4.2",
+    "opencc-js": "^1.4.2",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

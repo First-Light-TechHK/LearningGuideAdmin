@@ -5,8 +5,12 @@ import { readFileSync } from 'node:fs'
 import {
   ASSIST_FEEDBACK,
   FAQ_CATEGORIES,
+  FAQ_SIGNALS,
   HELPDESK_CATEGORIES,
   HELPDESK_LOCALES,
+  ORDER_KINDS,
+  ORDER_STATUSES,
+  PAYMENT_MODES,
   TICKET_STATUSES,
   TIMELINE_LIMIT,
 } from '../src/backoffice/contracts/helpdesk'
@@ -15,17 +19,25 @@ import {
   categoryLabel,
   errorMessage,
   faqCategoryLabel,
+  faqSignalLabel,
+  formatOrderAmount,
+  orderStatusLabel,
+  paymentModeLabel,
   statusLabel,
   subscriptionStatusLabel,
 } from '../src/backoffice/lib/helpdeskFormat'
-import { assistFeedbackTone, subscriptionTone } from '../src/backoffice/lib/helpdeskView'
+import { assistFeedbackTone, ratingValue, subscriptionTone } from '../src/backoffice/lib/helpdeskView'
 
 // The Portal <-> Admin Helpdesk wire contract (fixtures/helpdesk-contract.json, captured from a
 // real local run of both apps). The client shows what Portal sends, via the Admin server.
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const fixture = JSON.parse(read('./fixtures/helpdesk-contract.json')) as {
   enums: Record<string, string[]> & { agentProblemCode: Record<string, string[]> }
-  adminToPortal: { timelineRequest: string; detailResponse: Record<string, unknown> }
+  adminToPortal: {
+    timelineRequest: string
+    detailResponse: Record<string, unknown>
+    listResponse: { tickets: Array<Record<string, unknown>> }
+  }
 }
 const LOCALES = ['en-GB', 'zh-CN'] as const
 
@@ -101,5 +113,51 @@ describe('HelpDesk client against the Portal contract', () => {
     assert.equal(typeof fixture.adminToPortal.detailResponse.flagged, 'boolean')
     const query = new URL(fixture.adminToPortal.timelineRequest, 'http://x').searchParams
     assert.equal(Number(query.get('limit')), TIMELINE_LIMIT)
+  })
+
+  test('v4: aiAssist items carry the learner rating as Portal sends it; the AI block shows a number 1-5, nothing for null', () => {
+    const items = fixture.adminToPortal.detailResponse.aiAssist as Array<{ rating: unknown }>
+    assert.deepEqual(items.map((item) => item.rating), [4, null])
+    assert.deepEqual(items.map((item) => ratingValue(item.rating)), [4, null])
+  })
+
+  test('v5: order statuses and payment modes match Portal and every one has a label in both languages', () => {
+    assert.deepEqual([...ORDER_STATUSES], fixture.enums.orderStatus)
+    assert.deepEqual([...ORDER_KINDS], fixture.enums.orderKind)
+    assert.deepEqual([...PAYMENT_MODES], fixture.enums.paymentMode)
+    for (const locale of LOCALES) {
+      for (const status of fixture.enums.orderStatus) {
+        const label = orderStatusLabel(locale, status)
+        assert.notEqual(label, status, `${locale} order status ${status} has no label`)
+        assert.doesNotMatch(label, /_/, `${locale} ${status}`)
+      }
+      for (const mode of fixture.enums.paymentMode) {
+        assert.notEqual(paymentModeLabel(locale, mode), mode, `${locale} payment mode ${mode} has no label`)
+      }
+    }
+  })
+
+  test('v5: the captured order is the 8-field projection; its amount is minor units in a lower-case currency', () => {
+    const order = fixture.adminToPortal.detailResponse.order as Record<string, unknown>
+    assert.deepEqual(Object.keys(order).sort(), ['amount', 'createdAt', 'currency', 'id', 'kind', 'paymentMode', 'planName', 'status'])
+    assert.equal(fixture.adminToPortal.detailResponse.orderId, order.id)
+    assert.equal(order.amount, 3900)
+    assert.equal(order.currency, 'usd')
+    for (const locale of LOCALES) assert.match(formatOrderAmount(locale, order.amount as number, order.currency as string), /39\.00/)
+    assert.ok(fixture.adminToPortal.listResponse.tickets.some((ticket) => typeof ticket.orderId === 'string'))
+  })
+
+  test('v6: FAQ signals match the contract (chip priority order) and every one has a label in both languages', () => {
+    assert.deepEqual([...FAQ_SIGNALS], fixture.enums.faqSignal)
+    assert.ok(!fixture.enums.faqSignal.includes('open_ticket_waiting'), 'not an FAQ: Portal shows a fixed card')
+    for (const locale of LOCALES) {
+      const labels = fixture.enums.faqSignal.map((signal) => faqSignalLabel(locale, signal))
+      for (const [index, signal] of fixture.enums.faqSignal.entries()) {
+        assert.notEqual(labels[index], signal, `${locale} signal ${signal} has no label`)
+        assert.doesNotMatch(labels[index], /_/, `${locale} ${signal}`)
+      }
+      assert.equal(new Set(labels).size, labels.length, `${locale} labels are distinct`)
+    }
+    assert.equal(faqSignalLabel('zh-CN', 'payment_failed'), '付款失败')
   })
 })

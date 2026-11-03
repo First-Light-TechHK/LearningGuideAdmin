@@ -20,7 +20,9 @@ const KNOWN_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
   'INTERNAL_ERROR',
 ])
 
-export type ApiResult<T> = { success: true; data: T; error: null } | { success: false; data: null; error: ErrorCode }
+export type ApiResult<T> =
+  | { success: true; data: T; error: null }
+  | { success: false; data: null; error: ErrorCode; message?: string }
 
 /**
  * 后端统一信封是 { success, data, error: { code, message } }；
@@ -37,7 +39,7 @@ export async function boRequest<T>(url: string, init?: RequestInit): Promise<Api
     const body = (await response.json().catch(() => null)) as {
       success?: boolean
       data?: T
-      error?: { code?: string } | null
+      error?: { code?: string; message?: string } | null
     } | null
     if (body?.success === true) return { success: true, data: body.data as T, error: null }
     const code = body?.error?.code
@@ -45,6 +47,7 @@ export async function boRequest<T>(url: string, init?: RequestInit): Promise<Api
       success: false,
       data: null,
       error: code && KNOWN_ERRORS.has(code) ? (code as ErrorCode) : 'INTERNAL_ERROR',
+      message: body?.error?.message,
     }
   } catch {
     return { success: false, data: null, error: 'INTERNAL_ERROR' }

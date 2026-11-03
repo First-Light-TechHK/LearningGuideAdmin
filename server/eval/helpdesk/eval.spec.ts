@@ -14,6 +14,9 @@ import {
   caseLanguage,
   chooseModel,
   DEFAULT_BUDGET_USD,
+  deadlineDeps,
+  evalCutoff,
+  evalDeadline,
   EVAL_LANGUAGES,
   EVAL_LOCALES,
   EVAL_PERSONAS,
@@ -32,6 +35,7 @@ import {
   runRetrieval,
   summarize,
   summarizeRetrieval,
+  thinkingLabel,
   turnKind,
   writeReport,
   type CaseResult,
@@ -41,6 +45,7 @@ import {
   type RetrievalReport,
   type RetrievalResult,
 } from './harness';
+import { PICK_FAQ_MAX_TOKENS } from '../../src/ai/helpdesk/workflow/faq-workflow';
 
 /**
  * Helpdesk 推荐评测（helpdesk-agent-v2-pi-dsh §5）在 CI 里跑：数据集合法且覆盖到位、
@@ -198,7 +203,7 @@ describe('eval dataset', () => {
     writeFileSync(
       path,
       [
-        { ...cases[0], role: 'parent' },
+        { ...cases[0], role: 'pays_for_another_account' },
         { ...cases[0], id: 't1', conversationId: 'conv-1', turn: 1 },
         { ...cases[0], id: 't2', conversationId: 'conv-1', turn: 2 },
         { ...cases[0], id: 'o1', origin: 'batch-01.jsonl#b1-001' },
@@ -209,7 +214,7 @@ describe('eval dataset', () => {
     expect(
       loadCases(path).map((c) => [c.role, c.conversationId, c.turn]),
     ).toEqual([
-      ['parent', undefined, undefined],
+      ['pays_for_another_account', undefined, undefined],
       [undefined, 'conv-1', 1],
       [undefined, 'conv-1', 2],
       [undefined, undefined, undefined],
@@ -350,6 +355,7 @@ function result(
     asked: true,
     validCall: true,
     unpricedCalls: 0,
+    alternativeIds: [],
     ...over,
   };
 }
@@ -417,6 +423,8 @@ describe('report', () => {
       gotFaqId: null,
       latencyMs: 3_500,
       locale: 'zh-CN',
+      // 没答上，但「你可能想问」里有它
+      alternativeIds: [FAQ(9), B],
     }),
   ].map((r) => ({ ...r, costUsd: 0.001, inputTokens: 100, outputTokens: 5 }));
   const real = { kind: 'real', model: 'openai/gpt-4o-mini' } as const;
@@ -444,6 +452,10 @@ describe('report', () => {
       // 7 条该有答案的里期望的 FAQ 都在候选中；模型答对其中 4 条
       retrievalRecall: 1,
       modelRecall: 0.5714,
+      // 该有答案却没答的 2 条（r9 r10）里，r10 的 FAQ 在 alternatives 中
+      alternativesRecall: 0.5,
+      alternativesOffered: 1,
+      unansweredAnswerable: 2,
       noneWithoutModel: 0,
       invalidCalls: 0,
       failedRuns: 1,
@@ -451,6 +463,69 @@ describe('report', () => {
     expect(report.cases).toEqual({ total: 10, run: 10 });
     expect(report.budget).toEqual({ capUsd: 5, spentUsd: 0.01, stopped: null });
     expect(report.model).toEqual({ ...real, note: null });
+  });
+
+  it('reports alternatives recall: answerable cases with no answer whose FAQ (or an acceptable one) was offered (v3 §1)', () => {
+    const rs = [
+      result({
+        id: 'a1',
+        expectedFaqId: A,
+        gotFaqId: null,
+        alternativeIds: [B, A],
+      }),
+      result({
+        id: 'a2',
+        expectedFaqId: A,
+        acceptableFaqIds: [B],
+        gotFaqId: null,
+        alternativeIds: [B],
+      }),
+      result({
+        id: 'a3',
+        expectedFaqId: A,
+        gotFaqId: null,
+        alternativeIds: [],
+      }),
+      result({
+        id: 'a4',
+        expectedFaqId: B,
+        gotFaqId: null,
+        alternativeIds: [A],
+      }),
+      // answered or not answerable: not counted
+      result({ id: 'a5', expectedFaqId: A, gotFaqId: A }),
+      result({ id: 'a6', expectedFaqId: A, gotFaqId: B }),
+      result({
+        id: 'a7',
+        expectedFaqId: null,
+        gotFaqId: null,
+        alternativeIds: [A],
+      }),
+    ];
+    const report = summarize({
+      outcome: { results: rs, spentUsd: 0, stopped: null },
+      totalCases: rs.length,
+      model: real,
+      retrieval: 'postgresql',
+      budgetUsd: 5,
+    });
+    expect(report.metrics.alternativesRecall).toBe(0.5);
+    expect(report.metrics.alternativesOffered).toBe(2);
+    expect(report.metrics.unansweredAnswerable).toBe(4);
+    expect(markdownReport(report)).toContain(
+      '| Alternatives recall (answerable, no answer) | 50.0% (2 of 4) |',
+    );
+    const none = summarize({
+      outcome: { results: rs.slice(4), spentUsd: 0, stopped: null },
+      totalCases: 3,
+      model: real,
+      retrieval: 'postgresql',
+      budgetUsd: 5,
+    });
+    expect(none.metrics.alternativesRecall).toBeNull();
+    expect(markdownReport(none)).toContain(
+      '| Alternatives recall (answerable, no answer) | n/a (0 of 0) |',
+    );
   });
 
   it('breaks results down by persona and by locale', () => {
@@ -477,8 +552,18 @@ describe('report', () => {
 
   it('breaks results down by role, by language (mixed-language cases on their own) and by turn', () => {
     const rs = [
-      result({ id: 'p1', expectedFaqId: A, gotFaqId: A, role: 'parent' }),
-      result({ id: 'p2', expectedFaqId: A, gotFaqId: B, role: 'parent' }),
+      result({
+        id: 'p1',
+        expectedFaqId: A,
+        gotFaqId: A,
+        role: 'pays_for_another_account',
+      }),
+      result({
+        id: 'p2',
+        expectedFaqId: A,
+        gotFaqId: B,
+        role: 'pays_for_another_account',
+      }),
       result({
         id: 'm1',
         expectedFaqId: A,
@@ -506,7 +591,11 @@ describe('report', () => {
     });
     expect(report.byRole).toEqual({
       '(none)': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0 },
-      parent: { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
+      pays_for_another_account: {
+        cases: 2,
+        accuracy: 0.5,
+        wrongAnswerRate: 0.5,
+      },
     });
     expect(report.byLanguage).toEqual({
       'en-GB': { cases: 2, accuracy: 0.5, wrongAnswerRate: 0.5 },
@@ -520,7 +609,7 @@ describe('report', () => {
     });
     const md = markdownReport(report);
     expect(md).toContain('## By role');
-    expect(md).toContain('| parent | 2 | 50.0% | 50.0% |');
+    expect(md).toContain('| pays_for_another_account | 2 | 50.0% | 50.0% |');
     expect(md).toContain('## By language');
     expect(md).toContain('| mixed | 1 | 100.0% | 0.0% |');
     expect(md).toContain('## By turn');
@@ -839,11 +928,17 @@ describe('retrieval only (--retrieval-only)', () => {
         );
       },
       findPublished: () => Promise.reject(new Error('not used')),
+      findPopular: () => Promise.reject(new Error('not used')),
     };
     const progress: number[] = [];
     const results = await runRetrieval({
       cases: [
-        { ...base, role: 'parent', conversationId: 'c', turn: 2 },
+        {
+          ...base,
+          role: 'pays_for_another_account',
+          conversationId: 'c',
+          turn: 2,
+        },
         { ...base, id: 'n', expectedFaqId: null },
       ],
       qa,
@@ -853,7 +948,7 @@ describe('retrieval only (--retrieval-only)', () => {
     expect(progress).toEqual([0, 1]);
     expect(results[0]).toMatchObject({
       id: 'q',
-      role: 'parent',
+      role: 'pays_for_another_account',
       conversationId: 'c',
       turn: 2,
       expectedFaqId: A,
@@ -890,7 +985,7 @@ describe('retrieval only (--retrieval-only)', () => {
       acceptableFaqIds: [C],
       persona: 'mixed_language',
       locale: 'zh-CN',
-      role: 'parent',
+      role: 'pays_for_another_account',
     }),
     hit({
       id: 'r4',
@@ -961,7 +1056,10 @@ describe('retrieval only (--retrieval-only)', () => {
       recallAt8: null,
       noneEmpty: 1,
     });
-    expect(report.byRole.parent).toMatchObject({ answerable: 1, recallAt8: 1 });
+    expect(report.byRole.pays_for_another_account).toMatchObject({
+      answerable: 1,
+      recallAt8: 1,
+    });
     expect(report.byTurn.follow_up).toMatchObject({
       recallAt3: 0,
       recallAt8: 1,
@@ -1030,23 +1128,101 @@ describe('model and budget settings', () => {
       kind: 'fake',
       model: FAKE_MODEL_ID,
     });
+    // 和生产一样（分级方案，owner 2026-11-03）：小模型，聊天缺省不思考，提交工单那条路也不思考
     expect(chooseModel({ OPENROUTER_API_KEY: 'k' })).toEqual({
       kind: 'real',
-      model: 'google/gemini-2.5-flash',
+      model: 'google/gemma-4-31b-it',
+      thinking: 'off',
+    });
+    expect(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')).toEqual({
+      kind: 'real',
+      model: 'google/gemma-4-31b-it',
     });
     expect(
-      chooseModel({
-        OPENROUTER_API_KEY: 'k',
-        HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
-      }),
-    ).toEqual({ kind: 'real', model: 'anthropic/claude-haiku' });
-    // 没配 HELPDESK_SUGGEST_MODEL 时和生产选同一个模型
+      thinkingLabel(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')),
+    ).toBe(', thinking off');
     expect(
-      chooseModel({
-        OPENROUTER_API_KEY: 'k',
-        AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
-      }),
-    ).toEqual({ kind: 'real', model: 'google/gemini-3.5-flash' });
+      chooseModel(
+        {
+          OPENROUTER_API_KEY: 'k',
+          HELPDESK_SUGGEST_MODEL: 'anthropic/claude-haiku',
+          HELPDESK_SUGGEST_THINKING: 'off',
+        },
+        'chat',
+      ),
+    ).toEqual({
+      kind: 'real',
+      model: 'anthropic/claude-haiku',
+      thinking: 'off',
+    });
+    // 没配 HELPDESK_SUGGEST_MODEL 时和生产选同一个模型（代码里定的那个）
+    expect(
+      chooseModel(
+        {
+          OPENROUTER_API_KEY: 'k',
+          AI_AVAILABLE_MODELS: 'deepseek/deepseek-r1,google/gemini-3.5-flash',
+        },
+        'ticket',
+      ),
+    ).toEqual({ kind: 'real', model: 'google/gemma-4-31b-it' });
+  });
+
+  it('takes a longer deadline from HELPDESK_EVAL_DEADLINE_MS for real models only, and names it in the label', () => {
+    // 思考档位要看不截时限时的质量与延迟；不给就是线上的 3.5 秒
+    expect(evalDeadline({})).toBeUndefined();
+    expect(evalDeadline({ HELPDESK_EVAL_DEADLINE_MS: ' 30000 ' })).toBe(30_000);
+    for (const bad of ['0', '-5', '1.5', 'abc', '600001'])
+      expect(() => evalDeadline({ HELPDESK_EVAL_DEADLINE_MS: bad })).toThrow(
+        'HELPDESK_EVAL_DEADLINE_MS must be a whole number of milliseconds, 1 to 600000',
+      );
+    const model = chooseModel({
+      OPENROUTER_API_KEY: 'k',
+      HELPDESK_SUGGEST_THINKING: 'low',
+      HELPDESK_EVAL_DEADLINE_MS: '30000',
+    });
+    expect(model).toEqual({
+      kind: 'real',
+      model: 'google/gemma-4-31b-it',
+      thinking: 'low',
+      deadlineMs: 30_000,
+    });
+    expect(thinkingLabel(model)).toBe(', thinking low, deadline 30000 ms');
+    expect(chooseModel({ HELPDESK_EVAL_DEADLINE_MS: '30000' })).toEqual({
+      kind: 'fake',
+      model: FAKE_MODEL_ID,
+    });
+  });
+
+  it('takes the thinking cut-off from HELPDESK_EVAL_CUTOFF_MS (0 = thinking only, no backup) and names it in the label', () => {
+    // 线上思考截在 6.3 秒、同时发不思考的后备；评测要比截断前后
+    expect(evalCutoff({})).toBeUndefined();
+    expect(evalCutoff({ HELPDESK_EVAL_CUTOFF_MS: ' 0 ' })).toBe(0);
+    expect(evalCutoff({ HELPDESK_EVAL_CUTOFF_MS: '6300' })).toBe(6_300);
+    for (const bad of ['-5', '1.5', 'abc', '600001'])
+      expect(() => evalCutoff({ HELPDESK_EVAL_CUTOFF_MS: bad })).toThrow(
+        'HELPDESK_EVAL_CUTOFF_MS must be a whole number of milliseconds, 0 to 600000',
+      );
+    const env = {
+      OPENROUTER_API_KEY: 'k',
+      HELPDESK_SUGGEST_THINKING: 'high',
+      HELPDESK_EVAL_DEADLINE_MS: '60000',
+      HELPDESK_EVAL_CUTOFF_MS: '0',
+    };
+    expect(deadlineDeps(env)).toEqual({
+      deadlineMs: 60_000,
+      timeoutMs: 60_000,
+      cutoffMs: 0,
+    });
+    expect(deadlineDeps({})).toEqual({});
+    const model = chooseModel(env);
+    expect(model).toMatchObject({ deadlineMs: 60_000, cutoffMs: 0 });
+    expect(thinkingLabel(model)).toBe(
+      ', thinking high, deadline 60000 ms, no backup',
+    );
+    expect(
+      thinkingLabel(chooseModel({ ...env, HELPDESK_EVAL_CUTOFF_MS: '9000' })),
+    ).toBe(', thinking high, deadline 60000 ms, cut-off 9000 ms');
+    expect(chooseModel(env, 'ticket')).not.toHaveProperty('cutoffMs');
   });
 
   it('caps spend at HELPDESK_EVAL_BUDGET_USD, 5 USD by default', () => {
@@ -1100,6 +1276,36 @@ const abortedRunner: AgentStepRunner = {
 };
 
 const ENV = { OPENROUTER_API_KEY: 'stub', HELPDESK_SUGGEST_MODEL: 'stub' };
+
+describe('memory retrieval: popular FAQs (v3 §1 alternatives)', () => {
+  it('offers popular FAQs only, the category first, in the locale, without the excluded ones', async () => {
+    const qa = memoryQaSource(faqs);
+    const zh = await qa.findPopular({
+      locale: 'zh-CN',
+      category: 'courses_learning',
+      excludeIds: [FAQ(5)],
+      limit: 3,
+    });
+    expect(zh.map((c) => [c.id, c.question, c.score])).toEqual([
+      [FAQ(6), '如何加入直播课？', 0],
+      [FAQ(1), '如何重置密码？', 0],
+      [FAQ(9), '如何更改我的订阅？', 0],
+    ]);
+    expect(
+      (
+        await qa.findPopular({
+          locale: 'en-GB',
+          category: null,
+          excludeIds: [],
+          limit: 2,
+        })
+      ).map((c) => c.question),
+    ).toEqual([
+      'How do I reset my password?',
+      'How can I access my course materials?',
+    ]);
+  });
+});
 
 describe('running the cases', () => {
   const answerable = cases.filter((c) => c.persona === 'paraphrase');
@@ -1186,10 +1392,11 @@ describe('running the cases', () => {
     expect(outcome.stopped).toBe('unknown_cost');
   });
 
-  it('prices one call from the catalog: the longest prompt plus 80 output tokens, unknown off-catalog', async () => {
+  it('prices one call from the catalog: the longest prompt plus the step output limit (150 tokens), unknown off-catalog', async () => {
     // gpt-4o-mini: $0.15 / $0.60 per million tokens
+    expect(PICK_FAQ_MAX_TOKENS).toBe(150);
     expect(await callCeilingUsd('openai/gpt-4o-mini')).toBeCloseTo(
-      (CALL_PROMPT_TOKENS_MAX * 0.15 + 80 * 0.6) / 1e6,
+      (CALL_PROMPT_TOKENS_MAX * 0.15 + 150 * 0.6) / 1e6,
       12,
     );
     expect(await callCeilingUsd('acme/brand-new-model')).toBeNull();
@@ -1295,6 +1502,7 @@ describe('running the cases', () => {
           'answered',
           true,
         ]);
+        expect(r.alternativeIds).toEqual([]);
       } else {
         expect([r.id, r.gotFaqId, r.reason, r.asked]).toEqual([
           r.id,
@@ -1302,6 +1510,11 @@ describe('running the cases', () => {
           'no_candidates',
           false,
         ]);
+        // nothing retrieved: the popular FAQs of the seed library, code only
+        expect(r.alternativeIds.length).toBeGreaterThan(0);
+        expect(r.alternativeIds.length).toBeLessThanOrEqual(3);
+        for (const id of r.alternativeIds)
+          expect(faqs.find((f) => f.id === id)?.popular).toBe(true);
       }
       expect(r.costUsd).toBe(0);
     }
@@ -1588,12 +1801,27 @@ describe('PostgreSQL retrieval (HELPDESK_TEST_DATABASE_URL)', () => {
         expect(password[0]?.id).toBe(FAQ(1));
         const zh = await qa.findPublished(FAQ(1), 'zh-CN');
         expect(zh?.answer).toBe(faqs[0].answerZh);
+        // the memory source offers the same popular FAQs as the production SQL (same order needs updated_at, so as a set)
+        const search = {
+          locale: 'zh-CN',
+          category: 'payments_subscriptions' as const,
+          excludeIds: [],
+          limit: 3,
+        };
+        const popular = await qa.findPopular(search);
+        expect(popular).toHaveLength(3);
+        expect(popular[0].category).toBe('payments_subscriptions');
+        for (const c of popular)
+          expect(faqs.find((f) => f.id === c.id)?.popular).toBe(true);
       } finally {
         await close();
         const pool = new Pool({ connectionString: url });
+        // only this process's scratch schemas: '_' is a LIKE wildcard, so 'hdeval_%' also matched the
+        // hdevalgate_* schema of the release gate suite running in another worker (flaky in the full run)
         schemas = (
           await pool.query<{ nspname: string }>(
-            "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'hdeval_%'",
+            'SELECT nspname FROM pg_namespace WHERE starts_with(nspname, $1)',
+            [`hdeval_${process.pid}_`],
           )
         ).rows.map((row) => row.nspname);
         await pool.end();

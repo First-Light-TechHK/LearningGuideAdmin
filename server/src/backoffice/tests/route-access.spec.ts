@@ -104,6 +104,57 @@ describe('route access classification', () => {
     );
   });
 
+  it('lets Course=Edit change content inside an existing course, never create, publish or price one (REQ-0236)', () => {
+    const c = ['course'];
+    const cases: [string, string, string][] = [
+      ['GET', '/api/backoffice/courses', 'VIEW'],
+      ['GET', '/api/backoffice/courses/c1/history', 'VIEW'],
+      ['POST', '/api/backoffice/courses', 'CREATE'],
+      ['PUT', '/api/backoffice/courses/c1', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/localizations/zh-cn', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/lessons', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/lessons/reorder', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/lessons/l1', 'EDIT_EXISTING'],
+      ['DELETE', '/api/backoffice/courses/c1/lessons/l1', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/lessons/l1/video', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/lessons/l1/exhibits', 'EDIT_EXISTING'],
+      ['DELETE', '/api/backoffice/courses/c1/lessons/l1/exhibits/e1', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/lessons/l1/readings', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/lessons/l1/knowledge-test', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/media', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/media/session', 'EDIT_EXISTING'],
+      ['PUT', '/api/backoffice/courses/c1/media/sessions/s1/chunk', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/media/sessions/s1/complete', 'EDIT_EXISTING'],
+      ['DELETE', '/api/backoffice/courses/c1/media/sessions/s1', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/cover', 'EDIT_EXISTING'],
+      ['DELETE', '/api/backoffice/courses/c1/cover', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/docx', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/readings/import', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/understanding/import', 'EDIT_EXISTING'],
+      ['POST', '/api/backoffice/courses/c1/publish', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/c1/delete-draft', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/c1/live-status', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/c1/restore', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/c1/import', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/c1/export', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/import', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/import/raw/session', 'PUBLISH'],
+      ['PUT', '/api/backoffice/courses/import/j1/chunk', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/import/j1/confirm', 'PUBLISH'],
+      ['PUT', '/api/backoffice/courses/c1/trial', 'CREATE'],
+      ['PUT', '/api/backoffice/courses/c1/plans', 'CREATE'],
+      ['POST', '/api/backoffice/courses/c1/plans/p1/sync-stripe', 'CREATE'],
+      ['POST', '/api/backoffice/courses/c1/something-new', 'CREATE'],
+    ];
+    for (const [method, path, action] of cases) {
+      assert.deepEqual(
+        routeAccess(method, path),
+        { kind: 'menu', menus: c, action },
+        `${method} ${path}`,
+      );
+    }
+  });
+
   it('keeps every other knowledge endpoint behind the Knowledge menu with its action', () => {
     const k = ['knowledge'];
     const cases: [string, string, string][] = [

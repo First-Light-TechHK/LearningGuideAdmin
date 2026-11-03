@@ -64,6 +64,10 @@ describe('draft', () => {
       questionZh: '',
       answerZh: '',
       keywords: '',
+      // v5 question trees: a new FAQ is an answer card and an entry question, with no situations
+      type: 'answer',
+      entry: true,
+      signals: [],
     })
   })
 
@@ -127,7 +131,37 @@ describe('validation (server rules)', () => {
       questionZh: '如何重置密码？',
       answerZh: '使用**忘记密码**。',
       keywords: ['a', 'b'],
+      type: 'answer',
+      entry: true,
+      signals: [],
     })
+  })
+
+  test('v5: card type, entry and situations round-trip; an older server without them reads as an answer entry', () => {
+    const draft = draftFromFaq(faq({ type: 'choice', entry: false, signals: ['from_order', 'payment_failed'] }))
+    assert.equal(draft.type, 'choice')
+    assert.equal(draft.entry, false)
+    // the priority order of FAQ_SIGNALS, as the server stores them
+    assert.deepEqual(draft.signals, ['payment_failed', 'from_order'])
+    const old = draftFromFaq(faq())
+    assert.deepEqual([old.type, old.entry, old.signals], ['answer', true, []])
+    assert.equal(isDraftDirty({ ...old, signals: ['trial_ending'] }, old), true)
+    assert.equal(isDraftDirty({ ...old, signals: [...old.signals] }, old), false)
+    assert.equal(isDraftDirty({ ...old, entry: false }, old), true)
+    const body = toFaqBody({ ...old, signals: ['email_unverified', 'trial_ending', 'trial_ending'] })
+    assert.deepEqual(body.signals, ['trial_ending', 'email_unverified'])
+  })
+
+  test('v5: the prompt of a choice question states no facts: no digits, links or emails', () => {
+    const base = { ...draftFromFaq(faq()), type: 'choice' as const, answerEn: 'Which one is it?', answerZh: '你遇到的是哪种情况？' }
+    assert.deepEqual(validateFaqDraft(base), {})
+    assert.deepEqual(validateFaqDraft({ ...base, answerEn: 'Within 14 days?', answerZh: '看 https://a.test' }), {
+      answerEn: 'choicePrompt',
+      answerZh: 'choicePrompt',
+    })
+    assert.deepEqual(validateFaqDraft({ ...base, answerZh: '发邮件到 a@b.test' }), { answerZh: 'choicePrompt' })
+    // an answer card may say all of that
+    assert.deepEqual(validateFaqDraft({ ...base, type: 'answer', answerEn: 'Within 14 days.' }), {})
   })
 })
 

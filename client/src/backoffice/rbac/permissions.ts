@@ -44,10 +44,9 @@ export const ROLE_MATRIX: Record<EmployeeRole, Record<MenuKey, PermissionLevel>>
   },
   GRAPHIC_DESIGNER: {
     course: "EDIT",
-    // PRD §3.2 里 Course=Edit，但本应用只有 Knowledge 一个「课程内容编辑面」
-    // （Course 菜单为占位），故把 Course 的编辑能力落在 Knowledge 上（可改现有内容，
-    // 不能新建/删除/发布——由 isActionAllowed 的 EDIT_EXISTING 语义保证）。
-    knowledge: "EDIT",
+    // REQ-0236 / PRD §3.2：Course=Edit（可改已有课程内容，不能新增、删除、发布），
+    // 其他菜单全部 View。Course 模块已上线，编辑能力不再借道 Knowledge。
+    knowledge: "VIEW",
     aiTutor: "VIEW",
     order: "VIEW",
     reporting: "VIEW",
@@ -156,18 +155,21 @@ export function employeeAccountHref(locale: string): string {
  * PRD §2 范围说明 + §8.5：Settings 有子导航，其中 Employee Account 仅 Admin 可见；
  * Payment Gateway 与 Notification Configuration 在 P0 只是占位入口。
  */
-export type SettingsSubKey = "employeeAccount" | "paymentGateway" | "notificationConfiguration";
+export type SettingsSubKey = "employeeAccount" | "paymentGateway" | "notificationConfiguration" | "learningAccess";
 
 export const SETTINGS_SUB_ORDER = [
   "employeeAccount",
   "paymentGateway",
   "notificationConfiguration",
+  // Student Management PRD §7：紧跟 Notification Configuration；能看 Settings 的角色都能看（只读角色只读）
+  "learningAccess",
 ] as const;
 
 export const SETTINGS_SUB_SEGMENT: Record<SettingsSubKey, string> = {
   employeeAccount: "employee-account",
   paymentGateway: "payment-gateway",
   notificationConfiguration: "notification-configuration",
+  learningAccess: "learning-access",
 };
 
 export function settingsSubHref(locale: string, sub: SettingsSubKey): string {
@@ -184,6 +186,8 @@ export function visibleSettingsSubs(role: EmployeeRole): SettingsSubKey[] {
 export function menuFromPathSegments(segments: string[] | undefined): MenuKey | null {
   if (!segments || segments.length === 0) return null;
   const target = segments[0];
+  // Operations 从 Course Overview 进入，侧边栏仍高亮 Course（PRD §6）
+  if (target === "operations") return "course";
   const entry = (Object.entries(MENU_SEGMENT) as [MenuKey, string][]).find(
     ([, segment]) => segment === target
   );

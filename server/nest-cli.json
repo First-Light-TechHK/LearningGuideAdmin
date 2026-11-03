@@ -4,7 +4,10 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "assets": ["ai/prompts/*"],
+    "assets": [
+      "ai/prompts/*",
+      "backoffice/modules/helpdesk/demo/library/*.json"
+    ],
     "watchAssets": true
   }
 }

@@ -118,6 +118,11 @@ const source = {
           APP_ENV: environment.toUpperCase(),
           PORT: "3000",
           AWS_REGION: region,
+          // Course media/package storage. DEV uses a dedicated Admin course bucket;
+          // media keys stay at the bucket root, package staging under staging/.
+          COURSE_MEDIA_BUCKET: "learning-guide-admin-dev-course-851987565851",
+          COURSE_PACKAGE_BUCKET: "learning-guide-admin-dev-course-851987565851",
+          COURSE_PACKAGE_PREFIX: "staging/",
           ...(process.env.AI_AVAILABLE_MODELS ? { AI_AVAILABLE_MODELS: process.env.AI_AVAILABLE_MODELS } : {}),
           // Mail: SMTP wins when fully configured, otherwise SES v2 with this sender.
           // SES starts in the sandbox; production access must be requested in AWS.

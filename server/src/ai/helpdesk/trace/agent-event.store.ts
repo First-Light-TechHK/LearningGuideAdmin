@@ -23,6 +23,8 @@ export type NewAgentEvent = {
 export const LEARNER_TEXT_FIELDS: Partial<Record<AgentEventType, string>> = {
   'turn/start': 'input',
   'assistant/message': 'text',
+  // v5：给学员看的短句（模型写的过了守卫，或模板）可能复述学员原文
+  'turn/end': 'output',
 };
 
 export type AppendOptions = {
@@ -43,6 +45,45 @@ export interface AgentEventLog {
   chain(rootRunId: string): Promise<string[]>;
   /** 清掉早于 cutOff 的学员原文字段，返回清理的事件数。 */
   purgeLearnerText(cutOff: Date): Promise<number>;
+  /** since 之后的 step/end 按步骤（name、kind）数：总数、校验没过、守卫拦下、出错或超时。 */
+  stepHealth(since: Date): Promise<StepHealthRow[]>;
+}
+
+export type StepHealthRow = {
+  step: string;
+  kind: 'agent' | 'code';
+  total: number;
+  invalid: number;
+  guardFallbacks: number;
+  failures: number;
+};
+
+/**
+ * 守卫降级里不算「模型写坏了」的原因：模型说卡片没讲到（not_covered）、调用本身无效（missing，
+ * 已记在 agent 步的 invalid）、出错或超时（error / timeout，记在 failures）。
+ */
+export const NOT_GUARD_REJECTIONS = [
+  'not_covered',
+  'missing',
+  'error',
+  'timeout',
+] as const;
+
+/** 一条 step/end 的数据 → 计入哪几项（内存实现用；PostgreSQL 实现是同一规则的 SQL）。 */
+function healthOf(data: JsonObject) {
+  const output = data.output as JsonObject | undefined;
+  const guard = output?.guard as JsonObject | undefined;
+  const reason = typeof guard?.reason === 'string' ? guard.reason : '';
+  return {
+    invalid: data.outcome === 'no_call',
+    guardFallback:
+      guard?.result === 'fallback' &&
+      !(NOT_GUARD_REJECTIONS as readonly string[]).includes(reason),
+    failure:
+      data.outcome === 'error' ||
+      data.outcome === 'aborted' ||
+      data.error !== undefined,
+  };
 }
 
 export class RunAlreadyExistsError extends Error {
@@ -132,6 +173,39 @@ export function createMemoryAgentEventLog(): AgentEventLog & {
       }
       return Promise.resolve(cleared);
     },
+    stepHealth(since) {
+      const rows = new Map<string, StepHealthRow>();
+      for (const events of runs.values()) {
+        for (const event of events) {
+          if (event.type !== 'step/end' || event.at < since.getTime()) continue;
+          const step = event.data.name;
+          const kind = event.data.kind;
+          if (typeof step !== 'string' || (kind !== 'agent' && kind !== 'code'))
+            continue;
+          const key = `${step}\u0000${kind}`;
+          const row = rows.get(key) ?? {
+            step,
+            kind,
+            total: 0,
+            invalid: 0,
+            guardFallbacks: 0,
+            failures: 0,
+          };
+          const h = healthOf(event.data);
+          row.total += 1;
+          row.invalid += Number(h.invalid);
+          row.guardFallbacks += Number(h.guardFallback);
+          row.failures += Number(h.failure);
+          rows.set(key, row);
+        }
+      }
+      return Promise.resolve(
+        [...rows.values()].sort(
+          (a, b) =>
+            a.step.localeCompare(b.step) || a.kind.localeCompare(b.kind),
+        ),
+      );
+    },
   };
 }
 
@@ -202,5 +276,24 @@ export class PrismaAgentEventLog implements AgentEventLog {
          WHERE type = ${type} AND time < ${cutOff} AND data ? ${field}::text`;
     }
     return cleared;
+  }
+
+  async stepHealth(since: Date): Promise<StepHealthRow[]> {
+    const excluded = [...NOT_GUARD_REJECTIONS];
+    const rows = await this.prisma.$queryRaw<StepHealthRow[]>`
+      SELECT data->>'name' AS step, data->>'kind' AS kind,
+             count(*)::int AS total,
+             count(*) FILTER (WHERE data->>'outcome' = 'no_call')::int AS invalid,
+             count(*) FILTER (WHERE data->'output'->'guard'->>'result' = 'fallback'
+               AND NOT (COALESCE(data->'output'->'guard'->>'reason', '') = ANY(${excluded}::text[])))::int
+               AS "guardFallbacks",
+             count(*) FILTER (WHERE data->>'outcome' IN ('error', 'aborted') OR data ? 'error')::int
+               AS failures
+        FROM helpdesk_agent_events
+       WHERE type = 'step/end' AND time >= ${since}
+         AND jsonb_typeof(data->'name') = 'string' AND data->>'kind' IN ('agent', 'code')
+       GROUP BY 1, 2
+       ORDER BY 1, 2`;
+    return rows;
   }
 }

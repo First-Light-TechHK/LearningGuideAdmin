@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 
 import {
   CONFIRM_WINDOW_HOURS,
@@ -10,6 +11,7 @@ import {
   type TicketMessage,
 } from '../contracts/helpdesk'
 import { attachmentUrl, newIdempotencyKey } from '../lib/helpdeskApi'
+import { canTurnIntoCandidate } from '../lib/helpdeskFlywheel'
 import { categoryLabel, statusLabel } from '../lib/helpdeskFormat'
 import {
   TIMELINE_AVATAR,
@@ -23,6 +25,7 @@ import {
   initials,
   isImeComposing,
   listTime,
+  ratingValue,
   splitNotes,
   splitThread,
   visibleBusy,
@@ -41,9 +44,11 @@ import { HdBotIcon } from './icons'
  * 操作栏：Mark as reviewed（OPEN 时是 Claim / 接单）、Email student（展开回复框）、Internal notes
  * （展开内部备注与备注框）、Flag follow-up（开关）。VIEW 整个操作栏不显示，内部备注直接只读显示在对话里。
  * 回复框、备注面板、状态胶囊、按下态等没有画板的部分沿用同一套样式（待视觉验收）。
+ * v5 Part G4：已解决的工单（CLOSED，不是学员撤回的）在操作栏下多一个「转成 FAQ 候选」（只给 FULL，
+ * 没有画板，待视觉验收）；结果提示带一个到 FAQ 候选的链接。
  */
 
-export type Notice = { id: string; kind: 'error' | 'info'; text: string } | null
+export type Notice = { id: string; kind: 'error' | 'info'; text: string; link?: { to: string; label: string } } | null
 export type Panel = { id: string; kind: 'reply' | 'notes' } | null
 
 /** 时间线上的一张卡片：列表行一定有；详情只有打开过的那些才有（选中的那张一定有）。 */
@@ -64,6 +69,8 @@ type Props = {
   onClaim: (id: string) => void
   onMarkReviewed: (id: string) => void
   onFlag: (id: string) => void
+  /** 「转成 FAQ 候选」（v5 Part G4）。 */
+  onToCandidate: (id: string) => void
   /** 打开 AI 块的「查看链路」抽屉（run id = AI 块 id）。 */
   onTrace: (runId: string) => void
   /** idempotencyKey：同一份草稿重试沿用同一个，内容变了或发送成功后换新。 */
@@ -128,6 +135,7 @@ function MessageCard({ message, ticket, locale }: { message: TicketMessage; tick
 
 function AiBlock({ assist, locale, onTrace }: { assist: TicketAiAssist; locale: Locale; onTrace: (runId: string) => void }) {
   const tone = assistFeedbackTone(assist.feedback)
+  const rating = ratingValue(assist.rating)
   return (
     <div className="hdAiRow">
       <section className="hdAiBlock" aria-label={t(locale, 'helpDesk.ai.title')}>
@@ -150,6 +158,8 @@ function AiBlock({ assist, locale, onTrace }: { assist: TicketAiAssist; locale: 
             {t(locale, tone === 'positive' ? 'helpDesk.ai.helpful' : 'helpDesk.ai.notHelpful')}
           </p>
         ) : null}
+        {/* v3 §2：学员在「本次服务满意吗？」里给的星级；没评（或跳过）不显示。无画板，沿用反馈行样式（待视觉验收） */}
+        {rating !== null ? <p className="hdAiRating">{t(locale, 'helpDesk.rating.value', { n: rating })}</p> : null}
       </section>
       <span className="hdBotAvatar" aria-hidden="true">
         <HdBotIcon />
@@ -281,6 +291,7 @@ export function EnquiryTimeline(props: Props) {
             const draftKey = (kind: string) => `${row.id}:${kind}`
             const unavailable = t(locale, 'helpDesk.actions.unavailable')
             const reviewEnabled = controls.claim || controls.markReviewed
+            const ticketRating = ratingValue(ticket.rating)
             return (
               <div
                 key={row.id}
@@ -330,6 +341,12 @@ export function EnquiryTimeline(props: Props) {
                         </p>
                         {/* 状态：Figma 卡片上没有，放在 meta 行右侧，不挤占主题与类型（待视觉验收） */}
                         <span className={`hdStatusPill hdStatus${ticket.status}`}>{statusLabel(locale, ticket.status)}</span>
+                        {/* v3 §2：学员给工单的评分「评分 n/5」，没有评分时「未评分」（规格原文：每张工单都显示）；跟在状态胶囊后、同一套胶囊样式（无画板，待视觉验收） */}
+                        <span className="hdStatusPill hdTicketRating">
+                          {ticketRating === null
+                            ? t(locale, 'helpDesk.rating.none')
+                            : t(locale, 'helpDesk.rating.value', { n: ticketRating })}
+                        </span>
                       </div>
                     </header>
                     <div className="hdDivider" />
@@ -409,12 +426,31 @@ export function EnquiryTimeline(props: Props) {
                         </div>
                       </>
                     ) : null}
+                    {canTurnIntoCandidate(ticket, canWrite) ? (
+                      <div className="hdCardExtra">
+                        <button
+                          type="button"
+                          className="hdLinkButton hdToCandidate"
+                          title={t(locale, 'helpDesk.actions.toCandidateHint')}
+                          disabled={cardBusy !== null}
+                          onClick={() => props.onToCandidate(row.id)}
+                        >
+                          {cardBusy === 'candidate' ? t(locale, 'helpDesk.actions.toCandidateBusy') : t(locale, 'helpDesk.actions.toCandidate')}
+                        </button>
+                      </div>
+                    ) : null}
                   </article>
                 </div>
 
                 {notice && notice.id === row.id ? (
                   <div className={`alert ${notice.kind === 'error' ? 'alertError' : 'alertInfo'} hdNotice`} role="status">
-                    {notice.text}
+                    <span>{notice.text}</span>
+                    {notice.link ? (
+                      <>
+                        {' '}
+                        <Link to={notice.link.to}>{notice.link.label}</Link>
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
 

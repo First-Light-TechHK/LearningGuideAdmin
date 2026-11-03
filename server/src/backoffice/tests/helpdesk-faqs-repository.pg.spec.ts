@@ -6,11 +6,11 @@ import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
 import {
   FAQ_CANDIDATES_SQL,
   createPgFaqRepository,
-  createPgHelpdeskQaSource,
   searchTerms,
   type FaqRepository,
   type SqlDb,
 } from '../modules/helpdesk/faqs/faqRepository';
+import { createPgHelpdeskQaSource } from '../modules/helpdesk/faqs/faqQaSource';
 
 /**
  * PostgreSQL 实测（Tickets v2 §1 / §2）：版本号条件更新、修订与修改同事务、只追加修订、
@@ -40,13 +40,19 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
   counter += 1;
   return {
     id: `0192cccc-0000-7000-8000-${String(counter).padStart(12, '0')}`,
+    // v5 问题树：空 key = 数据库按英文问题取 slug
+    key: '',
+    type: 'answer',
+    entry: true,
     category: 'account_technical',
     popular: false,
+    popularRank: null,
     questionEn: `Question ${counter}`,
     answerEn: 'Answer',
     questionZh: `问题 ${counter}`,
     answerZh: '答案',
     keywords: [],
+    signals: [],
     status: 'published',
     version: 1,
     createdBy: EMP,
@@ -62,6 +68,7 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
   let admin: Pool;
   let pool: Pool;
   let repo: FaqRepository;
+  let db: SqlDb;
 
   beforeAll(async () => {
     admin = new Pool({ connectionString: url });
@@ -71,7 +78,7 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       options: `-c search_path=${schema}`,
     });
     await pool.query(migrationSql());
-    const db: SqlDb = {
+    db = {
       query: async (sql, params = []) =>
         (await pool.query<Record<string, unknown>>(sql, params as unknown[]))
           .rows,
@@ -101,7 +108,8 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
 
   beforeEach(async () => {
     await pool.query(
-      'TRUNCATE helpdesk_faq_revisions, helpdesk_faqs, helpdesk_suggestions',
+      // v5 问题树的表引用 helpdesk_faqs（外键），要一起清
+      'TRUNCATE helpdesk_faq_placements, helpdesk_faq_edge_revisions, helpdesk_faq_edges, helpdesk_faq_phrasings, helpdesk_faq_reviews, helpdesk_faq_revisions, helpdesk_faqs, helpdesk_suggestions',
     );
   });
 
@@ -243,6 +251,60 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
     }
   });
 
+  it('v5 Part A: stores, updates and returns the signals (list, search, Portal list, revisions); the table refuses unknown ones', async () => {
+    const { faq: created } = await repo.insert(
+      faq({
+        questionEn: 'My payment failed',
+        signals: ['payment_failed', 'recent_purchase'],
+      }),
+      EMP,
+      null,
+    );
+    expect(created.signals).toEqual(['payment_failed', 'recent_purchase']);
+    expect((await repo.get(created.id))?.signals).toEqual([
+      'payment_failed',
+      'recent_purchase',
+    ]);
+    const updated = await repo.update(
+      created.id,
+      1,
+      { signals: ['email_unverified'] },
+      'update',
+      EMP,
+    );
+    expect(updated).toMatchObject({
+      kind: 'ok',
+      value: { signals: ['email_unverified'], version: 2 },
+    });
+    const listed = await repo.listPublished({ limit: 100 });
+    expect(listed.find((f) => f.id === created.id)?.signals).toEqual([
+      'email_unverified',
+    ]);
+    const found = await repo.searchPublished({
+      locale: 'en-GB',
+      boost: null,
+      text: 'payment failed',
+      limit: 8,
+    });
+    expect(found.find((f) => f.id === created.id)?.signals).toEqual([
+      'email_unverified',
+    ]);
+    const [latest] = await repo.revisions(created.id);
+    expect(latest.snapshot).toMatchObject({ signals: ['email_unverified'] });
+    // an older row (inserted without the column) reads as no signals
+    const { rows } = await pool.query<{ signals: string[] }>(
+      `INSERT INTO helpdesk_faqs (id, category, question_en, answer_en, question_zh, answer_zh)
+       VALUES ('0192cccc-0000-7000-8000-0000000fffff', 'other', 'Q', 'A', '问', '答')
+       RETURNING signals`,
+    );
+    expect(rows[0].signals).toEqual([]);
+    for (const bad of [['nope'], ['open_ticket_waiting']]) {
+      await expect(
+        repo.insert(faq({ signals: bad as never }), EMP, null),
+      ).rejects.toThrow(/helpdesk_faqs_signals_check/);
+    }
+  });
+
   it('lists published FAQs newest first, filters, searches both languages and pages with a total', async () => {
     const pw = (
       await repo.insert(
@@ -330,6 +392,82 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
     expect(await repo.listPublished({ limit: 1 })).toHaveLength(1);
   });
 
+  it('offers the popular published FAQs in the locale, the enquiry category first, never the excluded ones (v3 §1)', async () => {
+    const pay = (
+      await repo.insert(
+        faq({
+          popular: true,
+          category: 'payments_subscriptions',
+          questionEn: 'Where is my invoice?',
+          questionZh: '发票在哪里？',
+        }),
+        EMP,
+        null,
+      )
+    ).faq;
+    const tech = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    const tech2 = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    const shown = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    const plain = (await repo.insert(faq(), EMP, null)).faq;
+    const gone = (await repo.insert(faq({ popular: true }), EMP, null)).faq;
+    await repo.update(gone.id, 1, { status: 'archived' }, 'archive', EMP);
+    void plain;
+    await touch(pay.id, '2026-10-03T00:00:00Z');
+    await touch(tech.id, '2026-10-01T00:00:00Z');
+    await touch(tech2.id, '2026-10-02T00:00:00Z');
+    await touch(shown.id, '2026-10-04T00:00:00Z');
+    const source = createPgHelpdeskQaSource(repo, db);
+    const zh = await source.findPopular({
+      locale: 'zh-CN',
+      category: 'payments_subscriptions',
+      excludeIds: [shown.id],
+      limit: 3,
+    });
+    expect(zh.map((c) => c.id)).toEqual([pay.id, tech2.id, tech.id]);
+    expect(zh[0]).toMatchObject({
+      category: 'payments_subscriptions',
+      question: '发票在哪里？',
+      answer: '答案',
+      score: 0,
+    });
+    // no category: newest first; the limit holds
+    expect(
+      (
+        await source.findPopular({
+          locale: 'en-GB',
+          category: null,
+          excludeIds: [],
+          limit: 2,
+        })
+      ).map((c) => [c.id, c.question]),
+    ).toEqual([
+      [shown.id, shown.questionEn],
+      [pay.id, 'Where is my invoice?'],
+    ]);
+    expect(
+      (
+        await source.findPopular({
+          locale: 'en-GB',
+          category: 'account_technical',
+          excludeIds: [shown.id, tech2.id],
+          limit: 3,
+        })
+      ).map((c) => c.id),
+    ).toEqual([tech.id, pay.id]);
+    await expect(
+      source.findPopular({
+        locale: 'fr-FR',
+        category: null,
+        excludeIds: [],
+        limit: 3,
+      }),
+    ).resolves.toEqual([]);
+    // the Portal list keeps its order when no category is given
+    expect(
+      (await repo.listPublished({ popular: true, limit: 50 })).map((f) => f.id),
+    ).toEqual([shown.id, pay.id, tech2.id, tech.id]);
+  });
+
   it('the real candidate query (FAQ_CANDIDATES_SQL) is served by the English full-text GIN index', async () => {
     const client = await pool.connect();
     try {
@@ -352,10 +490,10 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       );
       await client.query('ANALYZE helpdesk_faqs');
       await client.query(
-        `PREPARE hd_candidates(text, text, text, text, text[], int, text, boolean, text[], text[], int[]) AS ${FAQ_CANDIDATES_SQL}`,
+        `PREPARE hd_candidates(text, text, text, text, text[], int, text, boolean, text[], text[], int[], boolean, text[]) AS ${FAQ_CANDIDATES_SQL}`,
       );
       const terms = searchTerms('how do i reset my password?');
-      const args = `'en-GB', 'account_technical', 'password:* | reset:*', 'how do i reset my password?', ARRAY[]::text[], 8, NULL, NULL, ARRAY['password', 'reset'], ARRAY[${terms.typo.keys.map((k) => `'${k}'`).join(', ')}]::text[], ARRAY[${terms.typo.word.join(', ')}]::int[]`;
+      const args = `'en-GB', 'account_technical', 'password:* | reset:*', 'how do i reset my password?', ARRAY[]::text[], 8, NULL, NULL, ARRAY['password', 'reset'], ARRAY[${terms.typo.keys.map((k) => `'${k}'`).join(', ')}]::text[], ARRAY[${terms.typo.word.join(', ')}]::int[], true, ARRAY['answer']::text[]`;
       const { rows } = await client.query(
         `EXPLAIN EXECUTE hd_candidates(${args})`,
       );
@@ -372,7 +510,7 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       // 拼写容错一路：结果对，且谓词（typo_keys && 查询键）是 GIN 索引用得上的写法。
       // 选不选索引看代价（这么小的表、8 个键，规划器常宁可扫描），所以单独用同一谓词看索引可用
       const typo = searchTerms('pasword');
-      const typoArgs = `'en-GB', '', '', 'pasword', ARRAY[]::text[], 8, NULL, NULL, ARRAY[]::text[], ARRAY[${typo.typo.keys.map((k) => `'${k}'`).join(', ')}]::text[], ARRAY[${typo.typo.word.join(', ')}]::int[]`;
+      const typoArgs = `'en-GB', '', '', 'pasword', ARRAY[]::text[], 8, NULL, NULL, ARRAY[]::text[], ARRAY[${typo.typo.keys.map((k) => `'${k}'`).join(', ')}]::text[], ARRAY[${typo.typo.word.join(', ')}]::int[], true, ARRAY['answer']::text[]`;
       const typoFound = await client.query<{ question: string }>(
         `EXECUTE hd_candidates(${typoArgs})`,
       );
@@ -477,7 +615,7 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       );
       expect(found[0]).toMatchObject({ id: reset.id });
       expect(found.map((c) => c.id)).not.toContain(invoice.id);
-      const source = createPgHelpdeskQaSource(repo);
+      const source = createPgHelpdeskQaSource(repo, db);
       const [candidate] = await source.findCandidates({
         locale: 'zh-CN',
         category: null,
@@ -561,7 +699,10 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       expect((await find('zh-CN', null, '我的 invoice 在哪'))[0].id).toBe(
         invoice.id,
       );
-      const [candidate] = await createPgHelpdeskQaSource(repo).findCandidates({
+      const [candidate] = await createPgHelpdeskQaSource(
+        repo,
+        db,
+      ).findCandidates({
         locale: 'zh-CN',
         category: null,
         text: 'reset password',
@@ -637,7 +778,7 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
     });
 
     it('reads one published FAQ by id for a chip, never an archived one', async () => {
-      const source = createPgHelpdeskQaSource(repo);
+      const source = createPgHelpdeskQaSource(repo, db);
       expect(await source.findPublished(invoice.id, 'en-GB')).toMatchObject({
         id: invoice.id,
         question: 'Where can I find my invoice?',

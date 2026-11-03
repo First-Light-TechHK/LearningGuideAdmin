@@ -4,6 +4,7 @@ import type {
   AvailableActions,
   EnquiryDetail,
   EnquiryRow,
+  FaqCandidate,
   HelpdeskFaq,
 } from '../../src/backoffice/contracts/helpdesk'
 import type { SessionEmployee } from '../../src/backoffice/contracts/employee'
@@ -163,6 +164,45 @@ export function faq(id: string, patch: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     updatedBy: null,
     createdAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-28T08:30:00Z',
+    ...patch,
+  }
+}
+
+/** v5 Part G4：一个 FAQ 候选（服务端 FaqCandidate 的形状）。 */
+export function candidate(id: string, patch: Partial<FaqCandidate> = {}): FaqCandidate {
+  return {
+    id,
+    status: 'new',
+    suggestion: 'new_faq',
+    origin: 'mining',
+    topic: `Topic ${id}`,
+    proposedQuestion: `How do I ${id}?`,
+    labelSource: 'code',
+    category: 'payments_subscriptions',
+    locale: 'en-GB',
+    turnCount: 3,
+    examples: [],
+    sourceMix: {},
+    answerSources: [],
+    relatedNodeId: null,
+    relatedScore: null,
+    parentNodeId: null,
+    shownNodeId: null,
+    ticketId: null,
+    firstSeenAt: '2026-10-20T08:00:00Z',
+    lastSeenAt: '2026-10-28T08:00:00Z',
+    reason: null,
+    reasonNote: null,
+    acceptedAs: null,
+    acceptedFaqId: null,
+    mergedInto: null,
+    decidedBy: null,
+    decidedAt: null,
+    actionKey: null,
+    version: 1,
+    createdBy: null,
+    createdAt: '2026-10-20T08:00:00Z',
+    updatedAt: '2026-10-28T08:00:00Z',
     ...patch,
   }
 }

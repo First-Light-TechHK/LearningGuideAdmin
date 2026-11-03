@@ -1127,6 +1127,83 @@ describe('AI blocks (aiAssist after each card)', () => {
   })
 })
 
+describe('v3 §2 ratings (ticket card and AI blocks; 待视觉验收)', () => {
+  const at = '2026-10-28T08:50:00Z'
+  function assist(id: string, patch: Partial<EnquiryDetail['aiAssist'][number]>): EnquiryDetail['aiAssist'][number] {
+    return { id, source: 'submit', question: `Asked ${id}`, faqId: 'f1', faqQuestion: 'FAQ', answer: `Answer ${id}`, feedback: 'helpful', createdAt: at, rating: null, ...patch }
+  }
+  const ratingOf = (cardElement: HTMLElement) => cardElement.querySelector('.hdTicketRating')?.textContent?.trim() ?? null
+
+  test('a closed ticket shows the learner rating "Rating n/5" in en-GB and "评分 n/5" in zh-CN, next to the status', async () => {
+    serve(detail('a', { status: 'CLOSED', rating: 4 }))
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    const cardElement = await card('Subject a')
+    assert.equal(ratingOf(cardElement), 'Rating 4/5')
+    const pill = cardElement.querySelector('.hdTicketRating') as HTMLElement
+    assert.ok(pill.closest('.hdCardMetaRow'), 'in the meta row with the status pill')
+    assert.ok(pill.classList.contains('hdStatusPill'), 'reuses the status pill style')
+    cleanup()
+    serve(detail('a', { status: 'CLOSED', rating: 2 }))
+    await renderHelpDesk(server, { path: '/zh-CN/help-desk/a' })
+    assert.equal(ratingOf(await card('Subject a')), '评分 2/5')
+  })
+
+  test('a closed ticket without a rating says "Not rated" / "未评分"', async () => {
+    serve(detail('a', { status: 'CLOSED', rating: null }))
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    assert.equal(ratingOf(await card('Subject a')), 'Not rated')
+    cleanup()
+    serve(detail('a', { status: 'CLOSED', rating: null }))
+    await renderHelpDesk(server, { path: '/zh-CN/help-desk/a' })
+    assert.equal(ratingOf(await card('Subject a')), '未评分')
+  })
+
+  test('every ticket card shows its rating as the spec says: "Not rated" while there is none (open too), "Rating n/5" once rated, even after reopening', async () => {
+    serve(sameLearner('a', { status: 'ASSIGNED', rating: null }), sameLearner('b', { status: 'WAITING_USER', rating: 5, createdAt: '2026-10-28T10:00:00Z' }))
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    assert.equal(ratingOf(await card('Subject a')), 'Not rated')
+    await waitFor(() => assert.equal(ratingOf(within(conversation()).getByRole('article', { name: 'Subject b' })), 'Rating 5/5'))
+  })
+
+  test('an out-of-range rating is not shown as a score', async () => {
+    serve(detail('a', { status: 'CLOSED', rating: 7 }))
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    assert.equal(ratingOf(await card('Subject a')), 'Not rated')
+  })
+
+  test('AI blocks show the learner rating of that answer only when there is one', async () => {
+    serve(
+      detail('a', {
+        aiAssist: [
+          assist('rated', { rating: 5 }),
+          assist('unrated', { rating: null }),
+          assist('older', { rating: undefined }),
+          assist('bad', { rating: 0 }),
+          assist('low', { feedback: null, rating: 1 }),
+        ],
+      }),
+    )
+    await renderHelpDesk(server, { path: '/en-GB/help-desk/a' })
+    const blocks = within(item(await card('Subject a'))).getAllByRole('region', { name: 'AI Support Assistant' })
+    assert.deepEqual(
+      blocks.map((block) => block.querySelector('.hdAiRating')?.textContent?.trim() ?? null),
+      ['Rating 5/5', null, null, null, 'Rating 1/5'],
+    )
+    // 评分在反馈行之后
+    const feedback = blocks[0].querySelector('.hdAiFeedback') as HTMLElement
+    assert.ok(feedback.compareDocumentPosition(blocks[0].querySelector('.hdAiRating') as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING)
+    // 已有的反馈行不受影响
+    assert.match(feedback.textContent ?? '', /Yes, this solved my issue/)
+  })
+
+  test('zh-CN AI block rating copy', async () => {
+    serve(detail('a', { aiAssist: [assist('rated', { rating: 3 })] }))
+    await renderHelpDesk(server, { path: '/zh-CN/help-desk/a' })
+    const block = within(item(await card('Subject a'))).getByRole('region', { name: 'AI 客服助手' })
+    assert.equal(block.querySelector('.hdAiRating')?.textContent?.trim(), '评分 3/5')
+  })
+})
+
 describe('the timeline and drafts survive moving between enquiries', () => {
   test('a reply and a note draft are kept after opening another learner’s enquiry and coming back', async () => {
     const slow = deferred<Reply>()

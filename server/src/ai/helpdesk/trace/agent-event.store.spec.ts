@@ -7,7 +7,7 @@ import {
 describeAgentEventLog('memory log', () => createMemoryAgentEventLog());
 
 describe('agent event log has no rewrite path', () => {
-  it('offers append, read, chain and the 90-day learner-text purge only', () => {
+  it('offers append, read, chain, the read-only step health count and the 90-day learner-text purge only', () => {
     const methods = (proto: object) =>
       Object.getOwnPropertyNames(proto)
         .filter((name) => name !== 'constructor')
@@ -17,6 +17,7 @@ describe('agent event log has no rewrite path', () => {
       'chain',
       'purgeLearnerText',
       'read',
+      'stepHealth',
     ]);
     expect(Object.keys(createMemoryAgentEventLog()).sort()).toEqual([
       'append',
@@ -24,6 +25,7 @@ describe('agent event log has no rewrite path', () => {
       'purgeLearnerText',
       'read',
       'runs',
+      'stepHealth',
     ]);
   });
 });

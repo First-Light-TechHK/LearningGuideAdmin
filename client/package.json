@@ -12,6 +12,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "test:e2e:students": "node --test e2e/students.e2e.test.mjs",
+    "test:e2e:helpdesk": "node --test e2e/helpdesk-figma.e2e.test.mjs e2e/helpdesk-candidate-review.e2e.test.mjs e2e/helpdesk-data-charts.e2e.test.mjs e2e/helpdesk-faq-review.e2e.test.mjs e2e/helpdesk-changes.e2e.test.mjs",
     "test": "node --experimental-strip-types --import ./tests/support/register.mjs --test \"tests/**/*.test.ts\" \"tests/**/*.test.tsx\""
   },
   "dependencies": {
@@ -30,6 +32,8 @@
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4",
     "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "zustand": "^5.0.15"
   },
@@ -43,6 +47,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^28.1.0",
     "oxlint": "^1.81.0",
+    "playwright": "^1.61.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }

@@ -99,6 +99,11 @@ describe('FAQs tab (Figma 1379:2)', () => {
       [
         ['Enquiries', 'false'],
         ['FAQs', 'true'],
+        // v5 Part G4 / G6（待视觉验收）
+        ['FAQ candidates', 'false'],
+        ['HelpDesk data', 'false'],
+        // 修改记录（Figma 草案 2.6）
+        ['Change Log', 'false'],
       ],
     )
     assert.ok(screen.getByRole('button', { name: '+ Add FAQ' }))
@@ -143,7 +148,7 @@ describe('FAQs tab (Figma 1379:2)', () => {
     await openFaqs({ locale: 'zh-CN' })
     assert.deepEqual(
       screen.getAllByRole('tab').map((tab) => tab.textContent),
-      ['工单', '常见问题'],
+      ['工单', '常见问题', 'FAQ 候选', 'HelpDesk 数据', '修改记录'],
     )
     assert.ok(screen.getByRole('button', { name: '+ 新增常见问题' }))
     const first = await waitFor(() => tableRow('没有收到重置密码邮件'))
@@ -358,6 +363,10 @@ describe('FAQ drawer (Figma 1379:299)', () => {
       questionZh: '可以退款吗？',
       answerZh: '可以，14 天内。',
       keywords: ['refund', 'money back'],
+      // v5 question trees: the card type, entry and situations are part of the FAQ
+      type: 'answer',
+      entry: true,
+      signals: [],
     })
     await waitFor(() => absent(screen.queryByRole('dialog')))
     await waitFor(() => assert.equal(server.callsTo('GET', LIST).length, before + 1))
@@ -430,6 +439,9 @@ describe('FAQ drawer (Figma 1379:299)', () => {
       questionZh: '问题 f1？',
       answerZh: '答案 f1。',
       keywords: ['password', 'reset'],
+      type: 'answer',
+      entry: true,
+      signals: [],
       version: 4,
     })
   })
@@ -491,6 +503,32 @@ describe('FAQ drawer (Figma 1379:299)', () => {
     assert.equal(call.path, '/api/helpdesk/faqs/f1/archive')
     assert.deepEqual(call.body, { version: 6 })
     await waitFor(() => absent(screen.queryByRole('dialog')))
+  })
+
+  test('a delete refused because other questions still use it names those questions', async () => {
+    serveFaqs(faq('f1', { questionEn: 'Shared answer', version: 6 }))
+    server.on('POST', ARCHIVE, { status: 409, error: 'FAQ_HAS_PARENTS' })
+    const parent = (id: string, questionEn: string, questionZh: string, status: 'published' | 'archived' = 'published') => ({
+      edge: { id: `e-${id}`, parentId: id, childId: 'f1', kind: 'follow_up', position: 0, labelEn: null, labelZh: null, createdAt: '2026-10-30T00:00:00.000Z', updatedAt: '2026-10-30T00:00:00.000Z' },
+      node: { id, key: id, type: 'answer', entry: true, category: 'other', questionEn, questionZh, status },
+      label: { en: 'Shared answer', zh: '共享答案' },
+    })
+    server.on('GET', /\/faqs\/f1\/edges$/, {
+      data: {
+        children: [],
+        parents: [parent('p1', 'Why was my card declined?', '为什么卡被拒？'), parent('p2', 'Old question', '旧问题', 'archived')],
+      },
+    })
+    await openFaqs()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Shared answer' }))
+    await screen.findByRole('dialog')
+    fireEvent.click(within(drawer()).getByRole('button', { name: 'Delete FAQ' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    const alert = await within(drawer()).findByRole('alert')
+    assert.match(alert.textContent ?? '', /still a follow-up or option/)
+    await waitFor(() => assert.match(alert.textContent ?? '', /Why was my card declined\?/))
+    assert.doesNotMatch(alert.textContent ?? '', /Old question/)
+    assert.ok(screen.getByRole('dialog'), 'the drawer stays open')
   })
 
   test('Keep in the delete confirmation keeps the FAQ; a new FAQ has no Delete', async () => {
@@ -641,7 +679,7 @@ describe('the drawer, preview and confirmations are modal', () => {
     fill(/^Answer \(Chinese\)/, '写到一半')
     const add = screen.getByRole('button', { name: '+ Add FAQ' })
     assert.ok(add.closest('[inert]'), 'the header button is inert')
-    assert.ok(screen.getByRole('tablist').closest('[inert]'), 'the tabs are inert')
+    assert.ok(screen.getByRole('tablist', { name: 'Help Desk' }).closest('[inert]'), 'the tabs are inert')
     assert.ok(screen.getByRole('table').closest('[inert]'), 'the list behind is inert')
     assert.ok(drawer().closest('[inert]') === null, 'the drawer itself is not')
     fireEvent.click(add)
@@ -653,7 +691,7 @@ describe('the drawer, preview and confirmations are modal', () => {
     fireEvent.click(within(drawer()).getByRole('button', { name: 'Close' }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }))
     await waitFor(() => absent(screen.queryByRole('dialog')))
-    assert.ok(screen.getByRole('tablist').closest('[inert]') === null, 'live again once the drawer is closed')
+    assert.ok(screen.getByRole('tablist', { name: 'Help Desk' }).closest('[inert]') === null, 'live again once the drawer is closed')
   })
 
   test('Tab and Shift+Tab stay inside the drawer, and inside a confirmation while it is open', async () => {
@@ -722,14 +760,19 @@ describe('the drawer, preview and confirmations are modal', () => {
     await openFaqs()
     fireEvent.click(await screen.findByRole('button', { name: 'Preview Preview me' }))
     const dialog = await screen.findByRole('dialog', { name: 'Preview FAQ' })
-    assert.ok(screen.getByRole('tablist').closest('[inert]'), 'the page behind the preview is inert')
+    assert.ok(screen.getByRole('tablist', { name: 'Help Desk' }).closest('[inert]'), 'the page behind the preview is inert')
     const close = within(dialog).getByRole('button', { name: 'Close' })
     assert.ok(document.activeElement === close, 'focus on ' + close.textContent)
+    // v5: the question tree's way in sits at the foot of the preview (the table keeps Figma's Edit / Preview), so it
+    // is the last control; the browser moves Tab from Close to it, the layer wraps from it
+    const tree = within(dialog).getByRole('button', { name: 'View question tree', exact: true })
+    assert.ok(close.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING, 'after Close')
+    tree.focus()
     tab()
     const english = within(dialog).getByRole('radio', { name: 'EN' })
-    assert.ok(document.activeElement === english, 'Tab from Close (the last control) wraps to the language switch')
+    assert.ok(document.activeElement === english, 'Tab from the last control wraps to the language switch')
     tab({ shiftKey: true })
-    assert.ok(document.activeElement === close, 'Shift+Tab from the first control wraps to Close')
+    assert.ok(document.activeElement === tree, 'Shift+Tab from the first control wraps to the last')
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await waitFor(() => absent(screen.queryByRole('dialog')))
   })

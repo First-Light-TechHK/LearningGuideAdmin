@@ -21,7 +21,13 @@ export function validateManifestShape(raw: unknown): {
     code: string,
     message: string,
     path?: string,
-  ) => (level === 'error' ? errors : warnings).push({ level, code, path, message });
+  ) =>
+    (level === 'error' ? errors : warnings).push({
+      level,
+      code,
+      path,
+      message,
+    });
 
   const obj = raw as Record<string, unknown>;
   if (!obj || typeof obj !== 'object') {
@@ -29,9 +35,17 @@ export function validateManifestShape(raw: unknown): {
     return { report: { errors, warnings, incomplete: true } };
   }
   if (obj.format !== PACKAGE_FORMAT) {
-    push('error', 'PACKAGE_MANIFEST_INVALID', `format must be "${PACKAGE_FORMAT}"`, 'format');
+    push(
+      'error',
+      'PACKAGE_MANIFEST_INVALID',
+      `format must be "${PACKAGE_FORMAT}"`,
+      'format',
+    );
   }
-  if (typeof obj.formatVersion !== 'number' || obj.formatVersion > PACKAGE_FORMAT_VERSION) {
+  if (
+    typeof obj.formatVersion !== 'number' ||
+    obj.formatVersion > PACKAGE_FORMAT_VERSION
+  ) {
     push(
       'error',
       'PACKAGE_FORMAT_UNSUPPORTED',
@@ -45,7 +59,11 @@ export function validateManifestShape(raw: unknown): {
     return { report: { errors, warnings, incomplete: true } };
   }
   const str = (v: unknown, p: string, required = true): void => {
-    if (required ? typeof v !== 'string' || !v : v != null && typeof v !== 'string') {
+    if (
+      required
+        ? typeof v !== 'string' || !v
+        : v != null && typeof v !== 'string'
+    ) {
       push('error', 'PACKAGE_MANIFEST_INVALID', `${p} is required`, p);
     }
   };
@@ -53,13 +71,26 @@ export function validateManifestShape(raw: unknown): {
   str(course.slug, 'course.slug');
   str(course.category, 'course.category');
   str(course.learningMode, 'course.learningMode');
-  if (!Array.isArray(course.learningLanguages) || course.learningLanguages.length === 0) {
-    push('error', 'PACKAGE_MANIFEST_INVALID', 'course.learningLanguages is required', 'course.learningLanguages');
+  if (
+    !Array.isArray(course.learningLanguages) ||
+    course.learningLanguages.length === 0
+  ) {
+    push(
+      'error',
+      'PACKAGE_MANIFEST_INVALID',
+      'course.learningLanguages is required',
+      'course.learningLanguages',
+    );
   }
   str(course.defaultContentLanguage, 'course.defaultContentLanguage');
   const localized = course.localized as Record<string, unknown> | undefined;
   if (!localized || typeof localized !== 'object') {
-    push('error', 'PACKAGE_MANIFEST_INVALID', 'course.localized is required', 'course.localized');
+    push(
+      'error',
+      'PACKAGE_MANIFEST_INVALID',
+      'course.localized is required',
+      'course.localized',
+    );
   }
   const lessons = course.lessons;
   if (!Array.isArray(lessons) || lessons.length === 0) {

@@ -2,9 +2,22 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  CONFIDENCE_LEVELS,
   FAQ_CATEGORIES,
+  FAQ_EDGE_KINDS,
+  FAQ_NODE_TYPES,
+  FAQ_SIGNALS,
+  GUARD_REASONS,
+  GUARD_RESULTS,
+  GUARDED_FIELDS,
   HELPDESK_CATEGORIES,
   HELPDESK_LOCALES,
+  SITUATION_SIGNALS,
+  SUGGEST_INTENTS,
+  SUGGEST_KINDS,
+  SUGGEST_TURN_FIELDS,
+  parseSuggestContext,
+  suggestTurnProblems,
   type HelpdeskQaCandidate,
 } from '../../contracts/helpdesk-qa';
 import {
@@ -21,6 +34,9 @@ import {
   AGENT_ACTIONS,
   ATTACHMENT_CONTENT_TYPES,
   ATTACHMENT_INLINE_TYPES,
+  ORDER_KINDS,
+  ORDER_STATUSES,
+  PAYMENT_MODES,
   TICKET_STATUSES,
 } from '../modules/helpdesk/contracts';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
@@ -69,8 +85,17 @@ const fixture = JSON.parse(
     suggestRequest: Obj;
     suggestChatRequest: Obj;
     suggestChipRequest: Obj;
-    suggestResponse: { suggestion: Obj };
-    suggestNoMatchResponse: { suggestion: null };
+    suggestResponse: { suggestion: Obj; alternatives: Obj[] };
+    suggestNoMatchResponse: { suggestion: null; alternatives: Obj[] };
+    suggestAlternativesResponse: { suggestion: null; alternatives: Obj[] };
+    suggestContextRequest: Obj & { context: Obj };
+    suggestAnswerContextResponse: Obj;
+    suggestChoiceResponse: Obj;
+    suggestSmalltalkResponse: Obj;
+    suggestSmalltalkFallbackResponse: Obj;
+    suggestClarifyResponse: Obj;
+    suggestClarifyNotCoveredResponse: Obj;
+    suggestNoMatchContextResponse: Obj;
     traceparentHeader: string;
     outcomeRequest: Obj;
     helpfulOutcomeRequest: Obj;
@@ -129,6 +154,22 @@ describe('Helpdesk contract fixture: enums', () => {
     expect([...ALL_OUTCOMES]).toEqual(fixture.enums.assistFeedback);
     expect([...SUGGESTION_SOURCES]).toEqual(fixture.enums.assistSource);
     expect([...FAQ_CATEGORIES]).toEqual(fixture.enums.faqCategory);
+    expect([...ORDER_STATUSES]).toEqual(fixture.enums.orderStatus);
+    expect([...ORDER_KINDS]).toEqual(fixture.enums.orderKind);
+    expect([...PAYMENT_MODES]).toEqual(fixture.enums.paymentMode);
+  });
+
+  it('v6: the situation signals, FAQ signals (chip priority order), graph and suggest-turn enums', () => {
+    expect([...SITUATION_SIGNALS]).toEqual(fixture.enums.situationSignal);
+    expect([...FAQ_SIGNALS]).toEqual(fixture.enums.faqSignal);
+    expect([...FAQ_NODE_TYPES]).toEqual(fixture.enums.faqNodeType);
+    expect([...FAQ_EDGE_KINDS]).toEqual(fixture.enums.faqEdgeKind);
+    expect([...SUGGEST_KINDS]).toEqual(fixture.enums.suggestKind);
+    expect([...SUGGEST_INTENTS]).toEqual(fixture.enums.suggestIntent);
+    expect([...CONFIDENCE_LEVELS]).toEqual(fixture.enums.confidence);
+    expect([...GUARD_RESULTS]).toEqual(fixture.enums.guardResult);
+    expect([...GUARD_REASONS]).toEqual(fixture.enums.guardReason);
+    expect([...GUARDED_FIELDS]).toEqual(fixture.enums.guardedField);
   });
 });
 
@@ -186,6 +227,40 @@ describe('Helpdesk contract fixture: Admin reads Portal', () => {
     // v2: the flag and the AI assist log come through unchanged
     expect(detail.flagged).toBe(raw.flagged);
     expect(detail.aiAssist).toEqual(raw.aiAssist);
+  });
+
+  it('v4: the learner rating of an AI answer comes through as the number Portal sends (null when none)', () => {
+    const raw = toPortal.detailResponse.aiAssist.map((item) => item.rating);
+    expect(raw).toEqual([4, null]);
+    expect(
+      normaliseDetail(toPortal.detailResponse).aiAssist.map(
+        (item) => item.rating,
+      ),
+    ).toEqual(raw);
+  });
+
+  it('v5: the order projection comes through exactly as Portal sends it, and list rows carry orderId', async () => {
+    const raw = toPortal.detailResponse;
+    const detail = normaliseDetail(raw);
+    expect(detail.orderId).toBe(raw.orderId);
+    expect(detail.order).toEqual(raw.order);
+    expect(Object.keys(detail.order ?? {}).sort()).toEqual(
+      Object.keys(raw.order as Obj).sort(),
+    );
+    const service = createHelpdeskService({
+      listTickets: jest.fn().mockResolvedValue({
+        tickets: toPortal.listResponse.tickets.map((t) => normaliseSummary(t)),
+        nextCursor: null,
+        counts: {},
+      }),
+      getTicket: jest.fn().mockResolvedValue(detail),
+    } as never);
+    const list = await service.list({});
+    expect(list.tickets.map((t) => t.orderId)).toEqual(
+      toPortal.listResponse.tickets.map((t) => t.orderId),
+    );
+    const served = await service.detail(text(raw.id));
+    expect(served.order).toEqual(raw.order);
   });
 
   it('reads the flag on list rows', async () => {
@@ -413,14 +488,19 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
   function storedFaq(): HelpdeskFaq {
     return {
       id: text(faq.id),
+      key: 'reset-password',
+      type: 'answer',
+      entry: true,
       category: faq.category as never,
       popular: faq.popular === true,
+      popularRank: null,
       questionEn: text(faq.question),
       answerEn: text(faq.answer),
       questionZh: '如何重置密码？',
       answerZh:
         '1. 检查垃圾邮件\n2. 在 [忘记密码](https://www.ilovelearningguide.com/zh-CN/forgot-password) 重新申请',
       keywords: ['password', 'reset'],
+      signals: [],
       status: 'published',
       version: 3,
       createdBy: null,
@@ -468,7 +548,10 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
     await expect(service.publishedOne(id, query)).resolves.toEqual(faq);
   });
 
-  function suggestService(candidate: HelpdeskQaCandidate) {
+  function suggestService(
+    candidate: HelpdeskQaCandidate,
+    popular: HelpdeskQaCandidate[] = [],
+  ) {
     const logged: SuggestionLogEntry[] = [];
     // the model step picks the candidate (the real pi runner is tested in workflow/)
     const complete = jest.fn(() =>
@@ -483,6 +566,8 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
         findCandidates: () => Promise.resolve([candidate]),
         findPublished: (id) =>
           Promise.resolve(id === candidate.id ? candidate : null),
+        findPopular: ({ excludeIds }) =>
+          Promise.resolve(popular.filter((c) => !excludeIds.includes(c.id))),
       },
       runner: { run: complete },
       events,
@@ -563,6 +648,124 @@ describe('Helpdesk contract fixture: Admin answers Portal', () => {
         faqId: '0192bbbb-0000-7000-8000-000000000001',
       }),
     ).resolves.toEqual(toAdmin.suggestNoMatchResponse);
+  });
+
+  it('answers no match with the contract alternatives (v3 §1, code only)', async () => {
+    const expected = toAdmin.suggestAlternativesResponse;
+    const { service, complete } = suggestService(
+      {
+        id: '0192bbbb-0000-7000-8000-0000000000ff',
+        category: 'other',
+        question: 'q',
+        answer: 'a',
+        score: 1,
+      },
+      expected.alternatives.map((a) => ({
+        id: text(a.faqId),
+        category: 'account_technical',
+        question: text(a.question),
+        answer: 'stored answer',
+        score: 0,
+      })),
+    );
+    // the chip FAQ is no longer published: the popular FAQs instead, never the model
+    const answer = await service.suggest({
+      ...toAdmin.suggestChipRequest,
+      faqId: '0192bbbb-0000-7000-8000-000000000001',
+    });
+    expect(answer).toEqual(expected);
+    expect(shape(answer as unknown as Json)).toEqual(
+      shape(expected as unknown as Json),
+    );
+    expect(complete).not.toHaveBeenCalled();
+    expect(expected.alternatives.length).toBeLessThanOrEqual(3);
+  });
+
+  /** v6 的七个回包例子（请求带 context 时 Admin 回的形状）。 */
+  const v6Responses = () => ({
+    answer: toAdmin.suggestAnswerContextResponse,
+    choice: toAdmin.suggestChoiceResponse,
+    smalltalk: toAdmin.suggestSmalltalkResponse,
+    smalltalkFallback: toAdmin.suggestSmalltalkFallbackResponse,
+    clarify: toAdmin.suggestClarifyResponse,
+    clarifyNotCovered: toAdmin.suggestClarifyNotCoveredResponse,
+    noMatch: toAdmin.suggestNoMatchContextResponse,
+  });
+
+  it('v6: accepts the context request (Portal sends learner text only, never learner data)', async () => {
+    const request = toAdmin.suggestContextRequest;
+    expect(parseSuggestContext(request.context)).toEqual(request.context);
+    expect(Object.keys(request.context).sort()).toEqual(
+      ['nodeId', 'recentTurns', 'sessionId'].sort(),
+    );
+    // keys only: the learner's own words may mention a plan, the payload never carries their data
+    expect(
+      [...Object.keys(request), ...Object.keys(request.context)].join(' '),
+    ).not.toMatch(/order|signal|plan|subscription|email/i);
+    const { service, logged } = suggestService({
+      id: text(toAdmin.suggestAnswerContextResponse.nodeId),
+      category: 'payments_subscriptions',
+      question: 'I paid but my plan is not active',
+      answer: 'stored answer',
+      score: 1,
+    });
+    await expect(service.suggest(request)).resolves.toHaveProperty(
+      'alternatives',
+    );
+    expect(logged.map((entry) => entry.source)).toEqual(['chat']);
+  });
+
+  it('v6: every context answer follows the per-kind rules, and every kind is shown', () => {
+    const examples = v6Responses();
+    for (const [name, example] of Object.entries(examples))
+      expect({ name, problems: suggestTurnProblems(example) }).toEqual({
+        name,
+        problems: [],
+      });
+    expect(
+      [...new Set(Object.values(examples).map((e) => e.kind))].sort(),
+    ).toEqual([...SUGGEST_KINDS].sort());
+    // the answer example is a real excerpt of a 4-block answer, framed by an opening and a closing
+    expect(examples.answer).toMatchObject({
+      blocks: ['b2', 'b3'],
+      guard: { result: 'passed' },
+    });
+    expect(examples.choice).toMatchObject({
+      confidence: 'unsure',
+      opening: null,
+    });
+    expect(examples.clarifyNotCovered).toMatchObject({
+      covered: false,
+      explanation: null,
+      guard: { result: 'fallback', reason: 'not_covered' },
+    });
+    expect(examples.smalltalkFallback).toMatchObject({
+      releaseVersion: null,
+      guard: { result: 'fallback', fallback: ['reply'] },
+    });
+  });
+
+  it('v6: a request without context keeps exactly the v5 answer (no new fields)', () => {
+    for (const legacy of [
+      toAdmin.suggestResponse,
+      toAdmin.suggestNoMatchResponse,
+      toAdmin.suggestAlternativesResponse,
+    ]) {
+      expect(Object.keys(legacy).sort()).toEqual([
+        'alternatives',
+        'suggestion',
+      ]);
+      for (const field of SUGGEST_TURN_FIELDS)
+        expect(legacy).not.toHaveProperty(field);
+    }
+  });
+
+  it('v6: public FAQs carry signals, only the FAQ signal values', () => {
+    for (const faq of [...toAdmin.faqsResponse.faqs, toAdmin.faqResponse]) {
+      expect(Array.isArray(faq.signals)).toBe(true);
+      for (const signal of faq.signals as string[])
+        expect(fixture.enums.faqSignal).toContain(signal);
+    }
   });
 
   it('records the contract outcomes', async () => {

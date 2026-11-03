@@ -158,6 +158,86 @@ describeDb('PrismaHelpdeskSuggestionStore (PostgreSQL)', () => {
     ).rejects.toThrow(/helpdesk_suggestions_outcome_check/);
   });
 
+  it('v5: stores the turn (kind, intent, confidence, node, blocks, guard, covered, session, release); old rows leave them empty', async () => {
+    const session = uuidv7();
+    const turn = {
+      ...entry(qa1, 'chat'),
+      turn: {
+        kind: 'answer' as const,
+        intent: 'question' as const,
+        confidence: 'sure' as const,
+        nodeId: qa1,
+        blocks: ['b2', 'b3'],
+        guard: {
+          result: 'fallback' as const,
+          reason: 'digit' as const,
+          fallback: ['opening' as const],
+        },
+        covered: null,
+        sessionId: session,
+        releaseVersion: 3,
+      },
+    };
+    const old = entry(qa2, 'chat');
+    await store.record(turn);
+    await store.record(old);
+    const { rows } = await admin.query<Record<string, unknown>>(
+      `SELECT id::text, kind, intent, confidence, node_id::text, blocks, guard_result, guard_reason,
+              guard_fallback, covered, session_id::text, release_version
+         FROM ${schema}.helpdesk_suggestions WHERE id = ANY($1::uuid[])`,
+      [[turn.id, old.id]],
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(turn.id)).toEqual({
+      id: turn.id,
+      kind: 'answer',
+      intent: 'question',
+      confidence: 'sure',
+      node_id: qa1,
+      blocks: ['b2', 'b3'],
+      guard_result: 'fallback',
+      guard_reason: 'digit',
+      guard_fallback: ['opening'],
+      covered: null,
+      session_id: session,
+      release_version: 3,
+    });
+    expect(byId.get(old.id)).toEqual({
+      id: old.id,
+      kind: null,
+      intent: null,
+      confidence: null,
+      node_id: null,
+      blocks: [],
+      guard_result: null,
+      guard_reason: null,
+      guard_fallback: [],
+      covered: null,
+      session_id: null,
+      release_version: null,
+    });
+  });
+
+  it.each([
+    ['kind', `kind = 'handover'`],
+    ['intent', `intent = 'chitchat'`],
+    ['confidence', `confidence = 'maybe'`],
+    ['blocks', `blocks = ARRAY['b1','b2','b3','b4']`],
+    ['guard_result', `guard_result = 'blocked'`],
+    ['guard_reason', `guard_reason = 'rude'`],
+    ['guard_fallback', `guard_fallback = ARRAY['answer']`],
+    ['release_version', `release_version = 0`],
+  ])('v5: the database refuses a bad %s', async (column, assignment) => {
+    const row = entry(qa1, 'chat');
+    await store.record(row);
+    await expect(
+      admin.query(
+        `UPDATE ${schema}.helpdesk_suggestions SET ${assignment} WHERE id = $1`,
+        [row.id],
+      ),
+    ).rejects.toThrow(new RegExp(`helpdesk_suggestions_${column}_check`));
+  });
+
   it('lets only one of two concurrent outcomes win', async () => {
     const row = entry(qa1);
     await store.record(row);

@@ -1,16 +1,23 @@
+import { Logger } from '@nestjs/common';
 import { HttpException } from '@nestjs/common';
 
 import type {
   HelpdeskQaCandidate,
+  HelpdeskQaPopularSearch,
   HelpdeskQaSource,
 } from '../../contracts/helpdesk-qa';
 import type { JsonObject } from '../../contracts/helpdesk-trace';
 import { MemoryRateLimitStore } from '../rate-limit.service';
 import {
+  ALTERNATIVES_TIMEOUT_MS,
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
+  suggestLimits,
   suggestModel,
+  suggestThinking,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_THINKING_CUTOFF_MS,
+  SUGGEST_THINKING_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
   SUGGEST_TIMEOUT_MS,
 } from './helpdesk-suggest.service';
@@ -26,6 +33,7 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
+import { PICK_FAQ_SYSTEM } from './workflow/faq-workflow';
 
 /**
  * Helpdesk addendum §C：Agent 推荐答案（v2：写死的 FAQ 工作流 + 每个 agent 步一个 pi Agent）。
@@ -52,6 +60,53 @@ const candidates: HelpdeskQaCandidate[] = [
     score: 1,
   },
 ];
+
+/** 热门已发布 FAQ（检索不到候选时的「你可能想问」）；第一条就是 candidates[0]。 */
+const popular: HelpdeskQaCandidate[] = [
+  { ...candidates[0], score: 0 },
+  {
+    id: '0192bbbb-0000-7000-8000-000000000003',
+    category: 'account_technical',
+    question: 'How do I change my email address?',
+    answer: 'Account > Profile.',
+    score: 0,
+  },
+  {
+    id: '0192bbbb-0000-7000-8000-000000000004',
+    category: 'courses_learning',
+    question: 'Where do I find my courses?',
+    answer: 'My Learning.',
+    score: 0,
+  },
+  {
+    id: '0192bbbb-0000-7000-8000-000000000005',
+    category: 'other',
+    question: 'How do I contact support?',
+    answer: 'Use Contact Support.',
+    score: 0,
+  },
+];
+
+const alternativesOf = (list: HelpdeskQaCandidate[]) =>
+  list.map((c) => ({ faqId: c.id, question: c.question }));
+
+/** v3 §1：没有答案时的回包（suggestion: null + alternatives）。 */
+const NO_ANSWER = {
+  /** 检索到的候选，按检索顺序。 */
+  RANKED: { suggestion: null, alternatives: alternativesOf(candidates) },
+  /** 没有候选：热门 FAQ 前 3 个。 */
+  POPULAR: {
+    suggestion: null,
+    alternatives: alternativesOf(popular.slice(0, 3)),
+  },
+  /** chip 点的 FAQ（candidates[0]）不再出现。 */
+  CHIP_POPULAR: {
+    suggestion: null,
+    alternatives: alternativesOf(popular.slice(1, 4)),
+  },
+  /** rate_limited / aborted：不给。 */
+  NOTHING: { suggestion: null, alternatives: [] },
+};
 
 const input = {
   learnerId: LEARNER,
@@ -115,9 +170,11 @@ function fakeRunner(reply: RunnerReply) {
 function setup(
   options: {
     found?: HelpdeskQaCandidate[];
+    popular?: HelpdeskQaCandidate[];
     reply?: RunnerReply;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    deadlineMs?: number;
     now?: () => number;
   } = {},
 ) {
@@ -130,7 +187,14 @@ function setup(
       hit && locale === 'en-GB' ? { ...hit, score: 0 } : null,
     );
   });
-  const qa: HelpdeskQaSource = { findCandidates, findPublished };
+  const findPopular = jest.fn((search: HelpdeskQaPopularSearch) =>
+    Promise.resolve(
+      (options.popular ?? popular)
+        .filter((c) => !search.excludeIds.includes(c.id))
+        .slice(0, search.limit),
+    ),
+  );
+  const qa: HelpdeskQaSource = { findCandidates, findPublished, findPopular };
   const { run: complete, runner } = fakeRunner(
     options.reply ?? (() => pick(candidates[0].id)),
   );
@@ -150,6 +214,7 @@ function setup(
     events,
     env: () => env,
     timeoutMs: options.timeoutMs,
+    deadlineMs: options.deadlineMs,
     now: options.now,
   });
   return {
@@ -157,6 +222,7 @@ function setup(
     qa,
     findCandidates,
     findPublished,
+    findPopular,
     complete,
     events,
     rows,
@@ -235,9 +301,14 @@ describe('Helpdesk suggest: happy path', () => {
           'off_topic',
         ],
         faqId: [...candidates.map((c) => c.id), 'none'],
+        confidence: ['sure', 'unsure'],
       },
     });
-    expect(Object.keys(spec.tool.enumArgs)).toEqual(['intent', 'faqId']);
+    expect(Object.keys(spec.tool.enumArgs)).toEqual([
+      'intent',
+      'faqId',
+      'confidence',
+    ]);
     // 学员原文只放在 prompt 里，system 提示不含学员内容
     expect(spec.system).not.toContain('Ignore previous instructions');
     expect(spec.prompt).toContain('Ignore previous instructions');
@@ -245,7 +316,7 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.prompt).toContain(candidates[1].answer);
   });
 
-  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 80 tokens) but retrieves on the whole text', async () => {
+  it('bounds what the model sees (2000-char message: its start and its end, 600-char answers, 150 tokens) but retrieves on the whole text', async () => {
     const long = candidates.map((c) => ({ ...c, answer: c.answer.repeat(40) }));
     const { service, complete, findCandidates } = setup({ found: long });
     // 长信的真正问题常在最后一段：送给模型的是开头 600 字 + 结尾 1400 字
@@ -276,7 +347,8 @@ describe('Helpdesk suggest: happy path', () => {
     expect(prompt.candidates.map((c) => c.answer)).toEqual(
       long.map((c) => c.answer.slice(0, 600)),
     );
-    expect(spec.maxTokens).toBe(80);
+    // 三个参数的调用 DeepSeek 要用约 80 个 token：80 会截断，留足余量（2026-10-30 qa10k dev 3484 / 4890 次截断）
+    expect(spec.maxTokens).toBe(150);
   });
 
   it('keeps the injection guard and the one-call rule in the system prompt', async () => {
@@ -301,6 +373,45 @@ describe('Helpdesk suggest: happy path', () => {
     expect(spec.system).toContain(
       'the candidate that tells them how to do it themselves',
     );
+  });
+
+  it('shows no card for an unsure pick: the pick goes first in the alternatives, and an unsure none changes nothing', async () => {
+    // 2026-10-30 实测：「不确定」时给的卡片错得多，提交工单这条路同 v5 一样不出卡，让学员自己挑或转人工
+    expect(PICK_FAQ_SYSTEM).toContain(
+      'confidence: sure when one candidate clearly fits; unsure when two or more could fit or you are guessing.',
+    );
+    const unsure = (faqId: string) => () =>
+      Promise.resolve<AgentStepOutcome>({
+        kind: 'called',
+        args: { intent: 'question', faqId, confidence: 'unsure' },
+      });
+    const { service, rows } = setup({ reply: unsure(candidates[1].id) });
+    await expect(service.suggest(input)).resolves.toEqual({
+      suggestion: null,
+      alternatives: alternativesOf([candidates[1], candidates[0]]),
+    });
+    expect(rows[0]).toMatchObject({ faqId: null });
+    const none = setup({ reply: unsure('none') });
+    await expect(none.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.RANKED,
+    );
+    // sure, or no confidence at all (an older model reply), still answers
+    for (const confidence of ['sure', undefined]) {
+      const { service: sure } = setup({
+        reply: () =>
+          Promise.resolve<AgentStepOutcome>({
+            kind: 'called',
+            args: {
+              intent: 'question',
+              faqId: candidates[1].id,
+              ...(confidence ? { confidence } : {}),
+            },
+          }),
+      });
+      expect((await sure.suggest(input)).suggestion?.faqId).toBe(
+        candidates[1].id,
+      );
+    }
   });
 
   it('answers a question or an own-account request; every other intent is no answer, even with a valid id', async () => {
@@ -344,7 +455,7 @@ describe('Helpdesk suggest: happy path', () => {
 describe('Helpdesk suggest: every failure is a quiet null', () => {
   it('does not call the model when there are no candidates', async () => {
     const { service, complete, rows } = setup({ found: [] });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.POPULAR);
     expect(complete).not.toHaveBeenCalled();
     expect(rows[0]).toMatchObject({
       candidateIds: [],
@@ -370,7 +481,7 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     ],
   ])('returns null when the model step %s', async (_name, reply) => {
     const { service, rows } = setup({ reply });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(rows[0].faqId).toBeNull();
   });
 
@@ -384,24 +495,27 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
       },
     });
     const started = Date.now();
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(Date.now() - started).toBeLessThan(1000);
     expect(signal?.aborted).toBe(true);
-    expect(new HelpdeskSuggestService({} as never).timeoutMs).toBe(3000);
+    expect(suggestLimits(false, {})).toEqual({
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
   });
 
   it('returns null when the model call fails', async () => {
     const { service } = setup({
       reply: () => Promise.reject(new Error('502')),
     });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
   });
 
   it('returns null without calling anything when there is no API key', async () => {
     const { service, complete, findCandidates } = setup({
       env: { OPENROUTER_API_KEY: ' ' },
     });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.POPULAR);
     expect(complete).not.toHaveBeenCalled();
     expect(findCandidates).not.toHaveBeenCalled();
   });
@@ -409,14 +523,16 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
   it('returns null when candidates cannot be read or the log cannot be written', async () => {
     const broken = setup();
     broken.findCandidates.mockRejectedValue(new Error('db down'));
-    await expect(broken.service.suggest(input)).resolves.toEqual({
-      suggestion: null,
-    });
+    // nothing was retrieved: the popular FAQs
+    await expect(broken.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.POPULAR,
+    );
     const noLog = setup();
     noLog.log.record.mockRejectedValue(new Error('db down'));
-    await expect(noLog.service.suggest(input)).resolves.toEqual({
-      suggestion: null,
-    });
+    // the candidates were retrieved before the log failed
+    await expect(noLog.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.RANKED,
+    );
   });
 
   it('allows 10 suggestions per learner per hour, then returns null', async () => {
@@ -426,7 +542,7 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     for (let i = 0; i < 10; i++) {
       expect((await service.suggest(input)).suggestion).not.toBeNull();
     }
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.NOTHING);
     expect(complete).toHaveBeenCalledTimes(10);
     expect(hit).toHaveBeenLastCalledWith(
       `helpdesk-suggest:${LEARNER}`,
@@ -443,7 +559,7 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
   it('returns null when the rate-limit store fails', async () => {
     const { service, rateLimit, complete } = setup();
     jest.spyOn(rateLimit, 'tryHit').mockRejectedValue(new Error('db down'));
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.POPULAR);
     expect(complete).not.toHaveBeenCalled();
   });
 });
@@ -469,7 +585,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now += SUGGEST_DEADLINE_MS + 1;
       return Promise.resolve(candidates);
     });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(complete).not.toHaveBeenCalled();
     expect(rows).toHaveLength(1);
     expect(rows[0].faqId).toBeNull();
@@ -484,7 +600,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now += SUGGEST_DEADLINE_MS;
       return real(...args);
     });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.POPULAR);
     expect(complete).not.toHaveBeenCalled();
     expect(rows[0]?.faqId ?? null).toBeNull();
   });
@@ -502,9 +618,31 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       now += 1_000;
       return Promise.resolve(candidates);
     });
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(rows).toHaveLength(1);
     expect(rows[0].faqId).toBeNull();
+  });
+
+  it('takes a longer deadline when one is given (the thinking benchmark), 3.5 s by default', async () => {
+    let now = T0;
+    const { service, findCandidates, rows } = setup({
+      now: () => now,
+      timeoutMs: 30_000,
+      deadlineMs: 30_000,
+      reply: () => {
+        now += 12_000;
+        return pick(candidates[0].id);
+      },
+    });
+    findCandidates.mockImplementation(() => {
+      now += 1_000;
+      return Promise.resolve(candidates);
+    });
+    expect((await service.suggest(input)).suggestion?.faqId).toBe(
+      candidates[0].id,
+    );
+    expect(rows[0].faqId).toBe(candidates[0].id);
+    expect(suggestLimits(false, {}).deadlineMs).toBe(3_500);
   });
 
   it('gives the model only the time that is left, then aborts it', async () => {
@@ -522,7 +660,7 @@ describe("Helpdesk suggest: one overall deadline under Portal's 4 s timeout", ()
       return Promise.resolve(candidates);
     });
     const started = Date.now();
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.RANKED);
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(signal?.aborted).toBe(true);
   });
@@ -654,7 +792,7 @@ describe('Helpdesk suggest v2: chat', () => {
 
   it('returns null without an API key', async () => {
     const { service, complete } = setup({ env: {} });
-    await expect(service.suggest(chat)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(chat)).resolves.toEqual(NO_ANSWER.POPULAR);
     expect(complete).not.toHaveBeenCalled();
   });
 });
@@ -696,20 +834,22 @@ describe('Helpdesk suggest v2: chip', () => {
     const { service, rows } = setup();
     await expect(
       service.suggest({ ...chip, locale: 'zh-CN' }),
-    ).resolves.toEqual({ suggestion: null });
+    ).resolves.toEqual(NO_ANSWER.CHIP_POPULAR);
     await expect(
       service.suggest({
         ...chip,
         faqId: '0192bbbb-0000-7000-8000-0000000000ff',
       }),
-    ).resolves.toEqual({ suggestion: null });
+    ).resolves.toEqual(NO_ANSWER.POPULAR);
     expect(rows.map((r) => r.faqId)).toEqual([null, null]);
   });
 
   it('returns null when the FAQ cannot be read', async () => {
     const { service, findPublished } = setup();
     findPublished.mockRejectedValue(new Error('db down'));
-    await expect(service.suggest(chip)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(chip)).resolves.toEqual(
+      NO_ANSWER.CHIP_POPULAR,
+    );
   });
 });
 
@@ -736,8 +876,8 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
       expect((await service.suggest(chat)).suggestion).not.toBeNull();
       expect((await service.suggest(chip)).suggestion).not.toBeNull();
     }
-    await expect(service.suggest(chat)).resolves.toEqual({ suggestion: null });
-    await expect(service.suggest(chip)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(chat)).resolves.toEqual(NO_ANSWER.NOTHING);
+    await expect(service.suggest(chip)).resolves.toEqual(NO_ANSWER.NOTHING);
     expect(hit).toHaveBeenLastCalledWith(
       `helpdesk-assist:${LEARNER}`,
       30,
@@ -750,30 +890,78 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
   it('does not let submit use up the chat allowance', async () => {
     const { service } = setup();
     for (let i = 0; i < 10; i++) await service.suggest(input);
-    await expect(service.suggest(input)).resolves.toEqual({ suggestion: null });
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.NOTHING);
     expect((await service.suggest(chat)).suggestion).not.toBeNull();
   });
 });
 
 describe('Helpdesk suggest: model choice', () => {
-  it('uses HELPDESK_SUGGEST_MODEL, else the first cheap model, else the first, else a default', () => {
-    expect(
-      suggestModel({
-        HELPDESK_SUGGEST_MODEL: ' x/y ',
-        AI_AVAILABLE_MODELS: 'a/b',
-      }),
-    ).toBe('x/y');
-    expect(
-      suggestModel({
-        AI_AVAILABLE_MODELS:
-          'deepseek/deepseek-r1, anthropic/claude-big, google/gemini-3.5-flash, openai/gpt-4o-mini',
-      }),
-    ).toBe('google/gemini-3.5-flash');
-    expect(suggestModel({ AI_AVAILABLE_MODELS: 'a/large, b/huge' })).toBe(
-      'a/large',
+  it('uses the model fixed in code; HELPDESK_SUGGEST_MODEL only overrides it', () => {
+    // owner 2026-11-03：缺省就是分级方案的小模型（contracts/helpdesk-defaults.ts），不再是 DeepSeek
+    expect(suggestModel({})).toBe('google/gemma-4-31b-it');
+    expect(suggestModel({ HELPDESK_SUGGEST_MODEL: '  ' })).toBe(
+      'google/gemma-4-31b-it',
     );
-    // 2026-10-29 真模型评测（dev 难例）：gemini-2.5-flash 答错率最低、最快
-    expect(suggestModel({})).toBe('google/gemini-2.5-flash');
+    expect(suggestModel({ HELPDESK_SUGGEST_MODEL: ' x/y ' })).toBe('x/y');
+    // AI Tutor 的模型列表不影响推荐用的模型（DEV 上排第一的是 deepseek）
+    expect(
+      suggestModel({
+        AI_AVAILABLE_MODELS: 'openai/gpt-4o-mini, deepseek/deepseek-v4.1-flash',
+      }),
+    ).toBe('google/gemma-4-31b-it');
+  });
+
+  it('the chat does not think unless HELPDESK_SUGGEST_THINKING names a level (read on every call); the ticket form never thinks', async () => {
+    // 分级方案的小模型不开思考（2026-11-03；DeepSeek 时缺省 high）
+    expect(suggestThinking({})).toBe('off');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: ' LOW ' })).toBe('low');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'high' })).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('off');
+    // 提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天：不思考、3.5 秒
+    for (const env of [{}, { HELPDESK_SUGGEST_THINKING: 'low' }])
+      expect(suggestLimits(false, env)).toEqual({
+        deadlineMs: SUGGEST_DEADLINE_MS,
+        stepMs: SUGGEST_TIMEOUT_MS,
+      });
+    const { service, complete, env } = setup();
+    await service.suggest(input);
+    env.HELPDESK_SUGGEST_THINKING = 'low';
+    await service.suggest(input);
+    await service.suggest({ ...input, source: 'chat' });
+    for (const [, context] of complete.mock.calls)
+      expect(context.model).not.toHaveProperty('thinking');
+  });
+
+  it('does not think by default; cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
+    // 用户 2026-10-30：思考截在 6.3 秒（盲评 high 档 p95 6.3 秒、p99 12.6 秒），同时发不思考的后备
+    expect(SUGGEST_THINKING_CUTOFF_MS).toBe(6_300);
+    expect(SUGGEST_THINKING_DEADLINE_MS).toBe(8_000);
+    expect(suggestLimits(true, {})).toEqual({
+      thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'high' })).toEqual({
+      thinking: 'high',
+      deadlineMs: 8_000,
+      stepMs: 8_000,
+      cutoffMs: 6_300,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'low' })).toEqual({
+      thinking: 'low',
+      deadlineMs: 8_000,
+      stepMs: 8_000,
+      cutoffMs: 6_300,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'off' })).toEqual({
+      thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
+    expect(suggestLimits(false, {})).toEqual({
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
   });
 });
 
@@ -965,6 +1153,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
       faqId: candidates[0].id,
       model: 'test/cheap-model',
       latencyMs: expect.any(Number),
+      alternatives: [],
     });
   });
 
@@ -1031,7 +1220,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
     });
     await expect(
       ctx.service.suggest({ ...input, runId: RUN }, { signal: caller.signal }),
-    ).resolves.toEqual({ suggestion: null });
+    ).resolves.toEqual(NO_ANSWER.NOTHING);
     expect(await reasonOf(ctx, RUN)).toBe('aborted');
   });
 
@@ -1145,5 +1334,257 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
     const purge = jest.spyOn(ctx.events, 'purgeLearnerText');
     await ctx.service.suggest(input);
     expect(purge).toHaveBeenCalledWith(new Date(now - 90 * 24 * 3_600_000));
+  });
+
+  it('checks model output health at most every 15 minutes and logs one WARN line per degraded step', async () => {
+    let now = Date.UTC(2026, 10, 2, 8, 0, 0);
+    const ctx = setup({ now: () => now });
+    const stepHealth = jest.spyOn(ctx.events, 'stepHealth').mockResolvedValue([
+      {
+        step: 'explain',
+        kind: 'agent',
+        total: 40,
+        invalid: 30,
+        guardFallbacks: 0,
+        failures: 0,
+      },
+      {
+        step: 'pick_faq',
+        kind: 'agent',
+        total: 40,
+        invalid: 1,
+        guardFallbacks: 0,
+        failures: 0,
+      },
+    ]);
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    await ctx.service.suggest(input);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stepHealth).toHaveBeenCalledWith(new Date(now - 60 * 60_000));
+    const lines = warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes('model_output_degraded'));
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      type: 'helpdesk',
+      event: 'model_output_degraded',
+      step: 'explain',
+      invalidRate: 0.75,
+      threshold: 0.05,
+      windowMinutes: 60,
+    });
+    // within 15 minutes: no second check; after: checks again
+    now += 14 * 60_000;
+    await ctx.service.suggest(input);
+    expect(stepHealth).toHaveBeenCalledTimes(1);
+    now += 60_000;
+    await ctx.service.suggest(input);
+    expect(stepHealth).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+});
+
+describe('Helpdesk suggest v3: alternatives (你可能想问, spec v3 §1)', () => {
+  const four: HelpdeskQaCandidate[] = [
+    ...candidates,
+    { ...popular[2], score: 0.8 },
+    { ...popular[3], score: 0.5 },
+  ];
+  const RUN = '0192eeee-0000-7000-8000-0000000000b1';
+
+  it('offers the retrieved candidates, top 3 in rank order, when the model picks none, without asking it again', async () => {
+    const { service, complete, findPopular } = setup({
+      found: four,
+      reply: () => pick('none'),
+    });
+    await expect(service.suggest(input)).resolves.toEqual({
+      suggestion: null,
+      alternatives: alternativesOf(four.slice(0, 3)),
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(findPopular).not.toHaveBeenCalled();
+  });
+
+  it('offers the popular FAQs for the locale, enquiry category first, when nothing was retrieved', async () => {
+    const { service, complete, findPopular } = setup({ found: [] });
+    await expect(
+      service.suggest({ ...input, locale: 'zh-CN' }),
+    ).resolves.toEqual(NO_ANSWER.POPULAR);
+    expect(complete).not.toHaveBeenCalled();
+    expect(findPopular).toHaveBeenCalledTimes(1);
+    expect(findPopular).toHaveBeenCalledWith({
+      locale: 'zh-CN',
+      category: 'account_technical',
+      excludeIds: [],
+      limit: 3,
+    });
+  });
+
+  it('gives none with an answer, and never looks them up', async () => {
+    const { service, findPopular } = setup();
+    const result = await service.suggest(input);
+    expect(result.suggestion?.faqId).toBe(candidates[0].id);
+    expect(result.alternatives).toEqual([]);
+    expect(findPopular).not.toHaveBeenCalled();
+  });
+
+  it('gives none when rate limited', async () => {
+    const { service, findPopular, findCandidates } = setup({ found: [] });
+    for (let i = 0; i < 10; i++) await service.suggest(input);
+    findPopular.mockClear();
+    findCandidates.mockClear();
+    await expect(service.suggest(input)).resolves.toEqual(NO_ANSWER.NOTHING);
+    expect(findPopular).not.toHaveBeenCalled();
+  });
+
+  it('never offers the FAQ just shown: the chip FAQ and the FAQs Portal says it showed', async () => {
+    const shown = candidates[1].id.toUpperCase();
+    const ranked = setup({ found: four, reply: () => pick('none') });
+    await expect(
+      ranked.service.suggest({ ...input, shownFaqIds: [shown] }),
+    ).resolves.toEqual({
+      suggestion: null,
+      alternatives: alternativesOf([four[0], four[2], four[3]]),
+    });
+    const fallback = setup({ found: [] });
+    await fallback.service.suggest({
+      ...input,
+      source: 'chat',
+      shownFaqIds: [popular[0].id],
+    });
+    expect(fallback.findPopular).toHaveBeenLastCalledWith(
+      expect.objectContaining({ excludeIds: [popular[0].id] }),
+    );
+    // a chip FAQ that is no longer published is the one the learner just asked for
+    const chip = setup();
+    await chip.service.suggest({
+      learnerId: LEARNER,
+      locale: 'zh-CN',
+      source: 'chip',
+      faqId: popular[0].id,
+    });
+    expect(chip.findPopular).toHaveBeenLastCalledWith({
+      locale: 'zh-CN',
+      category: null,
+      excludeIds: [popular[0].id],
+      limit: 3,
+    });
+  });
+
+  it('falls back to the popular FAQs when every candidate was already shown', async () => {
+    const { service, findPopular } = setup({
+      found: [candidates[0]],
+      reply: () => pick('none'),
+    });
+    await expect(
+      service.suggest({ ...input, shownFaqIds: [candidates[0].id] }),
+    ).resolves.toEqual(NO_ANSWER.CHIP_POPULAR);
+    expect(findPopular).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops shown and repeated FAQs even if the source returns them, and keeps at most 3', async () => {
+    const { service, findPopular } = setup({ found: [] });
+    findPopular.mockResolvedValue([
+      popular[0],
+      popular[1],
+      popular[1],
+      popular[2],
+      popular[3],
+    ]);
+    await expect(
+      service.suggest({ ...input, shownFaqIds: [popular[0].id] }),
+    ).resolves.toEqual(NO_ANSWER.CHIP_POPULAR);
+  });
+
+  it('gives none, quickly, when the popular FAQs cannot be read in time', async () => {
+    const failing = setup({ found: [] });
+    failing.findPopular.mockRejectedValue(new Error('db down'));
+    await expect(failing.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.NOTHING,
+    );
+    expect(ALTERNATIVES_TIMEOUT_MS).toBeLessThanOrEqual(300);
+    const hanging = setup({ found: [] });
+    hanging.findPopular.mockReturnValue(new Promise(() => undefined));
+    const started = Date.now();
+    await expect(hanging.service.suggest(input)).resolves.toEqual(
+      NO_ANSWER.NOTHING,
+    );
+    expect(Date.now() - started).toBeLessThan(ALTERNATIVES_TIMEOUT_MS + 500);
+  });
+
+  it('gives none when the caller went away', async () => {
+    const caller = new AbortController();
+    caller.abort();
+    const { service, findPopular } = setup({ found: [] });
+    await expect(
+      service.suggest(input, { signal: caller.signal }),
+    ).resolves.toEqual(NO_ANSWER.NOTHING);
+    expect(findPopular).not.toHaveBeenCalled();
+  });
+
+  it('records the offered FAQ ids on turn/end', async () => {
+    const ctx = setup({ found: four, reply: () => pick('none') });
+    await ctx.service.suggest({ ...input, runId: RUN });
+    await ctx.service.flushTraces();
+    const end = (await ctx.events.read(RUN)).at(-1);
+    expect(end?.type).toBe('turn/end');
+    expect(end?.data).toMatchObject({
+      reason: 'no_match',
+      faqId: null,
+      alternatives: four.slice(0, 3).map((c) => c.id),
+    });
+  });
+
+  it.each([
+    ['not a list', { shownFaqIds: 'faq-1' }],
+    ['a malformed id', { shownFaqIds: ['faq-1'] }],
+    [
+      'more than 20 ids',
+      {
+        shownFaqIds: Array.from(
+          { length: 21 },
+          (_v, i) => `0192bbbb-0000-7000-8000-${String(i).padStart(12, '0')}`,
+        ),
+      },
+    ],
+  ])('rejects shownFaqIds that is %s with 400', async (_name, patch) => {
+    const { service } = setup();
+    const error = await service
+      .suggest({ ...input, ...patch })
+      .catch((e: unknown) => e);
+    expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
+  });
+});
+
+describe('suggest request context (v5, contract fixture v6)', () => {
+  it('accepts the context a v5 Portal sends and still answers', async () => {
+    const { service } = setup();
+    await expect(
+      service.suggest({
+        ...input,
+        context: {
+          nodeId: '0192bbbb-0000-7000-8000-000000000001',
+          sessionId: '0192bbbb-0000-7000-8000-000000000002',
+          recentTurns: ['I paid but my plan is not active'],
+        },
+      }),
+    ).resolves.toHaveProperty('suggestion');
+  });
+
+  it.each([
+    ['not an object', { context: 'x' }],
+    ['a malformed nodeId', { context: { nodeId: 'faq-1' } }],
+    [
+      'more than 3 recent turns',
+      { context: { recentTurns: ['a', 'b', 'c', 'd'] } },
+    ],
+  ])('rejects a context that is %s with 400', async (_name, patch) => {
+    const { service } = setup();
+    const error = await service
+      .suggest({ ...input, ...patch })
+      .catch((e: unknown) => e);
+    expect(problemOf(error)).toEqual({ status: 400, code: 'invalid_request' });
   });
 });

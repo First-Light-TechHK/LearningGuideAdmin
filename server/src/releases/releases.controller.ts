@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  Param,
+  Post,
+  Res,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { ReleasesService } from './releases.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
@@ -35,6 +45,24 @@ export class ReleasesController {
   @Get('releases/:releaseId')
   findOne(@Param('releaseId') releaseId: string) {
     return this.releasesService.findByReleaseId(releaseId);
+  }
+
+  /**
+   * 导出 Release 快照为 ZIP（方案 B，2026-10-30 新增）。
+   * VIEW 权限即可；纯读，不改动任何 Release / Course 状态。
+   * ZIP 内含 manifest.json + pages/{NNN}_{title}.md（每页一个文件）。
+   */
+  @Get('releases/:releaseId/export')
+  @Header('Content-Type', 'application/zip')
+  async exportZip(@Param('releaseId') releaseId: string, @Res() res: Response) {
+    const { buffer, filename } =
+      await this.releasesService.exportZip(releaseId);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
   }
 
   /** 删除版本（§3.4.5，2026-10-20 新增）：Live / 后台测试所选版本返回 409 */
