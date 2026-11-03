@@ -203,7 +203,8 @@ describeDb('helpdesk demo data (PostgreSQL)', () => {
     expect(first.turns).toBeGreaterThan(1000);
     expect(first.candidates).toBe(DEMO_CANDIDATES.length);
     expect(first.skippedCandidates).toEqual([]);
-    expect(first.runs).toBe(14);
+    // today's nightly run starts at 02:00 UTC: before that only the 13 past days (the test failed every day 00:00-02:00 UTC)
+    expect(first.runs).toBe(seededAt.getUTCHours() >= 2 ? 14 : 13);
     expect(first.reviews).toBeGreaterThan(0);
     expect(await seedDemoRows(db, seededAt)).toEqual({
       turns: 0,
@@ -244,7 +245,11 @@ describeDb('helpdesk demo data (PostgreSQL)', () => {
       );
     const turn = (
       await pool.query<{ id: string }>(
-        `SELECT id FROM helpdesk_insight_turns WHERE id::text LIKE '${DEMO_PREFIX}%' LIMIT 1`,
+        // a demo turn no demo candidate holds yet (a turn belongs to at most one candidate)
+        `SELECT t.id FROM helpdesk_insight_turns t
+          WHERE t.id::text LIKE '${DEMO_PREFIX}%'
+            AND NOT EXISTS (SELECT 1 FROM helpdesk_faq_candidate_turns c WHERE c.turn_id = t.id)
+          ORDER BY t.id LIMIT 1`,
       )
     ).rows[0].id;
     await pool.query(
