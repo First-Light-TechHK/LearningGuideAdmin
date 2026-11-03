@@ -8,8 +8,9 @@ import type { FaqReleaseSnapshot } from './faqRelease';
  * 缺省是免费的、只跑检索的评测（不问模型、不花钱）：对快照里每个入口 answer 节点，用它的
  * 英文问题、中文问题与每一种问法去检索那一版快照（与生产同一条候选 SQL），看它是否在前 8 名
  * （recall@8）。门槛：recall@8 ≥ 95%，且比上一个发布版本的 recall@8 低不超过 1 个百分点。
- * 真模型的评测（花钱）在开关后面：HELPDESK_RELEASE_MODEL_EVAL=on 且组装时给了 model 门才跑；
- * 开关开着却没给 model 门 → 不通过（不会悄悄跳过）。测试里永远关着。
+ * 真流程抽样检查（花钱，约 ¥1，owner 2026-11-03 选「抽样跑测试集」，faqReleaseModelGate.ts）：生产组装了
+ * model 门，缺省就跑（检索过了才跑），HELPDESK_RELEASE_MODEL_EVAL=off 才关；没组装却设了 =on → 不通过
+ *（不会悄悄跳过）。测试里不组装。
  */
 
 export type FaqReleaseEvalCase = {
@@ -54,8 +55,23 @@ export type FaqReleaseEvalReport = {
 export type FaqReleaseGateInput = {
   version: number;
   snapshot: FaqReleaseSnapshot;
-  /** 当前发布的那一版（比较 recall 用）；没有 → null。 */
-  previous: { version: number; evalReport: unknown } | null;
+  /** 当前发布的那一版（比较 recall 用；snapshot：找出这一版改了哪些卡）；没有 → null。 */
+  previous: {
+    version: number;
+    evalReport: unknown;
+    snapshot?: FaqReleaseSnapshot;
+  } | null;
+  /** 进度（服务层写进版本行并当心跳）；返回 false = 这次检查已被别的检查顶替，应当停下。 */
+  progress?: (progress: FaqReleaseEvalProgress) => Promise<boolean>;
+  /** 停下（被顶替或进程要退出）。 */
+  signal?: AbortSignal;
+};
+
+/** 检查进行到哪一步（界面显示「检查中 120 / 300」）。 */
+export type FaqReleaseEvalProgress = {
+  stage: 'retrieval' | 'vectors' | 'model';
+  done: number;
+  total: number;
 };
 
 export interface FaqReleaseGate {
@@ -260,6 +276,18 @@ export function createRetrievalGate(
   };
 }
 
+function prefixed(
+  prefix: string,
+  metrics: Record<string, number>,
+): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(metrics).map(([key, value]) => [
+      `${prefix}${key[0].toUpperCase()}${key.slice(1)}`,
+      value,
+    ]),
+  );
+}
+
 /**
  * 组装评测门：检索评测永远跑；真模型评测只在 modelEnabled 时跑（缺省读 HELPDESK_RELEASE_MODEL_EVAL）。
  * 两个都跑时，两个都过才算过。
@@ -270,30 +298,44 @@ export function createFaqReleaseGate(options: {
   modelEnabled?: boolean;
   now?: () => Date;
 }): FaqReleaseGate {
+  // 组装了真流程检查（生产）→ 缺省开着，HELPDESK_RELEASE_MODEL_EVAL=off 才关；没组装 → 只有 =on 才算开（然后不通过）
+  const flag = process.env.HELPDESK_RELEASE_MODEL_EVAL;
   const enabled =
-    options.modelEnabled ?? process.env.HELPDESK_RELEASE_MODEL_EVAL === 'on';
+    options.modelEnabled ?? (options.model ? flag !== 'off' : flag === 'on');
   const now = options.now ?? (() => new Date());
   return {
     async evaluate(input) {
+      await input.progress?.({ stage: 'retrieval', done: 0, total: 1 });
       const retrieval = await options.retrieval.evaluate(input);
       if (!enabled) return retrieval;
-      const model: FaqReleaseEvalReport = options.model
-        ? await options.model.evaluate(input)
-        : {
+      // 检索没过就不花钱跑模型（结果反正是不通过）
+      const model: FaqReleaseEvalReport = !retrieval.passed
+        ? {
             kind: 'model',
             passed: false,
             summary:
-              'The model eval is switched on (HELPDESK_RELEASE_MODEL_EVAL=on) but no model eval is configured',
+              'The live-pipeline sample did not run because the retrieval eval failed',
             ranAt: now().toISOString(),
             metrics: {},
             misses: [],
-          };
+          }
+        : options.model
+          ? await options.model.evaluate(input)
+          : {
+              kind: 'model',
+              passed: false,
+              summary:
+                'The model eval is switched on (HELPDESK_RELEASE_MODEL_EVAL=on) but no model eval is configured',
+              ranAt: now().toISOString(),
+              metrics: {},
+              misses: [],
+            };
       return {
         kind: 'combined',
         passed: retrieval.passed && model.passed,
         summary: `${retrieval.summary}. ${model.summary}`,
         ranAt: now().toISOString(),
-        metrics: retrieval.metrics,
+        metrics: { ...retrieval.metrics, ...prefixed('model', model.metrics) },
         misses: retrieval.misses,
         parts: [retrieval, model],
       };

@@ -201,6 +201,16 @@ export type FaqReleaseRow = {
   createdAt: string;
   publishedBy: string | null;
   publishedAt: string | null;
+  /** 最近一次检查的 run（还没有后台检查过的版本 → null）。 */
+  evalRun: FaqReleaseEvalRun | null;
+};
+
+/** 一次检查（后台）：进度与心跳；status = evaluating 且心跳停了 = 中断。 */
+export type FaqReleaseEvalRun = {
+  id: string;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+  progress: { stage: string; done: number; total: number } | null;
 };
 
 export type FaqReleaseWithSnapshot = FaqReleaseRow & {
@@ -234,7 +244,8 @@ export type PublishResult =
 export type PublishReadiness = 'ok' | 'not_ready' | 'stale';
 
 const RELEASE_COLUMNS = `id, version, status, snapshot_hash, checks, eval_report, source_version,
-  created_by, created_at, published_by, published_at`;
+  created_by, created_at, published_by, published_at, eval_run_id, eval_started_at, eval_heartbeat_at,
+  eval_progress`;
 
 function toRelease(row: Row): FaqReleaseRow {
   return {
@@ -252,6 +263,15 @@ function toRelease(row: Row): FaqReleaseRow {
     createdAt: iso(row.created_at),
     publishedBy: (row.published_by as string | null) ?? null,
     publishedAt: isoOrNull(row.published_at),
+    evalRun: row.eval_run_id
+      ? {
+          id: String(row.eval_run_id),
+          startedAt: isoOrNull(row.eval_started_at),
+          heartbeatAt: isoOrNull(row.eval_heartbeat_at),
+          progress:
+            (row.eval_progress as FaqReleaseEvalRun['progress'] | null) ?? null,
+        }
+      : null,
   };
 }
 
@@ -749,6 +769,73 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
         );
         return { release: toRelease(rows[0]), created: true };
       });
+    },
+
+    /**
+     * 开始一次检查：from 之一，或 evaluating 但心跳早于 staleBefore（中断了；没有心跳的旧行也算）→
+     * evaluating、新的 run id、心跳 = at、清空进度；别的检查还在跑 → null（不抢）。
+     */
+    async startEval(
+      version: number,
+      from: readonly FaqReleaseStatus[],
+      runId: string,
+      at: Date,
+      staleBefore: Date,
+    ): Promise<FaqReleaseRow | null> {
+      const rows = await db.query(
+        `UPDATE helpdesk_faq_releases
+            SET status = 'evaluating', eval_run_id = $3, eval_started_at = $4,
+                eval_heartbeat_at = $4, eval_progress = NULL
+          WHERE version = $1
+            AND (status = ANY ($2::text[])
+                 OR (status = 'evaluating'
+                     AND (eval_heartbeat_at IS NULL OR eval_heartbeat_at < $5)))
+          RETURNING ${RELEASE_COLUMNS}`,
+        [version, [...from], runId, at, staleBefore],
+      );
+      return rows.length > 0 ? toRelease(rows[0]) : null;
+    },
+
+    /** 心跳与进度：只有这个 run 还在 evaluating 时写得进；被顶替了 → false。 */
+    async evalHeartbeat(
+      version: number,
+      runId: string,
+      at: Date,
+      progress?: FaqReleaseEvalRun['progress'],
+    ): Promise<boolean> {
+      const rows = await db.query(
+        `UPDATE helpdesk_faq_releases
+            SET eval_heartbeat_at = $3,
+                eval_progress = CASE WHEN $4::boolean THEN $5::jsonb ELSE eval_progress END
+          WHERE version = $1 AND eval_run_id = $2 AND status = 'evaluating'
+          RETURNING version`,
+        [
+          version,
+          runId,
+          at,
+          progress !== undefined,
+          progress === undefined ? null : JSON.stringify(progress),
+        ],
+      );
+      return rows.length > 0;
+    },
+
+    /** 检查结束：只有这个 run 还在 evaluating 时写得进（被顶替的旧 run 写不进）→ 新状态与报告。 */
+    async finishEval(
+      version: number,
+      runId: string,
+      to: FaqReleaseStatus,
+      evalReport: unknown,
+      at: Date,
+    ): Promise<FaqReleaseRow | null> {
+      const rows = await db.query(
+        `UPDATE helpdesk_faq_releases
+            SET status = $3, eval_report = $4::jsonb, eval_heartbeat_at = $5
+          WHERE version = $1 AND eval_run_id = $2 AND status = 'evaluating'
+          RETURNING ${RELEASE_COLUMNS}`,
+        [version, runId, to, JSON.stringify(evalReport), at],
+      );
+      return rows.length > 0 ? toRelease(rows[0]) : null;
     },
 
     /** 只在当前状态是 from 之一时改状态（与评测报告）；不是 → null。 */

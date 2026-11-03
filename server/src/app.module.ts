@@ -35,6 +35,9 @@ import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
 import { createTraceSource } from './ai/helpdesk/trace/trace-query';
 import { PrismaService } from './prisma/prisma.service';
 import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqQaSource';
+import type { FaqReleaseSnapshot } from './backoffice/modules/helpdesk/faqs/faqRelease';
+import { HELPDESK_RELEASE_ANSWERER } from './contracts/helpdesk-release-eval';
+import { createReleaseAnswerer } from './ai/helpdesk/release-answerer';
 
 /**
  * Agent 读 KS 的方式：同进程起了 ks 角色、或没配 KS_BASE_URL 时直接读库；
@@ -121,6 +124,29 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
                         model: suggestModel,
                       }),
               },
+              // 发布前的真流程抽样检查（owner 2026-11-03）：线上聊天同一个 HelpdeskSuggestService，钉在候选版本上；
+              // 测试里不组装（只跑检索检查、同步返回）
+              ...(process.env.NODE_ENV === 'test'
+                ? {}
+                : {
+                    releaseAnswerer: {
+                      provide: HELPDESK_RELEASE_ANSWERER,
+                      useFactory: () =>
+                        createReleaseAnswerer({
+                          runner: new PiStepRunner(),
+                          qaFor: (version, snapshot) =>
+                            createPgHelpdeskQaSource(
+                              undefined,
+                              undefined,
+                              undefined,
+                              {
+                                version,
+                                snapshot: snapshot as FaqReleaseSnapshot,
+                              },
+                            ),
+                        }),
+                    },
+                  }),
               helpdeskTrace: {
                 provide: HELPDESK_TRACE_SOURCE,
                 useFactory: (prisma: PrismaService) =>

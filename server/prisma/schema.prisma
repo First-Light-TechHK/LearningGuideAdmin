@@ -597,6 +597,11 @@ model HelpdeskFaqRelease {
   snapshotHash  String    @map("snapshot_hash")
   checks        Json
   evalReport    Json?     @map("eval_report")
+  /// 当前（或最后一次）检查的 run；心跳停了 = 检查中断（迁移 20261103120000）
+  evalRunId       String?   @map("eval_run_id") @db.Uuid
+  evalStartedAt   DateTime? @map("eval_started_at") @db.Timestamptz(6)
+  evalHeartbeatAt DateTime? @map("eval_heartbeat_at") @db.Timestamptz(6)
+  evalProgress    Json?     @map("eval_progress")
   sourceVersion Int?      @map("source_version")
   createdBy     String?   @map("created_by") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
