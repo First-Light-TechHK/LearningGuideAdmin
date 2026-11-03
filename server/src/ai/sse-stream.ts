@@ -37,3 +37,18 @@ export async function pipeSse(
     res.end();
   }
 }
+
+/** Cancel upstream model work when the client closes the response. */
+export async function pipeSseWithAbort(
+  createGenerator: (signal: AbortSignal) => AsyncGenerator<string>,
+  res: Response,
+): Promise<void> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  res.once('close', abort);
+  try {
+    await pipeSse(createGenerator(controller.signal), res);
+  } finally {
+    res.off('close', abort);
+  }
+}

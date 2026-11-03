@@ -477,6 +477,7 @@ export function ChatWindow() {
                     okButtonProps: { danger: true },
                     onOk: () => {
                       undoLastUserMessage()
+                      setInput(m.content)
                       message.success(text('undoDone'))
                     },
                   })
