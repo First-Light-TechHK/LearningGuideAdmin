@@ -21,7 +21,12 @@ import {
   type GapLabeller,
 } from '../../contracts/helpdesk-flywheel';
 
+import {
+  HELPDESK_RELEASE_ANSWERER,
+  type ReleaseAnswerer,
+} from '../../contracts/helpdesk-release-eval';
 import { closePool } from '../lib/db';
+import { createModelReleaseGate } from '../modules/helpdesk/faqs/faqReleaseModelGate';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
 import { createFaqChangeLogService } from '../modules/helpdesk/faqs/faqChangeLogService';
 import {
@@ -40,7 +45,10 @@ import {
   createFaqService,
   type FaqService,
 } from '../modules/helpdesk/faqs/faqService';
-import { sharedFaqVectorSearch } from '../modules/helpdesk/faqs/faqVectors';
+import {
+  createEnvFaqVectorIndexer,
+  sharedFaqVectorSearch,
+} from '../modules/helpdesk/faqs/faqVectors';
 import { createHelpdeskService } from '../modules/helpdesk/helpdeskService';
 import { createPgCandidateRepository } from '../modules/helpdesk/flywheel/candidateRepository';
 import { createFaqCandidateService } from '../modules/helpdesk/flywheel/faqCandidateService';
@@ -129,6 +137,11 @@ export type BackofficeModuleOptions = {
    * 不给 = 「AI 按指令改卡」回 503 REWRITE_UNAVAILABLE。
    */
   cardRewriter?: Provider;
+  /**
+   * HELPDESK_RELEASE_ANSWERER 的提供者（AppModule 组装：线上聊天同一个 HelpdeskSuggestService，钉在候选版本上）。
+   * 给了 = 发布前的检查在后台跑，并加上真流程抽样（owner 2026-11-03）；不给（测试）= 只跑检索检查、同步返回。
+   */
+  releaseAnswerer?: Provider;
 };
 
 const HELPDESK_FLYWHEEL_RUNNER = Symbol('HELPDESK_FLYWHEEL_RUNNER');
@@ -225,9 +238,30 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
           provide: HELPDESK_FAQ_GRAPH_SERVICE,
           useFactory: () => createFaqGraphService({ graph }),
         },
+        options.releaseAnswerer ?? {
+          provide: HELPDESK_RELEASE_ANSWERER,
+          useValue: null,
+        },
         {
           provide: HELPDESK_FAQ_RELEASE_SERVICE,
-          useFactory: () => createFaqReleaseService({ graph }),
+          useFactory: (answerer: ReleaseAnswerer | null) =>
+            createFaqReleaseService({
+              graph,
+              ...(answerer
+                ? {
+                    background: true,
+                    modelGate: createModelReleaseGate({
+                      answerer,
+                      regressionCases: () =>
+                        createPgCandidateRepository().evalCases(),
+                      // 线上检索的向量那一路要这一版的向量（只算改过的文字；没配向量模型 = 不做）
+                      prepare: (version) =>
+                        createEnvFaqVectorIndexer().index(version),
+                    }),
+                  }
+                : {}),
+            }),
+          inject: [HELPDESK_RELEASE_ANSWERER],
         },
         {
           provide: HELPDESK_FAQ_CHANGE_LOG_SERVICE,

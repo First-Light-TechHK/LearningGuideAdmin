@@ -1,0 +1,54 @@
+/**
+ * 发布前的真流程抽样检查（owner 2026-11-03 选「抽样跑测试集」）的交接契约：BackOffice 的发布门
+ * 只经这里的 ReleaseAnswerer 问 Agent；实现在 src/ai/helpdesk/release-answerer.ts（和线上聊天同一个
+ * HelpdeskSuggestService：关键词 + 向量召回、精排、小模型选卡作答），由 app.module.ts 组装。
+ * 没有组装（测试、只有 ks 角色）= 不问模型。
+ *
+ * 测试集的问题是生成的（不含用户数据）；回归用例是员工接受过的、脱敏过的用户原话。
+ */
+export const HELPDESK_RELEASE_ANSWERER = Symbol('HELPDESK_RELEASE_ANSWERER');
+
+export type ReleaseEvalLocale = 'en-GB' | 'zh-CN';
+
+/** 一个问题在候选版本上得到的结果（和 Portal 看到的一样：出了哪张卡、还是追问 / 寒暄 / 没有卡）。 */
+export type ReleaseEvalAnswer = {
+  /** error：没有回复（没有 key、超时、模型出错、被限流）。 */
+  kind: 'answer' | 'clarify' | 'smalltalk' | 'no_match' | 'error';
+  /** answer：出的卡；clarify：追问的那张卡；其余 null。 */
+  nodeId: string | null;
+  /** 这个问题花的钱（美元，来自模型回复的计价；没有计价 = 0）。 */
+  costUsd: number;
+  /** 发出了却没有带价格回复的请求数。 */
+  unpricedCalls: number;
+};
+
+/** 绑定在一个候选版本上的答题器（快照由发布门给；这一版的向量要先算好）。 */
+export type ReleaseEvalSession = {
+  ask(input: {
+    message: string;
+    locale: ReleaseEvalLocale;
+    signal?: AbortSignal;
+  }): Promise<ReleaseEvalAnswer>;
+};
+
+export type ReleaseAnswerer = {
+  /** 没有 OPENROUTER_API_KEY → false（发布门照实报告「没跑」，不悄悄算过）。 */
+  available(): boolean;
+  /** 线上用的答题模型（报告里写明）。 */
+  model(): string;
+  forRelease(input: { version: number; snapshot: unknown }): ReleaseEvalSession;
+};
+
+export const noReleaseAnswerer: ReleaseAnswerer = {
+  available: () => false,
+  model: () => 'none',
+  forRelease: () => ({
+    ask: () =>
+      Promise.resolve({
+        kind: 'error',
+        nodeId: null,
+        costUsd: 0,
+        unpricedCalls: 0,
+      }),
+  }),
+};

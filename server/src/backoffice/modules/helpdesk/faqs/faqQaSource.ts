@@ -20,7 +20,11 @@ import {
   type SqlDb,
 } from './faqRepository';
 import { locatorHead, locatorIndex, type FaqSnapshotMap } from './faqMap';
-import type { FaqReleaseSource, FaqSnapshotNode } from './faqRelease';
+import type {
+  FaqReleaseSnapshot,
+  FaqReleaseSource,
+  FaqSnapshotNode,
+} from './faqRelease';
 import { createPgFaqReleaseSource } from './faqReleaseService';
 import {
   createEnvFaqVectorSearch,
@@ -457,6 +461,11 @@ export function createPgHelpdeskQaSource(
   vectors: FaqVectorSearch = db
     ? createEnvFaqVectorSearch(db)
     : sharedFaqVectorSearch(),
+  /**
+   * 钉在一个（还没发布的）候选版本上：发布前的真流程抽样检查用（faqReleaseModelGate.ts）。
+   * 缺省 = 上线的版本（生产）。
+   */
+  pinned?: { version: number; snapshot: FaqReleaseSnapshot },
 ): HelpdeskQaSource {
   const graph = createPgFaqGraphRepository(db);
   const source = createHelpdeskQaSource({
@@ -467,13 +476,23 @@ export function createPgHelpdeskQaSource(
       mode: () => retrievalMode(process.env),
       onError: logFaqVectorSearchError,
     }),
-    releases: createPgFaqReleaseSource(graph),
+    releases: pinned
+      ? {
+          current: () =>
+            Promise.resolve({
+              version: pinned.version,
+              publishedAt: '',
+              snapshot: pinned.snapshot,
+            }),
+        }
+      : createPgFaqReleaseSource(graph),
     liveEdges: () => graph.allEdges(),
     locator: () => locatorMode(process.env),
     searchScope: () => searchScope(process.env),
   });
   // 向量检索或精排（精排的召回池含向量那一路）开着时，启动就把上线版本的向量读进内存（约 1 秒），
   // 免得最先几个提问等不到、退回字词检索
+  if (pinned) return source;
   if (
     retrievalMode(process.env) !== 'lexical' ||
     helpdeskSetting(

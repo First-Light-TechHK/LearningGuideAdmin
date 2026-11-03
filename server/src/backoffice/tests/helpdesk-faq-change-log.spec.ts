@@ -29,6 +29,7 @@ function release(
     createdAt: `2026-10-0${version}T00:00:00.000Z`,
     publishedBy: null,
     publishedAt: `2026-10-0${version}T01:00:00.000Z`,
+    evalRun: null,
     ...fields,
   };
 }
