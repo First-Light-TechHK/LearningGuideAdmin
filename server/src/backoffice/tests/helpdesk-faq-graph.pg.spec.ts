@@ -1249,7 +1249,10 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       // the edge itself is kept: the follow-up still knows the card it follows
       expect(onFailed[0].under).toBe('What if my payment failed?');
       expect(searchScope({ HELPDESK_SEARCH_SCOPE: ' ALL ' })).toBe('all');
-      expect(searchScope({})).toBe('tree');
+      // owner 2026-11-03：平铺是缺省（分级方案），tree 要显式设
+      expect(searchScope({})).toBe('all');
+      expect(searchScope({ HELPDESK_SEARCH_SCOPE: ' tree ' })).toBe('tree');
+      expect(searchScope({ HELPDESK_SEARCH_SCOPE: 'x' })).toBe('all');
     });
 
     it('with a card on screen, children without a hit take at most the 4 shown slots and the search keeps 4', async () => {

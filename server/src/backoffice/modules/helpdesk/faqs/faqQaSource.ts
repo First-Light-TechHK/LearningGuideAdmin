@@ -6,6 +6,10 @@ import {
   type HelpdeskQaCandidate,
   type HelpdeskQaSource,
 } from '../../../../contracts/helpdesk-qa';
+import {
+  HELPDESK_DEFAULTS,
+  helpdeskSetting,
+} from '../../../../contracts/helpdesk-defaults';
 import { splitAnswerBlocks } from './faqBlocks';
 import { FAQ_LIMITS, localised, type HelpdeskFaq } from './faqContracts';
 import { createPgFaqGraphRepository } from './faqGraphRepository';
@@ -82,9 +86,9 @@ export function locatorMode(env: NodeJS.ProcessEnv): LocatorMode {
 }
 
 /**
- * 候选范围（HELPDESK_SEARCH_SCOPE，每次现读）。owner 2026-11-02 定了平铺：
- * - tree（缺省，和以前一样）：普通检索只搜入口卡；屏幕上有卡时先给它的子卡和树上近亲；
- * - all：平铺。每张已发布的答案卡都直接参与检索，不管是不是入口；不按父子边加子卡、近亲，
+ * 候选范围（HELPDESK_SEARCH_SCOPE，每次现读）。owner 2026-11-02 定了平铺，2026-11-03 起是缺省：
+ * - tree（要显式设）：普通检索只搜入口卡；屏幕上有卡时先给它的子卡和树上近亲；
+ * - all（缺省）：平铺。每张已发布的答案卡都直接参与检索，不管是不是入口；不按父子边加子卡、近亲，
  *   边只留给显示（追问 chip、选项卡）。要和「追问卡的问题单独看也完整」的卡库一起开
  *   （三组终测 2026-11-02：平铺与树准确率打平，单问中位 1.1 秒 vs 1.9 秒、每次更便宜）。
  */
@@ -92,9 +96,11 @@ export const SEARCH_SCOPES = ['tree', 'all'] as const;
 export type SearchScope = (typeof SEARCH_SCOPES)[number];
 
 export function searchScope(env: NodeJS.ProcessEnv): SearchScope {
-  return env.HELPDESK_SEARCH_SCOPE?.trim().toLowerCase() === 'all'
-    ? 'all'
-    : 'tree';
+  const value = env.HELPDESK_SEARCH_SCOPE?.trim().toLowerCase();
+  return (
+    SEARCH_SCOPES.find((scope) => scope === value) ??
+    HELPDESK_DEFAULTS.searchScope
+  );
 }
 
 type View = {
@@ -470,7 +476,10 @@ export function createPgHelpdeskQaSource(
   // 免得最先几个提问等不到、退回字词检索
   if (
     retrievalMode(process.env) !== 'lexical' ||
-    process.env.HELPDESK_RERANK_MODEL?.trim()
+    helpdeskSetting(
+      process.env.HELPDESK_RERANK_MODEL,
+      HELPDESK_DEFAULTS.rerankModel,
+    ) !== null
   )
     void warmFaqVectors(
       vectors,

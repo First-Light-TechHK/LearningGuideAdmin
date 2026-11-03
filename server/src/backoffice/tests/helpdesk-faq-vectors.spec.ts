@@ -269,8 +269,17 @@ describe('openRouterFaqEmbedder', () => {
     return { calls, impl };
   }
 
-  it('is off without a model or a key', () => {
-    expect(openRouterFaqEmbedder({ OPENROUTER_API_KEY: 'k' })).toBeNull();
+  it('uses bge-m3 by default; off without a key or with HELPDESK_EMBED_MODEL=off', () => {
+    // owner 2026-11-03：分级方案是缺省（contracts/helpdesk-defaults.ts）
+    expect(openRouterFaqEmbedder({ OPENROUTER_API_KEY: 'k' })?.model).toBe(
+      'baai/bge-m3',
+    );
+    expect(
+      openRouterFaqEmbedder({
+        OPENROUTER_API_KEY: 'k',
+        HELPDESK_EMBED_MODEL: 'off',
+      }),
+    ).toBeNull();
     expect(
       openRouterFaqEmbedder({ HELPDESK_EMBED_MODEL: 'baai/bge-m3' }),
     ).toBeNull();
@@ -567,6 +576,19 @@ describe('createFaqVectorSearch: speed', () => {
     expect(embedder.calls).toEqual([]);
     expect((await vectors.rank(RELEASE, '退钱'))?.[0].id).toBe('refund');
     expect(loads()).toBe(1);
+  });
+
+  it('warm computes the vectors a live release is missing (published before vectors were on), then serves them', async () => {
+    // owner 2026-11-03：向量是缺省方案的一层，部署不用手动补算
+    const store = memoryStore(nodes);
+    const embedder = fakeEmbedder(table);
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    await vectors.warm?.(RELEASE);
+    expect(embedder.calls.flat().sort()).toEqual(['Refund?', '退款？']);
+    expect((await vectors.rank(RELEASE, '退钱'))?.[0].id).toBe('refund');
+    // 再 warm 一次：都算过了，不再调模型
+    await vectors.warm?.(RELEASE);
+    expect(embedder.calls.flat().sort()).toEqual(['Refund?', '退款？', '退钱']);
   });
 
   it('warmFaqVectors warms the live release, skips when none is live and only logs a failure', async () => {

@@ -110,7 +110,7 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
                         model: suggestModel,
                       }),
               },
-              // 「AI 按指令改卡」：员工说怎么改，DeepSeek 改好给员工看（不保存）；没有 key 或测试里 = 不问模型
+              // 「AI 按指令改卡」：员工说怎么改，Helpdesk 的缺省模型改好给员工看（不保存）；没有 key 或测试里 = 不问模型
               cardRewriter: {
                 provide: HELPDESK_CARD_REWRITER,
                 useFactory: () =>

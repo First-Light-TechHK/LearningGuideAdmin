@@ -897,10 +897,10 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
 
 describe('Helpdesk suggest: model choice', () => {
   it('uses the model fixed in code; HELPDESK_SUGGEST_MODEL only overrides it', () => {
-    // 用户 2026-10-30：DeepSeek（deepseek-v4.1-flash）为主模型，gemini-2.5-flash 只作对照
-    expect(suggestModel({})).toBe('deepseek/deepseek-v4.1-flash');
+    // owner 2026-11-03：缺省就是分级方案的小模型（contracts/helpdesk-defaults.ts），不再是 DeepSeek
+    expect(suggestModel({})).toBe('google/gemma-4-31b-it');
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: '  ' })).toBe(
-      'deepseek/deepseek-v4.1-flash',
+      'google/gemma-4-31b-it',
     );
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: ' x/y ' })).toBe('x/y');
     // AI Tutor 的模型列表不影响推荐用的模型（DEV 上排第一的是 deepseek）
@@ -908,15 +908,15 @@ describe('Helpdesk suggest: model choice', () => {
       suggestModel({
         AI_AVAILABLE_MODELS: 'openai/gpt-4o-mini, deepseek/deepseek-v4.1-flash',
       }),
-    ).toBe('deepseek/deepseek-v4.1-flash');
+    ).toBe('google/gemma-4-31b-it');
   });
 
-  it('the chat thinks high unless HELPDESK_SUGGEST_THINKING names another level (read on every call); the ticket form never thinks', async () => {
-    // 用户 2026-10-30：DeepSeek 开 thinking。盲评：high 档错卡最少（长对话 0.45%，off 1.45%）
-    expect(suggestThinking({})).toBe('high');
+  it('the chat does not think unless HELPDESK_SUGGEST_THINKING names a level (read on every call); the ticket form never thinks', async () => {
+    // 分级方案的小模型不开思考（2026-11-03；DeepSeek 时缺省 high）
+    expect(suggestThinking({})).toBe('off');
     expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: ' LOW ' })).toBe('low');
-    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'off' })).toBe('off');
-    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'high' })).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('off');
     // 提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天：不思考、3.5 秒
     for (const env of [{}, { HELPDESK_SUGGEST_THINKING: 'low' }])
       expect(suggestLimits(false, env)).toEqual({
@@ -932,11 +932,16 @@ describe('Helpdesk suggest: model choice', () => {
       expect(context.model).not.toHaveProperty('thinking');
   });
 
-  it('cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
+  it('does not think by default; cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
     // 用户 2026-10-30：思考截在 6.3 秒（盲评 high 档 p95 6.3 秒、p99 12.6 秒），同时发不思考的后备
     expect(SUGGEST_THINKING_CUTOFF_MS).toBe(6_300);
     expect(SUGGEST_THINKING_DEADLINE_MS).toBe(8_000);
     expect(suggestLimits(true, {})).toEqual({
+      thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'high' })).toEqual({
       thinking: 'high',
       deadlineMs: 8_000,
       stepMs: 8_000,

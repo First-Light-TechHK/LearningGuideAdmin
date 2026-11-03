@@ -203,8 +203,9 @@ function scriptedRunner(script: {
         candidates?: { id: string }[];
         shown?: { id: string } | null;
       };
-      // 开思考的聊天同时发一个不思考的后备：只记思考那一路（两路的提示一样）
-      if (context.model.thinking !== 'off') prompts.push(prompt);
+      // 缺省不思考（分级方案）：每步只发一次请求，没有后备那一路
+      expect(context.model.thinking).toBe('off');
+      prompts.push(prompt);
       if (spec.tool.name === 'explain') {
         const e = script.explain?.[prompt.followUp as string] ?? {
           covered: false,
@@ -245,6 +246,8 @@ const ENV = {
   OPENROUTER_API_KEY: 'fake-key-local-only',
   OPENROUTER_BASE_URL: 'http://fake-model.invalid/api/v1',
   HELPDESK_SUGGEST_MODEL: 'fake/scripted',
+  // 精排缺省开（会发 /rerank 请求）；这里只看对话怎样送到 Admin
+  HELPDESK_RERANK_MODEL: 'off',
 };
 
 describe('scoring a turn', () => {

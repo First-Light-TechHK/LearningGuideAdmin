@@ -55,6 +55,10 @@ import {
 import { learnerOf } from './workflow/guard';
 import { openRouterReranker, rerankConfig, rerankedSource } from './rerank';
 import {
+  HELPDESK_DEFAULTS,
+  helpdeskSwitch,
+} from '../../contracts/helpdesk-defaults';
+import {
   assessModelHealth,
   healthThreshold,
   MODEL_HEALTH,
@@ -110,8 +114,11 @@ export const SUGGEST_THINKING_CUTOFF_MS = 6_300;
  * （Portal 显示「思考中」）；提交工单不思考，仍是 3.5 秒。
  */
 export const SUGGEST_THINKING_DEADLINE_MS = 8_000;
-/** 聊天的缺省思考档位（用户 2026-10-30：DeepSeek 开 thinking；盲评 high 档错卡最少）。 */
-export const DEFAULT_CHAT_THINKING: ThinkingSetting = 'high';
+/**
+ * 聊天的缺省思考档位：分级方案的小模型不开思考（HELPDESK_DEFAULTS；2026-10-30 DeepSeek 时是 high）。
+ */
+export const DEFAULT_CHAT_THINKING: ThinkingSetting =
+  HELPDESK_DEFAULTS.thinking;
 export const SUGGEST_CANDIDATES = 8;
 /**
  * v5 assist 一次给模型看的候选数（多出的 2 个给树上近亲与深层答案，见 ASSIST_SEARCH）；HELPDESK_LOCATOR=hybrid
@@ -129,9 +136,8 @@ export const ALTERNATIVES_TIMEOUT_MS = 300;
 /** 聊天面板（chat + chip）每学员每小时的额度，与 submit 分开计。 */
 export const ASSIST_RATE_LIMIT = { limit: 30, windowMs: 3_600_000 } as const;
 const PURGE_EVERY_MS = 3_600_000;
-// 2026-10-29 真模型评测（qa10k dev 难例）：比 gpt-4o-mini 答错少、更快
-// 用户 2026-10-30：Helpdesk 只用 DeepSeek（21:38Z 起不再跑别的模型作对照；评委是 Claude，不让 DeepSeek 给自己打分）
-const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash';
+// 分级方案的 L3 小模型（owner 2026-11-03：缺省就是最新方案，见 contracts/helpdesk-defaults.ts）；评委仍是 Claude
+const DEFAULT_MODEL = HELPDESK_DEFAULTS.model;
 // OPENROUTER_BASE_URL 是 AI Tutor 已有的变量，这里同样每次现读
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 
@@ -750,15 +756,18 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     if (isV5(input)) {
       // 开思考：同时发一个不思考的后备（不报步骤给「思考中」面板，步骤记 branch quick）
       const hedged = cutoffMs !== undefined && cutoffMs > 0;
-      // 分级 L2 精排（HELPDESK_RERANK_MODEL，缺省关）：在共享查询之前，两路只精排一次
+      // 分级 L2 精排（HELPDESK_RERANK_MODEL，缺省开，off 关）：在共享查询之前，两路只精排一次
       const rerank = rerankConfig(env);
       // 追问卡片带上父卡片的问题（HELPDESK_CARD_CONTEXT=on，缺省关）：精排与挑卡都看「父问题 → 追问」
       const cardContext =
         env.HELPDESK_CARD_CONTEXT?.trim().toLowerCase() === 'on';
-      // 只在精排开着时有用（字词检索不看前文）
+      // 只在精排开着时有用（字词检索不看前文）；缺省开，off 关
       const queryContext =
         rerank !== null &&
-        env.HELPDESK_QUERY_CONTEXT?.trim().toLowerCase() === 'on';
+        helpdeskSwitch(
+          env.HELPDESK_QUERY_CONTEXT,
+          HELPDESK_DEFAULTS.queryContext,
+        );
       const ranked = rerank
         ? rerankedSource(
             this.deps.qa,

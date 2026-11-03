@@ -924,6 +924,21 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 
 ---
 
+### 4A.17 分级小模型方案是缺省（2026-11-03，owner：「默认模型这里都要改」「推到线上也是要用我们的最新方案」）
+
+代码缺省就是这一套，部署只要 `OPENROUTER_API_KEY`；缺省值集中在 `server/src/contracts/helpdesk-defaults.ts`（Agent 与 BackOffice 两边都读），环境变量只用来临时换掉某一层，设成 `off` 关掉那一层（见 §8）。
+
+| 层 | 做什么 | 缺省 | 变量 |
+|---|---|---|---|
+| L1 召回 | 字词检索 ∪ 向量前 10；平铺，所有已发布答案卡都参与，边只给显示（追问 chip、选项卡）；向量与精排还按「上一句 → 这一句」再查一次，取高分 | bge-m3、平铺、带上一句 | `HELPDESK_EMBED_MODEL`、`HELPDESK_SEARCH_SCOPE`、`HELPDESK_QUERY_CONTEXT` |
+| L2 精排 | 召回池精排，留前 5 张；第一名 ≥ 0.816 且领先 ≥ 0.05 → 直接给卡，不调模型 | Voyage rerank-2.5-lite | `HELPDESK_RERANK_MODEL`、`HELPDESK_RERANK_KEEP`、`HELPDESK_RERANK_DIRECT` |
+| L3 小模型 | 挑卡、解释、寒暄（只分类 / 抽取，参数枚举锁定；守卫不过 → 退回固定流程） | gemma-4-31b，不开思考 | `HELPDESK_SUGGEST_MODEL`、`HELPDESK_SUGGEST_THINKING` |
+
+- 所有调用经 OpenRouter，按价格选最便宜的提供方（`provider.sort = price`）；BackOffice 的「AI 按指令改卡」与缺口挖掘用同一个 L3 模型。
+- 向量：发布新版本时自动算；服务启动时把线上版本缺的向量补上（按文本哈希，算过的不再算，写入 `ON CONFLICT DO NOTHING`），部署不用手动跑 `helpdesk:faq-vectors`。向量或精排失败、超时 → 退回字词检索 / 原顺序，学员照样拿到候选。
+- 模型输出健康：近 60 分钟任一步非法调用、被守卫退回或出错超过 5%（至少 20 次）→ 日志 WARN `model_output_degraded`；`GET /api/helpdesk/agent-runs/health?hours=24` 可查。不做页面（PRD 没有设计）。
+- 依据（v3.3 卡库 685 张，2026-11-03 终测，Claude 盲评，是 AI 评不是人工）：错卡 S650 test 0.19% / 多轮 0.91% / 闲聊 1.20%；每答 ¥0.0010 / 0.0023 / 0.0019；p50 / p95 1.2 / 3.6 秒、2.4 / 5.6 秒、2.2 / 4.7 秒。多轮集用于诊断过，数字偏乐观。
+
 ## 5. API 接口规范
 
 ### 5.1 知识库相关接口
@@ -1320,8 +1335,16 @@ PORTAL_HELPDESK_TOKEN=
 # HelpDesk Portal → Admin（2026-10-28，§4A.9）：/api/integration/helpdesk/** 的 Bearer 令牌（与 Portal 的
 # ADMIN_HELPDESK_TOKEN 相同），每次请求现读；为空 → 503 integration_disabled
 ADMIN_HELPDESK_TOKEN=
-# 推荐答案用的模型（§4A.8）；可不设，代码缺省 google/gemini-2.5-flash，只在要换模型时设
-HELPDESK_SUGGEST_MODEL=
+# Helpdesk 分级方案（§4A.17）：代码缺省就是这一套，下面都不用设；只在临时换掉某一层时设，off = 关掉那一层
+# HELPDESK_SUGGEST_MODEL=google/gemma-4-31b-it
+# HELPDESK_SUGGEST_THINKING=off
+# HELPDESK_EMBED_MODEL=baai/bge-m3
+# HELPDESK_RERANK_MODEL=voyageai/rerank-2.5-lite
+# HELPDESK_RERANK_KEEP=5
+# HELPDESK_RERANK_DIRECT=0.816,0.05
+# HELPDESK_SEARCH_SCOPE=all
+# HELPDESK_QUERY_CONTEXT=on
+# HELPDESK_MODEL_HEALTH_ALERT=0.05
 # 只给评测脚本 npm run eval:helpdesk 用（§4A.11），服务不读：真模型评测的花费上限（美元，缺省 5）
 # HELPDESK_EVAL_BUDGET_USD=5
 # FAQ 问题树发布时也跑真模型评测（§4A.13）：on 才跑，缺省关；开着却没组装 model 评测门 → 版本不通过

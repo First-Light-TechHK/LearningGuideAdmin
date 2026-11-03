@@ -2,16 +2,20 @@ import type {
   HelpdeskQaCandidate,
   HelpdeskQaSource,
 } from '../../contracts/helpdesk-qa';
+import {
+  HELPDESK_DEFAULTS,
+  helpdeskSetting,
+} from '../../contracts/helpdesk-defaults';
 
 /**
  * 精排（分级方案 L2，owner 2026-11-02：精排也走 OpenRouter，按价格选，参数量不限）。
  *
- * 默认什么都不做：没有 HELPDESK_RERANK_MODEL 或 OPENROUTER_API_KEY 就不精排，候选顺序和以前一样。
- * 每次现读（不用重新部署）：
- * - HELPDESK_RERANK_MODEL：OpenRouter /rerank 的模型（如 voyageai/rerank-2.5-lite、qwen/qwen3-reranker-8b）。
- * - HELPDESK_RERANK_KEEP：精排后留给模型看的候选数（缺省全留）。
- * - HELPDESK_RERANK_DIRECT：「分数,领先差距」，如 0.83,0.05：没有屏幕上的卡片、第一名是答案卡、
- *   分数与领先第二名的差距都够 → 直接给卡，不调用大模型（阈值只在开发集上标定）。不设 = 从不直接给。
+ * 缺省开（contracts/helpdesk-defaults.ts，owner 2026-11-03）；没有 OPENROUTER_API_KEY 就不精排，候选顺序不变。
+ * 每次现读（不用重新部署），没设 = 缺省方案，off = 关掉：
+ * - HELPDESK_RERANK_MODEL：OpenRouter /rerank 的模型（缺省 voyageai/rerank-2.5-lite）；off = 不精排。
+ * - HELPDESK_RERANK_KEEP：精排后留给模型看的候选数（缺省 5）；off = 全留。
+ * - HELPDESK_RERANK_DIRECT：「分数,领先差距」（缺省 0.816,0.05）：没有屏幕上的卡片、第一名是答案卡、
+ *   分数与领先第二名的差距都够 → 直接给卡，不调用模型（阈值只在开发集上标定）。off 或写错 = 从不直接给。
  * 精排失败或超时（RERANK_LIMITS.timeoutMs）→ 原顺序，学员不会因为它拿不到候选；不重试。
  */
 export const RERANK_LIMITS = {
@@ -31,20 +35,34 @@ export type RerankConfig = {
   direct: { score: number; margin: number } | null;
 };
 
+/** 精排模型：没设 = 缺省，off = null（不精排）。 */
+export function rerankModel(env: NodeJS.ProcessEnv): string | null {
+  return helpdeskSetting(
+    env.HELPDESK_RERANK_MODEL,
+    HELPDESK_DEFAULTS.rerankModel,
+  );
+}
+
 export function rerankConfig(env: NodeJS.ProcessEnv): RerankConfig | null {
-  const model = env.HELPDESK_RERANK_MODEL?.trim();
+  const model = rerankModel(env);
   if (!model || !env.OPENROUTER_API_KEY?.trim()) return null;
-  const keepRaw = Number(env.HELPDESK_RERANK_KEEP?.trim());
-  const keep = Number.isInteger(keepRaw) && keepRaw > 0 ? keepRaw : null;
-  const parts = (env.HELPDESK_RERANK_DIRECT ?? '')
-    .split(',')
-    .map((part) => Number(part.trim()));
+  const keepSetting = env.HELPDESK_RERANK_KEEP?.trim() ?? '';
+  const keepRaw = Number(keepSetting);
+  const keep =
+    keepSetting === ''
+      ? HELPDESK_DEFAULTS.rerankKeep
+      : Number.isInteger(keepRaw) && keepRaw > 0
+        ? keepRaw
+        : null;
+  const directSetting = env.HELPDESK_RERANK_DIRECT?.trim() ?? '';
+  const parts = directSetting.split(',').map((part) => Number(part.trim()));
   const direct =
-    parts.length === 2 &&
-    parts.every((n) => Number.isFinite(n) && n >= 0 && n <= 1) &&
-    env.HELPDESK_RERANK_DIRECT?.trim()
-      ? { score: parts[0], margin: parts[1] }
-      : null;
+    directSetting === ''
+      ? { ...HELPDESK_DEFAULTS.rerankDirect }
+      : parts.length === 2 &&
+          parts.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)
+        ? { score: parts[0], margin: parts[1] }
+        : null;
   return { model, keep, direct };
 }
 

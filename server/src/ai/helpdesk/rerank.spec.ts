@@ -25,15 +25,26 @@ const card = (
 
 const KEY = 'test-openrouter-key-local-only';
 
-describe('rerankConfig (read each call; off unless a model and a key are set)', () => {
-  it('is off without a model or without a key', () => {
-    expect(rerankConfig({ OPENROUTER_API_KEY: KEY })).toBeNull();
+describe('rerankConfig (read each call; the tiered defaults unless set, off with "off" or without a key)', () => {
+  it('uses the tiered defaults with only a key (owner 2026-11-03)', () => {
+    expect(rerankConfig({ OPENROUTER_API_KEY: KEY })).toEqual({
+      model: 'voyageai/rerank-2.5-lite',
+      keep: 5,
+      direct: { score: 0.816, margin: 0.05 },
+    });
+  });
+
+  it('is off without a key or with HELPDESK_RERANK_MODEL=off', () => {
     expect(
       rerankConfig({ HELPDESK_RERANK_MODEL: 'voyageai/rerank-2.5-lite' }),
     ).toBeNull();
+    expect(rerankConfig({})).toBeNull();
+    expect(
+      rerankConfig({ OPENROUTER_API_KEY: KEY, HELPDESK_RERANK_MODEL: ' OFF ' }),
+    ).toBeNull();
   });
 
-  it('reads model, keep and the direct thresholds; bad values mean "not set"', () => {
+  it('reads model, keep and the direct thresholds; off or bad values mean "keep all" / "never direct"', () => {
     expect(
       rerankConfig({
         OPENROUTER_API_KEY: KEY,
@@ -49,7 +60,8 @@ describe('rerankConfig (read each call; off unless a model and a key are set)', 
     for (const [keep, direct] of [
       ['0', '1.5,0.1'],
       ['x', '0.8'],
-      ['2.5', ''],
+      ['2.5', 'off'],
+      ['off', 'OFF'],
     ])
       expect(
         rerankConfig({

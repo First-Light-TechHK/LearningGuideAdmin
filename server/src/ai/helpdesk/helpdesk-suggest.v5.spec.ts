@@ -221,6 +221,10 @@ function setup(
         OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
         OPENROUTER_BASE_URL: 'http://llm.test/v1',
         HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+        // 精排缺省开（会发 /rerank 请求）；这些用例只看工作流本身，精排见 tiered L2 那组
+        HELPDESK_RERANK_MODEL: 'off',
+        // 缺省不思考（小模型）；这里开着，好把「思考 + 不思考后备」两路一起测到
+        HELPDESK_SUGGEST_THINKING: 'high',
       },
     now: options.now,
   });
@@ -1007,9 +1011,8 @@ describe('v5 without a model call', () => {
       const env = {
         OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
         HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
-        ...(options.thinking
-          ? { HELPDESK_SUGGEST_THINKING: options.thinking }
-          : {}),
+        HELPDESK_RERANK_MODEL: 'off',
+        HELPDESK_SUGGEST_THINKING: options.thinking ?? 'high',
       };
       const harness = setup({
         env,
@@ -1035,7 +1038,7 @@ describe('v5 without a model call', () => {
         .map(([, context]) => context.model.thinking)
         .sort();
 
-    it('thinks high by default and asks a thinking-off backup at the same time; a thinking answer in time wins and the backup is stopped', async () => {
+    it('thinks high when set and asks a thinking-off backup at the same time; a thinking answer in time wins and the backup is stopped', async () => {
       const { service, run, quickSignals, events } = hedged({
         thinkingTakes: SUGGEST_THINKING_CUTOFF_MS - 1,
       });
@@ -1251,6 +1254,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
           OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
           HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
           HELPDESK_SUGGEST_THINKING: 'off',
+          HELPDESK_RERANK_MODEL: 'off',
         }),
       }),
     };
@@ -1462,7 +1466,7 @@ describe('v7 learner state (Portal → Agent)', () => {
   );
 });
 
-describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, off by default)', () => {
+describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, on by default)', () => {
   const ENV = {
     OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
     OPENROUTER_BASE_URL: 'http://llm.test/v1',
@@ -1566,10 +1570,10 @@ describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, off by default)',
     ).toBe(false);
   });
 
-  it('HELPDESK_QUERY_CONTEXT=on: the reranker is also asked with "previous message → message"; off asks once', async () => {
+  it('HELPDESK_QUERY_CONTEXT (on by default): the reranker is also asked with "previous message → message"; off asks once', async () => {
     const fetch = rerankWith([0.5, 0.6, 0.55]);
     const context = { recentTurns: ['older', 'Which ways can I pay?'] };
-    const on = setup({ env: { ...ENV, HELPDESK_QUERY_CONTEXT: 'on' } });
+    const on = setup({ env: ENV });
     await ask(on.service, chat('and WeChat Pay?', context));
     const queries = fetch.mock.calls.map(
       (call) =>
@@ -1588,7 +1592,7 @@ describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, off by default)',
     );
 
     fetch.mockClear();
-    const off = setup({ env: ENV });
+    const off = setup({ env: { ...ENV, HELPDESK_QUERY_CONTEXT: 'off' } });
     await ask(off.service, chat('and WeChat Pay?', context));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(off.findCandidates.mock.calls[0][0].context).toBeUndefined();
