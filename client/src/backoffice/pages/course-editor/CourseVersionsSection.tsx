@@ -79,6 +79,7 @@ export function CourseVersionsSection({
   setBusy,
   onReload,
   onNotice,
+  canPublish = true,
 }: {
   locale: string;
   course: CourseDetail;
@@ -90,6 +91,8 @@ export function CourseVersionsSection({
   setBusy: (value: boolean) => void;
   onReload: () => Promise<void>;
   onNotice: (message: string) => void;
+  /** REQ-0236：发布、删草稿、导入导出、上下线、恢复版本只给 Course=Full。 */
+  canPublish?: boolean;
 }) {
   const navigate = useNavigate();
   const [publishOpen, setPublishOpen] = useState(false);
@@ -271,7 +274,7 @@ export function CourseVersionsSection({
               {course.hasDraft ? L(locale, '未发布', 'Not published') : L(locale, '无草稿', 'No draft')}
               {course.hasDraft ? ` · ${L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}` : ''}
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            {canPublish && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <button type="button" style={primaryBtn} disabled={busy || !course.hasDraft || !course.completeness.canPublish} onClick={() => setPublishOpen(true)}>
                 {L(locale, '发布', 'Publish')}
               </button>
@@ -281,7 +284,7 @@ export function CourseVersionsSection({
               <button type="button" style={buttonStyle} disabled={busy} onClick={() => setImportOpen(true)}>
                 {L(locale, '导入课程包', 'Import package')}
               </button>
-            </div>
+            </div>}
           </div>
           <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
@@ -289,21 +292,21 @@ export function CourseVersionsSection({
               {liveVersion ? `${liveVersion.versionLabel} · ${liveVersion.isLive ? L(locale, '线上', 'Live') : ''} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
             </div>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{liveStatusLabel(locale, course.liveStatus)}</div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            {canPublish && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <button type="button" style={buttonStyle} disabled={busy || !liveVersion} onClick={() => setStatusOpen(true)}>
                 {L(locale, '更改状态', 'Change status')}
               </button>
               <button type="button" style={buttonStyle} disabled={busy || !liveVersion || exportBusy} onClick={() => void exportPackage()}>
                 {exportBusy ? L(locale, '导出中…', 'Exporting…') : L(locale, '导出课程包', 'Export package')}
               </button>
-            </div>
-            <div style={{ marginTop: 8 }}>
+            </div>}
+            {canPublish && <div style={{ marginTop: 8 }}>
               <label style={{ fontSize: 12 }}>{L(locale, '导出版本', 'Export version')}</label>
               <select value={exportVersion} onChange={(event) => setExportVersion(event.target.value)} style={{ marginLeft: 8, padding: 4 }}>
                 <option value="live">{L(locale, '线上版本', 'Live')}</option>
                 <option value="working">{L(locale, '草稿', 'Working')}</option>
               </select>
-            </div>
+            </div>}
           </div>
         </div>
       </div>
@@ -329,7 +332,7 @@ export function CourseVersionsSection({
                 <td>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course/${course.id}/preview?versionId=${version.id}`)}>{L(locale, '查看', 'View')}</button>
-                    {!version.isLive && <button type="button" style={buttonStyle} disabled={busy} onClick={() => setRestoreVersion(version)}>{L(locale, '恢复', 'Restore')}</button>}
+                    {canPublish && !version.isLive && <button type="button" style={buttonStyle} disabled={busy} onClick={() => setRestoreVersion(version)}>{L(locale, '恢复', 'Restore')}</button>}
                   </div>
                 </td>
               </tr>

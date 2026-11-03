@@ -31,6 +31,7 @@ export function CourseTrialSection({
   onReload,
   onNotice,
   contentLanguage,
+  canManage = true,
 }: {
   locale: string;
   courseId: string;
@@ -41,6 +42,8 @@ export function CourseTrialSection({
   onReload: () => Promise<void>;
   onNotice: (message: string) => void;
   contentLanguage: string;
+  /** REQ-0236：试看与价格属商业配置，只给 Course=Full；其他角色只读。 */
+  canManage?: boolean;
 }) {
   const [enabled, setEnabled] = useState(trial.enabled);
   const [rows, setRows] = useState<TrialRow[]>(trial.rows);
@@ -299,7 +302,7 @@ export function CourseTrialSection({
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        {canManage && <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
             type="button"
             style={primaryBtn}
@@ -313,13 +316,13 @@ export function CourseTrialSection({
           {rows.some((row) => row.inTrial && cutoffMissing(row)) && (
             <span style={{ fontSize: 12, color: '#b42318' }}>{L(locale, '请先为所有学习语言填写截止点。', 'Set cut-offs for every learning language first.')}</span>
           )}
-        </div>
+        </div>}
       </div>
 
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '价格（订阅 · USD）', 'Pricing (subscription · USD)')}</h2>
-          <button type="button" style={buttonStyle} disabled={busy} onClick={addPlan}>{L(locale, '+ 添加套餐', '+ Add plan')}</button>
+          {canManage && <button type="button" style={buttonStyle} disabled={busy} onClick={addPlan}>{L(locale, '+ 添加套餐', '+ Add plan')}</button>}
         </div>
         <div style={{ overflowX: 'auto', marginTop: 12 }}>
           <table className="table" style={{ width: '100%' }}>
@@ -360,7 +363,7 @@ export function CourseTrialSection({
                     {plan.syncError && <div style={{ opacity: 0.75 }}>{plan.syncError}</div>}
                   </td>
                   <td>
-                    {!plan.id.startsWith('new-') && <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} disabled={busy} onClick={() => void retrySync(plan.id)}>{L(locale, '重试', 'Retry')}</button>}
+                    {canManage && !plan.id.startsWith('new-') && <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} disabled={busy} onClick={() => void retrySync(plan.id)}>{L(locale, '重试', 'Retry')}</button>}
                   </td>
                 </tr>
               ))}
@@ -368,12 +371,12 @@ export function CourseTrialSection({
             </tbody>
           </table>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        {canManage && <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap', alignItems: 'center' }}>
           <button type="button" style={primaryBtn} disabled={busy || duplicateLookupKeys.size > 0} onClick={() => void savePlans()}>{L(locale, '保存并同步 Stripe', 'Save & sync Stripe')}</button>
           {duplicateLookupKeys.size > 0 && (
             <span style={{ fontSize: 12, color: '#b42318' }}>{L(locale, '有套餐的计费周期相同，Lookup key 会重复，请先调整。', 'Some plans share a billing period, so their lookup keys clash — adjust them first.')}</span>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );

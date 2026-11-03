@@ -216,6 +216,47 @@ describe('BackOffice access (e2e)', () => {
     },
   );
 
+  // REQ-0236：Graphic Designer 对 Course 是 Edit（可改已有课程内容，不能新增、删除、发布），
+  // 其他菜单全部 View。守卫先于业务校验：放行的拿到 400/404，被拦的拿到 403。
+  it('lets the Graphic Designer edit an existing course but not create, publish or price one, nor edit Knowledge', async () => {
+    const id = '00000000-0000-0000-0000-000000000000';
+    const designer = await signInAs(app, 'GRAPHIC_DESIGNER');
+    const status = async (send: () => Promise<request.Response>) => (await send()).status;
+
+    for (const send of [
+      () => designer.put(`/api/backoffice/courses/${id}`).send({}),
+      () => designer.post(`/api/backoffice/courses/${id}/lessons`).send({}),
+      () => designer.put(`/api/backoffice/courses/${id}/lessons/${id}`).send({}),
+      () => designer.post(`/api/backoffice/courses/${id}/media/session`).send({}),
+    ]) {
+      expect(await status(send)).not.toBe(403);
+    }
+    for (const send of [
+      () => designer.post('/api/backoffice/courses').send({}),
+      () => designer.post(`/api/backoffice/courses/${id}/publish`).send({}),
+      () => designer.post(`/api/backoffice/courses/${id}/delete-draft`).send({}),
+      () => designer.post(`/api/backoffice/courses/${id}/live-status`).send({}),
+      () => designer.put(`/api/backoffice/courses/${id}/plans`).send({}),
+      () => designer.put(`/api/backoffice/courses/${id}/trial`).send({}),
+      () => designer.post('/api/backoffice/courses/import').send({}),
+      () => designer.put(`/api/pages/${id}`).send({}),
+      () => designer.put(`/api/courses/${id}`).send({}),
+    ]) {
+      expect(await status(send)).toBe(403);
+    }
+
+    // 只读角色连已有课程也不能改
+    const viewer = await signInAs(app, 'COURSE_CREATOR');
+    expect(
+      await status(() => viewer.put(`/api/backoffice/courses/${id}`).send({})),
+    ).toBe(403);
+    // Full 角色照常
+    const admin = await signInAs(app, 'ADMIN');
+    expect(
+      await status(() => admin.post(`/api/backoffice/courses/${id}/publish`).send({})),
+    ).not.toBe(403);
+  });
+
   it('runs the full employee lifecycle: create, activate, sign in, deactivate', async () => {
     const admin = await signInAs(app, 'ADMIN');
     const previous = process.env.APP_ENV;

@@ -7,7 +7,9 @@ import type {
   HistoryPage,
   TrialSettings,
 } from '../contracts/course';
+import { useEmployee } from '../ShellRoute';
 import { boRequest } from '../lib/api';
+import { isActionAllowed } from '../rbac/permissions';
 import { categoryLabel } from '../lib/categoryLabel';
 
 import { CourseInfoSection } from './course-editor/CourseInfoSection';
@@ -30,6 +32,11 @@ type Tab = 'info' | 'content' | 'trial' | 'versions';
 export function CourseEditorPage() {
   const { courseId = '', locale = 'en-GB' } = useParams();
   const navigate = useNavigate();
+  // REQ-0236：Edit 级（Graphic Designer）只改已有课程内容；发布 / 导入导出 / 上下线 /
+  // 恢复版本，以及试看和价格（商业配置）只给 Course=Full。后端是最终边界，这里只收起按钮。
+  const employee = useEmployee();
+  const canPublish = isActionAllowed(employee.role, 'course', 'PUBLISH');
+  const canManageCommerce = isActionAllowed(employee.role, 'course', 'CREATE');
   const [course, setCourse] = useState<CourseDetail | null>(null);
   const [trial, setTrial] = useState<TrialSettings | null>(null);
   const [versions, setVersions] = useState<CourseVersion[]>([]);
@@ -153,8 +160,8 @@ export function CourseEditorPage() {
       <div style={{ marginTop: 16 }}>
         {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} onNext={() => setTab('content')} />}
         {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
-        {tab === 'trial' && trial && <CourseTrialSection locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} contentLanguage={contentLanguage} />}
-        {tab === 'versions' && <CourseVersionsSection locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
+        {tab === 'trial' && trial && <CourseTrialSection canManage={canManageCommerce} locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} contentLanguage={contentLanguage} />}
+        {tab === 'versions' && <CourseVersionsSection canPublish={canPublish} locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
       </div>
     </section>
   );
