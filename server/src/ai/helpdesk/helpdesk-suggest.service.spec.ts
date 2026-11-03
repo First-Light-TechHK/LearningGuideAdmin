@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { HttpException } from '@nestjs/common';
 
 import type {
@@ -1328,6 +1329,55 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
     const purge = jest.spyOn(ctx.events, 'purgeLearnerText');
     await ctx.service.suggest(input);
     expect(purge).toHaveBeenCalledWith(new Date(now - 90 * 24 * 3_600_000));
+  });
+
+  it('checks model output health at most every 15 minutes and logs one WARN line per degraded step', async () => {
+    let now = Date.UTC(2026, 10, 2, 8, 0, 0);
+    const ctx = setup({ now: () => now });
+    const stepHealth = jest.spyOn(ctx.events, 'stepHealth').mockResolvedValue([
+      {
+        step: 'explain',
+        kind: 'agent',
+        total: 40,
+        invalid: 30,
+        guardFallbacks: 0,
+        failures: 0,
+      },
+      {
+        step: 'pick_faq',
+        kind: 'agent',
+        total: 40,
+        invalid: 1,
+        guardFallbacks: 0,
+        failures: 0,
+      },
+    ]);
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    await ctx.service.suggest(input);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stepHealth).toHaveBeenCalledWith(new Date(now - 60 * 60_000));
+    const lines = warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes('model_output_degraded'));
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      type: 'helpdesk',
+      event: 'model_output_degraded',
+      step: 'explain',
+      invalidRate: 0.75,
+      threshold: 0.05,
+      windowMinutes: 60,
+    });
+    // within 15 minutes: no second check; after: checks again
+    now += 14 * 60_000;
+    await ctx.service.suggest(input);
+    expect(stepHealth).toHaveBeenCalledTimes(1);
+    now += 60_000;
+    await ctx.service.suggest(input);
+    expect(stepHealth).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });
 

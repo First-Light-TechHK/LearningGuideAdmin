@@ -54,6 +54,11 @@ import {
 } from './workflow/faq-workflow';
 import { learnerOf } from './workflow/guard';
 import { openRouterReranker, rerankConfig, rerankedSource } from './rerank';
+import {
+  assessModelHealth,
+  healthThreshold,
+  MODEL_HEALTH,
+} from './trace/model-health';
 
 /**
  * Helpdesk 推荐答案（Figma addendum §C；Tickets v2 §2；helpdesk-agent-v2-pi-dsh，Agent 角色）。
@@ -417,6 +422,7 @@ function isV5(input: SuggestInput): boolean {
 export class HelpdeskSuggestService implements OnModuleDestroy {
   private readonly logger = new Logger('HelpdeskSuggest');
   private lastPurge = Number.NEGATIVE_INFINITY;
+  private lastHealthCheck = Number.NEGATIVE_INFINITY;
   private readonly writing = new Set<Promise<void>>();
 
   constructor(private readonly deps: HelpdeskSuggestDeps) {}
@@ -940,6 +946,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
         : {}),
     });
     this.purgeLater();
+    this.checkHealthLater();
     return {
       chosen,
       reason,
@@ -961,6 +968,48 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     this.deps.events.purgeLearnerText(cutOff).catch((error: unknown) => {
       this.warn('Agent event learner text purge failed', error);
     });
+  }
+
+  /**
+   * 模型输出健康（trace/model-health.ts）：每个实例每 MODEL_HEALTH.checkEveryMs 最多顺手查一次最近
+   * windowMinutes 分钟；某一步校验没过、守卫拦下或出错超时的比例超过阈值 → 一行结构化 WARN 日志
+   * （type helpdesk，event model_output_degraded），运维按它报警。失败不影响推荐。
+   */
+  private checkHealthLater(): void {
+    const now = this.now();
+    if (now - this.lastHealthCheck < MODEL_HEALTH.checkEveryMs) return;
+    this.lastHealthCheck = now;
+    const env = this.env();
+    const threshold = healthThreshold(env);
+    const since = new Date(now - MODEL_HEALTH.windowMinutes * 60_000);
+    this.deps.events
+      .stepHealth(since)
+      .then((rows) => {
+        for (const step of assessModelHealth(rows, {
+          threshold,
+          minSample: MODEL_HEALTH.minSample,
+        })) {
+          if (!step.alert) continue;
+          this.logger.warn(
+            JSON.stringify({
+              type: 'helpdesk',
+              event: 'model_output_degraded',
+              step: step.step,
+              kind: step.kind,
+              model: env.HELPDESK_SUGGEST_MODEL?.trim() || null,
+              windowMinutes: MODEL_HEALTH.windowMinutes,
+              total: step.total,
+              invalidRate: step.invalidRate,
+              guardFallbackRate: step.guardFallbackRate,
+              failureRate: step.failureRate,
+              threshold,
+            }),
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        this.warn('Model output health check failed', error);
+      });
   }
 
   /**

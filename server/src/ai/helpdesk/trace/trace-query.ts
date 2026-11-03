@@ -5,6 +5,7 @@ import type {
 } from '../../../contracts/helpdesk-trace';
 import { isUuid } from '../../../common/uuidv7';
 import { LEARNER_TEXT_FIELDS, type AgentEventLog } from './agent-event.store';
+import { healthThreshold, modelHealthReport } from './model-health';
 
 /**
  * 链路查询（dsh sessionQuery 的 readSession / traceEvent）。给 BackOffice 的都是导出副本：
@@ -27,8 +28,19 @@ export function exportEvents(
 const stepOf = (event: AgentEventEnvelope) =>
   typeof event.data.step === 'number' ? event.data.step : null;
 
-export function createTraceSource(log: AgentEventLog): HelpdeskTraceSource {
+export function createTraceSource(
+  log: AgentEventLog,
+  options: { now?: () => Date; env?: NodeJS.ProcessEnv } = {},
+): HelpdeskTraceSource {
   return {
+    modelHealth(hours) {
+      return modelHealthReport(log, {
+        hours,
+        now: (options.now ?? (() => new Date()))(),
+        threshold: healthThreshold(options.env ?? process.env),
+      });
+    },
+
     async readRun(rawRunId) {
       if (!isUuid(rawRunId)) return null;
       const runId = rawRunId.toLowerCase();

@@ -89,6 +89,7 @@ export function costCollector(): AgentEventLog & { total(): number | null } {
     read: () => Promise.resolve([]),
     chain: () => Promise.resolve([]),
     purgeLearnerText: () => Promise.resolve(0),
+    stepHealth: () => Promise.resolve([]),
     total: () => total,
   };
 }

@@ -84,7 +84,14 @@ async function seed() {
   imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true })],
   controllers: [BackofficeHelpdeskAgentRunsController],
   providers: [
-    { provide: HELPDESK_TRACE_SOURCE, useValue: createTraceSource(log) },
+    {
+      provide: HELPDESK_TRACE_SOURCE,
+      // 一小时后看（seed 的事件在 2026-10-29 09:00 UTC）
+      useValue: createTraceSource(log, {
+        now: () => new Date(Date.UTC(2026, 9, 29, 10, 0, 0)),
+        env: {},
+      }),
+    },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     { provide: APP_GUARD, useClass: BackofficeAccessGuard },
@@ -138,6 +145,7 @@ describe('HelpDesk agent run trace endpoints', () => {
     await request(server())
       .get(`/api/helpdesk/agent-runs/${RUN}/events/1`)
       .expect(401);
+    await request(server()).get('/api/helpdesk/agent-runs/health').expect(401);
   });
 
   // every role has at least VIEW on the HelpDesk menu (PRD matrix)
@@ -192,6 +200,39 @@ describe('HelpDesk agent run trace endpoints', () => {
     expect(body.data.derived.map((e) => e.seq)).toEqual([4]);
   });
 
+  it.each(readers)(
+    '%s can read the model output health of each step (default 24 hours)',
+    async (role) => {
+      const res = await request(server())
+        .get('/api/helpdesk/agent-runs/health')
+        .set('Cookie', as(role))
+        .expect(200);
+      const body = res.body as Envelope<{
+        hours: number;
+        threshold: number;
+        minSample: number;
+        steps: { step: string; kind: string; total: number; alert: boolean }[];
+      }>;
+      expect(body.data).toMatchObject({
+        hours: 24,
+        threshold: 0.05,
+        minSample: 20,
+      });
+      expect(body.data.steps).toEqual([]);
+      expect(res.headers['cache-control']).toBe('no-store');
+    },
+  );
+
+  it.each(['0', '-1', '1.5', 'abc', '169', '1000'])(
+    'rejects health hours %s with 400 INVALID_INPUT',
+    async (hours) => {
+      const res = await request(server())
+        .get(`/api/helpdesk/agent-runs/health?hours=${hours}`)
+        .set('Cookie', as('ADMIN'))
+        .expect(400);
+      expect((res.body as Envelope<null>).error?.code).toBe('INVALID_INPUT');
+    },
+  );
   it('never returns learner text', async () => {
     for (const path of [
       `/api/helpdesk/agent-runs/${RUN}`,
