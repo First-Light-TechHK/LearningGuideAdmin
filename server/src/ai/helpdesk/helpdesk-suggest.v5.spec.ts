@@ -789,6 +789,11 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
       'Traditional Chinese',
     );
     expect(explain.system).toContain('"writeIn"');
+    // no added steps or dropped conditions; a nearby general point is not covered (blind review 2026-11-03)
+    expect(explain.system).toContain(
+      'never say something is enough on its own',
+    );
+    expect(explain.system).toContain('does not say exactly what they ask');
   });
 
   it('names each step it starts for the thinking panel: pick_faq is pick, and nothing else is said', async () => {
