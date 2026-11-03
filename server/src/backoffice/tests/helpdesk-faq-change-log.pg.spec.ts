@@ -235,7 +235,7 @@ describeDb('Helpdesk FAQ change log (PostgreSQL)', () => {
     await pool.query(
       `TRUNCATE helpdesk_faq_release_nodes, helpdesk_faq_releases, helpdesk_faq_edge_revisions,
                 helpdesk_faq_edges, helpdesk_faq_phrasing_revisions, helpdesk_faq_phrasings,
-                helpdesk_faq_revisions, helpdesk_faqs`,
+                helpdesk_faq_revisions, helpdesk_faqs CASCADE`,
     );
     const graph = createPgFaqGraphRepository(db);
     const source = createPgFaqReleaseSource(graph);
