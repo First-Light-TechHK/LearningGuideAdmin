@@ -2,6 +2,8 @@
 .DS_Store
 Thumbs.db
 desktop.ini
+# macOS 解压/复制残留（AppleDouble），每个文件一份，随素材一起生成
+._*
 
 # IDE
 .vs/
@@ -54,9 +56,17 @@ docs/design/figma/course-management/*.geometry.json
 # 课程媒体与原始素材（大文件，超过 GitHub 100MB 单文件限制，不入库；媒体存放于 server/storage）
 server/storage/
 docs/*.zip
+docs/*.mp4
 docs/modeling-life/
 docs/Modeling Life Data/
 docs/Modeling life数据-small/
+# 运营直接解压到 docs/ 的课程素材包（含同名副本、下载产生的 “(1)” 文件）
+docs/Modeling*/
+docs/__MACOSX/
+docs/*(1).*
+
+# 本地从 PRD 文档提取的文本（一次性工作产物）
+prd_extracted.txt
 
 # Cursor 本地会话/缓存（机器相关，不入库）
 .cursor/
