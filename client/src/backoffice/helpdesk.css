@@ -2976,6 +2976,21 @@
   color: #69778b;
 }
 
+/* 检查中断（心跳停了；待视觉验收：沿用未通过的浅底，换成提醒色） */
+.hdReleaseStatus-interrupted {
+  background: #fff7e6;
+  color: #b45309;
+}
+
+.hdReleaseProgress {
+  color: #2468df;
+}
+
+.hdReleaseHint {
+  display: block;
+  margin-top: 2px;
+}
+
 .hdReleaseDiffRow td {
   background: #f8fafc;
 }

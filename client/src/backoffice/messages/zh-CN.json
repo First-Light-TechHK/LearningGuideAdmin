@@ -713,7 +713,8 @@
       "REWRITE_UNAVAILABLE": "这个环境还没接上 AI（缺 OpenRouter 的 key），先手动改。",
       "REWRITE_FAILED": "AI 这次没按要求改，换个说法再试。",
       "REWRITE_TIMEOUT": "AI 这次太慢没回来，过一会儿再试，或者先手动改。",
-      "REWRITE_RATE_LIMITED": "一分钟内让 AI 改太多次了，稍等一下再试。"
+      "REWRITE_RATE_LIMITED": "一分钟内让 AI 改太多次了，稍等一下再试。",
+      "FAQ_RELEASE_EVALUATING": "这个版本正在检查，请等结果出来。"
     },
     "addFaq": "新增常见问题",
     "actions": {
@@ -1093,9 +1094,9 @@
     "releases": {
       "button": "版本发布",
       "title": "版本发布",
-      "subtitle": "学员只看到已上线的版本。改动要创建新版本、通过检查和评测、再发布后才会上线。",
+      "subtitle": "用户只看到已上线的版本。改动要生成新版本、通过检查、再发布后才会上线。",
       "live": "当前上线：v{version}",
-      "none": "还没有发布过版本，学员看到的是逐条保存的常见问题。",
+      "none": "还没有发布过版本，用户看到的是逐条保存的常见问题。",
       "working": "相对当前上线版本的改动",
       "noChanges": "相对当前上线版本没有改动。",
       "diff": {
@@ -1118,7 +1119,7 @@
         "answerEn": "英文答案",
         "questionZh": "中文问题",
         "answerZh": "中文答案",
-        "signals": "学员情境",
+        "signals": "用户情境",
         "keywords": "关键词",
         "kind": "连接类型",
         "position": "顺序",
@@ -1129,9 +1130,9 @@
       "checksPassed": "全部检查通过",
       "checksFailed": "{count} 个问题需要处理",
       "counts": "{nodes} 个问题、{entries} 个入口、{choices} 道选择题、{edges} 条连接、{phrasings} 种问法",
-      "create": "发布新版本",
-      "creating": "检查中…",
-      "createHint": "冻结工作副本，然后运行图检查和评测。发布之前不会上线。",
+      "create": "生成新版本",
+      "creating": "生成中…",
+      "createHint": "冻结工作副本，然后在后台运行图检查、检索检查和真流程抽样（约 3–5 分钟）。发布之前不会上线。",
       "sameAsLatest": "相对 v{version} 没有改动，没有新建版本。",
       "created": "已创建 v{version}。",
       "history": "版本历史",
@@ -1144,10 +1145,11 @@
       },
       "status": {
         "draft": "待发布",
-        "evaluating": "评测中",
+        "evaluating": "检查中",
         "published": "已上线",
         "rejected": "未通过",
-        "superseded": "已被替换"
+        "superseded": "已被替换",
+        "interrupted": "检查中断"
       },
       "passed": "通过",
       "failed": "未通过",
@@ -1158,7 +1160,7 @@
       "misses": "{count} 个用例没有命中",
       "publish": "发布 v{version}",
       "publishShort": "发布",
-      "publishConfirm": "发布 v{version}？学员大约一分钟内就会看到。",
+      "publishConfirm": "发布 v{version}？用户大约一分钟内就会看到。",
       "confirmNo": "取消",
       "publishedNotice": "v{version} 已上线。",
       "recheck": "重新检查",
@@ -1173,7 +1175,18 @@
       "empty": "还没有版本。",
       "loading": "加载中…",
       "createdOn": "创建于 {date}",
-      "checksValue": "图检查：{result}"
+      "checksValue": "图检查：{result}",
+      "createdChecking": "已生成 v{version}，正在后台检查（约 3–5 分钟）。可以先关掉这个窗口，回来再看结果。",
+      "recheckStarted": "v{version} 已开始重新检查。",
+      "progress": {
+        "starting": "检查中…",
+        "retrieval": "检查中：检索",
+        "vectors": "检查中：准备向量",
+        "model": "检查中：真流程抽样 {done} / {total}"
+      },
+      "interruptedHint": "检查没跑完（服务重启或部署打断了它）。点「重新检查」再跑一次。",
+      "model": "真流程抽样{result}：错卡 {wrong}%，{cases} 题，约 ¥{cny}",
+      "modelNotRun": "真流程抽样：未运行"
     },
     "candidates": {
       "search": "搜索话题、问题或例句...",

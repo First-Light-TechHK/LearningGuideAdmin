@@ -205,7 +205,10 @@ export type ReleaseActions = { publish: boolean; recheck: boolean; rollback: boo
  * - 回滚：曾经上线过（superseded），且当前上线的不是它、也不是从它回滚来的。
  */
 export function releaseActions(release: FaqRelease, published: number | null, live?: FaqRelease | null): ReleaseActions {
-  const reEvaluable = ['draft', 'rejected', 'evaluating'].includes(release.status) && release.sourceVersion === null
+  // 正在检查的不能再开一次（服务端 409）；中断了（或旧的服务端没报进度）才可以重新检查
+  const reEvaluable =
+    (['draft', 'rejected'].includes(release.status) || (release.status === 'evaluating' && release.evaluation?.state !== 'running')) &&
+    release.sourceVersion === null
   const rollback =
     release.status === 'superseded' && release.version !== published && (live?.sourceVersion ?? null) !== release.version
   return { publish: release.publishable, recheck: reEvaluable, rollback }
@@ -231,3 +234,23 @@ export function evalRecall(report: FaqReleaseEvalReport | null): number | null {
   const value = report?.metrics?.recallAt8
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
+
+/** 真流程抽样那一份报告（combined 的 parts 里，或单独的 model 报告）；没跑 → null。 */
+export function modelReport(report: FaqReleaseEvalReport | null): FaqReleaseEvalReport | null {
+  if (!report) return null
+  if (report.kind === 'model') return report
+  return report.parts?.find((part) => part.kind === 'model') ?? null
+}
+
+/** 还有检查在跑（界面每隔几秒重读一次）。 */
+export function checksRunning(releases: FaqRelease[]): boolean {
+  return releases.some((release) => release.status === 'evaluating' && release.evaluation?.state === 'running')
+}
+
+/** 列表上的状态：evaluating 且心跳停了 → interrupted。 */
+export function releaseStatusKey(release: FaqRelease): string {
+  return release.status === 'evaluating' && release.evaluation?.state === 'interrupted' ? 'interrupted' : release.status
+}
+
+/** 美元 → 人民币（约数，界面显示「约 ¥」用）。 */
+export const USD_TO_CNY = 7.2

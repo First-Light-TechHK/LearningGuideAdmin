@@ -416,8 +416,19 @@ export type FaqReleaseEvalReport = {
   summary: string;
   ranAt: string;
   metrics: Record<string, number>;
-  misses: { nodeId: string; key: string; locale: string; source: string; text: string; rank: number | null }[];
+  /** retrieval：没进前 8 的用例；model（真流程抽样）：答错卡或没得到回答的问题（expected / got）。 */
+  misses: { nodeId?: string; key?: string; locale: string; source: string; text: string; rank?: number | null; expected?: string; got?: string }[];
   sourceVersion?: number;
+  /** combined：检索检查与真流程抽样各一份。 */
+  parts?: FaqReleaseEvalReport[];
+};
+
+/** 检查进行到哪一步（后台检查，owner 2026-11-03）。 */
+export type FaqReleaseEvaluation = {
+  /** interrupted：心跳停了（服务重启、部署打断），可以重新检查。 */
+  state: 'running' | 'interrupted';
+  startedAt: string | null;
+  progress: { stage: 'retrieval' | 'vectors' | 'model' | string; done: number; total: number } | null;
 };
 
 export type FaqRelease = {
@@ -434,6 +445,8 @@ export type FaqRelease = {
   publishedAt: string | null;
   /** draft，且检查与评测都过了。 */
   publishable: boolean;
+  /** 只有 status = evaluating 时有（旧的服务端没有这个字段）。 */
+  evaluation?: FaqReleaseEvaluation | null;
 };
 
 export type FaqReleaseList = { releases: FaqRelease[]; published: number | null };
