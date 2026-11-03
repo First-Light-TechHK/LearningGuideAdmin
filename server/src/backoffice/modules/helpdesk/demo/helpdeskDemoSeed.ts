@@ -54,7 +54,7 @@ export const DEMO_POPULAR_MARKER_KEY = 'helpdesk_demo_popular';
  * 卡片内容那一版（库文件里的问题、答案、追问；2026-11-02 起按代码核对过的修正）。库文件的卡片内容再改就换这个值：
  * 已经灌过的 DEV 下次启动按库文件更新卡片，员工在 BackOffice 改过的卡不动（keepStaffEdits），再出一版发布。
  */
-export const DEMO_CONTENT_TAG = 'content-2026-11-02d';
+export const DEMO_CONTENT_TAG = 'content-2026-11-03a';
 export const DEMO_CONTENT_MARKER_KEY = 'helpdesk_demo_content';
 /**
  * 流程树那一版（库文件 faq-map-v2.json）。树或卡的位置再改就换这个值：已经灌过的 DEV 下次启动先删掉种子里

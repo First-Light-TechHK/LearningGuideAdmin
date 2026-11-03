@@ -1,5 +1,5 @@
 {
- "$comment": "Helpdesk FAQ library v3.3 (2026-11-02, 685 cards: entries + follow-ups; v3.2 + answers corrected against the code during the SOP tree v2 check, card types aligned with the tree, follow-up questions rewritten to stand alone and independent follow-up links removed for the flat library), merged from the project's split source faq-library/v3.1/cards with tools/faqlib.py merge; review evidence (routes, screenshots, sources) left out. Seeded by `npm run seed:helpdesk-demo` (eval/helpdesk/demo) through the normal services, idempotent by key. Do not edit here: edit the split source and merge again. The CI eval gate still uses faq-library.json (v2, 198 cards).",
+ "$comment": "Helpdesk FAQ library v3.4 (2026-11-03, 685 cards: entries + follow-ups; v3.3 + 36 answers for features not fully built written in their designed state, questions and links unchanged; v3.3 = answers corrected against the code during the SOP tree v2 check, card types aligned with the tree, follow-up questions rewritten to stand alone and independent follow-up links removed for the flat library), merged from the project's split source faq-library/v3.1/cards with tools/faqlib.py merge; review evidence (routes, screenshots, sources) left out. Seeded by `npm run seed:helpdesk-demo` (eval/helpdesk/demo) through the normal services, idempotent by key. Do not edit here: edit the split source and merge again. The CI eval gate still uses faq-library.json (v2, 198 cards).",
  "faqs": [
   {
    "key": "create-account",
@@ -407,9 +407,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "How do I change my password?",
-   "answerEn": "There is no password field in **Personal settings**. To set a new password, use a reset email.\n1. Select your avatar at the top right and select **Sign out**.\n2. On the sign-in page, enter your email, select **Continue**, then select **Forgot password?** and **Send reset email**.\n3. Open the link in the email within one hour (check your spam folder), enter your new password in **Password** and **Confirm new password** (at least 8 characters and no more than 30, because the sign-in **Password** box accepts at most 30) and select **Reset password**.",
+   "answerEn": "1. Select your avatar at the top right and select **Personal settings**.\n2. In the password section, enter your **Current password**, then your new password, then the same new password in **Confirm new password** (at least 8 characters; keep it to 30 or fewer, because the sign-in **Password** box accepts at most 30).\n3. Save the new password.\n\nIf you do not remember your current password, use a reset email instead:\n1. Select your avatar at the top right and select **Sign out**.\n2. On the sign-in page, enter your email, select **Continue**, then select **Forgot password?** and **Send reset email**.\n3. Open the link in the email within one hour (check your spam folder), enter your new password in **Password** and **Confirm new password** (at least 8 characters and no more than 30, because the sign-in **Password** box accepts at most 30) and select **Reset password**.",
    "questionZh": "如何修改密码？",
-   "answerZh": "**个人设置**中没有密码输入项。如需设置新密码，请使用重置邮件。\n1. 点击右上角的头像，选择**退出登录**。\n2. 在登录页输入邮箱并点击**继续**，然后点击**忘记密码？**和**发送重置邮件**。\n3. 在一小时内打开邮件中的链接（请检查垃圾邮件文件夹），在**密码**和**确认新密码**中输入新密码（至少 8 个字符，且不超过 30 个，因为登录页的**密码**框最多只能输入 30 个字符），然后点击**重置密码**。",
+   "answerZh": "1. 点击右上角的头像，选择**个人设置**。\n2. 在密码部分输入**当前密码**，再输入新密码，并在**确认新密码**中再次输入新密码（至少 8 个字符，建议不超过 30 个，因为登录页的**密码**框最多只能输入 30 个字符）。\n3. 保存新密码。\n\n如果不记得当前密码，请改用重置邮件：\n1. 点击右上角的头像，选择**退出登录**。\n2. 在登录页输入邮箱并点击**继续**，然后点击**忘记密码？**和**发送重置邮件**。\n3. 在一小时内打开邮件中的链接（请检查垃圾邮件文件夹），在**密码**和**确认新密码**中输入新密码（至少 8 个字符，且不超过 30 个，因为登录页的**密码**框最多只能输入 30 个字符），然后点击**重置密码**。",
    "keywords": [
     "change password",
     "new password",
@@ -445,7 +445,6 @@
    "key": "activation-email-missing",
    "category": "account_technical",
    "popular": true,
-   "popularRank": 1,
    "questionEn": "I did not get the activation email, or the activation link has expired.",
    "answerEn": "1. Check your spam or junk folder.\n2. On the **Check your email** page, select **Resend activation email**. You can send up to 10 verification emails a day.\n3. Activation links are valid for 24 hours. If yours has expired, resend the email and use the link in the newest one.\n\nYou need to activate your email before you can sign in with email and password.",
    "questionZh": "收不到激活邮件或激活链接已失效怎么办？",
@@ -491,13 +490,13 @@
      "labelEn": "My activation link says it is invalid or expired. What now?",
      "labelZh": "激活链接提示无效或已过期，怎么办？"
     }
-   ]
+   ],
+   "popularRank": 1
   },
   {
    "key": "google-sign-in",
    "category": "account_technical",
    "popular": true,
-   "popularRank": 2,
    "questionEn": "Can I sign in with Google?",
    "answerEn": "Yes. On the sign-in page, select **Google** under **Or continue with** and choose your Google account.\n\nIf a Learning Guide account already uses the same email as your Google account, Google signs you into that account and connects to it automatically, so your courses and subscription stay. You do not need to sign in with a password first.\n\nYou can also connect Google yourself:\n1. Sign in, select your avatar at the top right and open **Personal settings**.\n2. Under **Sign-in methods**, select **Connect Google**. Once connected, it shows \"You can sign in with Google at any time.\"",
    "questionZh": "可以用 Google 登录吗？",
@@ -535,13 +534,13 @@
      "labelEn": "If I connect Google, will my courses and subscription stay?",
      "labelZh": "绑定 Google 后，我的课程和订阅会不变吗？"
     }
-   ]
+   ],
+   "popularRank": 2
   },
   {
    "key": "wechat-bind-email",
    "category": "account_technical",
    "popular": true,
-   "popularRank": 3,
    "questionEn": "Why do I need to add an email when I sign in with WeChat?",
    "answerEn": "The first time you sign in with WeChat, you bind an email address to finish setting up your account so you can continue learning or purchasing. This step cannot be skipped; the only other option on the page is **Sign out**.\n1. Enter your email and select **Send verification email**.\n2. Open the binding link in that email within 24 hours, then select **Confirm email binding** on the page that opens. You can resend after 60 seconds.\n3. If you already have a Learning Guide account with this email, you can enter it: after you confirm the link, your WeChat joins that account and its subscriptions and learning records are kept. If the page says \"This account cannot be connected.\", activate that account first, use a different email, or contact support.",
    "questionZh": "第一次用微信登录，为什么要绑定邮箱？",
@@ -599,7 +598,8 @@
      "labelEn": "I opened the binding link but the page did not move on. Why?",
      "labelZh": "我已经打开了绑定链接，但“请检查邮箱”页面没有继续，为什么？"
     }
-   ]
+   ],
+   "popularRank": 3
   },
   {
    "key": "change-account-email",
@@ -681,9 +681,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "How do I change my name or personal details?",
-   "answerEn": "1. Select your avatar at the top right and select **Personal settings**.\n2. Edit **Name** (1 to 50 letters or numbers; spaces, hyphens, apostrophes and middle dots are allowed).\n3. Under **Personal details**, **Country** is required. **Age**, **Education** and **Areas of interest** (up to five) are optional.\n4. Select **Save changes**. You should see \"Settings saved.\"\n\nYou cannot upload a profile picture at the moment.",
+   "answerEn": "1. Select your avatar at the top right and select **Personal settings**.\n2. Edit **Name** (1 to 50 letters or numbers; spaces, hyphens, apostrophes and middle dots are allowed).\n3. Under **Personal details**, **Country** is required. **Age**, **Education** and **Areas of interest** (up to five) are optional.\n4. Select **Save changes**. You should see \"Settings saved.\"\n\nYou can also add a profile picture on this page: under **Profile**, select **Upload image**, choose a JPG or PNG image up to 5 MB, adjust the crop and select **Save avatar**. To go back to the default letter, select **Use default**.",
    "questionZh": "如何修改姓名或个人信息？",
-   "answerZh": "1. 点击右上角的头像，选择**个人设置**。\n2. 修改**姓名**（1 到 50 个文字或数字字符，可使用空格、连字符、撇号和间隔号）。\n3. 在**个人信息**中，**国家/地区**为必填项；**年龄**、**教育程度**和**感兴趣的领域**（最多 5 项）为选填项。\n4. 点击**保存修改**，页面会显示“设置已保存。”\n\n目前无法上传头像图片。",
+   "answerZh": "1. 点击右上角的头像，选择**个人设置**。\n2. 修改**姓名**（1 到 50 个文字或数字字符，可使用空格、连字符、撇号和间隔号）。\n3. 在**个人信息**中，**国家/地区**为必填项；**年龄**、**教育程度**和**感兴趣的领域**（最多 5 项）为选填项。\n4. 点击**保存修改**，页面会显示“设置已保存。”\n\n你也可以在这个页面添加头像：在**个人资料**下点击**上传图片**，选择不超过 5 MB 的 JPG 或 PNG 图片，调整裁剪后点击**保存头像**。如需恢复为默认头像，请点击**使用默认头像**。",
    "keywords": [
     "change name",
     "personal details",
@@ -797,7 +797,6 @@
    "key": "stay-signed-in",
    "category": "account_technical",
    "popular": true,
-   "popularRank": 4,
    "questionEn": "How do I stay signed in on my own computer?",
    "answerEn": "1. On the sign-in page, tick **Keep me signed in** before you select **Sign in**.\n2. With the box ticked, you stay signed in for about 14 days in this browser.\n3. If you sign in with **Google** or **WeChat**, there is no box to tick: you stay signed in for about 30 days in that browser.\n4. On a shared computer, leave the box unticked. When you finish, select your avatar at the top right and then **Sign out**; this matters most if you used Google or WeChat.",
    "questionZh": "如何在自己的电脑上保持登录？",
@@ -832,7 +831,8 @@
      "labelEn": "Without the tick, am I signed out when I close the browser?",
      "labelZh": "我没有勾选，关闭浏览器后会退出登录吗？"
     }
-   ]
+   ],
+   "popularRank": 4
   },
   {
    "key": "sign-out",
@@ -990,7 +990,6 @@
    "key": "live-mic-camera",
    "category": "account_technical",
    "popular": true,
-   "popularRank": 20,
    "questionEn": "My microphone or camera does not work in a Live Session.",
    "answerEn": "1. Allow the microphone and camera in your browser's site settings (usually the icon beside the address bar), then try again.\n2. If it is still blocked, allow your browser to use the camera and microphone in your device's privacy settings.\n3. Close other apps that might be using the camera or microphone.\n4. If you cannot hear anyone, select the notice \"Sound is blocked by your browser. Click to turn it on.\"",
    "questionZh": "直播课里麦克风或摄像头用不了怎么办？",
@@ -1029,13 +1028,13 @@
     },
     "live-mic--others-cant-hear-me",
     "live-mic--cant-hear-anyone"
-   ]
+   ],
+   "popularRank": 20
   },
   {
    "key": "access-course-materials",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 9,
    "questionEn": "How can I access my course materials?",
    "answerEn": "1. Select your avatar at the top right and choose **My Learning**.\n2. On the course card, select **Resume Learning** to open your lessons. The button reads **Review Course** once the course is complete. If you have only previewed the course, the card shows **Continue preview** or **View plans** instead.\n3. If a course is missing, open it from **Courses** and select **Start learning**. My Learning lists only courses you have started or previewed.",
    "questionZh": "如何找到我的课程内容？",
@@ -1080,13 +1079,13 @@
      "labelEn": "It says Continue learning after I finished. Is it complete?",
      "labelZh": "学完所有课时，课程页仍显示“继续学习”，算完成吗？"
     }
-   ]
+   ],
+   "popularRank": 9
   },
   {
    "key": "subscribed-no-course-in-my-learning",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 10,
    "questionEn": "I subscribed, but My Learning says I have not started any courses. Where is my course?",
    "answerEn": "My Learning lists only courses you have started, so a new subscription or trial does not add a course card until you open a lesson.\n1. Open **Courses** and select the course. It should show **Included in your plan** and **Start learning**.\n2. Select **Start learning**. If you see **How would you like to learn?**, choose **Video Mode** or **Text Mode**, then select **Continue with Video** or **Continue with Text**.\n3. Open **My Learning** from your avatar menu. The course card now appears with **Resume Learning**.\n\nIf the course page shows **View all benefits** instead of **Start learning**, your plan does not include this course.",
    "questionZh": "我已订阅，但“我的学习”显示还没有开始任何课程。我的课程在哪里？",
@@ -1121,7 +1120,8 @@
    "entry": true,
    "followUps": [
     "no-start-learning-button"
-   ]
+   ],
+   "popularRank": 10
   },
   {
    "key": "continue-course-progress",
@@ -1165,7 +1165,6 @@
    "key": "try-before-subscribe",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 6,
    "questionEn": "Can I try a course before I subscribe?",
    "answerEn": "Yes, where a course offers a free preview or a trial. You need to be signed in first; if you are not, you are taken to the **Sign in or create account** page.\n1. **Preview**: open **Courses**, select the course and select **Preview** next to the lesson that offers it. The preview shows part of the lesson.\n2. **Trial**: some courses offer a three-day trial. On the course page select **View all benefits**. If a **Choose a plan** section appears, choose a plan and select **Start three-day trial**.",
    "questionZh": "订阅前可以先试试课程吗？",
@@ -1204,13 +1203,13 @@
      "labelZh": "为什么免费试用还要付款方式？"
     },
     "free-trial-how"
-   ]
+   ],
+   "popularRank": 6
   },
   {
    "key": "preview-ended",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 7,
    "questionEn": "My free preview says it has ended. How do I keep going?",
    "answerEn": "A free preview shows only part of a lesson. To keep going you need a plan that includes the course.\n1. In the preview, select **Choose access plan**. A window titled **Enjoying the course so far?** opens.\n2. Select **Choose access plan** in that window, pick a plan that includes the course and complete checkout. On a course's own plan panel you may also see **Start three-day trial**.\n3. When your access is active, go back to the course page and select **Continue learning**. It reads **Start learning** only if you have not opened a lesson yet.",
    "questionZh": "免费试看显示已结束，怎样继续学习？",
@@ -1250,7 +1249,8 @@
      "labelEn": "I closed the payment page. Am I subscribed? How do I retry?",
      "labelZh": "我关闭或取消了支付页面，我订阅成功了吗？怎样重新付款？"
     }
-   ]
+   ],
+   "popularRank": 7
   },
   {
    "key": "no-start-learning-button",
@@ -1465,7 +1465,6 @@
    "key": "check-understanding-test",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 14,
    "questionEn": "Where do I find Check your understanding, and why is my test not available yet?",
    "answerEn": "1. In a lesson, select **Check your understanding** in the **Deep Learning** panel on the right. This opens the **Understanding** page.\n2. Lesson tests open after you complete the lesson. Until then Lesson 1 shows **Available after lesson completion**: select **Next lesson** at the end of the lesson, then choose **Knowledge Test** or **Application Test**.\n3. Later lessons show **Unlocks after Lesson 1** and so on. They open once you have completed both tests of the previous lesson. The course **Fluency Test** shows **Coming soon** and cannot be opened yet.",
    "questionZh": "“检查你的理解”在哪里？为什么测试暂时不能开始？",
@@ -1498,7 +1497,8 @@
    "entry": true,
    "followUps": [
     "check-understanding--fluency"
-   ]
+   ],
+   "popularRank": 14
   },
   {
    "key": "zoom-lesson-image",
@@ -1585,7 +1585,6 @@
    "key": "ai-tutor-what-where",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 15,
    "questionEn": "What is the AI Tutor, and where do I find it?",
    "answerEn": "The AI Tutor is a learning assistant that answers using the course and lesson you are studying.\n1. In a lesson, select **Ask AI Tutor** in the **Deep Learning** panel. It is shown only when AI Tutor is available for the course, and you need access to the course.\n2. Choose **Lecture** to have the topic explained, or **Socratic** to be guided with questions.\n3. Select **New chat** to start again.\n\nAI Tutor answers support your learning and are not professional, legal, medical or financial advice.",
    "questionZh": "AI Tutor 是什么？在哪里使用？",
@@ -1619,13 +1618,13 @@
     "ai-tutor-what-where--no-button",
     "ai-tutor-what-where--chat-saved",
     "ai-tutor-what-where--lecture-socratic"
-   ]
+   ],
+   "popularRank": 15
   },
   {
    "key": "download-lessons-offline",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 11,
    "questionEn": "Can I download lessons to watch offline?",
    "answerEn": "Not at the moment. Lessons are available online only; there is no download option.",
    "questionZh": "可以下载课程离线观看吗？",
@@ -1657,13 +1656,13 @@
      "labelEn": "Can I download videos or exhibits to watch later?",
      "labelZh": "可以把视频或展示资源下载下来以后看吗？"
     }
-   ]
+   ],
+   "popularRank": 11
   },
   {
    "key": "course-certificate",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 8,
    "questionEn": "Do I get a certificate when I finish a course?",
    "answerEn": "Learning Guide does not offer course certificates at the moment. When you finish a course, its card in **My Learning** shows **Review Course** so you can go back over it.",
    "questionZh": "学完课程后有证书吗？",
@@ -1692,7 +1691,8 @@
    "followUps": [
     "course-certificate--future",
     "course-certificate--review-course"
-   ]
+   ],
+   "popularRank": 8
   },
   {
    "key": "study-groups-what-join",
@@ -1733,7 +1733,6 @@
    "key": "cant-join-study-group",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 16,
    "questionEn": "I found a Study Group but I can't join it. Why?",
    "answerEn": "You need valid access to the group's Course before you can join. Without it, the group page shows **Course access required** and a **View Course** button instead of **Join Now**. Until you join, it says **Join this Study Group to view its Live Sessions**.\n1. If you are not signed in, select **Sign In** first.\n2. Select **View Course** to open the Course page and get access.\n3. Go back to **Study Groups**, open the group again and select **Join Now**.",
    "questionZh": "找到了学习小组，但无法加入，为什么？",
@@ -1774,7 +1773,8 @@
      "labelZh": "小组显示“该课程已不再提供”，还能加入吗？"
     },
     "cant-join-study-group--not-signed-in"
-   ]
+   ],
+   "popularRank": 16
   },
   {
    "key": "my-study-groups-where",
@@ -1970,7 +1970,6 @@
    "key": "plan-to-attend-reserve",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 19,
    "questionEn": "Does Plan to Attend reserve my place in a Live Session?",
    "answerEn": "No. **Plan to Attend** records that you intend to come and includes you in the session reminder. The card says **Planning to attend does not reserve a place.**\n1. Only people who have entered the session are counted in the **currently in session** number.\n2. If every place is taken, the **Join now** button shows **Session full**.",
    "questionZh": "“计划参加”会保留我的座位吗？",
@@ -2001,13 +2000,13 @@
    "entry": true,
    "followUps": [
     "plan-to-attend-reserve--reminder-cancelled"
-   ]
+   ],
+   "popularRank": 19
   },
   {
    "key": "create-study-group-schedule",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 18,
    "questionEn": "How do I create a Study Group and schedule a Live Session?",
    "answerEn": "1. Open **Study Groups** and select **+ Create Study Group**.\n2. Choose a **Related Course** you have access to, enter the **Study Group Title** (up to 50 characters) and **About this Study Group** (up to 200 characters), then select **Create Study Group**. You become the group's Host.\n3. In your group, select **Schedule Live Session** and set **Session Title**, **Date**, **Start Time**, **Duration** (10, 20, 30 or 40 mins) and **Maximum Participants** (2 to 6), then select **Schedule Session**.\n\nThe Host and members who selected **Plan to Attend** get a reminder in the 10 minutes before the session starts.",
    "questionZh": "如何创建学习小组并安排直播课？",
@@ -2047,7 +2046,8 @@
      "labelEn": "Why can't I change my Live Session's title or length?",
      "labelZh": "为什么安排好的直播课不能修改标题、时长或人数上限？"
     }
-   ]
+   ],
+   "popularRank": 18
   },
   {
    "key": "create-group-required-fields",
@@ -2337,7 +2337,6 @@
    "key": "choose-6-or-12-months",
    "category": "payments_subscriptions",
    "popular": true,
-   "popularRank": 22,
    "questionEn": "How do I choose between a 6-month and a 12-month plan?",
    "answerEn": "1. Open **Subscription** and use the **6 Months** / **12 Months** switch above the plan cards. The price on each card changes with the term.\n2. Compare the prices. The **Everything** card can also show a struck-through price and a **Save** tag.\n3. Select the plan button. On **Confirm your subscription**, check **Pay now**, **Term** (with its start and end dates) and **Next payment** before you continue. The plan renews automatically unless you cancel, and purchases can't be refunded.",
    "questionZh": "6 个月和 12 个月方案怎么选？",
@@ -2369,13 +2368,13 @@
    "entry": true,
    "followUps": [
     "choose-6-or-12-months--pay-now-term"
-   ]
+   ],
+   "popularRank": 22
   },
   {
    "key": "buy-single-course",
    "category": "payments_subscriptions",
    "popular": true,
-   "popularRank": 23,
    "questionEn": "Can I buy just one course instead of a category or Everything?",
    "answerEn": "Only some courses offer a course-only plan.\n1. Open the course page and select **View all benefits**.\n2. On **Subscription**, look under the course title for **Choose a plan**. If it lists plans for that course, choose one and select **Continue to purchase**.\n3. On **Confirm your subscription**, tick the three confirmations and select **Continue**.\n\nIf you only see the **Everything** and **Category** cards, the course has no course-only plan.",
    "questionZh": "我可以只买一门课程，而不买分类或全部课程吗？",
@@ -2405,7 +2404,8 @@
    "entry": true,
    "followUps": [
     "buy-single-course--price"
-   ]
+   ],
+   "popularRank": 23
   },
   {
    "key": "confirm-continue-greyed",
@@ -2453,11 +2453,10 @@
    "key": "free-trial-how",
    "category": "payments_subscriptions",
    "popular": true,
-   "popularRank": 25,
    "questionEn": "How does the free trial work?",
-   "answerEn": "Some courses offer a three-day trial.\n1. Open the course page and select **View all benefits**.\n2. If a **Choose a plan** section appears, choose a plan and select **Start three-day trial**. If that button is greyed out, no trial is available for that plan right now. Trials are not offered on the **Everything** or **Category** cards.\n3. **Confirm your subscription** shows **USD 0.00 during the trial** and that a payment method is needed for automatic renewal. Tick the three confirmations, select **Continue** and complete checkout.\n\nIf you do not cancel, the paid term follows the trial. Each plan can be trialled once, and cancelling ends course access straight away.",
+   "answerEn": "Some courses offer a three-day trial.\n1. Open the course page and select **View all benefits**.\n2. If a **Choose a plan** section appears, choose a plan and select **Start three-day trial**. If that button is greyed out, no trial is available for that plan right now. Course-only, **Category** and **Everything** plans can all offer a trial; a trial unlocks exactly what the plan you choose covers.\n3. **Confirm your subscription** shows **USD 0.00 during the trial** and that a payment method is needed for automatic renewal. Tick the three confirmations, select **Continue** and complete checkout.\n\nIf you do not cancel, the paid term follows the trial. Each plan can be trialled once, and cancelling ends course access straight away.",
    "questionZh": "免费试用是怎样的？",
-   "answerZh": "部分课程提供三天试用。\n1. 打开课程页面，选择**查看所有权益**。\n2. 如果出现**选择计划**，选择一个方案后点击**开始三天试用**；如果该按钮是灰色的，说明该方案暂时无法试用。**全部课程**和**分类课程**卡片上不提供试用。\n3. **确认订阅**页面会显示**试用期间 USD 0.00**，并说明自动续订需要提供付款方式。勾选三项确认，点击**继续**并完成付款。\n\n如果不取消，试用结束后将开始付费周期。每个方案只能试用一次，取消后会立即结束课程访问。",
+   "answerZh": "部分课程提供三天试用。\n1. 打开课程页面，选择**查看所有权益**。\n2. 如果出现**选择计划**，选择一个方案后点击**开始三天试用**；如果该按钮是灰色的，说明该方案暂时无法试用。单课方案、**分类课程**和**全部课程**方案都可以提供试用；试用开放的内容与你所选方案的范围完全一致。\n3. **确认订阅**页面会显示**试用期间 USD 0.00**，并说明自动续订需要提供付款方式。勾选三项确认，点击**继续**并完成付款。\n\n如果不取消，试用结束后将开始付费周期。每个方案只能试用一次，取消后会立即结束课程访问。",
    "keywords": [
     "free trial",
     "three-day trial",
@@ -2495,7 +2494,8 @@
      "labelEn": "I was asked to sign in. Will I lose my plan?",
      "labelZh": "我点了“开始三天试用”，页面让我先登录，选好的方案会丢吗？"
     }
-   ]
+   ],
+   "popularRank": 25
   },
   {
    "key": "trial-again-same-course",
@@ -3066,9 +3066,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Why did my payment fail?",
-   "answerEn": "The page does not show the reason a payment failed, and there is no section in **My Subscription** to change card details.\n1. For a new purchase, if you left the payment page without paying or the payment did not go through, no plan starts. Go back to **Subscription** and complete checkout again. If you think you were charged but your plan is missing, do not pay again; contact support as in step 3.\n2. If a renewal payment failed, the plan card shows **Payment failed** and **Grace period until** with a date. Select **Pay now** on the card to pay the renewal.\n3. If it keeps failing, select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**), choose **Payments & Subscriptions** as the **Enquiry Type**, describe the problem and select **Submit Enquiry**. Do not include card details.",
+   "answerEn": "The page does not show the reason a payment failed. To change the card used for your plan, select **Update payment method** on the plan card in **My Subscription**; it opens a secure Stripe page.\n1. For a new purchase, if you left the payment page without paying or the payment did not go through, no plan starts. Go back to **Subscription** and complete checkout again. If you think you were charged but your plan is missing, do not pay again; contact support as in step 3.\n2. If a renewal payment failed, the plan card shows **Payment failed** and **Grace period until** with a date. Select **Update payment method** to change the card, or **Pay now** to pay the renewal.\n3. If it keeps failing, select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**), choose **Payments & Subscriptions** as the **Enquiry Type**, describe the problem and select **Submit Enquiry**. Do not include card details.",
    "questionZh": "为什么我的付款失败了？",
-   "answerZh": "页面不会显示付款失败的原因，**我的订阅**中也没有修改银行卡信息的入口。\n1. 新购买时，如果你没有付款就离开了付款页面，或者付款没有成功，订阅不会开始。请回到**订阅**页面重新完成付款。如果你认为已被扣款但方案没有出现，请不要再次付款，按第 3 步联系客服。\n2. 如果是续订付款失败，方案卡片会显示**付款失败**和**宽限期结束日期**。点击卡片上的**立即支付**即可支付续订费用。\n3. 如果一直失败，请点击右上角头像，打开**我的学习**，在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**），在**问题类型**中选择**支付与订阅**，描述问题后点击**提交问题**。请不要填写银行卡信息。",
+   "answerZh": "页面不会显示付款失败的原因。如需更换方案所用的银行卡，请在**我的订阅**的方案卡片上点击**更新支付方式**，会打开 Stripe 的安全页面。\n1. 新购买时，如果你没有付款就离开了付款页面，或者付款没有成功，订阅不会开始。请回到**订阅**页面重新完成付款。如果你认为已被扣款但方案没有出现，请不要再次付款，按第 3 步联系客服。\n2. 如果是续订付款失败，方案卡片会显示**付款失败**和**宽限期结束日期**。点击**更新支付方式**可更换银行卡，点击**立即支付**即可支付续订费用。\n3. 如果一直失败，请点击右上角头像，打开**我的学习**，在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**），在**问题类型**中选择**支付与订阅**，描述问题后点击**提交问题**。请不要填写银行卡信息。",
    "keywords": [
     "payment failed",
     "card declined",
@@ -3925,9 +3925,9 @@
    "category": "other",
    "popular": false,
    "questionEn": "Where are my notifications, and can I change notification emails?",
-   "answerEn": "Notifications are not active at the moment, and **Personal settings** has no notification or email preference.\n1. Select **Notification Center** in the left menu of My Learning (in the avatar menu it is called **Notifications**).\n2. The page currently says notifications are not active in this release.\n3. For questions about emails from us, select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**).",
+   "answerEn": "The **Notification Center** lists notifications about your subscription, payments and trial. **Personal settings** has no notification or email preference.\n1. Select **Notification Center** in the left menu of My Learning (in the avatar menu it is called **Notifications**).\n2. The page lists each notification with its title, summary, time and type. Select **Mark as read** or **Mark as unread** on a notification to change its status. When you have unread notifications, the header shows how many.\n3. For questions about emails from us, select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**).",
    "questionZh": "我的通知在哪里？能修改通知邮件吗？",
-   "answerZh": "通知功能目前尚未启用，**个人设置**中也没有通知或邮件偏好。\n1. 在我的学习左侧菜单中选择**通知中心**（头像菜单中同样为**通知中心**）。\n2. 页面目前显示尚未启用通知。\n3. 如对我们发送的邮件有疑问，请点击右上角头像，打开**我的学习**，在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**）。",
+   "answerZh": "**通知中心**会显示与你的订阅、付款和试用相关的通知。**个人设置**中没有通知或邮件偏好。\n1. 在我的学习左侧菜单中选择**通知中心**（头像菜单中同样为**通知中心**）。\n2. 页面会列出每条通知的标题、摘要、时间和类型。可以在通知上点击**标记为已读**或**标记为未读**来切换状态。有未读通知时，页面顶部会显示未读数量。\n3. 如对我们发送的邮件有疑问，请点击右上角头像，打开**我的学习**，在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**）。",
    "keywords": [
     "notifications",
     "notification center",
@@ -4822,9 +4822,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "A page looks broken or out of date, or the buttons do nothing. What can I do?",
-   "answerEn": "1. Reload the page without the saved copy: press **Ctrl+Shift+R** on Windows or **Cmd+Shift+R** on a Mac (Chrome, Edge and Firefox).\n2. Make sure your browser is up to date, or try another up-to-date browser. Learning Guide does not warn you when a browser is too old, so a broken page can be a sign it needs updating.\n3. If it still looks wrong, clear the saved images and files for this site in your browser settings, then open the page again. This can sign you out, so you may need to sign in again.\n4. If it is still not right, select **Help Center / FAQ** in the page footer, then **Contact Support**, choose **Technical Support** as the **Enquiry Type**, tell us which browser and version you use, and attach a screenshot.",
+   "answerEn": "1. Reload the page without the saved copy: press **Ctrl+Shift+R** on Windows or **Cmd+Shift+R** on a Mac (Chrome, Edge and Firefox).\n2. Make sure your browser is up to date, or try another up-to-date browser. Learning Guide supports the current and previous major versions of Chrome, Safari and Edge. It does not warn you when a browser is too old, so a broken page can be a sign it needs updating.\n3. If it still looks wrong, clear the saved images and files for this site in your browser settings, then open the page again. This can sign you out, so you may need to sign in again.\n4. If it is still not right, select **Help Center / FAQ** in the page footer, then **Contact Support**, choose **Technical Support** as the **Enquiry Type**, tell us which browser and version you use, and attach a screenshot.",
    "questionZh": "页面显示错乱、还是旧样子，或者按钮点了没反应，怎么办？",
-   "answerZh": "1. 强制刷新页面，让浏览器重新加载：Windows 上按 **Ctrl+Shift+R**，Mac 上按 **Cmd+Shift+R**（适用于 Chrome、Edge 和 Firefox）。\n2. 确认浏览器是最新版本，或者换一个最新版的浏览器试试。浏览器版本过低时 Learning Guide 不会弹出提醒，所以页面错乱可能就是浏览器需要更新了。\n3. 仍然不对，请在浏览器设置里清除本网站保存的图片和文件，再重新打开页面。这样可能会让你退出登录，需要重新登录。\n4. 还是不行，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**，在**问题类型**里选择**技术支持**，告诉我们你用的浏览器和版本，并附上截图。",
+   "answerZh": "1. 强制刷新页面，让浏览器重新加载：Windows 上按 **Ctrl+Shift+R**，Mac 上按 **Cmd+Shift+R**（适用于 Chrome、Edge 和 Firefox）。\n2. 确认浏览器是最新版本，或者换一个最新版的浏览器试试。Learning Guide 支持 Chrome、Safari 和 Edge 的当前主要版本和上一个主要版本。浏览器版本过低时 Learning Guide 不会弹出提醒，所以页面错乱可能就是浏览器需要更新了。\n3. 仍然不对，请在浏览器设置里清除本网站保存的图片和文件，再重新打开页面。这样可能会让你退出登录，需要重新登录。\n4. 还是不行，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**，在**问题类型**里选择**技术支持**，告诉我们你用的浏览器和版本，并附上截图。",
    "keywords": [
     "cache",
     "broken layout",
@@ -4870,7 +4870,6 @@
    "key": "emails-blocked-work-school",
    "category": "account_technical",
    "popular": true,
-   "popularRank": 5,
    "questionEn": "Learning Guide emails never reach my work or school inbox. What can I do?",
    "answerEn": "1. Check the junk, spam and quarantine folders in that mailbox, and search for **Learning Guide**.\n2. Look for these subjects: **Learning Guide account confirmation**, **Learning Guide password reset**, **Verify and bind your email** and **Live Session reminder**. Support replies start with your enquiry number in square brackets. If you asked for the email from the Chinese version of the site, its subject is in Chinese, for example **Learning Guide 账号确认**.\n3. Ask your IT team to let mail from Learning Guide through to your address and to release any held messages with those subjects.\n4. If nothing arrives, select **Help Center / FAQ** in the page footer, then **Contact Support**, and tell us which email address you use and that your work or school mail may be filtering messages. If you cannot sign in, use **Contact us** under **Support** at the bottom of the home page instead.",
    "questionZh": "我的工作邮箱或学校邮箱一直收不到 Learning Guide 的邮件，怎么办？",
@@ -4909,7 +4908,8 @@
    "entry": true,
    "followUps": [
     "emails-blocked-work-school--still-nothing"
-   ]
+   ],
+   "popularRank": 5
   },
   {
    "key": "network-blocks-live-session",
@@ -5519,9 +5519,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "Where do I upload a profile photo? I only see a letter in a circle.",
-   "answerEn": "1. Select your avatar at the top right, then open **Personal settings**.\n2. The circle under **Profile** shows the first letter of your **Name**. There is no upload button for a photo on this page at the moment, so you cannot add a picture yourself.\n3. If you would like this to be added, you can send the idea: select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**), choose **Other Enquiries** as the **Enquiry Type** and select **Submit Enquiry**.",
+   "answerEn": "1. Select your avatar at the top right, then open **Personal settings**.\n2. The circle under **Profile** shows the first letter of your **Name** until you add a picture.\n3. Select **Upload image**, then choose a JPG or PNG image up to 5 MB from your device. If the image does not meet these rules, the page shows a message saying why.\n4. In the **Crop profile image** window, drag the image or use the sliders to crop it to a square, then select **Save avatar**.\n5. To replace the picture, select **Upload image** again. To go back to the letter, select **Use default**.",
    "questionZh": "在哪里上传头像照片？我只看到一个字母的圆圈。",
-   "answerZh": "1. 点击右上角的头像，选择**个人设置**。\n2. **个人资料**下的圆形图标显示的是**姓名**的第一个字。目前页面上没有上传图片的按钮，无法自行添加头像照片。\n3. 如果希望增加这个功能，可以把想法告诉我们：在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**），在**问题类型**中选择**其他问题**，然后点击**提交问题**。",
+   "answerZh": "1. 点击右上角的头像，然后打开**个人设置**。\n2. 添加图片之前，**个人资料**下的圆形图标显示的是**姓名**的第一个字。\n3. 点击**上传图片**，从设备中选择不超过 5 MB 的 JPG 或 PNG 图片。如果图片不符合要求，页面会提示原因。\n4. 在**裁剪头像**窗口中，拖动图片或使用滑块把图片裁剪为正方形，然后点击**保存头像**。\n5. 如需更换图片，请再次点击**上传图片**；如需恢复为字母头像，请点击**使用默认头像**。",
    "keywords": [
     "profile photo",
     "avatar",
@@ -5864,7 +5864,6 @@
    "key": "progress-percentage",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 13,
    "questionEn": "My progress shows 50% after I finished one lesson. How is progress worked out?",
    "answerEn": "The percentage on your **My Learning** card shows how far through the course you have got in the mode you use (**Video Mode** or **Text Mode**). It rises as you move further in, whether you finish a lesson or start a later one, and it does not go down if you reopen an earlier lesson.\n1. Open **My Learning** from your avatar menu. The card shows your current lesson, for example **Current: Lesson 1**, and your percentage.\n2. Reach the last part of the last lesson. The card then shows **Completed** and **100%**.\n3. Tests are counted separately: the **Understanding** page lists each lesson's **Knowledge Test** and **Application Test** with a status, and the card can reach 100% without them.",
    "questionZh": "学完一节课后进度只显示 50%，进度是怎么算的？",
@@ -5908,7 +5907,8 @@
      "labelEn": "Where is Check your understanding? Why is my test locked?",
      "labelZh": "“检查你的理解”在哪里？为什么测试暂时不能开始？"
     }
-   ]
+   ],
+   "popularRank": 13
   },
   {
    "key": "complete-course-window",
@@ -6082,7 +6082,6 @@
    "key": "video-resume-position",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 12,
    "questionEn": "When I open my video again it starts from the beginning. Does it remember where I stopped?",
    "answerEn": "Not to the exact second. If the lesson's video is divided into sections, **Resume Learning** reopens it at the start of the section you reached. If the video is one section, it starts from the beginning. You can then jump to the part you want with the seek bar.\n1. Open **My Learning** and select **Resume Learning** on the course card to go back to your lesson.\n2. Select the play button.\n3. Drag the seek bar under the video to the part you want. It helps to note the time shown next to the seek bar before you leave.",
    "questionZh": "下次再打开视频，为什么又从头开始？它不会记住我停在哪里吗？",
@@ -6119,7 +6118,8 @@
      "labelZh": "视频从头开始播，我的进度还在吗？"
     },
     "video-resume-position--where-button"
-   ]
+   ],
+   "popularRank": 12
   },
   {
    "key": "lesson-breadcrumb-back",
@@ -6242,7 +6242,6 @@
    "key": "cancel-live-session",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 21,
    "questionEn": "How do I cancel a Live Session I scheduled?",
    "answerEn": "Only the Host can cancel a Live Session, and only before it starts. Cancelling removes it from the Study Group.\n1. Open **Study Groups** and select your group from **My Study Groups**.\n2. On the session card, select **Cancel Session**.\n3. In **Cancel this Live Session?**, select **Yes, cancel session**. Select **Go back** if you want to keep it.\n\nIf you only need a different time, select **Edit Session** and change the **Date** or **Start Time** instead.",
    "questionZh": "我安排的直播课怎么取消？",
@@ -6275,7 +6274,8 @@
     "cancel-live-session--members-notified",
     "cancel-live-session--after-start",
     "cancel-live-session--undo"
-   ]
+   ],
+   "popularRank": 21
   },
   {
    "key": "cancel-study-group",
@@ -6514,7 +6514,6 @@
    "key": "create-group-needs-course-access",
    "category": "courses_learning",
    "popular": true,
-   "popularRank": 17,
    "questionEn": "Why can't I create a Study Group? It says I need access to a Course.",
    "answerEn": "You can only create a Study Group for a Course you have access to. Until you have one, **Create Study Group** in the form stays greyed out.\n1. Select **View Courses** in the message, or select **Courses** in the top menu.\n2. Get access to the Course you want to study with others, for example with a plan or the free trial, then go back to **Study Groups**.\n3. Select **+ Create Study Group**, choose the course under **Related Course**, fill in the title and description, then select **Create Study Group**.",
    "questionZh": "为什么我不能创建学习小组？提示需要课程访问权限。",
@@ -6547,7 +6546,8 @@
     "create-group-needs-course-access--trial-counts",
     "create-group-needs-course-access--other-category",
     "create-group-needs-course-access--related-course-list"
-   ]
+   ],
+   "popularRank": 17
   },
   {
    "key": "study-group-not-found",
@@ -6742,7 +6742,6 @@
    "key": "everything-includes",
    "category": "payments_subscriptions",
    "popular": true,
-   "popularRank": 24,
    "questionEn": "What does Everything include, and where can I see which courses are in it?",
    "answerEn": "Everything covers every category, plus anything new added during your plan.\n1. Open **Subscription**. On the **Everything** card, read the line under the category names. It reads like \"N courses across N categories\".\n2. Select **View all** on that line to open the course list on **Courses**.\n3. On **Confirm your subscription**, the plan summary says you get access to every course in all categories, plus anything new added during your plan.",
    "questionZh": "“全部课程”方案包含什么？在哪里能看到具体有哪些课程？",
@@ -6770,7 +6769,8 @@
    "entry": true,
    "followUps": [
     "everything-includes--new-courses"
-   ]
+   ],
+   "popularRank": 24
   },
   {
    "key": "pay-12-months-upfront",
@@ -7184,9 +7184,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "My Subscription says Auto-renewal off. Has my plan been cancelled?",
-   "answerEn": "Not yet. **Auto-renewal off** means the plan will not renew, but you keep access until the date under **Valid until**.\n1. Open **My Learning** > **My Subscription** and check the plan card.\n2. To keep the plan going, select **Turn on auto-renewal** while the plan has not expired.\n3. The other labels: **Active** means it renews automatically (the button is **Cancel auto-renewal**). **Trial** is a free trial (the button is **Cancel**). **Payment failed** shows **Grace period until** and **Pay now**.\n4. Under **Past subscriptions**, **Expired** or **Cancelled** with an **Expired on** date means the plan has ended and the card has no buttons. To learn again, choose a plan on **Subscription**.",
+   "answerEn": "Not yet. **Auto-renewal off** means the plan will not renew, but you keep access until the date under **Valid until**.\n1. Open **My Learning** > **My Subscription** and check the plan card.\n2. To keep the plan going, select **Turn on auto-renewal** while the plan has not expired.\n3. The other labels: **Active** means it renews automatically (the button is **Cancel auto-renewal**). **Trial** is a free trial (the button is **Cancel**). **Payment failed** shows **Grace period until** and **Pay now**.\n4. Under **Past subscriptions**, **Expired** or **Cancelled** with an **Expired on** date means the plan has ended. To learn again, select **Subscribe again** on that card, which takes you to a secure Stripe payment page for the plan, or choose a plan on **Subscription**.",
    "questionZh": "我的订阅里显示“已取消自动续订”，我的订阅是不是已经取消了？",
-   "answerZh": "还没有。**已取消自动续订**表示方案不会再续订，但在**有效期至**的日期之前你仍可使用。\n1. 打开**我的学习** > **我的订阅**，查看方案卡片。\n2. 如果想继续订阅，在方案到期前点击**开启自动续费**。\n3. 其他状态：**订阅有效**表示会自动续订（按钮是**取消自动续订**）；**试用**是免费试用（按钮是**取消**）；**付款失败**会显示**宽限期结束日期**和**立即支付**。\n4. 在**历史订阅**中，显示**订阅已过期**或**已取消**以及**过期日期**，表示方案已结束，卡片上没有按钮。如需继续学习，请在**订阅**页面重新选择方案。",
+   "answerZh": "还没有。**已取消自动续订**表示方案不会再续订，但在**有效期至**的日期之前你仍可使用。\n1. 打开**我的学习** > **我的订阅**，查看方案卡片。\n2. 如果想继续订阅，在方案到期前点击**开启自动续费**。\n3. 其他状态：**订阅有效**表示会自动续订（按钮是**取消自动续订**）；**试用**是免费试用（按钮是**取消**）；**付款失败**会显示**宽限期结束日期**和**立即支付**。\n4. 在**历史订阅**中，显示**订阅已过期**或**已取消**以及**过期日期**，表示方案已结束。如需继续学习，可以点击该卡片上的**重新订阅**，进入该方案的 Stripe 安全付款页面；也可以在**订阅**页面重新选择方案。",
    "keywords": [
     "auto-renewal off",
     "subscription status labels",
@@ -7226,9 +7226,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "I cancelled my trial by mistake. Can I undo it?",
-   "answerEn": "There is no undo button. Trial access ended when you confirmed, and the same trial can't be started again.\n1. Open **My Learning** > **My Subscription** and select **Past subscriptions**. The trial shows **Cancelled** with an **Expired on** date and no buttons.\n2. To keep learning, open the course page, select **View all benefits**, choose a plan and select **Continue to purchase**.\n3. If the cancellation was a mistake and you want us to look at it, select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**), choose **Payments & Subscriptions** as the **Enquiry Type**, describe what happened and select **Submit Enquiry**. Do not include card details.",
+   "answerEn": "Yes, as long as the trial's original period has not ended. Trial access ended when you confirmed, but you can turn auto-renewal back on for the trial before its original end date. Your access comes back straight away and the end date is not extended. Because auto-renewal is on again, the paid term follows the trial unless you cancel. The same trial can't be started again.\n1. Open **My Learning** > **My Subscription** and find the cancelled trial. It shows the trial's original end date.\n2. Select **Turn on auto-renewal** on it. Your course access comes back straight away.\n3. If the original trial period has already ended, the trial can't be resumed. To keep learning, open the course page, select **View all benefits**, choose a plan and select **Continue to purchase**.\n4. If the cancellation was a mistake and you want us to look at it, select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box at the bottom of the left menu (on a phone, select **Help Center / FAQ** in the page footer, then **Contact Support**), choose **Payments & Subscriptions** as the **Enquiry Type**, describe what happened and select **Submit Enquiry**. Do not include card details.",
    "questionZh": "我不小心取消了试用，可以撤销吗？",
-   "answerZh": "没有撤销按钮。你确认取消后，试用访问已经结束，同一个试用也不能再次开始。\n1. 打开**我的学习** > **我的订阅**，展开**历史订阅**。该试用显示**已取消**和**过期日期**，没有按钮。\n2. 如需继续学习，打开课程页面，选择**查看所有权益**，选好方案后点击**继续购买**。\n3. 如果取消是误操作，希望我们帮你看看，请点击右上角头像，打开**我的学习**，在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**），在**问题类型**中选择**支付与订阅**，说明情况后点击**提交问题**。请不要填写银行卡信息。",
+   "answerZh": "可以，只要试用的原定期限还没有结束。你确认取消后，试用访问已经结束，但在原定结束日期之前，你可以为该试用重新开启自动续费。访问权限会立即恢复，结束日期不会延长。重新开启自动续费后，除非你再次取消，试用结束后会接着开始付费周期。同一个试用不能重新开始。\n1. 打开**我的学习** > **我的订阅**，找到已取消的试用，卡片上会显示试用原定的结束日期。\n2. 在该试用上点击**开启自动续费**，课程访问权限会立即恢复。\n3. 如果试用的原定期限已经结束，试用就无法再恢复。如需继续学习，请打开课程页面，选择**查看所有权益**，选好方案后点击**继续购买**。\n4. 如果取消是误操作，希望我们帮你看看，请点击右上角头像，打开**我的学习**，在左侧菜单底部的**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**），在**问题类型**中选择**支付与订阅**，说明情况后点击**提交问题**。请不要填写银行卡信息。",
    "keywords": [
     "undo cancel trial",
     "restore trial",
@@ -8491,9 +8491,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "I can't find where to change my password in Personal settings. Is there a Change password section?",
-   "answerEn": "No. **Personal settings** has no password fields. It shows **Profile**, **Personal details**, **Language** and **Sign-in methods**. To set a new password, sign out, then select **Forgot password?** on the sign-in page and use the reset email.",
+   "answerEn": "Yes. **Personal settings** has a password section: enter your **Current password**, your new password and **Confirm new password**, then save the new password. The page also shows **Profile**, **Personal details**, **Language** and **Sign-in methods**. If you do not remember your current password, sign out, then select **Forgot password?** on the sign-in page and use the reset email.",
    "questionZh": "个人设置里找不到修改密码的地方，是没有这个部分吗？",
-   "answerZh": "是的，**个人设置**中没有密码输入框。页面包括**个人资料**、**个人信息**、**语言**和**登录方式**。如需设置新密码，请先退出登录，然后在登录页点击**忘记密码？**，通过重置邮件设置。",
+   "answerZh": "不是。**个人设置**中有修改密码的部分：输入**当前密码**、新密码和**确认新密码**，然后保存新密码。页面还包括**个人资料**、**个人信息**、**语言**和**登录方式**。如果不记得当前密码，请先退出登录，然后在登录页点击**忘记密码？**，通过重置邮件设置。",
    "keywords": [
     "can't",
     "find",
@@ -8520,9 +8520,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "Can I change my password without waiting for a reset email?",
-   "answerEn": "No. The only way to set a new password is the reset email, so you need to open the inbox of the account's email. Select **Forgot password?** on the sign-in page, select **Send reset email**, then open the link in the email within one hour.",
+   "answerEn": "Yes, if you remember your current password. Open **Personal settings**, enter your **Current password**, your new password and **Confirm new password**, then save the new password. You do not need to wait for an email.\n\nIf you do not remember your current password, use the reset email, so you need to open the inbox of the account's email. Select **Forgot password?** on the sign-in page, select **Send reset email**, then open the link in the email within one hour.",
    "questionZh": "不用等重置邮件，能直接修改密码吗？",
-   "answerZh": "不能。目前只能通过重置邮件设置新密码，所以你需要能打开账号邮箱。请在登录页点击**忘记密码？**，然后点击**发送重置邮件**，并在一小时内打开邮件里的链接。",
+   "answerZh": "可以，前提是你记得当前密码。请打开**个人设置**，输入**当前密码**、新密码和**确认新密码**，然后保存新密码，不需要等邮件。\n\n如果不记得当前密码，请使用重置邮件，因此你需要能打开账号邮箱。请在登录页点击**忘记密码？**，然后点击**发送重置邮件**，并在一小时内打开邮件里的链接。",
    "keywords": [
     "change",
     "password",
@@ -9264,9 +9264,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "Which browser should I use if the site's videos will not play?",
-   "answerEn": "Learning Guide does not name one required browser. Use an up-to-date one.\n1. Update your browser, or try a different up-to-date browser.\n2. Turn off extensions that block scripts or media, then reopen the lesson.\n3. If the video still will not play, select **Help Center / FAQ** in the page footer, then **Contact Support**, choose **Technical Support** as the **Enquiry Type**, say which browser you use and attach a screenshot.",
+   "answerEn": "Learning Guide supports the current and previous major versions of Chrome, Safari and Edge, so use one of these.\n1. Update your browser, or try a different one from that list.\n2. Turn off extensions that block scripts or media, then reopen the lesson.\n3. If the video still will not play, select **Help Center / FAQ** in the page footer, then **Contact Support**, choose **Technical Support** as the **Enquiry Type**, say which browser you use and attach a screenshot.",
    "questionZh": "网站视频无法播放时，应该用哪种浏览器？",
-   "answerZh": "Learning Guide 没有指定必须使用的浏览器，请使用最新版本的浏览器。\n1. 更新浏览器，或换一个最新版的浏览器试试。\n2. 关闭会拦截脚本或媒体的插件，然后重新打开课时。\n3. 视频仍然无法播放时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**，在**问题类型**中选择**技术支持**，说明你使用的浏览器并附上截图。",
+   "answerZh": "Learning Guide 支持 Chrome、Safari 和 Edge 的当前主要版本和上一个主要版本，请使用其中之一。\n1. 更新浏览器，或换用上述浏览器中的另一个试试。\n2. 关闭会拦截脚本或媒体的插件，然后重新打开课时。\n3. 视频仍然无法播放时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**，在**问题类型**中选择**技术支持**，说明你使用的浏览器并附上截图。",
    "keywords": [
     "browser",
     "videos",
@@ -11421,9 +11421,9 @@
    "category": "courses_learning",
    "popular": false,
    "questionEn": "When I change the time of a Live Session I scheduled, will the people who planned to attend be told?",
-   "answerEn": "Yes, by email. When the Start Time changes, members who selected **Plan to Attend** are sent an email titled **Live Session rescheduled**, asking them to open the Study Group to see the new time. Members who did not select **Plan to Attend** are not sent it. Emails can be late or filtered, so check the session card in **Study Groups**, which always shows the current time. The **Notification Center** is not active in this release.",
+   "answerEn": "Yes, by email. When the Start Time changes, members who selected **Plan to Attend** are sent an email titled **Live Session rescheduled**, asking them to open the Study Group to see the new time. Members who did not select **Plan to Attend** are not sent it. Emails can be late or filtered, so check the session card in **Study Groups**, which always shows the current time.",
    "questionZh": "我改了自己安排的直播课时间，已经计划参加的人会收到通知吗？",
-   "answerZh": "会，通过邮件。开始时间改动后，选择了**计划参加**的成员会收到标题为“直播课时间已更改”的邮件，提示他们打开学习小组查看新时间。没有选择**计划参加**的成员不会收到。邮件可能延迟或被拦截，所以请以**学习小组**中直播课卡片显示的时间为准，它始终是当前时间。**通知中心**在当前版本中尚未启用。",
+   "answerZh": "会，通过邮件。开始时间改动后，选择了**计划参加**的成员会收到标题为“直播课时间已更改”的邮件，提示他们打开学习小组查看新时间。没有选择**计划参加**的成员不会收到。邮件可能延迟或被拦截，所以请以**学习小组**中直播课卡片显示的时间为准，它始终是当前时间。",
    "keywords": [
     "people",
     "planned",
@@ -11748,9 +11748,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Can I start a free trial on the Everything or Category plan?",
-   "answerEn": "No. **Start three-day trial** only appears under **Choose a plan** on a course page. The **Everything** and **Category** cards only have a purchase button.",
+   "answerEn": "Yes, where a trial is available for the plan. **Start three-day trial** is offered with a plan that has one; if it is greyed out, no trial is available for that plan right now. The trial unlocks exactly what the plan covers: all published courses for **Everything**, or the category you choose for **Category**.",
    "questionZh": "“全部课程”或“分类课程”方案能开始免费试用吗？",
-   "answerZh": "不能。**开始三天试用**只会出现在课程页面的**选择计划**下。**全部课程**和**分类课程**卡片只有购买按钮。",
+   "answerZh": "可以，前提是该方案有可用的试用。有试用的方案会提供**开始三天试用**；如果按钮是灰色的，说明该方案暂时无法试用。试用开放的内容与方案范围一致：**全部课程**是所有已发布的课程，**分类课程**是你选择的那个分类。",
    "keywords": [
     "start",
     "free",
@@ -12043,9 +12043,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "My subscription card says Payment failed and I can't see Cancel auto-renewal. What now?",
-   "answerEn": "A card that shows **Payment failed** only has **Pay now**. **Cancel auto-renewal** appears on cards that are **Active**. Select **Pay now** to settle it. If you want to stop the plan instead, select **Contact support** in the **Contact us** box in **My Learning** and tell us what you need.",
+   "answerEn": "A card that shows **Payment failed** has **Update payment method** and **Pay now**. **Cancel auto-renewal** appears on cards that are **Active**. Select **Pay now** to settle it, or select **Update payment method** first if your card needs changing. If you want to stop the plan instead, select **Contact support** in the **Contact us** box in **My Learning** and tell us what you need.",
    "questionZh": "我的订阅卡片显示“付款失败”，找不到“取消自动续订”，怎么办？",
-   "answerZh": "显示**付款失败**的卡片只有**立即支付**按钮，**取消自动续订**只出现在**订阅有效**的卡片上。请点击**立即支付**完成付款。如果你想停止这个方案，请在**我的学习**的**联系我们**区域点击**联系客服**，告诉我们你的需求。",
+   "answerZh": "显示**付款失败**的卡片有**更新支付方式**和**立即支付**两个按钮，**取消自动续订**只出现在**订阅有效**的卡片上。请点击**立即支付**完成付款；如需更换银行卡，请先点击**更新支付方式**。如果你想停止这个方案，请在**我的学习**的**联系我们**区域点击**联系客服**，告诉我们你的需求。",
    "keywords": [
     "card",
     "says",
@@ -12161,9 +12161,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Is there a confirmation window when I turn subscription auto-renewal back on?",
-   "answerEn": "No. Select **Turn on auto-renewal** and the card goes back to **Active** with **Cancel auto-renewal** straight away.",
+   "answerEn": "Yes. Select **Turn on auto-renewal** and a confirmation window opens. It shows the next payment date, the renewal price and the renewal terms. Confirm it and the card goes back to **Active** with **Cancel auto-renewal** straight away. Turning auto-renewal back on does not charge you at that moment: the plan renews on its original schedule at its original renewal price.",
    "questionZh": "重新开启订阅自动续费时会有确认窗口吗？",
-   "answerZh": "没有确认窗口。点击**开启自动续费**后，卡片会立即恢复为**订阅有效**，并显示**取消自动续订**。",
+   "answerZh": "有。点击**开启自动续费**后会打开确认窗口，窗口中会显示下次付款日期、续订价格和续订条款。确认后，卡片会立即恢复为**订阅有效**，并显示**取消自动续订**。重新开启自动续订不会在当时扣款：方案仍按原定日程、以原续订价格续订。",
    "keywords": [
     "confirmation",
     "window",
@@ -13062,9 +13062,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "How do I update my card details?",
-   "answerEn": "**My Subscription** has no card section, so you cannot change card details there.\n1. If a renewal failed, select **Pay now** on the plan card. It opens a secure payment page for that plan.\n2. For anything else about your card, I can't say what support can change, but you can ask: select **Contact support** in the **Contact us** box (on a phone, use **Help Center / FAQ**, then **Contact Support**). Do not include card details.",
+   "answerEn": "Use **Update payment method** on the plan card in **My Subscription**. It opens a secure payment page hosted by Stripe, and you come back to **My Subscription** afterwards.\n1. Open **My Learning** > **My Subscription** and find the plan card.\n2. Select **Update payment method** and follow the steps on the Stripe page. Updating the payment method does not by itself mean the renewal has gone through, so check the plan card afterwards.\n3. If a renewal failed, you can also select **Pay now** on the plan card to pay for that plan on a secure payment page.\n4. For anything else about your card, you can ask support: select **Contact support** in the **Contact us** box (on a phone, use **Help Center / FAQ**, then **Contact Support**). Do not include card details.",
    "questionZh": "怎么更新银行卡信息？",
-   "answerZh": "**我的订阅**中没有银行卡信息区域，因此无法在那里修改。\n1. 如果是续订付款失败，点击方案卡片上的**立即支付**，会打开该方案的安全付款页面。\n2. 其他与银行卡有关的问题，客服能否处理我无法确定，但你可以咨询：在**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**）。请不要填写银行卡信息。",
+   "answerZh": "请在**我的订阅**的方案卡片上点击**更新支付方式**，会打开由 Stripe 托管的安全付款页面，完成后你会回到**我的订阅**。\n1. 打开**我的学习** > **我的订阅**，找到对应的方案卡片。\n2. 点击**更新支付方式**，按 Stripe 页面上的提示操作。更新付款方式本身并不代表续订已经成功，请稍后再查看方案卡片。\n3. 如果是续订付款失败，也可以在方案卡片上点击**立即支付**，在安全付款页面为该方案付款。\n4. 其他与银行卡有关的问题，可以咨询客服：在**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**）。请不要填写银行卡信息。",
    "keywords": [
     "update",
     "card",
@@ -13124,9 +13124,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Will a failed subscription payment be tried again automatically?",
-   "answerEn": "The product does not say when or whether another charge will be tried. Please check before you pay again.\n1. Open **My Learning** > **My Subscription** and read the plan card and **Payment history**.\n2. If you are not sure what to do, contact support with **Payments & Subscriptions** as the **Enquiry Type**. Do not include card details.",
+   "answerEn": "No. A failed renewal payment is not tried again automatically. The plan stays active for a short recovery period, and you can pay it yourself during that time. Please check before you pay again.\n1. Open **My Learning** > **My Subscription** and read the plan card and **Payment history**.\n2. If the card shows **Payment failed**, select **Pay now**. If your card needs changing, select **Update payment method** first.\n3. If you are not sure what to do, contact support with **Payments & Subscriptions** as the **Enquiry Type**. Do not include card details.",
    "questionZh": "订阅付款失败后，系统会自动重新扣款吗？",
-   "answerZh": "产品没有说明何时或是否会再次尝试扣款。再次付款前，请先检查。\n1. 打开**我的学习** > **我的订阅**，查看方案卡片和**付款记录**。\n2. 如果不确定怎么办，请在**问题类型**中选择**支付与订阅**联系客服。请不要填写银行卡信息。",
+   "answerZh": "不会。续订付款失败后，系统不会自动再次扣款。方案会在较短的恢复期内保持有效，你可以在此期间自行付款。再次付款前，请先检查。\n1. 打开**我的学习** > **我的订阅**，查看方案卡片和**付款记录**。\n2. 如果卡片显示**付款失败**，请点击**立即支付**；如需更换银行卡，请先点击**更新支付方式**。\n3. 如果不确定怎么办，请在**问题类型**中选择**支付与订阅**联系客服。请不要填写银行卡信息。",
    "keywords": [
     "payment",
     "tried",
@@ -13305,9 +13305,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "I was charged by mistake. Can I get my money back?",
-   "answerEn": "Purchases can't be refunded (except where required by law), under the **No refunds** rule. If you think you were charged by mistake, the support team reviews it. The product does not say what they will decide or how long it takes.\n1. Select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box (on a phone, use **Help Center / FAQ**, then **Contact Support**).\n2. Choose **Payments & Subscriptions** as the **Enquiry Type**, describe what happened and select **Submit Enquiry**. Do not include card details.\n3. The support team replies by email.",
+   "answerEn": "Purchases can't be refunded (except where required by law), under the **No refunds** rule. If you think you were charged by mistake, the support team reviews it. Our team can only make a refund in an exceptional case, such as a duplicate charge or a system error, and there is no refund button for you. If a refund is made, access to the plan ends straight away. The product does not say how long this takes.\n1. Select your avatar at the top right, open **My Learning** and select **Contact support** in the **Contact us** box (on a phone, use **Help Center / FAQ**, then **Contact Support**).\n2. Choose **Payments & Subscriptions** as the **Enquiry Type**, describe what happened and select **Submit Enquiry**. Do not include card details.\n3. The support team replies by email.",
    "questionZh": "我被误扣款了，能把钱要回来吗？",
-   "answerZh": "根据**不支持退款**的规定，购买后不予退款（法律另有规定的除外）。如果你认为是误扣款，客服团队会查看。产品没有说明处理结果，也没有说明需要多久。\n1. 点击右上角头像，打开**我的学习**，在**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**）。\n2. 在**问题类型**中选择**支付与订阅**，说明发生了什么，然后点击**提交问题**。请不要填写银行卡信息。\n3. 客服团队会通过邮件回复你。",
+   "answerZh": "根据**不支持退款**的规定，购买后不予退款（法律另有规定的除外）。如果你认为是误扣款，客服团队会查看。只有在重复扣款或系统错误等特殊情况下，才会由我们的团队办理退款，用户自己没有退款入口。若办理了退款，该方案的访问权限会立即结束。产品没有说明需要多久。\n1. 点击右上角头像，打开**我的学习**，在**联系我们**区域点击**联系客服**（使用手机时，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**）。\n2. 在**问题类型**中选择**支付与订阅**，说明发生了什么，然后点击**提交问题**。请不要填写银行卡信息。\n3. 客服团队会通过邮件回复你。",
    "keywords": [
     "charged",
     "mistake",
@@ -13338,9 +13338,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "I was charged by mistake. Will support definitely refund me?",
-   "answerEn": "I can't promise that. Only the support team can look at the details of your payment, and the product does not say what the outcome will be. Please contact support with the details, as described above.",
+   "answerEn": "I can't promise that. Subscription payments are non-refundable, and our team can only make a refund in an exceptional case, such as a duplicate charge or a system error, after checking the details of your payment. Please contact support with the details, as described above.",
    "questionZh": "我被误扣款了，客服一定会退款给我吗？",
-   "answerZh": "我不能保证。只有客服团队能查看付款的具体情况，产品也没有说明结果。请按上面的方法联系客服，并说明详细情况。",
+   "answerZh": "我不能保证。订阅付款不予退款，只有在重复扣款或系统错误等特殊情况下，我们的团队才会在核实你的付款详情后办理退款。请按上面的方法联系客服，并说明详细情况。",
    "keywords": [
     "support",
     "definitely",
@@ -13392,9 +13392,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Does Learning Guide save my card? Can I remove it?",
-   "answerEn": "Learning Guide does not store your full card number or security code. There is no saved-card section in **My Subscription**, so you cannot remove a card there.\n1. On **Confirm your subscription** you authorise Stripe to charge your payment method each new period until you cancel. Each period is as long as your plan: **6 Months** or **12 Months**. To stop future charges, select **Cancel auto-renewal** on the plan card.\n2. For other questions about your card, I can't say what support can do, but you can ask through **Contact support** in the **Contact us** box. Do not include card details.",
+   "answerEn": "Learning Guide does not store your full card number or security code. **My Subscription** has no list of saved cards. To change the card used for your plan, select **Update payment method** on the plan card in **My Subscription**; it opens a secure Stripe page.\n1. On **Confirm your subscription** you authorise Stripe to charge your payment method each new period until you cancel. Each period is as long as your plan: **6 Months** or **12 Months**. To stop future charges, select **Cancel auto-renewal** on the plan card.\n2. For other questions about your card, I can't say what support can do, but you can ask through **Contact support** in the **Contact us** box. Do not include card details.",
    "questionZh": "Learning Guide 会保存我的银行卡吗？可以删除吗？",
-   "answerZh": "Learning Guide 不会保存你的完整卡号或安全码（CVC）。**我的订阅**中没有已保存银行卡的管理区域，因此无法在那里删除。\n1. 在**确认订阅**页面，你授权了 Stripe 在每个新周期扣款，直到你取消。每个周期与你所选方案的时长相同（**6 个月**或**12 个月**）。想停止以后的扣款，请在方案卡片上点击**取消自动续订**。\n2. 关于银行卡的其他问题，客服能做什么我无法确定，但你可以通过**联系我们**区域的**联系客服**咨询。请不要填写银行卡信息。",
+   "answerZh": "Learning Guide 不会保存你的完整卡号或安全码（CVC）。**我的订阅**中没有已保存银行卡的列表。如需更换方案所用的银行卡，请在**我的订阅**的方案卡片上点击**更新支付方式**，会打开 Stripe 的安全页面。\n1. 在**确认订阅**页面，你授权了 Stripe 在每个新周期扣款，直到你取消。每个周期与你所选方案的时长相同（**6 个月**或**12 个月**）。想停止以后的扣款，请在方案卡片上点击**取消自动续订**。\n2. 关于银行卡的其他问题，客服能做什么我无法确定，但你可以通过**联系我们**区域的**联系客服**咨询。请不要填写银行卡信息。",
    "keywords": [
     "learning",
     "guide",
@@ -13450,9 +13450,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Do my AI Tutor points expire?",
-   "answerEn": "The product does not say whether points expire. **My Subscription** shows no points balance and no expiry date for points yet.\n1. To see the points for a plan, open **Subscription** and read the **AI Tutor points** line on the plan card.\n2. If you need to know how long your points last, select your avatar at the top right, open **My Learning** and select **Contact support**.",
+   "answerEn": "AI Tutor points stay valid while the subscription they came with is active. They are issued once in each subscription period, on the day you pay, and they end when the plan reaches its **Valid until** date.\n1. To see the points for a plan, open **Subscription** and read the **AI Tutor points** line on the plan card.\n2. To see the points of your own plan, open **My Learning** > **My Subscription**, where they are shown with the plan's validity.",
    "questionZh": "AI 导师积分会过期吗？",
-   "answerZh": "产品没有说明积分是否会过期。**我的订阅**页面目前没有显示积分余额，也没有积分的到期日期。\n1. 如需查看某个方案的积分，请打开**订阅**页面，阅读方案卡片上的**AI Tutor 积分**一行。\n2. 如果需要确认积分的有效期，请点击右上角的头像，打开**我的学习**，点击**联系客服**。",
+   "answerZh": "AI Tutor 积分在所属订阅有效期间可用。积分每个订阅周期发放一次，在付款当天发放；方案到达**有效期至**日期时，积分随之结束。\n1. 如需查看某个方案的积分，请打开**订阅**页面，阅读方案卡片上的**AI Tutor 积分**一行。\n2. 如需查看自己方案的积分，请打开**我的学习** > **我的订阅**，积分会和方案的有效期一起显示。",
    "keywords": [
     "tutor",
     "points",
@@ -14640,9 +14640,9 @@
    "category": "other",
    "popular": false,
    "questionEn": "Why is my Notification Center empty?",
-   "answerEn": "The Notification Center is not switched on at the moment. The page says **Notifications are not active in the current test release.**",
+   "answerEn": "The **Notification Center** shows notifications about your subscription, payments and trial, and it stays empty until one has been sent to you. It does not include product or business announcements or marketing messages.",
    "questionZh": "我的通知中心为什么是空的？",
-   "answerZh": "通知中心目前还没有启用。页面会显示“当前测试版本暂未启用通知数据。”",
+   "answerZh": "**通知中心**会显示与你的订阅、付款和试用相关的通知；在收到第一条通知之前，列表是空的。其中不包含产品或业务公告，也不包含营销消息。",
    "keywords": [
     "notification",
     "center",
@@ -16351,9 +16351,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "Which browsers does Learning Guide support?",
-   "answerEn": "Learning Guide does not publish a browser list, so please use the latest version of your browser, or try another up-to-date one.\n1. Open your browser's menu and check for an update.\n2. Restart the browser, then open Learning Guide again.\n3. If a page still looks wrong, select **Help Center / FAQ** in the page footer, then **Contact Support**, and tell us your browser and version.",
+   "answerEn": "Learning Guide supports the current and previous major versions of Chrome, Safari and Edge. If you use a different browser or an older version, please update it or switch to one of these.\n1. Open your browser's menu and check for an update.\n2. Restart the browser, then open Learning Guide again.\n3. If a page still looks wrong, select **Help Center / FAQ** in the page footer, then **Contact Support**, and tell us your browser and version.",
    "questionZh": "Learning Guide 支持哪些浏览器？",
-   "answerZh": "Learning Guide 没有公布支持的浏览器列表，请使用浏览器的最新版本，或换一个最新版的浏览器。\n1. 打开浏览器菜单，检查是否有更新。\n2. 重新启动浏览器，再打开 Learning Guide。\n3. 页面仍然不对，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**，告诉我们你的浏览器和版本。",
+   "answerZh": "Learning Guide 支持 Chrome、Safari 和 Edge 的当前主要版本和上一个主要版本。如果你使用其他浏览器或更早的版本，请更新浏览器，或换用上述浏览器之一。\n1. 打开浏览器菜单，检查是否有更新。\n2. 重新启动浏览器，再打开 Learning Guide。\n3. 页面仍然不对，请点击页面底部的**帮助中心 / 常见问题**，再点击**联系客服**，告诉我们你的浏览器和版本。",
    "keywords": [
     "browsers",
     "learning",
@@ -17500,9 +17500,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "My profile shows only a letter in a circle, and the top-right circle is a letter too. Is that the same picture?",
-   "answerEn": "Yes. The top-right circle shows the same letter, from your **Name**. It does not show a photo, because no photo can be uploaded at the moment.",
+   "answerEn": "Yes. The top-right circle shows the same letter, from your **Name**, until you upload a profile image under **Profile** in **Personal settings**.",
    "questionZh": "我的个人资料里只有一个字母圆圈，右上角的圆圈也是一个字母，是同一个头像吗？",
-   "answerZh": "是的。右上角的圆圈同样显示你**姓名**的第一个字，目前无法显示照片。",
+   "answerZh": "是的。右上角的圆圈同样显示你**姓名**的第一个字，直到你在**个人设置**的**个人资料**下上传头像图片。",
    "keywords": [
     "circle",
     "top",
@@ -18370,9 +18370,9 @@
    "category": "courses_learning",
    "popular": false,
    "questionEn": "If I cancel a Live Session I scheduled, do my group members get a message?",
-   "answerEn": "The **Cancel this Live Session?** window only says the session will be removed from the Study Group. It is removed from the **Live Sessions** list for everyone, and their **Plan to Attend** for it ends with it. The product also sends a notification to members who had selected **Plan to Attend**, but the **Notification Center** is not showing notifications at the moment, so if it matters, tell your members yourself.",
+   "answerEn": "The **Cancel this Live Session?** window only says the session will be removed from the Study Group. It is removed from the **Live Sessions** list for everyone, and their **Plan to Attend** for it ends with it. The product also sends a notification to members who had selected **Plan to Attend**.",
    "questionZh": "我取消自己安排的一节直播课后，小组成员会收到消息吗？",
-   "answerZh": "**取消这节直播课？**窗口只写明这节直播课会从学习小组中移除。它会从所有人的**直播课**列表中消失，之前的**计划参加**也随之失效。产品还会给点过**计划参加**的成员发一条通知，但**通知中心**目前还没有显示通知，所以如果这件事重要，请你自己告诉成员。",
+   "answerZh": "**取消这节直播课？**窗口只写明这节直播课会从学习小组中移除。它会从所有人的**直播课**列表中消失，之前的**计划参加**也随之失效。产品还会给点过**计划参加**的成员发一条通知。",
    "keywords": [
     "members",
     "message",
@@ -19211,9 +19211,9 @@
    "category": "courses_learning",
    "popular": false,
    "questionEn": "The Host moved my Live Session to a new time. How will I know the new time? Will the Host tell me?",
-   "answerEn": "The session card always shows the current time, so check it in **Study Groups** before the start. If you chose **Plan to Attend**, the product also sends an email titled **Live Session rescheduled** to your account email when the Host changes the time, but emails can be late or filtered, so do not rely on it alone. The **Notification Center** is not active in this release.",
+   "answerEn": "The session card always shows the current time, so check it in **Study Groups** before the start. If you chose **Plan to Attend**, the product also sends an email titled **Live Session rescheduled** to your account email when the Host changes the time, but emails can be late or filtered, so do not rely on it alone.",
    "questionZh": "主持人把我的直播课改到了新时间，我怎么知道新时间？主持人会通知我吗？",
-   "answerZh": "直播课卡片始终显示当前时间，请在开始前到**学习小组**中查看。如果你点击了**计划参加**，主持人修改时间后，产品还会向你的账号邮箱发送标题为“直播课时间已更改”的邮件，但邮件可能延迟或被拦截，请不要只依赖它。**通知中心**在当前版本中尚未启用。",
+   "answerZh": "直播课卡片始终显示当前时间，请在开始前到**学习小组**中查看。如果你点击了**计划参加**，主持人修改时间后，产品还会向你的账号邮箱发送标题为“直播课时间已更改”的邮件，但邮件可能延迟或被拦截，请不要只依赖它。",
    "keywords": [
     "know",
     "new",
@@ -19344,9 +19344,9 @@
    "category": "courses_learning",
    "popular": false,
    "questionEn": "Will I be told if the Host cancels a Live Session?",
-   "answerEn": "A cancelled Live Session is simply removed from the **Live Sessions** list. The product does not email about a cancelled session, and the **Notification Center** is not active in this release, so check **Study Groups** to see what is still on. If you were waiting in the session window, it closes and says **This Live Session has been cancelled.**",
+   "answerEn": "A cancelled Live Session is removed from the **Live Sessions** list. Members who had selected **Plan to Attend** are sent a notification, but the product does not email about a cancelled session, so check **Study Groups** to see what is still on. If you were waiting in the session window, it closes and says **This Live Session has been cancelled.**",
    "questionZh": "主持人取消直播课，我会收到通知吗？",
-   "answerZh": "被取消的直播课会直接从**直播课**列表中移除。产品不会就取消的直播课发邮件，**通知中心**在当前版本中也尚未启用，所以请到**学习小组**中确认哪些直播课还在。如果你当时正在等待窗口里，窗口会关闭并提示“这节直播课已被取消。”",
+   "answerZh": "被取消的直播课会从**直播课**列表中移除。点过**计划参加**的成员会收到一条通知，但产品不会就取消的直播课发邮件，所以请到**学习小组**中确认哪些直播课还在。如果你当时正在等待窗口里，窗口会关闭并提示“这节直播课已被取消。”",
    "keywords": [
     "told",
     "host",
@@ -19753,9 +19753,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Is there a student or group discount on plans?",
-   "answerEn": "I could not find one on **Subscription** or **Confirm your subscription**. The only saving shown is the **Save** tag on the **Everything** card, which compares it with buying every category separately. When a promotion code is offered, you enter it on the Stripe payment page after **Continue**.",
+   "answerEn": "I could not find one on **Subscription** or **Confirm your subscription**. The savings shown are the **Save** tag on the **Everything** card, which compares it with buying every category separately, and a multi-course offer: when six course-only plans with the same term are bought in one order and no other promotion applies, the lowest-priced course is free. The free course still gets full access, and the offer is not repeated at automatic renewal. When a promotion code is offered, you enter it on the Stripe payment page after **Continue**.",
    "questionZh": "方案有学生或团体折扣吗？",
-   "answerZh": "在**订阅**和**确认订阅**页面上我没有找到。页面上唯一显示的节省，是**全部课程**卡片上的**节省**标签，它对比的是分别购买每个分类的价格。如果有优惠码活动，请在点击**继续**后打开的 Stripe 付款页面输入。",
+   "answerZh": "在**订阅**和**确认订阅**页面上我没有找到。页面上显示的优惠有两种：**全部课程**卡片上的**节省**标签，对比的是分别购买每个分类的价格；以及多门课程优惠：在同一订单中购买六门时长相同的单课方案、且没有叠加其他优惠时，价格最低的一门课免费。免费的那门课同样可以完整学习，该优惠不会在自动续订时重复。如果有优惠码活动，请在点击**继续**后打开的 Stripe 付款页面输入。",
    "keywords": [
     "student",
     "group",
@@ -19810,9 +19810,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Do course-only plans come with AI Tutor points too?",
-   "answerEn": "The list under **Choose a plan** shows only each plan's name and price. Once you choose one and select **Continue to purchase**, **Confirm your subscription** shows the AI Tutor points for that plan under **Selected Plan**, so check it there before you pay.",
+   "answerEn": "Yes. Course plans come with AI Tutor points too. The list under **Choose a plan** shows each plan's AI Tutor points next to its name and price. Once you choose one and select **Continue to purchase**, **Confirm your subscription** shows the AI Tutor points for that plan again under **Selected Plan**, so you can check them there before you pay.",
    "questionZh": "仅限本课程的方案也有 AI Tutor 积分吗？",
-   "answerZh": "**选择计划**下的列表只显示每个方案的名称和价格。选好方案并点击**继续购买**后，**确认订阅**页面会在**所选方案**下显示该方案的 AI 点数，请在付款前在那里核对。",
+   "answerZh": "有。仅限本课程的方案也附带 AI Tutor 积分。**选择计划**下的列表会在每个方案的名称和价格旁显示该方案的 AI Tutor 积分。选好方案并点击**继续购买**后，**确认订阅**页面会在**所选方案**下再次显示该方案的 AI 点数，请在付款前在那里核对。",
    "keywords": [
     "course-only",
     "plans",
@@ -20207,9 +20207,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Do my AI Tutor points expire?",
-   "answerEn": "The product does not say. The **Subscription** page and **Confirm your subscription** show how many AI Tutor points each plan comes with, but **My Subscription** shows no points balance and no expiry date. If you need to know, select your avatar at the top right, open **My Learning** and select **Contact support**.",
+   "answerEn": "Points stay valid while the subscription they came with is active, and they end when the plan reaches its **Valid until** date. The **Subscription** page and **Confirm your subscription** show how many AI Tutor points each plan comes with, and **My Subscription** shows the points of your own plan together with its validity.",
    "questionZh": "AI Tutor 积分会过期吗？",
-   "answerZh": "产品没有说明。**订阅**页面和**确认订阅**页面会显示每个方案附带多少 AI Tutor 积分，但**我的订阅**里没有积分余额，也没有到期日期。如果需要确认，请点击右上角的头像，打开**我的学习**，点击**联系客服**。",
+   "answerZh": "积分在所属订阅有效期间可用，并在方案到达**有效期至**日期时结束。**订阅**页面和**确认订阅**页面会显示每个方案附带多少 AI Tutor 积分，**我的订阅**会连同有效期一起显示你自己方案的积分。",
    "keywords": [
     "tutor",
     "points",
@@ -20236,9 +20236,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "If I cancel my subscription, do I keep my AI Tutor points?",
-   "answerEn": "The product does not say what happens to points when you cancel. What it does say is that your access stays active until **Valid until** after you cancel auto-renewal. For anything about points, select your avatar at the top right, open **My Learning** and select **Contact support**.",
+   "answerEn": "Yes, until your plan ends. Cancelling auto-renewal does not change your current validity or entitlements, so your access and your AI Tutor points stay active until **Valid until**. After that date the plan ends and its points end with it. This applies to paid plans. Cancelling a free trial ends its course access straight away.",
    "questionZh": "如果我取消订阅，AI Tutor 积分还在吗？",
-   "answerZh": "产品没有说明取消后积分会怎样。能确定的是：取消自动续订后，你的访问权限会保持到**有效期至**。关于积分的问题，请点击右上角的头像，打开**我的学习**，点击**联系客服**。",
+   "answerZh": "保留，直到方案结束。取消自动续订不会改变你当前的有效期和权益，所以你的访问权限和 AI Tutor 积分都会保持到**有效期至**。过了这个日期，方案结束，积分也随之结束。以上适用于付费方案；如果取消的是免费试用，课程访问会立即结束。",
    "keywords": [
     "cancel",
     "keep",
@@ -20460,9 +20460,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "What happens to my courses and progress after my plan's Valid until date?",
-   "answerEn": "1. After that date the plan moves to **Past subscriptions** and shows an **Expired on** date, with no buttons.\n2. Your progress and your place in each course are kept. In **My Learning** the course card shows **View plans** instead of **Resume Learning**.\n3. To learn again, choose a plan on **Subscription**. Once you have access again, you continue from where you stopped.",
+   "answerEn": "1. After that date the plan moves to **Past subscriptions** and shows an **Expired on** date and a **Subscribe again** button.\n2. Your progress and your place in each course are kept. In **My Learning** the course card shows **View plans** instead of **Resume Learning**.\n3. To learn again, select **Subscribe again** on the plan (it opens Stripe's hosted checkout page), or choose a plan on **Subscription**. Once you have access again, you continue from where you stopped.",
    "questionZh": "方案的有效期至那天之后，我的课程和学习进度会怎么样？",
-   "answerZh": "1. 到那个日期后，方案会移到**历史订阅**，显示**过期日期**，卡片上没有按钮。\n2. 你的学习进度和每门课学到的位置都会保留。在**我的学习**里，课程卡片上的按钮会从**继续学习**变成**查看订阅方案**。\n3. 想继续学习，请在**订阅**页面重新选择方案。重新获得访问权限后，会从你上次停下的地方继续。",
+   "answerZh": "1. 到那个日期后，方案会移到**历史订阅**，显示**过期日期**和**重新订阅**按钮。\n2. 你的学习进度和每门课学到的位置都会保留。在**我的学习**里，课程卡片上的按钮会从**继续学习**变成**查看订阅方案**。\n3. 想继续学习，请点击方案上的**重新订阅**（会打开 Stripe 托管的结账页面），或在**订阅**页面重新选择方案。重新获得访问权限后，会从你上次停下的地方继续。",
    "keywords": [
     "happens",
     "courses",
@@ -20489,9 +20489,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "What should I write to support about the free trial I cancelled by mistake?",
-   "answerEn": "1. Choose **Payments & Subscriptions** as the **Enquiry Type**.\n2. In **Subject** and **Message**, say which course and plan you chose, the date you cancelled, and that it was a mistake.\n3. Select **Submit Enquiry**. Do not include card details. Our support team reads it and replies by email.",
+   "answerEn": "1. If the original trial end date has not passed, you can resume the trial yourself: open **My Learning** > **My Subscription** and select **Turn on auto-renewal** on the cancelled trial. Your access to the full course comes back straight away, and the trial end date does not change.\n2. If you still need help from support, choose **Payments & Subscriptions** as the **Enquiry Type**.\n3. In **Subject** and **Message**, say which course and plan you chose, the date you cancelled, and that it was a mistake.\n4. Select **Submit Enquiry**. Do not include card details. Our support team reads it and replies by email.",
    "questionZh": "我误取消了免费试用，应该怎么向客服说明？",
-   "answerZh": "1. 在**问题类型**中选择**支付与订阅**。\n2. 在**主题**和**详细描述**中写明你选择的课程和方案、取消的日期，以及这是误操作。\n3. 点击**提交问题**。请不要填写银行卡信息。客服团队会查看并通过邮件回复你。",
+   "answerZh": "1. 如果还没到原来的试用结束日期，你可以自己恢复试用：打开**我的学习** > **我的订阅**，在已取消的试用上点击**开启自动续费**。你对完整课程的访问会立即恢复，试用结束日期不变。\n2. 如果仍需要客服协助，请在**问题类型**中选择**支付与订阅**。\n3. 在**主题**和**详细描述**中写明你选择的课程和方案、取消的日期，以及这是误操作。\n4. 点击**提交问题**。请不要填写银行卡信息。客服团队会查看并通过邮件回复你。",
    "keywords": [
     "write",
     "support",
@@ -20520,9 +20520,9 @@
    "category": "payments_subscriptions",
    "popular": false,
    "questionEn": "Can the support team restore my cancelled free trial?",
-   "answerEn": "My Subscription has no button to restore a cancelled trial, and the product does not say whether our support team can do it. Send an enquiry from **Contact Support** and describe what happened. The team decides what happens next.",
+   "answerEn": "You can restore it yourself, without contacting support, as long as the trial's original period has not ended. In **My Learning** > **My Subscription**, find the cancelled trial and select **Turn on auto-renewal**. Your access comes back straight away and the end date is not extended. After the original end date the trial can't be restored, and you would need to subscribe to a plan. If something goes wrong, send an enquiry from **Contact Support** and describe what happened.",
    "questionZh": "客服能帮我恢复已取消的免费试用吗？",
-   "answerZh": "**我的订阅**中没有恢复已取消试用的按钮，产品也没有说明客服是否可以恢复。请在**联系客服**中提交问题，说明情况，由客服团队决定如何处理。",
+   "answerZh": "只要试用的原定期限还没有结束，你可以自己恢复，不需要联系客服。请在**我的学习** > **我的订阅**中找到已取消的试用，点击**开启自动续费**。访问权限会立即恢复，结束日期不会延长。超过原定结束日期后，试用无法再恢复，需要订阅方案。如果遇到问题，请在**联系客服**中提交问题，说明情况。",
    "keywords": [
     "support",
     "team",
@@ -21494,9 +21494,9 @@
    "category": "account_technical",
    "popular": false,
    "questionEn": "Can I turn on two-factor authentication (2FA) for my account?",
-   "answerEn": "No. Learning Guide has no two-factor or two-step verification. You sign in with your email and password, or with **Google** or **WeChat**, and **Personal settings** has no security switch to turn on.\n1. To set a new password, sign out, then on the sign-in page enter your email, select **Continue**, then select **Forgot password?** and **Send reset email**. Resetting the password also ends the sign-ins that were already active on other devices.\n2. To check whether Google is linked to your account, open **Personal settings** and look under **Sign-in methods**.",
+   "answerEn": "No. Learning Guide has no two-factor or two-step verification. You sign in with your email and password, or with **Google** or **WeChat**, and **Personal settings** has no security switch to turn on.\n1. To change your password, open **Personal settings**, enter your **Current password**, your new password and **Confirm new password**, then save the new password. If you do not remember your current password, sign out, then on the sign-in page enter your email, select **Continue**, then select **Forgot password?** and **Send reset email**. Resetting the password also ends the sign-ins that were already active on other devices.\n2. To check whether Google is linked to your account, open **Personal settings** and look under **Sign-in methods**.",
    "questionZh": "可以为我的账号开启两步验证（2FA）吗？",
-   "answerZh": "不可以。Learning Guide 没有两步验证功能。你使用邮箱和密码，或者 **Google**、**微信**登录，**个人设置**里也没有可以开启的安全开关。\n1. 如需设置新密码，请先退出登录，然后在登录页输入邮箱并点击**继续**，再点击**忘记密码？**和**发送重置邮件**。重置密码后，其他设备上已有的登录也会结束。\n2. 想查看账号是否已绑定 Google，请打开**个人设置**，在**登录方式**下查看。",
+   "answerZh": "不可以。Learning Guide 没有两步验证功能。你使用邮箱和密码，或者 **Google**、**微信**登录，**个人设置**里也没有可以开启的安全开关。\n1. 如需修改密码，请打开**个人设置**，输入**当前密码**、新密码和**确认新密码**，然后保存新密码。如果不记得当前密码，请先退出登录，然后在登录页输入邮箱并点击**继续**，再点击**忘记密码？**和**发送重置邮件**。重置密码后，其他设备上已有的登录也会结束。\n2. 想查看账号是否已绑定 Google，请打开**个人设置**，在**登录方式**下查看。",
    "keywords": [
     "2fa",
     "two-factor",
