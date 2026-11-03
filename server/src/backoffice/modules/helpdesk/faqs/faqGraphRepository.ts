@@ -24,7 +24,8 @@ import { toFaq, type SqlClient, type SqlDb } from './faqRepository';
  * - 边的每次写入都先拿同一把事务级 advisory 锁（helpdesk_faq_graph），所以「成环检查（递归 CTE）+ 插入」
  *   与另一个并发的建边不会交错：两条互相指向的边不可能同时通过；
  * - 每次建 / 改 / 删边，同一事务里追加一行 helpdesk_faq_edge_revisions（改前 / 改后）；
- * - 问法按 (faq_id, locale, lower(text)) 唯一：同一个再加一次返回已有的那条；
+ * - 问法按 (faq_id, locale, lower(text)) 唯一：同一个再加一次返回已有的那条；加上 / 删掉的同一事务里
+ *   追加一行 helpdesk_faq_phrasing_revisions（Change Log）；
  * - 发布版本：新建时版本号 = 最大 + 1（另一把锁 helpdesk_faq_releases），快照与它的检索行
  *   （helpdesk_faq_release_nodes）同一事务写入；发布 = 同一事务里旧的 published → superseded、
  *   新的 → published（部分唯一索引保证至多一行 published）。
@@ -117,6 +118,30 @@ async function writeEdgeRevision(
       action,
       before === null ? null : JSON.stringify(before),
       after === null ? null : JSON.stringify(after),
+      employeeId,
+    ],
+  );
+}
+
+/** 问法的修订（迁移 20261103000000）：问法表是硬删的，靠它留下谁加了 / 删了哪一条。 */
+async function writePhrasingRevision(
+  client: SqlClient,
+  action: 'create' | 'delete',
+  phrasing: FaqPhrasing,
+  employeeId: string | null,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO helpdesk_faq_phrasing_revisions
+       (id, phrasing_id, faq_id, action, locale, text, source, employee_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      uuidv7(),
+      phrasing.id,
+      phrasing.faqId,
+      action,
+      phrasing.locale,
+      phrasing.text,
+      phrasing.source,
       employeeId,
     ],
   );
@@ -518,7 +543,10 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       return rows.map(toPhrasing);
     },
 
-    /** 加一种问法；同一条 FAQ、同一语言、不分大小写一样的已经有了 → 返回那条（created=false）。 */
+    /**
+     * 加一种问法；同一条 FAQ、同一语言、不分大小写一样的已经有了 → 返回那条（created=false，不留修订）。
+     * 新加的同一事务里追加一行 helpdesk_faq_phrasing_revisions（Change Log）。
+     */
     async insertPhrasing(phrasing: {
       faqId: string;
       locale: PhrasingLocale;
@@ -526,30 +554,40 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       source: PhrasingSource;
       employeeId: string | null;
     }): Promise<{ phrasing: FaqPhrasing; created: boolean }> {
-      const rows = await db.query(
-        `INSERT INTO helpdesk_faq_phrasings (id, faq_id, locale, text, search_text, source, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (faq_id, locale, lower(text)) DO NOTHING
-         RETURNING id, faq_id, locale, text, source, created_by, created_at`,
-        [
-          uuidv7(),
-          phrasing.faqId,
-          phrasing.locale,
-          phrasing.text,
-          phrasingSearchText(phrasing.text),
-          phrasing.source,
-          phrasing.employeeId,
-        ],
-      );
-      if (rows.length > 0)
-        return { phrasing: toPhrasing(rows[0]), created: true };
-      const existing = await db.query(
-        `SELECT id, faq_id, locale, text, source, created_by, created_at
-           FROM helpdesk_faq_phrasings
-          WHERE faq_id = $1 AND locale = $2 AND lower(text) = lower($3)`,
-        [phrasing.faqId, phrasing.locale, phrasing.text],
-      );
-      return { phrasing: toPhrasing(existing[0]), created: false };
+      return db.withTransaction(async (client) => {
+        const inserted = await client.query(
+          `INSERT INTO helpdesk_faq_phrasings (id, faq_id, locale, text, search_text, source, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (faq_id, locale, lower(text)) DO NOTHING
+           RETURNING id, faq_id, locale, text, source, created_by, created_at`,
+          [
+            uuidv7(),
+            phrasing.faqId,
+            phrasing.locale,
+            phrasing.text,
+            phrasingSearchText(phrasing.text),
+            phrasing.source,
+            phrasing.employeeId,
+          ],
+        );
+        if (inserted.rows.length > 0) {
+          const created = toPhrasing(inserted.rows[0]);
+          await writePhrasingRevision(
+            client,
+            'create',
+            created,
+            phrasing.employeeId,
+          );
+          return { phrasing: created, created: true };
+        }
+        const existing = await client.query(
+          `SELECT id, faq_id, locale, text, source, created_by, created_at
+             FROM helpdesk_faq_phrasings
+            WHERE faq_id = $1 AND locale = $2 AND lower(text) = lower($3)`,
+          [phrasing.faqId, phrasing.locale, phrasing.text],
+        );
+        return { phrasing: toPhrasing(existing.rows[0]), created: false };
+      });
     },
 
     async getPhrasing(id: string): Promise<FaqPhrasing | null> {
@@ -561,14 +599,22 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       return rows.length > 0 ? toPhrasing(rows[0]) : null;
     },
 
-    /** 删一种问法；已经没有了 → null（幂等）。 */
-    async deletePhrasing(id: string): Promise<FaqPhrasing | null> {
-      const rows = await db.query(
-        `DELETE FROM helpdesk_faq_phrasings WHERE id = $1
-         RETURNING id, faq_id, locale, text, source, created_by, created_at`,
-        [id],
-      );
-      return rows.length > 0 ? toPhrasing(rows[0]) : null;
+    /** 删一种问法；已经没有了 → null（幂等，不留修订）。删掉的同一事务里追加一行修订（谁删的）。 */
+    async deletePhrasing(
+      id: string,
+      employeeId: string | null,
+    ): Promise<FaqPhrasing | null> {
+      return db.withTransaction(async (client) => {
+        const { rows } = await client.query(
+          `DELETE FROM helpdesk_faq_phrasings WHERE id = $1
+           RETURNING id, faq_id, locale, text, source, created_by, created_at`,
+          [id],
+        );
+        if (rows.length === 0) return null;
+        const deleted = toPhrasing(rows[0]);
+        await writePhrasingRevision(client, 'delete', deleted, employeeId);
+        return deleted;
+      });
     },
 
     // ----------------------------------------------------------------- 发布版本

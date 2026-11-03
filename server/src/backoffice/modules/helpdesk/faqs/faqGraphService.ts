@@ -395,11 +395,13 @@ export function createFaqGraphService(options: FaqGraphServiceOptions = {}) {
     },
 
     async deletePhrasing(
-      _actor: FaqActor,
+      actor: FaqActor,
       rawPhrasingId: string,
     ): Promise<{ deleted: boolean }> {
       const id = uuid(rawPhrasingId, 'phrasing id');
-      return { deleted: (await graph.deletePhrasing(id)) !== null };
+      return {
+        deleted: (await graph.deletePhrasing(id, actor.employeeId)) !== null,
+      };
     },
 
     /**

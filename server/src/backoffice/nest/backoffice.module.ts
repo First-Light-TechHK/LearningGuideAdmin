@@ -18,6 +18,7 @@ import {
 
 import { closePool } from '../lib/db';
 import { createPgFaqGraphRepository } from '../modules/helpdesk/faqs/faqGraphRepository';
+import { createFaqChangeLogService } from '../modules/helpdesk/faqs/faqChangeLogService';
 import { createFaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
 import { HELPDESK_FAQ_RELEASE_SOURCE } from '../modules/helpdesk/faqs/faqRelease';
 import {
@@ -50,6 +51,10 @@ import {
 } from '../modules/user-authentication/services/bootstrap';
 import { BackofficeAuthController } from './auth.controller';
 import { BackofficeEmployeesController } from './employees.controller';
+import {
+  BackofficeHelpdeskFaqChangesController,
+  HELPDESK_FAQ_CHANGE_LOG_SERVICE,
+} from './helpdesk-faq-changes.controller';
 import { BackofficeHelpdeskAgentRunsController } from './helpdesk-agent-runs.controller';
 import {
   BackofficeHelpdeskFaqGraphController,
@@ -135,6 +140,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         BackofficeHelpdeskController,
         BackofficeHelpdeskFaqsController,
         BackofficeHelpdeskFaqGraphController,
+        BackofficeHelpdeskFaqChangesController,
         HelpdeskIntegrationFaqsController,
         HelpdeskIntegrationFaqReleaseController,
         BackofficeHelpdeskAgentRunsController,
@@ -161,6 +167,11 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         {
           provide: HELPDESK_FAQ_RELEASE_SERVICE,
           useFactory: () => createFaqReleaseService({ graph }),
+        },
+        {
+          provide: HELPDESK_FAQ_CHANGE_LOG_SERVICE,
+          useFactory: () =>
+            createFaqChangeLogService({ releases: () => graph.releases() }),
         },
         // 已发布快照：还没有任何发布版本时 current() 为 null（Portal 收到 404 no_release，照旧读逐条发布的 FAQ）
         { provide: HELPDESK_FAQ_RELEASE_SOURCE, useValue: releaseSource },
