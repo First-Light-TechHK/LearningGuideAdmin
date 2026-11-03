@@ -429,6 +429,53 @@ describe('running conversations like the Portal chat', () => {
     expect(outcome).toMatchObject({ conversationsRun: 1, stopped: null });
   });
 
+  it('checks an explanation given on a handover-word turn against the card Admin explained, not as an escape', async () => {
+    const { runner } = scriptedRunner({
+      pick: {
+        'can I get a refund': { intent: 'question', faqId: FAQ(13) },
+        'I want a human, what does fewer than two lessons mean?': {
+          intent: 'clarify',
+          faqId: 'shown',
+        },
+      },
+      explain: {
+        'I want a human, what does fewer than two lessons mean?': {
+          covered: true,
+          explanation:
+            'No problem: if you have finished at most one lesson, you can still ask within 14 days.',
+        },
+      },
+    });
+    const outcome = await runConversations({
+      conversations: [
+        {
+          ...conversation,
+          id: 'c-handover-clarify',
+          turns: [
+            {
+              message: 'can I get a refund',
+              expect: { kind: 'answer', faqId: FAQ(13) },
+            },
+            {
+              message: 'I want a human, what does fewer than two lessons mean?',
+              expect: { kind: 'handover' },
+            },
+          ],
+        },
+      ],
+      qa: memoryQaSource(faqs),
+      runner,
+      env: ENV,
+      budgetUsd: 1,
+      paid: false,
+    });
+    const handover = outcome.results[1];
+    expect(handover.got).toMatchObject({ kind: 'handover', handover: true });
+    expect(handover.right).toBe(true);
+    expect(handover.grounded).toBe(true);
+    expect(handover.escapes).toEqual([]);
+  });
+
   it('scores a wrong card, an ungrounded explanation and a wrong small-talk intent', async () => {
     const { runner } = scriptedRunner({
       pick: {

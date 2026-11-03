@@ -645,9 +645,10 @@ export async function runConversations(
         (got.kind === 'clarify' && got.covered === false);
       if (unsolved) streak += 1;
       else if (got.kind !== 'smalltalk') streak = 0;
+      // Admin 真正解释的那张卡（handover 的话会把 got 改成 handover，卡片 id 要从 asked 取）
       const shownAnswer =
-        got.kind === 'clarify' && got.nodeId
-          ? ((await options.qa.findPublished(got.nodeId, locale))?.answer ??
+        asked.kind === 'clarify' && asked.nodeId
+          ? ((await options.qa.findPublished(asked.nodeId, locale))?.answer ??
             null)
           : null;
       const grounded =
