@@ -69,6 +69,16 @@ model Page {
   @@index([courseId, sortOrder])
 }
 
+model KnowledgeImageAsset {
+  id        String   @id @default(uuid()) @db.Uuid
+  courseId  String
+  storageKey String @unique
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([courseId])
+}
+
 // 全局 Tag 词库（2026-10-16 方案 B 轻量版：用户输入新 tag 自动沉淀，颜色自动分配）
 model Tag {
   id    String @id @default(uuid())

@@ -70,7 +70,7 @@ export function UploadDocumentModal({
     const gen = genRef.current
     setConverting(true)
     try {
-      const doc = await knowledgeApi.convertFile(file)
+      const doc = await knowledgeApi.convertFile(file, target!.courseId)
       if (gen !== genRef.current) return // 弹窗已关闭/重开，丢弃陈旧结果
       setConverted(doc)
       setStep(2)

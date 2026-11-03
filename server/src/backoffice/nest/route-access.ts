@@ -64,7 +64,8 @@ function actionFor(method: string, segments: string[]): ActionKind {
     }
     return 'CREATE';
   }
-  if (first === 'files' && second === 'convert') return 'EDIT_EXISTING';
+  if (first === 'files' && ['convert', 'images'].includes(second ?? ''))
+    return 'EDIT_EXISTING';
   if (first === 'sync') return 'CREATE';
   if (first === 'courses' && segments.length === 3) {
     if (['release', 'activate-release', 'set-live'].includes(third ?? ''))

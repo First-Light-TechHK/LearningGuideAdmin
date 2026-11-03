@@ -204,12 +204,17 @@ export const knowledgeApi = {
 
   // 文档转换（§5.1.5 / §3.2.3 / §10）：仅本地转换返回预览，不建页；
   // Import 经上方 createPage（§5.1.2）建页
-  convertFile: (file: File) => {
+  convertFile: (file: File, courseId: string) => {
     const form = new FormData()
     form.append('file', file)
     return http
-      .post<ConvertedDocument>('/files/convert', form, { timeout: 60000 })
+      .post<ConvertedDocument>(`/files/convert?courseId=${encodeURIComponent(courseId)}`, form, { timeout: 60000 })
       .then((r) => r.data)
+  },
+  uploadImage: (file: File, courseId: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post<{ url: string }>(`/files/images/${encodeURIComponent(courseId)}`, form).then((r) => r.data)
   },
 }
 
