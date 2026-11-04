@@ -406,7 +406,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     const history = messages
       .filter((m) => m.content.trim())
-      .slice(-10)
+      .slice(mode === 'SOCRATIC' ? -20 : -10)
       .map((m) => ({ role: m.role === 'ai' ? ('assistant' as const) : ('user' as const), content: m.content }))
 
     let msgs: ChatMessage[] = [

@@ -34,7 +34,7 @@ describe('OpenRouterProvider', () => {
         responseWith([
           'data: {"choices":[{"delta":{"content":"hello"}}]}\n',
           'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n',
-          'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2}}\n',
+          'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"completion_tokens_details":{"reasoning_tokens":1}}}\n',
           'data: [DONE]\n',
         ]),
       );
@@ -47,11 +47,12 @@ describe('OpenRouterProvider', () => {
       baseUrl: 'https://example.invalid',
       temperature: 0.4,
       maxOutputTokens: 500,
+      reasoningEffort: 'low',
     }))
       events.push(event);
     expect(events).toEqual([
       { type: 'delta', content: 'hello' },
-      { type: 'usage', usage: { inputTokens: 10, outputTokens: 2 } },
+      { type: 'usage', usage: { inputTokens: 10, outputTokens: 2, reasoningTokens: 1 } },
       { type: 'finish', reason: 'stop' },
     ]);
     const [, request] = (globalThis.fetch as jest.Mock).mock.calls[0] as [
@@ -62,6 +63,8 @@ describe('OpenRouterProvider', () => {
       temperature: 0.4,
       max_tokens: 500,
       stream: true,
+      usage: { include: true },
+      reasoning: { effort: 'low' },
     });
   });
 

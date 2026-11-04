@@ -44,12 +44,16 @@ export class OpenRouterProvider implements LlmProvider {
       model: opts.model,
       messages: opts.messages satisfies LlmMessage[],
       stream: true,
+      usage: { include: true },
       ...(opts.temperature === undefined
         ? {}
         : { temperature: opts.temperature }),
       ...(opts.maxOutputTokens === undefined
         ? {}
         : { max_tokens: opts.maxOutputTokens }),
+      ...(opts.reasoningEffort === undefined
+        ? {}
+        : { reasoning: { effort: opts.reasoningEffort } }),
     };
     let res: Response;
     try {
@@ -113,7 +117,11 @@ export class OpenRouterProvider implements LlmProvider {
         }
         try {
           const parsed = JSON.parse(payload) as {
-            usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+            usage?: {
+              prompt_tokens?: unknown;
+              completion_tokens?: unknown;
+              completion_tokens_details?: { reasoning_tokens?: unknown };
+            };
             choices?: Array<{
               delta?: { content?: string };
               finish_reason?: unknown;
@@ -127,13 +135,18 @@ export class OpenRouterProvider implements LlmProvider {
           ) {
             const inputTokens = usage.prompt_tokens;
             const outputTokens = usage.completion_tokens;
+            const reasoningTokens =
+              usage.completion_tokens_details?.reasoning_tokens;
             if (
               (inputTokens === undefined ||
                 (Number.isSafeInteger(inputTokens) &&
                   (inputTokens as number) >= 0)) &&
               (outputTokens === undefined ||
                 (Number.isSafeInteger(outputTokens) &&
-                  (outputTokens as number) >= 0))
+                  (outputTokens as number) >= 0)) &&
+              (reasoningTokens === undefined ||
+                (Number.isSafeInteger(reasoningTokens) &&
+                  (reasoningTokens as number) >= 0))
             ) {
               yield {
                 type: 'usage',
@@ -144,6 +157,9 @@ export class OpenRouterProvider implements LlmProvider {
                   ...(outputTokens === undefined
                     ? {}
                     : { outputTokens: outputTokens as number }),
+                  ...(reasoningTokens === undefined
+                    ? {}
+                    : { reasoningTokens: reasoningTokens as number }),
                 },
               };
             }

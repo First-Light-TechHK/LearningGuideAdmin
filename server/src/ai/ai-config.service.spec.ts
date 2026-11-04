@@ -614,6 +614,10 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       `${DEFAULT_MAIN_PROMPT}\n\n${DEFAULT_PROMPTS.LECTURE.systemPrompt}`,
     );
     expect(view.welcomeMsg).toBe(DEFAULT_PROMPTS.LECTURE.welcome['zh-CN']);
+    const socratic = await service.resolvePrompts('c1', 'r1', 'SOCRATIC');
+    expect(socratic.systemPrompt).toBe(
+      `${DEFAULT_MAIN_PROMPT}\n\n${DEFAULT_PROMPTS.SOCRATIC.systemPrompt}`,
+    );
   });
 
   it('resolveLearnerWelcome：返回课程级统一 welcome', async () => {
