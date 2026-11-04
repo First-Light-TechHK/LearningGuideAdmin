@@ -1,3 +1,5 @@
+import { t } from '../backoffice/lib/i18n/messages'
+import { currentLocale } from '../backoffice/lib/i18n/serverText'
 import { create } from 'zustand'
 import {
   knowledgeApi,
@@ -335,7 +337,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
 
   async runSync(mode) {
     const { selectedExternalId } = get()
-    if (!selectedExternalId) throw new Error('未选择同步目标')
+    if (!selectedExternalId) throw new Error(t(currentLocale(), 'knowledge.sync.selectTarget'))
     set({ syncing: true })
     try {
       const summary =

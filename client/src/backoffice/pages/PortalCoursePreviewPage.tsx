@@ -103,7 +103,7 @@ export function PortalCoursePreviewPage() {
     let cancelled = false
     async function load() {
       if (!courseId || !token) {
-        setError(L(locale, '预览链接缺少课程或 token。', 'The preview link is missing a course or token.'))
+        setError(L(locale, '预览链接缺少课程或令牌。', 'The preview link is missing a course or token.'))
         setLoading(false)
         return
       }
@@ -119,7 +119,7 @@ export function PortalCoursePreviewPage() {
         return
       }
       setError(
-        result.message || L(locale, '预览链接无效或已过期，请回到 Back Office 重新生成。', 'This preview link is invalid or has expired. Create a new one from the Back Office.'),
+        result.message || L(locale, '预览链接无效或已过期，请回到后台重新生成。', 'This preview link is invalid or has expired. Create a new one from the Back Office.'),
       )
     }
     void load()
@@ -368,7 +368,7 @@ export function PortalCoursePreviewPage() {
                 <dd style={{ margin: 0, color: '#0A0A0A' }}>{detail.code}</dd>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                <dt>{L(locale, 'Slug', 'Slug')}</dt>
+                <dt>{L(locale, '短名', 'Slug')}</dt>
                 <dd style={{ margin: 0, color: '#0A0A0A' }}>{detail.slug}</dd>
               </div>
             </dl>

@@ -10,6 +10,7 @@ import type {
   SubscriptionFilter,
 } from '../contracts/students'
 import { notifySessionChanged } from './navigation'
+import { serverText } from './i18n/serverText'
 
 /**
  * 学生管理接口。与 helpdeskApi 一样解统一信封、保留错误码（STUDENTS_NOT_CONNECTED / VERSION_CONFLICT /
@@ -32,7 +33,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<StudentsResu
       ok: false,
       code: typeof code === 'string' && code !== '' ? code : 'INTERNAL_ERROR',
       status: response.status,
-      message: typeof body?.error?.message === 'string' ? body.error.message : null,
+      message: typeof body?.error?.message === 'string' ? serverText(body.error.message) : null,
     }
   } catch {
     return { ok: false, code: 'STUDENTS_UNAVAILABLE', status: 0, message: null }

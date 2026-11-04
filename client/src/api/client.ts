@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { notifySessionChanged } from '../backoffice/lib/navigation'
+import { serverText } from '../backoffice/lib/i18n/serverText'
 
 /**
  * axios 实例（开发文档 §6.1）。dev 环境经 vite 代理访问 /api（§5.1 全局前缀）。
@@ -35,12 +36,13 @@ http.interceptors.response.use(
     // 后端错误信封：{ success:false, error:{ code, message } }
     const envelope = error.response?.data as ApiEnvelope<null> | undefined
     if (envelope?.error) {
-      const err = new Error(envelope.error.message) as Error & {
+      const err = new Error(serverText(envelope.error.message)) as Error & {
         code?: string
       }
       err.code = envelope.error.code
       return Promise.reject(err)
     }
-    return Promise.reject(error)
+    // 没有信封（断网、超时、网关错误）：axios 的原文是英文，同样按当前语言显示
+    return Promise.reject(new Error(serverText(null)))
   },
 )

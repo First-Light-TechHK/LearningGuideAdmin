@@ -61,7 +61,7 @@ export function CourseEditorPage() {
     ]);
     setLoading(false);
     if (!detail.success) {
-      setNotice(`Could not load course: ${detail.message ?? detail.error}`);
+      setNotice(`${L(locale, '课程加载失败', 'Could not load course')}: ${detail.message ?? detail.error}`);
       return;
     }
     setCourse(detail.data);
@@ -119,7 +119,7 @@ export function CourseEditorPage() {
         <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14, background: '#F5F8FF' }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
           <div style={{ fontSize: 13 }}>
-            {liveVersion ? `${liveVersion.versionLabel} · ${liveStatusLabel(locale, course.liveStatus)} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
+            {liveVersion ? `${liveVersion.versionLabel} · ${liveStatusLabel(locale, course.liveStatus)} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt, locale)}` : L(locale, '从未发布', 'Not published')}
           </div>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import type { ErrorCode } from '../contracts/envelope'
+import { serverText } from './i18n/serverText'
 import { notifySessionChanged } from './navigation'
 
 const KNOWN_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
@@ -47,7 +48,7 @@ export async function boRequest<T>(url: string, init?: RequestInit): Promise<Api
       success: false,
       data: null,
       error: code && KNOWN_ERRORS.has(code) ? (code as ErrorCode) : 'INTERNAL_ERROR',
-      message: body?.error?.message,
+      message: body?.error?.message ? serverText(body.error.message) : undefined,
     }
   } catch {
     return { success: false, data: null, error: 'INTERNAL_ERROR' }

@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button, Result } from 'antd'
+import { t } from '../backoffice/lib/i18n/messages'
+import { currentLocale } from '../backoffice/lib/i18n/serverText'
 
 /**
  * 全局错误边界（2026-10-27 新增）：
@@ -34,7 +36,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      const msg = this.state.error?.message || '未知错误'
+      const locale = currentLocale()
+      const msg = this.state.error?.message || t(locale, 'errorBoundary.unknown')
       return (
         <div
           style={{
@@ -47,11 +50,11 @@ export class ErrorBoundary extends Component<Props, State> {
         >
           <Result
             status="error"
-            title="页面渲染异常"
-            subTitle={`错误信息：${msg}`}
+            title={t(locale, 'errorBoundary.title')}
+            subTitle={t(locale, 'errorBoundary.detail', { message: msg })}
             extra={[
               <Button type="primary" key="reload" onClick={this.handleReload}>
-                重新加载
+                {t(locale, 'errorBoundary.reload')}
               </Button>,
             ]}
           />

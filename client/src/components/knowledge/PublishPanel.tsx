@@ -8,6 +8,7 @@ import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
+import { formatDateTime } from '../../backoffice/lib/i18n/format'
 
 /**
  * Releases 版本发布面板（§3.4；2026-10-15 激活版本模型；2026-10-19 由 Publish 更名为 Releases）：
@@ -23,7 +24,7 @@ import { useKText } from './i18n'
  */
 export function PublishPanel() {
   const { message, modal } = App.useApp()
-  const { text } = useKText()
+  const { locale, text } = useKText()
   /** PRD §3.2/§3.3：发布/切换版本是 PUBLISH、删除版本是 DELETE；View/Edit 不显示 */
   const access = useWorkspaceAccess()
   const courses = useKnowledgeStore((s) => s.courses)
@@ -224,7 +225,7 @@ export function PublishPanel() {
                   {r.isActive && <Tag color="green">{text('publish.tagLive')}</Tag>}
                   {r.isTestSelected && <Tag>{text('publish.tagTesting')}</Tag>}
                   <Typography.Text type="secondary">
-                    {new Date(r.createdAt).toLocaleString()}
+                    {formatDateTime(locale, r.createdAt)}
                   </Typography.Text>
                   {/* editing 版本不可再「切换到此版本」（2026-10-20 三次改拍） */}
                   {access.canPublish && historyCourse && !r.isEditing && (
