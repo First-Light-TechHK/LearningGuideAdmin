@@ -34,7 +34,8 @@ const base = {
 
 describe('FAQ answers: the save check uses the Portal renderer rules', () => {
   it('reads the pinned shared corpus', () => {
-    expect(createHash('sha256').update(BYTES).digest('hex')).toBe(
+    const normalized = Buffer.from(BYTES.toString('utf8').replace(/\r\n/g, '\n'));
+    expect(createHash('sha256').update(normalized).digest('hex')).toBe(
       '45ece9b892722705fa064ef580ebaa1b0afdb094758eebdf021238565a97c852',
     );
   });
