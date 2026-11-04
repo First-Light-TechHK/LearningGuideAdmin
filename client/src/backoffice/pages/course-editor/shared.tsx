@@ -1,12 +1,13 @@
 import { useCallback, useState } from 'react';
+import { formatDateTime } from '../../lib/i18n/format';
 
 export const L = (locale: string, zh: string, en: string) =>
   locale.startsWith('zh') ? zh : en;
 
 /** 学习语言代码 → 展示名。 */
-export function languageLabel(_locale: string, code: string): string {
-  if (code === 'zh-CN') return '中文';
-  if (code === 'en-GB' || code === 'en') return 'English';
+export function languageLabel(locale: string, code: string): string {
+  if (code === 'zh-CN') return L(locale, '中文', 'Chinese');
+  if (code === 'en-GB' || code === 'en') return L(locale, '英文', 'English');
   return code;
 }
 
@@ -153,10 +154,8 @@ export function fmtDuration(seconds: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export function fmtDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+export function fmtDate(value: string | null | undefined, locale: string): string {
+  return formatDateTime(locale, value);
 }
 
 /**

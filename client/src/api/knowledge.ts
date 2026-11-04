@@ -1,5 +1,6 @@
 import { http } from './client'
 import { notifySessionChanged } from '../backoffice/lib/navigation'
+import { serverText } from '../backoffice/lib/i18n/serverText'
 
 // ============ 类型（与后端 Prisma 模型字段对齐，§2） ============
 
@@ -174,10 +175,10 @@ export const knowledgeApi = {
       // 会话过期 / 被停用（401）或角色刚被改（403）
       if (res.status === 401 || res.status === 403) notifySessionChanged()
       // 尝试解析后端统一错误信封 { success:false, error:{ code, message } }
-      let msg = `导出失败 (${res.status})`
+      let msg = serverText(null)
       try {
         const j = (await res.json()) as { error?: { message?: string } }
-        if (j?.error?.message) msg = j.error.message
+        if (j?.error?.message) msg = serverText(j.error.message)
       } catch {
         /* 非 JSON 响应体，用默认消息 */
       }

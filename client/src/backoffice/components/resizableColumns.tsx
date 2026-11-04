@@ -7,6 +7,8 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { t } from '../lib/i18n/messages'
+import { useLocale } from '../lib/navigation'
 
 /**
  * 后台表格列宽调整。
@@ -20,7 +22,6 @@ export const MIN_COLUMN_WIDTH = 48
 
 const STORAGE_PREFIX = 'lgbo_table_widths.'
 
-const RESIZE_TITLE = '拖动调整列宽，双击恢复默认 / Drag to resize, double-click to reset'
 
 function normalizeWidths(value: unknown, fallback: number[], minWidth: number): number[] {
   if (!Array.isArray(value) || value.length !== fallback.length) return fallback.slice()
@@ -56,6 +57,7 @@ export function useResizableColumns({
   defaultWidths,
   minWidth = MIN_COLUMN_WIDTH,
 }: ResizableColumnsOptions) {
+  const locale = useLocale()
   const [widths, setWidths] = useState<number[]>(() => readStoredWidths(storageKey, defaultWidths, minWidth))
   const widthsRef = useRef(widths)
   const defaultsRef = useRef(defaultWidths)
@@ -140,8 +142,8 @@ export function useResizableColumns({
       className="tableColResizer"
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize column"
-      title={RESIZE_TITLE}
+      aria-label={t(locale, 'common.resizeColumn')}
+      title={t(locale, 'common.resizeColumnHint')}
       onPointerDown={(event) => startResize(index, event)}
       onDoubleClick={() => resetColumn(index)}
     />

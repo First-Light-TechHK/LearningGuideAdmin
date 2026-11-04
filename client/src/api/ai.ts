@@ -1,5 +1,6 @@
 import { http } from './client'
 import { notifySessionChanged } from '../backoffice/lib/navigation'
+import { serverText } from '../backoffice/lib/i18n/serverText'
 
 /** AI Tutor 接口封装（§5.2；chat-stream 为 SSE，在 aiStore 中经 fetch 处理） */
 
@@ -133,10 +134,10 @@ export async function chatStream(
 
   if (!res.ok || !res.body) {
     if (res.status === 401) notifySessionChanged()
-    let msg = `请求失败（HTTP ${res.status}）`
+    let msg = serverText(null)
     try {
       const json = (await res.json()) as { error?: { message?: string } }
-      if (json.error?.message) msg = json.error.message
+      if (json.error?.message) msg = serverText(json.error.message)
     } catch {
       /* 非 JSON 错误体：使用默认消息 */
     }

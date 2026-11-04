@@ -289,7 +289,7 @@ export function CourseVersionsSection({
           <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
             <div style={{ fontSize: 13 }}>
-              {liveVersion ? `${liveVersion.versionLabel} · ${liveVersion.isLive ? L(locale, '线上', 'Live') : ''} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
+              {liveVersion ? `${liveVersion.versionLabel} · ${liveVersion.isLive ? L(locale, '线上', 'Live') : ''} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt, locale)}` : L(locale, '从未发布', 'Not published')}
             </div>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{liveStatusLabel(locale, course.liveStatus)}</div>
             {canPublish && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
@@ -327,7 +327,7 @@ export function CourseVersionsSection({
             {sortedVersions.map((version) => (
               <tr key={version.id}>
                 <td>{version.versionLabel}{version.isLive ? ` · ${L(locale, '线上', 'Live')}` : ''}</td>
-                <td>{fmtDate(version.wentLiveAt ?? version.createdAt)}</td>
+                <td>{fmtDate(version.wentLiveAt ?? version.createdAt, locale)}</td>
                 <td>{version.sourceVersionLabel ?? version.sourceEnvironment ?? '—'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -357,7 +357,7 @@ export function CourseVersionsSection({
           <tbody>
             {(history?.items ?? []).map((item) => (
               <tr key={item.id}>
-                <td>{fmtDate(item.time)}</td>
+                <td>{fmtDate(item.time, locale)}</td>
                 <td>{item.operator}</td>
                 <td>{historyActionLabel(item.action, locale)}{item.versionNo ? <span style={{ opacity: 0.6 }}> · v{item.versionNo}</span> : null}</td>
                 <td className="cellWrap" style={{ fontSize: 12, opacity: 0.8 }}>{historyDetailText(item, locale)}</td>
@@ -442,7 +442,7 @@ export function CourseVersionsSection({
 
       {importOpen && (
         <Modal title={L(locale, '导入课程包', 'Import package')} onClose={() => setImportOpen(false)}>
-          <p style={{ fontSize: 13 }}>{L(locale, '课程包替换当前课程的草稿。线上版本不变，直到 Publish。', 'The package replaces the draft of this course. What is live does not change until you publish.')}</p>
+          <p style={{ fontSize: 13 }}>{L(locale, '课程包替换当前课程的草稿。线上版本不变，直到发布。', 'The package replaces the draft of this course. What is live does not change until you publish.')}</p>
           <Field label={L(locale, '上传 .zip', 'Upload .zip')}>
             <input type="file" accept=".zip,.lgcourse.zip" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} />
           </Field>

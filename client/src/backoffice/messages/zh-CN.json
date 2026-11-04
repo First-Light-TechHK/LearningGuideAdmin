@@ -26,7 +26,10 @@
     "copied": "已复制",
     "language": "语言",
     "retry": "重试",
-    "sessionUnavailable": "暂时无法连接服务器确认登录状态，请检查网络后重试。"
+    "sessionUnavailable": "暂时无法连接服务器确认登录状态，请检查网络后重试。",
+    "remainingSeconds": "约剩 {seconds} 秒",
+    "resizeColumn": "调整列宽",
+    "resizeColumnHint": "拖动调整列宽，双击恢复默认"
   },
   "nav": {
     "course": "课程",
@@ -132,7 +135,8 @@
     "collapse": "收起侧边栏",
     "expand": "展开侧边栏",
     "role": "角色",
-    "settingsSection": "设置"
+    "settingsSection": "设置",
+    "switchLanguage": "Switch to English (UK)"
   },
   "course": {
     "title": "课程",
@@ -151,7 +155,7 @@
   "operations": {
     "title": "运营位",
     "popularCourses": "热门课程",
-    "discoveryBanner": "发现页 Banner",
+    "discoveryBanner": "发现页横幅",
     "publish": "发布"
   },
   "history": {
@@ -261,7 +265,8 @@
     "PASSWORD_TOO_WEAK": "密码未满足最低强度要求。",
     "PASSWORD_MISMATCH": "两次输入的密码不一致。",
     "PASSWORD_SAME_AS_CURRENT": "新密码不能与当前密码相同。",
-    "INTERNAL_ERROR": "系统出现异常，请重试。"
+    "INTERNAL_ERROR": "系统出现异常，请重试。",
+    "serverGeneric": "操作失败，请重试。"
   },
   "aiTutor": {
     "title": "AI 导师",
@@ -290,11 +295,11 @@
     "saveFailed": "保存失败",
     "onlineOn": "已上线（对用户侧开放）",
     "onlineOff": "已下线（不对用户侧开放）",
-    "onlineNotSynced": "请先在 Portal 同步该课程后再开启 Online",
-    "onlineNoLive": "请先将某个版本设为上线后再开启 Online",
+    "onlineNotSynced": "请先在 Portal 同步该课程后再开启上线",
+    "onlineNoLive": "请先将某个版本设为上线后再开启上线",
     "chatNoRelease": "请先选择测试版本或将某个版本设为上线",
     "unpublished": "未发布",
-    "noReleases": "暂无 Release",
+    "noReleases": "暂无发布版本",
     "live": "已上线",
     "testing": "测试中",
     "setLive": "设为上线",
@@ -350,7 +355,7 @@
       "allCoursesPlaceholder": "全部课件（选择课程作为同步目标）"
     },
     "search": {
-      "placeholder": "搜索标题或 heading…"
+      "placeholder": "搜索标题…"
     },
     "tree": {
       "sortFailed": "排序保存失败",
@@ -362,8 +367,8 @@
       "newPage": "新建页面",
       "uploadDoc": "上传文档建页",
       "deleteCourse": "删除课程",
-      "emptyAll": "暂无课件，请在上方选择同步目标后 Sync",
-      "emptyCourse": "该课程尚未同步，点击下方 Sync 拉取",
+      "emptyAll": "暂无课件，请在上方选择同步目标后同步",
+      "emptyCourse": "该课程尚未同步，点击下方同步按钮拉取",
       "noMatch": "无匹配结果",
       "dragReorder": "拖拽调整顺序",
       "staleTooltip": "该节点与外部源不同步，不会作为 AI Tutor 知识库使用",
@@ -395,8 +400,8 @@
       "deleteVersionAria": "删除版本 {version}",
       "publishModalTitle": "发布课程「{title}」全部页面快照",
       "publish": "发布",
-      "publishHint": "Create Release 将发布整个课程下所有页面的快照（非单个页面）。",
-      "notesPlaceholder": "Revision Notes（必填）",
+      "publishHint": "创建发布版本将发布整个课程下所有页面的快照（非单个页面）。",
+      "notesPlaceholder": "修订说明（必填）",
       "tagEditing": "编辑中",
       "tagLive": "线上",
       "tagTesting": "测试中",
@@ -962,7 +967,7 @@
         "choice": "答案框里写一句提问，学员从 2–4 个选项里选一个；不要写数字或链接。"
       },
       "entry": "入口问题",
-      "entryHint": "可以直接匹配学员的新问题，也可以作为 chip 展示。只在某张卡片之后才有意义的追问请关掉。",
+      "entryHint": "可以直接匹配学员的新问题，也可以作为快捷选项展示。只在某张卡片之后才有意义的追问请关掉。",
       "signals": "学员情境",
       "signalsHint": "处于这些情境的学员会优先看到这张卡片。",
       "key": "标识：{key}",
@@ -1039,7 +1044,7 @@
         "choice_prompt": "选择题的提问不能包含数字或链接。",
         "follow_ups": "追问超过 6 条。",
         "language": "缺少英文或中文。",
-        "label_length": "chip 或选项的文字太长。",
+        "label_length": "快捷选项的文字太长。",
         "answer_blocks": "有一种语言的答案是空的。",
         "map_shape": "流程树或对象表里有节点放错了层级。",
         "map_placement": "有卡挂在了不能挂卡的节点上（只能挂在步骤、岔子或格子上）。",
@@ -2173,7 +2178,7 @@
     "emailNew": "新邮箱",
     "emailReason": "原因或工单号",
     "emailStandard": "会给新邮箱发验证链接，点开前状态是待验证。新旧邮箱都会收到通知，学生会被退出登录。",
-    "emailExempt": "已人工核验邮箱归属（Admin-exempt）",
+    "emailExempt": "已人工核验邮箱归属（管理员豁免）",
     "emailExemptRef": "工单号或核验方式",
     "emailExemptWarn": "这是员工的核验记录，不代表学生点过验证链接，会作为安全事件记录。",
     "emailSend": "发送验证链接",
@@ -2255,12 +2260,18 @@
     "retry": "重试",
     "experiments": "实验",
     "comingSoon": "即将推出",
-    "experimentsBody": "AI Tutor 策略、Banner 位置和订阅价格的 A/B 测试，敬请期待！",
+    "experimentsBody": "AI Tutor 策略、横幅位置和订阅价格的 A/B 测试，敬请期待！",
     "experimentTags": {
       "tutor": "AI Tutor 策略",
-      "banner": "Banner 位置",
+      "banner": "横幅位置",
       "pricing": "订阅价格"
     },
     "feature": "功能"
+  },
+  "errorBoundary": {
+    "title": "页面渲染异常",
+    "detail": "错误信息：{message}",
+    "unknown": "未知错误",
+    "reload": "重新加载"
   }
 }

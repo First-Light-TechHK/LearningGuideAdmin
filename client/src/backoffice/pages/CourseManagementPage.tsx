@@ -9,6 +9,8 @@ import { boRequest } from '../lib/api'
 import { categoryLabel } from '../lib/categoryLabel'
 import { uploadFileWithProgress } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
+import type { Locale } from '../lib/i18n/config'
+import { serverText } from '../lib/i18n/serverText'
 import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
 import { MenuGuard } from './ModulePages'
@@ -35,15 +37,16 @@ type ConfirmOutcome = {
   message?: string
 }
 
-function uploadErrorText(code: string, detail?: string): string {
+function uploadErrorText(locale: string, code: string, detail?: string): string {
+  const zh = locale.startsWith('zh')
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
-    return '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。'
+    return zh ? '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。' : 'The upload was interrupted (unstable network or a service restart). Check them and try again.'
   }
   if (code === 'TIMEOUT') {
-    return '上传超时（网络过慢或服务无响应）。请重试。'
+    return zh ? '上传超时（网络过慢或服务无响应）。请重试。' : 'The upload timed out (slow network or no answer from the service). Try again.'
   }
-  if (detail && detail.trim()) return `导入失败：${detail}`
-  return `导入失败：${code}`
+  const reason = detail && detail.trim() ? serverText(detail, locale as Locale) : code
+  return zh ? `导入失败：${reason}` : `Import failed: ${reason}`
 }
 
 function formatWhen(value: string | null | undefined, locale: string): string {
@@ -198,7 +201,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       await new Promise((r) => setTimeout(r, 1500))
       const poll = await boRequest<JobView>(`/api/backoffice/courses/import/${job.jobId}`)
       if (!poll.success) {
-        setMessage(uploadErrorText(poll.error, poll.message))
+        setMessage(uploadErrorText(locale, poll.error, poll.message))
         return job
       }
       job = poll.data
@@ -226,7 +229,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     )
     if (!init.success) {
       setBusy(false)
-      setMessage(uploadErrorText(init.error, init.message))
+      setMessage(uploadErrorText(locale, init.error, init.message))
       return
     }
     const { jobId } = init.data
@@ -245,7 +248,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       if (!res.success) {
         setBusy(false)
         setUploadPct(null)
-        setMessage(uploadErrorText(res.error, res.errorMessage))
+        setMessage(uploadErrorText(locale, res.error, res.errorMessage))
         return
       }
       sent += blob.size
@@ -256,13 +259,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     const comp = await boRequest<JobView>(`/api/backoffice/courses/import/${jobId}/complete`, { method: 'POST' })
     if (!comp.success) {
       setBusy(false)
-      setMessage(uploadErrorText(comp.error, comp.message))
+      setMessage(uploadErrorText(locale, comp.error, comp.message))
       return
     }
     const job = await pollImportJob(comp.data)
     setBusy(false)
     setImportJob(job)
-    if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
+    if (job.status === 'FAILED') setMessage(job.error ? uploadErrorText(locale, '', job.error) : L('导入校验失败。', 'Import validation failed.'))
     else if (job.status === 'AWAITING_CONFIRM') setMessage(L('原始素材已转换。确认前请先查看校验结果。', 'Raw materials converted. Review validation before confirming.'))
   }
 
@@ -279,14 +282,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     })
     if (!result.success) {
       setBusy(false)
-      setMessage(uploadErrorText(result.error, result.message))
+      setMessage(uploadErrorText(locale, result.error, result.message))
       return
     }
     setMessage(L('已提交，正在后台解析素材…', 'Submitted. Parsing materials in the background…'))
     const job = await pollImportJob(result.data)
     setBusy(false)
     setImportJob(job)
-    if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
+    if (job.status === 'FAILED') setMessage(job.error ? uploadErrorText(locale, '', job.error) : L('导入校验失败。', 'Import validation failed.'))
     else setMessage(L('已从本地目录解析素材，请在校验信息中确认后导入。', 'Parsed materials from the server folder. Review validation before confirming.'))
   }
 
@@ -304,7 +307,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (!start.success && course.liveVersionId) start = await startExport('working')
     if (!start.success) {
       setExportingId(null)
-      setMessage(uploadErrorText(start.error, start.message))
+      setMessage(uploadErrorText(locale, start.error, start.message))
       return
     }
     for (let attempt = 0; attempt < 120; attempt++) {
@@ -363,7 +366,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (result.success) {
       setImportJob(result.data)
       if (result.data.status === 'FAILED') setMessage(result.data.error ?? L('导入校验失败。', 'Import validation failed.'))
-    } else setMessage(uploadErrorText(result.error, result.errorMessage))
+    } else setMessage(uploadErrorText(locale, result.error, result.errorMessage))
   }
 
   async function confirmImport(onConflict: string, overwriteDraft = false) {
@@ -524,14 +527,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（英文）', 'Course title (English)')} *<input name="titleEn" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（中文）', 'Course title (Chinese)')} *<input name="titleZh" required style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID（留空自动生成）', 'Course ID (auto if blank)')}<input name="code" pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')} *<select required value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('请选择分类', 'Select a category')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
             </div>
             <fieldset style={{ border: '1px solid #D5DCE8', borderRadius: 8, padding: 12, marginTop: 14 }}>
               <legend style={{ fontSize: 13, fontWeight: 600, padding: '0 4px' }}>{L('学习语言', 'Learning languages')} *</legend>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
-                {[['en-GB', 'English'], ['zh-CN', '中文']].map(([code, label]) => (
+                {[['en-GB', languageLabel(locale, 'en-GB')], ['zh-CN', languageLabel(locale, 'zh-CN')]].map(([code, label]) => (
                   <label key={code} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       type="checkbox"
@@ -830,16 +833,16 @@ function ImportPanel({
           </>
         )}
       </p>
-      {job.error && <div style={{ color: '#b42318', fontSize: 13, marginBottom: 8 }}>{job.error}</div>}
+      {job.error && <div style={{ color: '#b42318', fontSize: 13, marginBottom: 8 }}>{serverText(job.error, locale as Locale)}</div>}
       {errors.length > 0 && (
         <div style={{ color: '#b42318', fontSize: 13 }}>
-          {errors.map((e, i) => <div key={i}>ERROR {e.code}: {e.message}</div>)}
+          {errors.map((e, i) => <div key={i}>{e.code}: {serverText(e.message, locale as Locale)}</div>)}
         </div>
       )}
       {warnings.length > 0 && (
         <details style={{ fontSize: 13, marginTop: 8 }}>
           <summary>{warnings.length} {zh ? '条警告' : 'warning(s)'}</summary>
-          {warnings.map((w, i) => <div key={i} style={{ opacity: 0.8 }}>WARN {w.code}: {w.message}</div>)}
+          {warnings.map((w, i) => <div key={i} style={{ opacity: 0.8 }}>{w.code}: {serverText(w.message, locale as Locale)}</div>)}
         </details>
       )}
       {job.status === 'AWAITING_CONFIRM' && (

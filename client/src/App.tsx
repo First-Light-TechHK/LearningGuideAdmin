@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { App as AntApp, ConfigProvider } from 'antd'
 import enGB from 'antd/locale/en_GB'
 import zhCN from 'antd/locale/zh_CN'
@@ -92,6 +92,10 @@ function AITutorWorkspace() {
 /** antd 内置文案跟随地址栏语言（/en-GB/... 或 /zh-CN/...） */
 function useAntdLocale() {
   const segment = useLocation().pathname.split('/')[1]
+  // <html lang> 跟随语言：读屏、浏览器翻译和拼写检查都看它
+  useEffect(() => {
+    document.documentElement.lang = segment === 'zh-CN' ? 'zh-CN' : 'en-GB'
+  }, [segment])
   return segment === 'zh-CN' ? zhCN : enGB
 }
 

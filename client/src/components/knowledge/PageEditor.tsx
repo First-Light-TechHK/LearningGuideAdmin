@@ -17,6 +17,7 @@ import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 import { knowledgeApi } from '../../api/knowledge'
+import { formatDateTime } from '../../backoffice/lib/i18n/format'
 
 /**
  * Page 编辑器（2026-10-29 改版：Markdown 源码编辑 + 预览）。
@@ -67,10 +68,10 @@ interface LocalDraft {
 }
 
 /** 本地草稿时间展示（恢复确认弹窗用） */
-function formatSavedAt(savedAt?: number): string {
+function formatSavedAt(locale: string, savedAt?: number): string {
   if (!savedAt) return ''
   try {
-    return new Date(savedAt).toLocaleString()
+    return formatDateTime(locale, savedAt)
   } catch {
     return ''
   }
@@ -98,7 +99,7 @@ export function PageEditor() {
   const tocScrollTarget = useKnowledgeStore((s) => s.tocScrollTarget)
   const clearTocScrollTarget = useKnowledgeStore((s) => s.clearTocScrollTarget)
   const { modal } = App.useApp()
-  const { text } = useKText()
+  const { locale, text } = useKText()
   /** PRD §3.2/§3.3：View 角色只读，Edit/Full 才可改既有内容 */
   const access = useWorkspaceAccess()
 
@@ -250,7 +251,7 @@ export function PageEditor() {
       return
     }
     const pageId = d.pageId
-    const when = formatSavedAt(local.savedAt)
+    const when = formatSavedAt(locale, local.savedAt)
     modal.confirm({
       title: text('editor.draftTitle'),
       content: text('editor.draftContent', {

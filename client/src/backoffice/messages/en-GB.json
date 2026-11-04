@@ -26,7 +26,10 @@
     "copied": "Copied",
     "language": "Language",
     "retry": "Try again",
-    "sessionUnavailable": "We could not reach the server to check your session. Please check your connection and try again."
+    "sessionUnavailable": "We could not reach the server to check your session. Please check your connection and try again.",
+    "remainingSeconds": "about {seconds}s left",
+    "resizeColumn": "Resize column",
+    "resizeColumnHint": "Drag to resize, double-click to reset"
   },
   "nav": {
     "course": "Course",
@@ -132,7 +135,8 @@
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
     "role": "Role",
-    "settingsSection": "Settings"
+    "settingsSection": "Settings",
+    "switchLanguage": "切换到简体中文"
   },
   "course": {
     "title": "Course",
@@ -261,7 +265,8 @@
     "PASSWORD_TOO_WEAK": "The password does not meet the minimum requirements.",
     "PASSWORD_MISMATCH": "The two passwords do not match.",
     "PASSWORD_SAME_AS_CURRENT": "The new password must be different from your current password.",
-    "INTERNAL_ERROR": "Something went wrong. Please try again."
+    "INTERNAL_ERROR": "Something went wrong. Please try again.",
+    "serverGeneric": "Something went wrong. Please try again."
   },
   "aiTutor": {
     "title": "AI Tutor",
@@ -2262,5 +2267,11 @@
       "pricing": "Subscription pricing"
     },
     "feature": "Feature"
+  },
+  "errorBoundary": {
+    "title": "This page could not be displayed",
+    "detail": "Details: {message}",
+    "unknown": "Unknown error",
+    "reload": "Reload"
   }
 }

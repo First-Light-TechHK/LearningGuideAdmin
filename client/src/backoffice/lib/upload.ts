@@ -1,5 +1,6 @@
 import { boRequest } from './api'
 import { notifySessionChanged } from './navigation'
+import { serverText } from './i18n/serverText'
 
 export type UploadResult<T> =
   | { success: true; data: T }
@@ -55,7 +56,7 @@ export function uploadFileWithProgress<T>(
           resolve({
             success: false,
             error: body?.error?.code ?? `HTTP_${xhr.status}`,
-            errorMessage: body?.error?.message ?? `HTTP ${xhr.status}`,
+            errorMessage: serverText(body?.error?.message),
           })
       } catch {
         // 响应体不是 JSON 信封（多为网关 5xx/504 或单请求被边缘切断），带上真实状态码便于定位

@@ -178,7 +178,7 @@ export function CoursePreviewPage() {
                   <p style={{ margin: 0, opacity: 0.75 }}>
                     {L(
                       locale,
-                      '保存成功不代表课时已达到学员端展示条件。学员大纲只显示 Study & Exploration 已完成的课时。',
+                      '保存成功不代表课时已达到学员端展示条件。学员大纲只显示学习与探索内容已完成的课时。',
                       'A successful save does not mean a lesson is ready for learners. The outline only shows lessons with completed Study & Exploration.',
                     )}
                   </p>
@@ -191,7 +191,7 @@ export function CoursePreviewPage() {
                   <strong style={{ fontSize: 14 }}>
                     {L(
                       locale,
-                      '学员端大纲只列出 Study & Exploration 已完成的课时，以下课时尚未完成：',
+                      '学员端大纲只列出学习与探索内容已完成的课时，以下课时尚未完成：',
                       'The learner outline only lists lessons whose Study & Exploration is complete. Still incomplete:',
                     )}
                   </strong>
