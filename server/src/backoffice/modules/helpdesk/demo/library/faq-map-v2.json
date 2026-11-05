@@ -1,5 +1,5 @@
 {
- "$comment": "Helpdesk SOP tree v2 (2026-11-02, built from the Portal code and PRDs: 10 stages, steps, deviations in the skeleton; rule table objects x attributes) and the place of every card of FAQ library v3.2. Generated from the project files faq-library/v3.1/map/ (skeleton.json + placements/); do not edit here. DEV syncs it on start when DEMO_MAP_TAG changes (helpdeskDemoSeed.ts).",
+ "$comment": "Helpdesk SOP tree v2 (2026-11-02, built from the Portal code and PRDs: 10 stages, steps, deviations in the skeleton; rule table objects x attributes) and the place of every card of FAQ library v3.5 (2026-11-03: three Study Group deviations reworded after the Study Group fix 72eba55). Generated from the project files faq-library/v3.1/map/ (skeleton.json + placements/); do not edit here. DEV syncs it on start when DEMO_MAP_TAG changes (helpdeskDemoSeed.ts).",
  "skeleton": {
   "stages": [
    {
@@ -1465,8 +1465,8 @@
        },
        {
         "key": "group.reminders.enter-now-does-nothing",
-        "en": "I press Enter now on a Live Session reminder in the Study Groups sidebar and nothing happens",
-        "zh": "我在学习小组侧边栏的直播课提醒上点“立即进入”，什么都没有发生"
+        "en": "I press Enter now on a Live Session reminder and see an error instead of the room",
+        "zh": "我在直播课提醒上点“立即进入”，没有进入房间，而是看到报错"
        }
       ]
      },
@@ -1586,8 +1586,8 @@
        },
        {
         "key": "group.start.started-but-not-in-room",
-        "en": "I pressed Start Live Session; the session now shows Live now but I am still on the Study Groups page with an error",
-        "zh": "我点了“开始直播课”，直播课显示正在直播，但我还停留在学习小组页面并看到报错"
+        "en": "I pressed Start Live Session and the room opened with a connection error",
+        "zh": "我点了“开始直播课”，进入了直播房间，但房间里显示连接错误"
        },
        {
         "key": "group.start.start-refused-stale",
@@ -1861,8 +1861,8 @@
        },
        {
         "key": "group.tutor.tutor-withdraw-too-late",
-        "en": "Withdraw does nothing because the AI Tutor already started",
-        "zh": "点“撤回”没有反应，因为 AI Tutor 已经开始回答"
+        "en": "I press Withdraw but AI Tutor has already started answering",
+        "zh": "我点“撤回”时，AI Tutor 已经开始回答了"
        },
        {
         "key": "group.tutor.cannot-see-shared-screen",

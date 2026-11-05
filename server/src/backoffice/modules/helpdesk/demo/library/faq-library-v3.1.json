@@ -1,5 +1,5 @@
 {
- "$comment": "Helpdesk FAQ library v3.4 (2026-11-03, 685 cards: entries + follow-ups; v3.3 + 36 answers for features not fully built written in their designed state, questions and links unchanged; v3.3 = answers corrected against the code during the SOP tree v2 check, card types aligned with the tree, follow-up questions rewritten to stand alone and independent follow-up links removed for the flat library), merged from the project's split source faq-library/v3.1/cards with tools/faqlib.py merge; review evidence (routes, screenshots, sources) left out. Seeded by `npm run seed:helpdesk-demo` (eval/helpdesk/demo) through the normal services, idempotent by key. Do not edit here: edit the split source and merge again. The CI eval gate still uses faq-library.json (v2, 198 cards).",
+ "$comment": "Helpdesk FAQ library v3.5 (2026-11-03, 685 cards: entries + follow-ups; v3.4 + the AI tutor switch card ai-tutor-switch-greyed--ask-in-room following the Study Group fix 72eba55; v3.4 = v3.3 + 36 answers for features not fully built written in their designed state; v3.3 = answers corrected against the code during the SOP tree v2 check, card types aligned with the tree, follow-up questions rewritten to stand alone and independent follow-up links removed for the flat library), merged from the project's split source faq-library/v3.1/cards with tools/faqlib.py merge; review evidence (routes, screenshots, sources) left out. Seeded by `npm run seed:helpdesk-demo` (eval/helpdesk/demo) through the normal services, idempotent by key. Do not edit here: edit the split source and merge again. The CI eval gate still uses faq-library.json (v2, 198 cards).",
  "faqs": [
   {
    "key": "create-account",
@@ -11219,9 +11219,9 @@
    "category": "courses_learning",
    "popular": false,
    "questionEn": "How do I ask AI Tutor a question during a Live Session?",
-   "answerEn": "In the chat box, start your message with **@AI Tutor** or pick it from the mention list. The box reads **Type your message or @AI Tutor...**\n1. The room answers questions one at a time, and you can have up to two waiting. If you see **Wait for the AI Tutor to answer your earlier questions first.**, wait for an answer and ask again.\n2. To take back a question that is still waiting, select **Withdraw**.\nAI Tutor only answers while the Live Session is live and AI Tutor is on for that session.",
+   "answerEn": "In the chat box, start your message with **@AI Tutor** or pick it from the mention list. The box reads **Type your message or @AI Tutor...**\n1. The room answers questions one at a time, and you can have up to two waiting. If you see **Wait for the AI Tutor to answer your earlier questions first.**, wait for an answer and ask again.\n2. To take back a question that is still waiting, select **Withdraw**. If AI Tutor has already started on it, you see **The AI Tutor is already answering that question.** It can no longer be withdrawn, and the answer follows.\nAI Tutor only answers while the Live Session is live and AI Tutor is on for that session.",
    "questionZh": "直播课里怎么向 AI Tutor 提问？",
-   "answerZh": "在聊天框里，以 **@AI Tutor** 开头输入问题，或从提及列表中选择它。输入框提示为“输入消息或 @AI Tutor...”。\n1. 直播间里 AI Tutor 一次回答一个问题，你最多可以有两个问题在排队。如果显示“请等 AI Tutor 先回答完你之前的问题。”，请等它回答后再提问。\n2. 想收回还在排队的问题，请点击**撤回**。\nAI Tutor 只在直播课进行中、且本节开启了 AI Tutor 时才会回答。",
+   "answerZh": "在聊天框里，以 **@AI Tutor** 开头输入问题，或从提及列表中选择它。输入框提示为“输入消息或 @AI Tutor...”。\n1. 直播间里 AI Tutor 一次回答一个问题，你最多可以有两个问题在排队。如果显示“请等 AI Tutor 先回答完你之前的问题。”，请等它回答后再提问。\n2. 想收回还在排队的问题，请点击**撤回**。如果 AI Tutor 已经开始回答，会显示**AI Tutor 已经在回答这个问题了。**，这时不能再撤回，答案会接着出来。\nAI Tutor 只在直播课进行中、且本节开启了 AI Tutor 时才会回答。",
    "keywords": [
     "ask",
     "tutor",

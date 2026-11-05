@@ -15,7 +15,7 @@ import {
 } from '../../../src/backoffice/modules/helpdesk/demo/helpdeskDemoSeed';
 
 /**
- * 演示数据：FAQ 卡片库 v3.2（685 张）+ SOP 流程树 v2 + 四周的对话记录、候选卡、夜间任务、卡片审核。
+ * 演示数据：FAQ 卡片库 v3.5（685 张）+ SOP 流程树 v2 + 四周的对话记录、候选卡、夜间任务、卡片审核。
  *
  *   DATABASE_URL=… npm run seed:helpdesk-demo                 灌（再跑一次不重复）
  *   DATABASE_URL=… npm run seed:helpdesk-demo -- --remove     删掉全部演示行（id 以 de000000- 开头）
