@@ -126,6 +126,47 @@ async function collect(gen: AsyncGenerator<string>): Promise<string> {
 }
 
 describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
+  it('后台在相关段落后展示当前 Release 图片，无需用户要求图片', async () => {
+    const { service, knowledge } = setup(async function* () {
+      yield '状态变量描述系统的当前数值。\n\n';
+      yield '下一段讨论模型的变化率。';
+    });
+    const image = `/api/files/images/${COURSE_ID}/22222222-2222-4222-8222-222222222222.png`;
+    (knowledge.getRelease as jest.Mock).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'v1',
+      pages: [
+        { title: 'Lesson 1', contentMd: `状态变量。![状态变量图](${image})` },
+      ],
+    });
+    await expect(
+      collect(service.streamChat({ ...dto(), message: '解释状态变量' })),
+    ).resolves.toBe(
+      `状态变量描述系统的当前数值。\n\n![状态变量图](${image})\n\n下一段讨论模型的变化率。`,
+    );
+  });
+
+  it('图片随相关段落增量输出，模型已给出同图时不重复插入', async () => {
+    const image = `/api/files/images/${COURSE_ID}/22222222-2222-4222-8222-222222222222.png`;
+    const { service, knowledge } = setup(async function* () {
+      yield `状态变量示意如下：![状态变量图](${image})\n\n`;
+      yield '下面讨论变化率。';
+    });
+    (knowledge.getRelease as jest.Mock).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'v1',
+      pages: [
+        { title: 'Lesson 1', contentMd: `状态变量。![状态变量图](${image})` },
+      ],
+    });
+    const gen = service.streamChat({ ...dto(), message: '解释状态变量' });
+    expect((await gen.next()).value).toContain(`![状态变量图](${image})`);
+    const rest = await collect(gen);
+    expect(rest).not.toContain(`![状态变量图](${image})`);
+  });
+
   it('完整 Release 直接进入编译器，并在模型结束前输出首段', async () => {
     const { service, knowledge } = setup(async function* () {
       yield 'first';
