@@ -195,11 +195,23 @@ Admin 触发的创建员工、修改未验证邮箱、重发激活、重置密�
 | `AUTH_TOKEN` | 建议 | 同时用于 `/api/user/**` 服务密钥和 `POST /api/auth/setup`（网页创建首个管理员）的校验；PROD 未配置时 setup 一律拒绝 |
 | `SESSION_SECRET` | 可选 | ≥32 字符；不配则首次启动生成并存库，多实例共用 |
 | `BACKOFFICE_APP_URL` | 可选 | 邮件链接的站点地址；不配则取请求来源（仅 localhost 与 `admin*.ilovelearningguide.com`），兜底 `https://admin.ilovelearningguide.com` |
+| `PORTAL_STUDENTS_BASE_URL` / `PORTAL_STUDENTS_TOKEN` | 建议 | 学员管理调 Portal 的地址与 Bearer 令牌（§6.3），每次请求现读；不配时回退 `PORTAL_HELPDESK_BASE_URL` / `PORTAL_HELPDESK_TOKEN`。令牌两边（Portal 与同环境 Admin）取同一个值；单独配好后 Helpdesk 令牌就调不了学员接口 |
 | `APP_ENV` | 已有 | 标识 DEV / SIT / PROD。Admin 触发的邮件操作始终回传一次性激活/重置链接（邮件发送成功也保留），页面显示供手动转交 |
 
 注意：开启后所有 KS / AI Tutor 页面和接口都需要登录。
 
 默认管理员（2026-10-23）：迁移 `20261023170000_backoffice_default_admin` 在库里还没有任何员工时，建受保护管理员 `admin@ilovelearningguide.com`。仓库只存 scrypt 哈希，初始密码另行交付；仓库公开，首次登录后须立即改密码。已有员工的库不受影响；`BOOTSTRAP_ADMIN_*` 与 `/api/auth/setup` 仍可用于其他环境。
+
+## 6.3 学员管理与 Learning Access & Experiments（2026-11-02，Student Management PRD v1.0）
+
+Figma 1423:3（列表）、1438:123（详情抽屉）、1444:378（Settings > Learning Access & Experiments）。Figma 没画的状态沿用现有样式，待视觉验收。
+
+- **数据归属**：学员账号与功能开关都在 Portal（唯一写入方）。Admin 不建表，`server/src/backoffice/modules/students/` 只转发到 Portal 集成接口 `/api/integration/students*`（`portalStudentsClient.ts` 是唯一的 Portal 客户端），并注入当前登录员工作为操作人；每次修改和每次被拒的修改都写审计。
+- **接口**：`GET /api/students`（搜索、筛选、分页）、`GET /api/students/:studentId`、`PUT /api/students/:studentId/feature-overrides`（单人 Allow / Deny / 默认，带理由与乐观版本）、`POST /api/students/:studentId/actions`（停用 / 启用、改邮箱（普通或 Admin 免验证）、补发验证邮件、密码重设 / 设置链接）；`GET` / `PUT /api/learning-access`（全局开关，带影响确认）、`POST /api/learning-access/emergency`（紧急关闭）。
+- **权限**：菜单 `student` 与 `settings`。读 = VIEW；学员写操作要 `student` FULL，全局开关与紧急关闭要 `settings` FULL（Admin、Operation Admin）。
+- **功能判定（Portal `modules/student-management/featureAccess.ts`，只此一处）**：账号停用 > 紧急关闭 > 前置条件（Improve Tutor 要有含 AI Tutor 的订阅）> 单人 Deny / Allow > 全局缺省。Improve Tutor 缺省关，AI Support Assistant 缺省开（owner 2026-11-02）。不缓存，学员下一次请求就生效。其它客户端读 Portal `GET /api/me/features`（Improve Tutor 在 KS 那边读它）。
+- **停用账号**：不能登录（密码、Google、微信），已有会话失效，不发重设链接；不碰 Stripe。
+- **测试**：`server/src/backoffice/tests/students.spec.ts`（接口权限、校验、审计、Portal 字段映射）；浏览器 E2E `npm run test:e2e:students`（client，只在本机跑）。
 
 ## 7. 验收方式
 

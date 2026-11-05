@@ -51,6 +51,8 @@ All endpoints are under `/api/helpdesk/`. The guard is menu `helpDesk`: GET need
 | --- | --- |
 | `GET faq-candidates?status&suggestion&origin&q&page&pageSize` | The queue, biggest groups first, with per-status counts and node summaries |
 | `GET faq-candidates/:id` | One candidate, its revisions (with `employeeName`, the staff member's display name at the time) and its nodes. Revisions never hold learner text: examples, draft sources, topic and question are stored as counts |
+| `GET faq-candidates/:id/review` | Review data for one candidate (read only, no model call): the suggestion and its reason, how the AI handled those turns at the time, similar cards and the suggested place |
+| `GET faq-map` | The structure map (process tree and rule table) used by the review page's place picker |
 | `GET faq-candidates/:id/draft` | Prefill for a new FAQ or a follow-up: questions by language, category, placeholder-free phrasings. **The answer is empty for staff to write.** `answerDraft` holds only human replies from resolved enquiries, labelled 草稿 待核实 / "Draft, to be verified" |
 | `POST faq-candidates/:id/accept` `{as, faqId, parentId?, phrasings?, version}` | `as` is one of `add_phrasing`, `new_faq` or `follow_up`. FAQs have no draft state (saving publishes), so for `new_faq` and `follow_up` staff create the node with `POST faqs` from the draft first, then accept with its `faqId`. `follow_up` also links `parentId` to `faqId`. The chosen examples (`phrasings`, example numbers; by default every example without a placeholder) become `flywheel` phrasings and **regression cases for that node**. Unticked examples and examples with a placeholder never become cases. The whole accept runs under a per-candidate PostgreSQL advisory lock, so when two staff accept at once the second gets 409 and leaves no phrasings, edges or cases behind. |
 | `POST faq-candidates/:id/dismiss` `{reason, note?, version}` | `reason` is one of duplicate, not_a_gap, out_of_scope, personal_data, spam or other; `other` needs a note. The note is scrubbed. With `personal_data`, the same transaction empties the candidate's examples and draft sources, sets its topic and proposed question to `<redacted>`, and clears the text and agent reply of its member turns in the fact table (`redacted_at`, so a later pull does not write them back) |
@@ -61,6 +63,7 @@ All endpoints are under `/api/helpdesk/`. The guard is menu `helpDesk`: GET need
 | `POST flywheel/jobs/gap_mining/run` (Idempotency-Key required) | Run now: 201 new (it runs in the background; poll the run), 200 same key, 409 `JOB_ALREADY_RUNNING`, 503 `JOB_START_FAILED` when the run could not be started (for example a database error; try again). Audited (`HELPDESK_JOB_RUN`) |
 | `GET jobs/assist-retention`, `POST jobs/assist-retention/run` | Portal's retention job: its runs, and run now (Portal does the locking and idempotency). Audited |
 | `GET flywheel/metrics?granularity=day\|week&from&to&split=none\|locale\|entry\|signal` | See G6 below |
+| `GET flywheel/ticket-stats?from&to` | Portal's read-only daily ticket numbers (UTC days, at most 92): created, resolved, cancelled, still open at day end, time to first staff reply |
 
 ## Release gate (G5)
 
@@ -128,8 +131,8 @@ Escape closes an open form, then the drawer, but does nothing while a decision i
 **"HelpDesk 数据" tab** (`/help-desk?tab=data`, `FlywheelDataView.tsx`):
 - **Controls:** daily (7, 28 or 92 days) or weekly (12, 26 or 52 weeks), ending today (UTC), and a split. A note says that days and weeks are in UTC and weeks start on Monday; a week the range covers only in part is labelled "(partial week)".
 - **The "Channel" split** (`split=entry` in the API) is the turn's source: ticket form, chat or suggested question. A hint under the controls says it is not the page the learner was on (Portal's feed has no page yet).
-- **Seven stat cards** cover the whole period. Each shows the value, its numerator and denominator, and a one-line definition; a null rate shows as —.
-- **Tables:** a trend table (AI-solved rate with a decorative bar), a per-segment table when a split is chosen (the cards stay overall), the top gap groups (with "Open" to the candidate), and the FAQs that most often lead to a ticket.
+- **Trends** (2026-10-31): one module with selectable tabs instead of separate blocks: Questions, AI-solved rate, no-match rate, handover rate, helpful rate, user rating, Tickets (from `flywheel/ticket-stats`, at most 92 days) and the nightly Background job. Each tab shows the period value and the last change; the chosen one draws one large line chart (`LineChart.tsx`, hand-written SVG; the client still has no chart library) with hover and keyboard read-out, gaps for empty periods and hollow points for a partial week.
+- **Per-segment table** when a split is chosen (the trend stays overall).
+- **Lists** in a two-tab switch: the top gap groups (with "Open" to the candidate) and the FAQs that most often lead to a ticket; long lists fold behind "Show all".
 - **States:** loading, empty ("no conversations in this period yet") and error. The page also shows when data was last pulled from Portal.
-- The client has no chart library, so the page uses tables and cards.
 

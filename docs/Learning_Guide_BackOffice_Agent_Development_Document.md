@@ -943,6 +943,14 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - 模型输出健康：近 60 分钟任一步非法调用、被守卫退回或出错超过 5%（至少 20 次）→ 日志 WARN `model_output_degraded`；`GET /api/helpdesk/agent-runs/health?hours=24` 可查。不做页面（PRD 没有设计）。
 - 依据（v3.3 卡库 685 张，2026-11-03 终测，Claude 盲评，是 AI 评不是人工）：错卡 S650 test 0.19% / 多轮 0.91% / 闲聊 1.20%；每答 ¥0.0010 / 0.0023 / 0.0019；p50 / p95 1.2 / 3.6 秒、2.4 / 5.6 秒、2.2 / 4.7 秒。多轮集用于诊断过，数字偏乐观。
 
+### 4A.18 其它 Helpdesk 文档（2026-11-05）
+
+- 数据飞轮、FAQ 候选与审核（含 `faq-candidates/:id/review`、`faq-map`）、HelpDesk 数据页（趋势图、每日工单数）：[Helpdesk_Data_Flywheel.md](Helpdesk_Data_Flywheel.md)。
+- FAQ 修改记录（Change Log 标签、改动详情、每张卡的历史）：[Helpdesk_FAQ_Change_Log.md](Helpdesk_FAQ_Change_Log.md)。
+- Portal 一侧（学员页、聊天面板、Help Centre、迁移 017–026）：Portal 仓库 `docs/phase1/helpdesk-tickets.md`，先看它的 §0「Current state」。
+
+---
+
 ## 5. API 接口规范
 
 ### 5.1 知识库相关接口
@@ -1349,6 +1357,14 @@ ADMIN_HELPDESK_TOKEN=
 # HELPDESK_SEARCH_SCOPE=all
 # HELPDESK_QUERY_CONTEXT=on
 # HELPDESK_MODEL_HEALTH_ALERT=0.05
+# FAQ 候选的字词检索方式：lexical（缺省；向量走 L2 精排的召回池）/ vector / hybrid（RRF 合并）；向量失败或超时 1.2 秒 → 这一次退回字词
+# HELPDESK_RETRIEVAL=lexical
+# 新问题的候选怎么排（每次现读）：flat（缺省）/ hybrid（流程树与对象表里结构最像的前 3 张放最前，原候选一张不少；要先 seed:helpdesk-faq-map 再发布）
+# HELPDESK_LOCATOR=flat
+# 追问卡带上父卡的问题（精排与挑卡都看「父问题 → 追问」）：on 才开，缺省关
+# HELPDESK_CARD_CONTEXT=on
+# 演示数据：只有部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后自动灌一次；off 关掉；SIT / UAT / PROD 永远不灌
+# HELPDESK_DEMO_DATA=off
 # 只给评测脚本 npm run eval:helpdesk 用（§4A.11），服务不读：真模型评测的花费上限（美元，缺省 5）
 # HELPDESK_EVAL_BUDGET_USD=5
 # FAQ 问题树发布时也跑真模型评测（§4A.13）：on 才跑，缺省关；开着却没组装 model 评测门 → 版本不通过
