@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { COMMERCE_CONFIG, commerceConfig } from './commerce.config';
+import {
+  COMMERCE_CONFIG,
+  commerceConfig,
+  type CommerceCourseConfig,
+} from './commerce.config';
 import { CourseStorageService } from './storage.service';
 import { CommerceCoursesService } from './commerce-courses.service';
 import { CommerceCoursesController } from './commerce-courses.controller';
@@ -43,7 +47,10 @@ import { MediaUploadService } from './media-upload.service';
     {
       provide: PackageInspector,
       inject: [COMMERCE_CONFIG, CourseStorageService],
-      useFactory: (config, storage) => new PackageInspector(config, storage),
+      useFactory: (
+        config: CommerceCourseConfig,
+        storage: CourseStorageService,
+      ) => new PackageInspector(config, storage),
     },
     PackageImporter,
     PublishingService,

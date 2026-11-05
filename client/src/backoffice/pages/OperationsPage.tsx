@@ -12,7 +12,7 @@ import type {
 import { boRequest } from '../lib/api';
 import { categoryLabel } from '../lib/categoryLabel';
 import { useResizableColumns } from '../components/resizableColumns';
-import { liveStatusLabel } from './course-editor/shared';
+import { liveStatusLabel } from './course-editor/shared-utils';
 import { formatDateTime } from '../lib/i18n/format';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
@@ -36,29 +36,34 @@ export function OperationsPage() {
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [addCourseId, setAddCourseId] = useState('');
   const [bannerLanguage, setBannerLanguage] = useState<'en-GB' | 'zh-CN'>('en-GB');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState('');
   const popularTable = useResizableColumns({
     storageKey: 'operations-popular-courses',
     defaultWidths: [50, 320, 150, 120, 240],
   });
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    const [popularResult, bannerResult, coursesResult] = await Promise.all([
+  const fetchLoad = useCallback(() => {
+    return Promise.all([
       boRequest<PopularCourses>('/api/backoffice/operations/popular-courses'),
       boRequest<DiscoveryBanner>('/api/backoffice/operations/discovery-banner'),
       boRequest<CourseList>('/api/backoffice/courses?page=1&pageSize=100'),
-    ]);
-    setBusy(false);
-    if (popularResult.success) setPopular(popularResult.data);
-    if (bannerResult.success) setBanner(bannerResult.data);
-    if (coursesResult.success) setCourses(coursesResult.data.courses);
+    ]).then(([popularResult, bannerResult, coursesResult]) => {
+      setBusy(false);
+      if (popularResult.success) setPopular(popularResult.data);
+      if (bannerResult.success) setBanner(bannerResult.data);
+      if (coursesResult.success) setCourses(coursesResult.data.courses);
+    });
   }, []);
 
+  const load = useCallback(() => {
+    setBusy(true);
+    return fetchLoad();
+  }, [fetchLoad]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void fetchLoad();
+  }, [fetchLoad]);
 
   const onlineCourses = useMemo(() => courses.filter((course) => course.liveStatus === 'ONLINE'), [courses]);
   const unusedCourses = useMemo(

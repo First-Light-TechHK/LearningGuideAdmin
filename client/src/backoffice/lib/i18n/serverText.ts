@@ -10,6 +10,15 @@ import { t } from "./messages";
  * 新增后端中文报错时要在这里加译文，tests/i18n-guard.test.ts 会扫描后端源码检查。
  */
 export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> = [
+  ["测试版本已变化，请刷新后重试", "The test release has changed. Refresh and try again."],
+  ["LLM 上游生成失败", "The model could not complete this response."],
+  ["LLM 上游连接中断", "The model connection was interrupted."],
+  ["所选知识库版本没有可用正文", "The selected release has no usable course content."],
+  ["所选知识库版本不存在", "The selected release does not exist."],
+  ["知识库版本不属于当前课程", "The release does not belong to this course."],
+  ["AI 回答连接中断，请重试", "AI response was interrupted"],
+  ["AI 回答未完成，请重试", "AI response was not completed"],
+  ["AI 响应格式错误，请重试", "Invalid AI stream event"],
   ["服务器内部错误", "Internal server error."],
   ["文件大小超过 15MB 限制", "The file is larger than the 15 MB limit."],
   ["请求内容过大，请拆分文档后重试", "The request is too large. Split the document and try again."],
@@ -59,6 +68,7 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["该课程已存在发布历史版本，拒绝删除；如需删除请先处理历史版本", "This course has released versions and cannot be deleted. Deal with those versions first."],
   ["文件内容不是有效的 .xls 格式（请确认文件类型）", "The file is not a valid .xls file."],
   ["文档转换失败，请检查文件是否损坏或受密码保护", "The document could not be converted. Check that it is not damaged or password protected."],
+  ["LaTeX 文件必须为有效的 UTF-8 文本", "The LaTeX file must be valid UTF-8 text."],
   ["DOCX 含图片，请从 Knowledge Pages 课程中导入", "This DOCX contains images. Import it from a course in Knowledge Pages."],
   ["该版本为 AI Tutor 后台测试所选版本，不可删除", "This version is selected for AI Tutor testing and cannot be deleted."],
   ["热门课程只能选择 1–6 门。", "Popular Courses allows 1–6 courses."],

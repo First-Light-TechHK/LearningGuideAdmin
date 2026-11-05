@@ -118,6 +118,7 @@ export type ChatStreamEvent =
 export async function chatStream(
   payload: {
     courseId: string
+    expectedReleaseId?: string
     message: string
     mode: AiMode
     history: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -146,21 +147,40 @@ export async function chatStream(
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const frames = buffer.split('\n\n')
-    buffer = frames.pop() ?? ''
-    for (const frame of frames) {
-      const line = frame.trim()
-      if (!line.startsWith('data:')) continue
-      try {
-        onEvent(JSON.parse(line.slice(5).trim()) as ChatStreamEvent)
-      } catch {
-        /* 忽略非 JSON 帧 */
-      }
+  let buffer = '', completed = false
+  const cancel = () => { void reader.cancel().catch(() => undefined) }
+  signal?.addEventListener('abort', cancel, { once: true })
+  const consume = (frame: string) => {
+    const data = frame.split(/\r?\n/).filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart()).join('\n')
+    if (!data) return
+    let event: unknown
+    try { event = JSON.parse(data) }
+    catch { throw new Error(serverText('Invalid AI stream event')) }
+    if (!event || typeof event !== 'object') throw new Error(serverText('Invalid AI stream event'))
+    if ('error' in event && typeof event.error === 'string') {
+      const error = serverText(event.error)
+      onEvent({ error })
+      throw new Error(error)
     }
+    if ('delta' in event && typeof event.delta === 'string') onEvent({ delta: event.delta })
+    else if ('done' in event && event.done === true) { completed = true; onEvent({ done: true }) }
+  }
+  try {
+    signal?.throwIfAborted()
+    while (!completed) {
+      const { done, value } = await reader.read()
+      signal?.throwIfAborted()
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      const frames = buffer.split(/\r?\n\r?\n/)
+      buffer = frames.pop() ?? ''
+      for (const frame of frames) { consume(frame); if (completed) break }
+      if (done) { if (!completed && buffer.trim()) consume(buffer); break }
+    }
+    if (!completed) throw new Error(serverText('AI response was interrupted'))
+  } finally {
+    signal?.removeEventListener('abort', cancel)
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
   }
 }

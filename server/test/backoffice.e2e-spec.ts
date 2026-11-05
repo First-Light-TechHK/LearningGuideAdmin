@@ -1,3 +1,9 @@
+import type { SuccessResponse, ErrorResponse } from './helpers/http-response';
+import type {
+  SessionPayload,
+  BackofficeAuthController,
+} from '../src/backoffice/nest/auth.controller';
+import type { BackofficeEmployeesController } from '../src/backoffice/nest/employees.controller';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -45,7 +51,9 @@ describe('BackOffice access (e2e)', () => {
 
   it('rejects signed-out calls to BackOffice endpoints but keeps health public', async () => {
     await request(server()).get('/api/health').expect(200);
-    const res = await request(server()).get('/api/courses').expect(401);
+    const res: ErrorResponse = await request(server())
+      .get('/api/courses')
+      .expect(401);
     expect(res.body.error.code).toBe('INVALID_EMPLOYEE_ACCOUNT');
     await request(server()).get('/api/session').expect(401);
     await request(server()).get('/api/admin/employees').expect(401);
@@ -117,7 +125,7 @@ describe('BackOffice access (e2e)', () => {
   });
 
   it('answers a wrong password and an unknown email the same way, and hides status until the password is right', async () => {
-    const unknown = await request(server())
+    const unknown: ErrorResponse = await request(server())
       .post('/api/auth/sign-in')
       .send({ email: 'bo-e2e-nobody@example.com', password: 'whatever-pass' })
       .expect(401);
@@ -128,12 +136,12 @@ describe('BackOffice access (e2e)', () => {
       `UPDATE employees SET account_status = 'INACTIVE' WHERE login_email = $1`,
       [email],
     );
-    const wrong = await request(server())
+    const wrong: ErrorResponse = await request(server())
       .post('/api/auth/sign-in')
       .send({ email, password: 'wrong-password' })
       .expect(401);
     expect(wrong.body.error.code).toBe('INVALID_CREDENTIALS');
-    const right = await request(server())
+    const right: ErrorResponse = await request(server())
       .post('/api/auth/sign-in')
       .send({ email, password: E2E_PASSWORD })
       .expect(403);
@@ -166,7 +174,9 @@ describe('BackOffice access (e2e)', () => {
       await agent.get('/api/ai/models').expect(expected.aiTutor);
       await agent.get('/api/admin/employees').expect(expected.employees);
 
-      const session = await agent.get('/api/session').expect(200);
+      const session: SuccessResponse<SessionPayload> = await agent
+        .get('/api/session')
+        .expect(200);
       const menus: string[] = session.body.data.menus;
       expect(menus.includes('knowledge')).toBe(expected.knowledge === 200);
       expect(menus.includes('aiTutor')).toBe(expected.aiTutor === 200);
@@ -208,7 +218,9 @@ describe('BackOffice access (e2e)', () => {
           await agent.put('/api/ai/config/no-such-course/online').send({}),
         ),
       ).toBe(!allowed);
-      const forbidden = await agent.post('/api/sync/all').send({});
+      const forbidden: ErrorResponse = await agent
+        .post('/api/sync/all')
+        .send({});
       if (!allowed) {
         expect(forbidden.status).toBe(403);
         expect(forbidden.body.error.code).toBe('NOT_AUTHORISED');
@@ -221,20 +233,24 @@ describe('BackOffice access (e2e)', () => {
   it('lets the Graphic Designer edit an existing course but not create, publish or price one, nor edit Knowledge', async () => {
     const id = '00000000-0000-0000-0000-000000000000';
     const designer = await signInAs(app, 'GRAPHIC_DESIGNER');
-    const status = async (send: () => Promise<request.Response>) => (await send()).status;
+    const status = async (send: () => Promise<request.Response>) =>
+      (await send()).status;
 
     for (const send of [
       () => designer.put(`/api/backoffice/courses/${id}`).send({}),
       () => designer.post(`/api/backoffice/courses/${id}/lessons`).send({}),
-      () => designer.put(`/api/backoffice/courses/${id}/lessons/${id}`).send({}),
-      () => designer.post(`/api/backoffice/courses/${id}/media/session`).send({}),
+      () =>
+        designer.put(`/api/backoffice/courses/${id}/lessons/${id}`).send({}),
+      () =>
+        designer.post(`/api/backoffice/courses/${id}/media/session`).send({}),
     ]) {
       expect(await status(send)).not.toBe(403);
     }
     for (const send of [
       () => designer.post('/api/backoffice/courses').send({}),
       () => designer.post(`/api/backoffice/courses/${id}/publish`).send({}),
-      () => designer.post(`/api/backoffice/courses/${id}/delete-draft`).send({}),
+      () =>
+        designer.post(`/api/backoffice/courses/${id}/delete-draft`).send({}),
       () => designer.post(`/api/backoffice/courses/${id}/live-status`).send({}),
       () => designer.put(`/api/backoffice/courses/${id}/plans`).send({}),
       () => designer.put(`/api/backoffice/courses/${id}/trial`).send({}),
@@ -253,7 +269,9 @@ describe('BackOffice access (e2e)', () => {
     // Full 角色照常
     const admin = await signInAs(app, 'ADMIN');
     expect(
-      await status(() => admin.post(`/api/backoffice/courses/${id}/publish`).send({})),
+      await status(() =>
+        admin.post(`/api/backoffice/courses/${id}/publish`).send({}),
+      ),
     ).not.toBe(403);
   });
 
@@ -264,7 +282,9 @@ describe('BackOffice access (e2e)', () => {
     let link: string;
     let employeeId: string;
     try {
-      const created = await admin
+      const created: SuccessResponse<
+        Awaited<ReturnType<BackofficeEmployeesController['create']>>
+      > = await admin
         .post('/api/admin/employees')
         .set('Origin', 'http://localhost:5173')
         .send({
@@ -288,14 +308,14 @@ describe('BackOffice access (e2e)', () => {
       process.env.APP_ENV = previous;
     }
 
-    const duplicate = await admin
+    const duplicate: ErrorResponse = await admin
       .post('/api/admin/employees')
       .send({ email: 'bo-e2e-new@example.com', role: 'FINANCE' })
       .expect(409);
     expect(duplicate.body.error.code).toBe('DUPLICATE_EMAIL');
 
     // Pending 账号还没有密码，不能登录（与密码错误同码）
-    const pending = await request(server())
+    const pending: ErrorResponse = await request(server())
       .post('/api/auth/sign-in')
       .send({ email: 'bo-e2e-new@example.com', password: 'whatever-password' })
       .expect(401);
@@ -312,7 +332,7 @@ describe('BackOffice access (e2e)', () => {
         confirmPassword: 'new-employee-pass',
       })
       .expect(200);
-    const reused = await request(server())
+    const reused: ErrorResponse = await request(server())
       .post('/api/auth/activate')
       .send({
         token,
@@ -323,7 +343,9 @@ describe('BackOffice access (e2e)', () => {
     expect(reused.body.error.code).toBe('TOKEN_ALREADY_USED');
 
     const employee = request.agent(server());
-    const signedIn = await employee
+    const signedIn: SuccessResponse<
+      Awaited<ReturnType<BackofficeAuthController['signIn']>>
+    > = await employee
       .post('/api/auth/sign-in')
       .send({ email: 'bo-e2e-new@example.com', password: 'new-employee-pass' })
       .expect(200);
@@ -336,7 +358,7 @@ describe('BackOffice access (e2e)', () => {
       .send({ accountStatus: 'INACTIVE' })
       .expect(200);
     await employee.get('/api/ai/models').expect(401);
-    const inactive = await request(server())
+    const inactive: ErrorResponse = await request(server())
       .post('/api/auth/sign-in')
       .send({ email: 'bo-e2e-new@example.com', password: 'new-employee-pass' })
       .expect(403);
@@ -348,7 +370,9 @@ describe('BackOffice access (e2e)', () => {
     const previous = process.env.EMAIL_DELIVERY;
     process.env.EMAIL_DELIVERY = 'discard';
     try {
-      const created = await admin
+      const created: SuccessResponse<
+        Awaited<ReturnType<BackofficeEmployeesController['create']>>
+      > = await admin
         .post('/api/admin/employees')
         .send({
           email: 'bo-e2e-sent@example.com',
@@ -359,7 +383,9 @@ describe('BackOffice access (e2e)', () => {
       expect(created.body.data.delivery).toBe('SENT');
       expect(created.body.data.manualLink).toContain('/en-GB/activate?token=');
 
-      const reset = await admin
+      const reset: SuccessResponse<
+        Awaited<ReturnType<BackofficeEmployeesController['resetPassword']>>
+      > = await admin
         .post(
           `/api/admin/employees/${created.body.data.employee.employeeId}/reset-password`,
         )
@@ -394,7 +420,9 @@ describe('BackOffice access (e2e)', () => {
     await first.post('/api/auth/sign-out').expect(200);
     await first.get('/api/session').expect(401);
 
-    const second = await request(server())
+    const second: SuccessResponse<
+      Awaited<ReturnType<BackofficeAuthController['signIn']>>
+    > = await request(server())
       .post('/api/auth/sign-in')
       .send({ email, password: E2E_PASSWORD })
       .expect(200);
@@ -411,7 +439,7 @@ describe('BackOffice access (e2e)', () => {
       .post('/api/auth/sign-in')
       .send({ email, password: E2E_PASSWORD })
       .expect(200);
-    const wrong = await agent
+    const wrong: ErrorResponse = await agent
       .post('/api/auth/change-password')
       .send({
         currentPassword: 'not-the-password',
@@ -437,9 +465,11 @@ describe('BackOffice access (e2e)', () => {
 
   it('refuses first-admin setup once any employee exists', async () => {
     await ensureEmployee('bo-e2e-existing@example.com', 'ADMIN');
-    const state = await request(server()).get('/api/auth/setup').expect(200);
+    const state: SuccessResponse<
+      Awaited<ReturnType<BackofficeAuthController['setupState']>>
+    > = await request(server()).get('/api/auth/setup').expect(200);
     expect(state.body.data.required).toBe(false);
-    const res = await request(server())
+    const res: ErrorResponse = await request(server())
       .post('/api/auth/setup')
       .send({
         email: 'bo-e2e-intruder@example.com',
@@ -461,7 +491,7 @@ describe('BackOffice access (e2e)', () => {
       `SELECT employee_id FROM employees WHERE login_email = 'bo-e2e-boot@example.com'`,
     );
     const id = rows[0].employee_id;
-    const res = await admin
+    const res: ErrorResponse = await admin
       .patch(`/api/admin/employees/${id}`)
       .send({ role: 'FINANCE' })
       .expect(403);
@@ -489,13 +519,15 @@ describe('BackOffice access (e2e)', () => {
       const previous = process.env.APP_ENV;
       process.env.APP_ENV = 'SIT';
       try {
-        const created = await admin
+        const created: SuccessResponse<
+          Awaited<ReturnType<BackofficeEmployeesController['create']>>
+        > = await admin
           .post('/api/admin/employees')
           .send({ email, role: 'FINANCE', locale: 'en-GB' })
           .expect(200);
         return {
           admin,
-          employeeId: created.body.data.employee.employeeId as string,
+          employeeId: created.body.data.employee.employeeId,
           activation: tokenOf(created.body.data.manualLink),
         };
       } finally {
@@ -503,13 +535,15 @@ describe('BackOffice access (e2e)', () => {
       }
     }
 
-    const status = async (token: string, purpose: string) =>
-      (
-        await request(server())
-          .get('/api/auth/token-status')
-          .query({ token, purpose })
-          .expect(200)
-      ).body.data.status;
+    const status = async (token: string, purpose: string) => {
+      const response: SuccessResponse<
+        Awaited<ReturnType<BackofficeAuthController['tokenStatus']>>
+      > = await request(server())
+        .get('/api/auth/token-status')
+        .query({ token, purpose })
+        .expect(200);
+      return response.body.data.status;
+    };
 
     it('voids the activation link once a reset link has set the password', async () => {
       const { employeeId, activation } = await createPending(
@@ -526,7 +560,7 @@ describe('BackOffice access (e2e)', () => {
         })
         .expect(200);
       expect(await status(activation, 'activation')).toBe('used');
-      const replay = await request(server())
+      const replay: ErrorResponse = await request(server())
         .post('/api/auth/activate')
         .send({
           token: activation,
@@ -566,7 +600,9 @@ describe('BackOffice access (e2e)', () => {
       process.env.APP_ENV = 'SIT';
       let fresh: string;
       try {
-        const res = await admin
+        const res: SuccessResponse<
+          Awaited<ReturnType<BackofficeEmployeesController['resetPassword']>>
+        > = await admin
           .post(`/api/admin/employees/${employeeId}/reset-password`)
           .send({ locale: 'en-GB' })
           .expect(200);
@@ -594,7 +630,9 @@ describe('BackOffice access (e2e)', () => {
         `UPDATE verification_tokens SET expires_at = now() - interval '1 minute'
           WHERE employee_id = (SELECT employee_id FROM employees WHERE login_email = 'bo-e2e-link4@example.com')`,
       );
-      const res = await request(server())
+      const res: SuccessResponse<
+        Awaited<ReturnType<BackofficeAuthController['tokenStatus']>>
+      > = await request(server())
         .get('/api/auth/token-status')
         .query({ token: activation, purpose: 'activation' })
         .expect(200);
@@ -615,7 +653,7 @@ describe('BackOffice access (e2e)', () => {
       .post('/api/auth/sign-in')
       .send({ email, password: E2E_PASSWORD })
       .expect(200);
-    const res = await agent
+    const res: ErrorResponse = await agent
       .post('/api/auth/change-password')
       .send({
         currentPassword: E2E_PASSWORD,
@@ -631,7 +669,9 @@ describe('BackOffice access (e2e)', () => {
     await ensureEmployee('bo-e2e-under_score@example.com', 'FINANCE');
     await ensureEmployee('bo-e2e-plain@example.com', 'FINANCE');
     const admin = await signInAs(app, 'ADMIN');
-    const res = await admin
+    const res: SuccessResponse<
+      Awaited<ReturnType<BackofficeEmployeesController['list']>>
+    > = await admin
       .get('/api/admin/employees')
       .query({ email: '_score' })
       .expect(200);
@@ -639,7 +679,9 @@ describe('BackOffice access (e2e)', () => {
       (item: { loginEmail: string }) => item.loginEmail,
     );
     expect(emails).toEqual(['bo-e2e-under_score@example.com']);
-    const all = await admin
+    const all: SuccessResponse<
+      Awaited<ReturnType<BackofficeEmployeesController['list']>>
+    > = await admin
       .get('/api/admin/employees')
       .query({ email: '%' })
       .expect(200);
@@ -671,7 +713,7 @@ describe('BackOffice access (e2e)', () => {
   });
 
   it('does not echo JSON parser details or advertise the framework', async () => {
-    const res = await request(server())
+    const res: ErrorResponse = await request(server())
       .post('/api/auth/sign-in')
       .set('Content-Type', 'application/json')
       .send('{bad json')

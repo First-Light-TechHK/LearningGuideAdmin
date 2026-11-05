@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EmbeddingService } from '../ai/embedding/embedding.service';
+import { EMBEDDING_QUERY_CLIENT } from '../ks/contract/embedding-client';
 import { ChunkingService } from './chunking.service';
 import { IndexingService } from './indexing.service';
 
@@ -9,7 +10,12 @@ import { IndexingService } from './indexing.service';
  * 提供 EmbeddingService（给 KsModule 的 PrismaKnowledgeClient 做向量检索用）。
  */
 @Module({
-  providers: [EmbeddingService, ChunkingService, IndexingService],
-  exports: [EmbeddingService, IndexingService],
+  providers: [
+    EmbeddingService,
+    { provide: EMBEDDING_QUERY_CLIENT, useExisting: EmbeddingService },
+    ChunkingService,
+    IndexingService,
+  ],
+  exports: [EmbeddingService, EMBEDDING_QUERY_CLIENT, IndexingService],
 })
 export class KnowledgeModule {}

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Exhibit } from '../../contracts/course';
-import { L, Modal, buttonStyle, exhibitTypeLabel, inputStyle } from './shared';
+import { Modal } from './shared';
+import { L, buttonStyle, exhibitTypeLabel, inputStyle } from './shared-utils';
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => {

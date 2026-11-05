@@ -472,19 +472,31 @@ export class AiConfigService implements OnModuleInit {
           where: { courseId_releaseId: { courseId, releaseId } },
         })
       : null;
+    return this.promptsFromConfig(cfg, mode);
+  }
+
+  private async promptsFromConfig(
+    cfg: CourseAiConfig | null,
+    mode: PromptMode,
+  ): Promise<ResolvedPrompts> {
     const modeIdField =
       mode === 'LECTURE'
         ? cfg?.lectureModeId
         : mode === 'SOCRATIC'
           ? cfg?.socraticModeId
           : cfg?.assessmentModeId;
-    const template = modeIdField
+    let template = modeIdField
       ? await this.prisma.promptTemplate.findUnique({
           where: { id: modeIdField },
         })
       : await this.prisma.promptTemplate.findFirst({
           where: { mode, isDefault: true },
         });
+    if (modeIdField && !template?.systemPrompt) {
+      template = await this.prisma.promptTemplate.findFirst({
+        where: { mode, isDefault: true },
+      });
+    }
     // System Prompt 按模式取自定义覆盖 → 模板 → 文件默认
     const customPrompt =
       mode === 'LECTURE'
@@ -529,6 +541,26 @@ export class AiConfigService implements OnModuleInit {
           where: { courseId_releaseId: { courseId, releaseId } },
         })
       : null;
+    void _mode;
+    return this.runtimeFromConfig(cfg);
+  }
+
+  /** 同一轮使用同一份配置，避免并发 Save 混合模型与 Prompt。 */
+  async resolveTutorRun(
+    courseId: string,
+    releaseId: string,
+    mode: 'LECTURE' | 'SOCRATIC',
+  ) {
+    const cfg = await this.prisma.courseAiConfig.findUnique({
+      where: { courseId_releaseId: { courseId, releaseId } },
+    });
+    return {
+      runtime: this.runtimeFromConfig(cfg),
+      prompts: await this.promptsFromConfig(cfg, mode),
+    };
+  }
+
+  private runtimeFromConfig(cfg: CourseAiConfig | null) {
     const apiKey = cfg?.apiKey
       ? this.crypto.decrypt(cfg.apiKey)
       : (this.config.get<string>('OPENROUTER_API_KEY') ?? '');

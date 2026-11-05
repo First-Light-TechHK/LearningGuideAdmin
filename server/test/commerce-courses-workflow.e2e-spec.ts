@@ -1,3 +1,4 @@
+import type { SuccessResponse, ErrorResponse } from './helpers/http-response';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { App } from 'supertest/types';
@@ -46,7 +47,7 @@ describe('Commerce course workflow (e2e)', () => {
 
   it('publishes once when Publish is pressed twice at the same time', async () => {
     const agent = await signInAs(app, 'ADMIN');
-    const created = await agent
+    const created: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
       .send({ code: `${code}-P`, title: 'Publish e2e' });
     const id: string = created.body.data.id;
@@ -75,7 +76,7 @@ describe('Commerce course workflow (e2e)', () => {
         agent.post(`/api/backoffice/courses/${id}/publish`).send({}),
       ]);
       expect(both.map((r) => r.status).sort()).toEqual([200, 409]);
-      const conflict = both.find((r) => r.status === 409)!;
+      const conflict: ErrorResponse = both.find((r) => r.status === 409)!;
       expect(conflict.body.error.code).toBe('NO_DRAFT');
       expect(
         await prisma.courseVersion.count({ where: { courseId: id } }),
@@ -87,7 +88,7 @@ describe('Commerce course workflow (e2e)', () => {
       ).toBe(1);
 
       // 再点一次：草稿已发布，409，不多出版本
-      const again = await agent
+      const again: ErrorResponse = await agent
         .post(`/api/backoffice/courses/${id}/publish`)
         .send({});
       expect(again.status).toBe(409);
@@ -101,7 +102,7 @@ describe('Commerce course workflow (e2e)', () => {
         .post(`/api/backoffice/courses/${id}/lessons`)
         .send({ title: 'Two' })
         .expect(201);
-      const second = await agent
+      const second: SuccessResponse<{ versionNo: number }> = await agent
         .post(`/api/backoffice/courses/${id}/publish`)
         .send({});
       expect(second.status).toBe(200);
@@ -148,7 +149,7 @@ describe('Commerce course workflow (e2e)', () => {
 
   it('keeps lesson edits consistent under double clicks', async () => {
     const agent = await signInAs(app, 'ADMIN');
-    const created = await agent
+    const created: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
       .send({ code: `${code}-L`, title: 'Lessons e2e' });
     const id: string = created.body.data.id;
@@ -175,7 +176,7 @@ describe('Commerce course workflow (e2e)', () => {
     const before = await prisma.lessonLocalization.findFirstOrThrow({
       where: { lessonId: lessons[1].id },
     });
-    const dup = await agent
+    const dup: ErrorResponse = await agent
       .put(`/api/backoffice/courses/${id}/lessons/${lessons[1].id}`)
       .send({ code: lessons[0].code, title: 'Should not stick' });
     expect(dup.status).toBe(409);
@@ -195,7 +196,7 @@ describe('Commerce course workflow (e2e)', () => {
 
   it('refuses to reorder lessons that belong to another course', async () => {
     const agent = await signInAs(app, 'ADMIN');
-    const mine = await agent
+    const mine: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
       .send({ code: `${code}-O`, title: 'Order e2e' });
     const other = await prisma.commerceCourse.findFirst({
@@ -244,9 +245,8 @@ describe('Commerce course workflow (e2e)', () => {
     // 不卡住就很难撞上。旧代码（先查再改）在这里会两次都开始导入，没有 409。
     // 只拦确认接口里的读（看调用栈），别的地方读同一任务照常放行。
     const delegate = prisma.coursePackageJob;
-    const original = delegate.findUnique.bind(
-      delegate,
-    ) as typeof delegate.findUnique;
+    const original: typeof delegate.findUnique =
+      delegate.findUnique.bind(delegate);
     let arrived = 0;
     let done = 0;
     let release: () => void = () => undefined;

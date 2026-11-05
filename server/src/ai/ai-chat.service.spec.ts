@@ -36,6 +36,19 @@ function setup(stream: StreamFn) {
       aiTestReleaseId: null,
       aiTutorOnline: true,
     }),
+    getRelease: jest.fn().mockImplementation((id: string) =>
+      Promise.resolve({
+        id,
+        courseId: COURSE_ID,
+        versionTag: 'v1',
+        pages: [
+          {
+            title: 'Modeling Life',
+            contentMd: 'long course material '.repeat(2000),
+          },
+        ],
+      }),
+    ),
     retrieveChunks: jest.fn().mockResolvedValue([
       {
         pageTitle: 'Modeling Life',
@@ -66,6 +79,11 @@ function setup(stream: StreamFn) {
       .fn()
       .mockResolvedValue({ systemPrompt: 'SYS', welcomeMsg: '' }),
   } as unknown as AiConfigService;
+
+  configs.resolveTutorRun = jest.fn(async (courseId, releaseId, mode) => ({
+    runtime: await configs.resolveRuntime(courseId, releaseId, mode),
+    prompts: await configs.resolvePrompts(courseId, releaseId, mode),
+  }));
 
   const registry = {
     get: jest.fn(() => ({ name: 'openrouter', stream })),
@@ -108,6 +126,83 @@ async function collect(gen: AsyncGenerator<string>): Promise<string> {
 }
 
 describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
+  it('完整 Release 直接进入编译器，并在模型结束前输出首段', async () => {
+    const { service, knowledge } = setup(async function* () {
+      yield 'first';
+      yield 'second';
+    });
+    (knowledge.getRelease as jest.Mock).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'v1',
+      pages: [{ title: 'Lesson 1', contentMd: 'Approved complete material' }],
+    });
+    const gen = service.streamChat(dto());
+    expect(await gen.next()).toEqual({ value: 'first', done: false });
+    expect(await gen.next()).toEqual({ value: 'second', done: false });
+    expect(await gen.next()).toEqual({ value: undefined, done: true });
+    expect(knowledge.retrieveChunks).not.toHaveBeenCalled();
+    expect(knowledge.getRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('后台屏幕版本过期时返回冲突，不读取知识或调用模型', async () => {
+    const stream = jest.fn(async function* () {
+      yield 'unexpected';
+    });
+    const { service, knowledge } = setup(stream);
+    await expect(
+      collect(service.streamChat({ ...dto(), expectedReleaseId: 'other' })),
+    ).rejects.toThrow('测试版本已变化');
+    expect(knowledge.getRelease).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it('Offline 不阻止后台测试，仍使用测试所选 Release', async () => {
+    const { service, knowledge, configs } = setup(async function* () {
+      yield 'ok';
+    });
+    (knowledge.getCourse as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: LIVE_RELEASE,
+      aiTestReleaseId: TEST_RELEASE,
+      aiTutorOnline: false,
+    });
+    await expect(collect(service.streamChat(dto()))).resolves.toBe('ok');
+    expect(configs.resolveRuntime).toHaveBeenCalledWith(
+      COURSE_ID,
+      TEST_RELEASE,
+      'LECTURE',
+    );
+  });
+
+  it('未选择测试 Release 时回退 Live，未发布课程拒绝调用模型', async () => {
+    const stream = jest.fn(async function* () {
+      yield 'ok';
+    });
+    const { service, knowledge, configs } = setup(stream);
+    (knowledge.getCourse as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: LIVE_RELEASE,
+      aiTestReleaseId: null,
+      aiTutorOnline: false,
+    });
+    await collect(service.streamChat(dto()));
+    expect(configs.resolveRuntime).toHaveBeenCalledWith(
+      COURSE_ID,
+      LIVE_RELEASE,
+      'LECTURE',
+    );
+    (knowledge.getCourse as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: null,
+      aiTestReleaseId: null,
+    });
+    await expect(collect(service.streamChat(dto()))).rejects.toThrow(
+      '没有可用',
+    );
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
   it('正常结束：记录 ok + 完整回答与截断后的 history 条数', async () => {
     const { service, write, entryOf } = setup(async function* () {
       yield 'Hello';
@@ -192,13 +287,13 @@ describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
     });
 
     const gen = service.streamChat(dto());
-    await expect(gen.next()).resolves.toEqual({ value: 'AB', done: false });
+    await expect(gen.next()).resolves.toEqual({ value: 'A', done: false });
     await gen.return(undefined);
 
     expect(write).toHaveBeenCalledTimes(1);
     const entry = entryOf();
     expect(entry.status).toBe('aborted');
-    expect(entry.answer).toBe('AB');
+    expect(entry.answer).toBe('A');
   });
 
   it('课程不存在：日志记 error，releaseId 为空', async () => {
@@ -1055,12 +1150,12 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
       opts.onEvent?.({ type: 'finish', reason: 'length' });
       yield 'partial answer';
     });
-    await expect(service.streamChat(dto()).next()).rejects.toBeInstanceOf(
+    await expect(collect(service.streamChat(dto()))).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(entryOf().status).toBe('error');
     expect(entryOf().finishReason).toBe('length');
-    expect(entryOf().answer).toBe('');
+    expect(entryOf().answer).toBe('partial answer');
     expect(entryOf().attempts?.[0]?.answerChars).toBe('partial answer'.length);
   });
 
@@ -1098,7 +1193,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(effort).toBe('low');
   });
 
-  it('DeepSeek Flash 首次截断后使用无推理档重试且不泄露部分正文', async () => {
+  it('DeepSeek Flash 已显示正文后截断，保留片段并报错且不重试', async () => {
     const efforts: Array<string | undefined> = [];
     const { service, configs } = setup(async function* (opts) {
       await Promise.resolve();
@@ -1116,10 +1211,13 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
       apiKey: 'test-key',
       baseUrl: 'https://example.invalid',
     });
-    await expect(collect(service.streamChat(dto()))).resolves.toBe(
-      'complete answer',
-    );
-    expect(efforts).toEqual(['low', 'none']);
+    const chunks: string[] = [];
+    const read = async () => {
+      for await (const chunk of service.streamChat(dto())) chunks.push(chunk);
+    };
+    await expect(read()).rejects.toThrow('内容未完成');
+    expect(chunks.join('')).toBe('partial answer');
+    expect(efforts).toEqual(['low']);
   });
 
   it('已取消请求向 Provider 传 AbortSignal 且不重试', async () => {

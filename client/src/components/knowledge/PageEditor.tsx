@@ -4,6 +4,7 @@ import type { MenuProps } from '../ui'
 import { EditOutlined, EyeOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
 import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import 'katex/dist/katex.min.css'
@@ -13,7 +14,7 @@ import { clearLocalDraft, localDraftKey, registerDraftFlusher, useKnowledgeStore
 import { MarkdownSourceEditor } from './MarkdownSourceEditor'
 import { MarkdownToolbar } from './MarkdownToolbar'
 import { insertSnippet, toggleLinePrefix } from './markdownCommands'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 import { knowledgeApi } from '../../api/knowledge'
@@ -55,7 +56,7 @@ function sanitizeHtml() {
 }
 
 const katexPlugins = {
-  remarkPlugins: [remarkMath],
+  remarkPlugins: [remarkGfm, remarkMath],
   rehypePlugins: [rehypeRaw, sanitizeHtml, rehypeKatex],
 }
 
@@ -173,9 +174,12 @@ export function PageEditor() {
   }, [])
 
   // 切换页面：退出预览态，回到源码编辑
-  useEffect(() => {
+  const [previewPage, setPreviewPage] = useState(draft?.pageId)
+  if (previewPage !== draft?.pageId) {
+    setPreviewPage(draft?.pageId)
     setPreview(false)
-  }, [draft?.pageId])
+  }
+  if (tocScrollTarget && preview) setPreview(false)
 
   // TOC 跳转：源码态直接定位；预览态先切回编辑再定位
   useEffect(() => {
@@ -186,7 +190,6 @@ export function PageEditor() {
       scrollToHeading(view, target)
     } else if (target) {
       pendingHeadingRef.current = target
-      setPreview(false)
     }
     clearTocScrollTarget()
   }, [tocScrollTarget, clearTocScrollTarget])
@@ -268,7 +271,7 @@ export function PageEditor() {
       },
       onCancel: () => clearLocalDraft(pageId),
     })
-  }, [draft?.pageId, access.canEdit, modal])
+  }, [draft?.pageId, access.canEdit, modal, locale, text])
 
   /** 临时诊断（仅开发模式）：主线程 >120ms 的长任务；验证改版效果后可删除 */
   useEffect(() => {

@@ -22,8 +22,9 @@ export type { InputProps } from './Input'
 export { Select } from './Select'
 export type { SelectProps } from './Select'
 
-export { Tag, TAG_PRESET_COLORS } from './Tag'
-export type { TagProps } from './Tag'
+export { Tag } from './Tag';
+export { TAG_PRESET_COLORS } from './tagColors';
+export type { TagProps } from './tagColors';
 
 export { default as Modal } from './Modal'
 export type { ModalProps } from './Modal'

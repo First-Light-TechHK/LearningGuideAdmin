@@ -14,21 +14,6 @@ export interface Chunk {
   tokenCount: number;
 }
 
-/** heading 文本转 slug（与 ai-chat.service.ts 保持一致） */
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
-}
-
-/** 生成带层级前缀的 heading key：`h{n}-{slug}` */
-function headingKey(level: number, text: string): string {
-  return `h${level}-${slugify(text)}`;
-}
-
 /**
  * 按 H1-H6 切分 Markdown（与 ai-chat.service.ts 的 splitByHeadings 逻辑一致）。
  * 每段记录 heading 文本、层级、以及该段原始行。
@@ -140,6 +125,7 @@ export class ChunkingService {
     text: string,
     heading: string | null,
   ): { content: string; tokenCount: number }[] {
+    void heading;
     const targetChars = this.targetTokens * 4;
     const overlapChars = this.overlapTokens * 4;
     const stepChars = targetChars - overlapChars;

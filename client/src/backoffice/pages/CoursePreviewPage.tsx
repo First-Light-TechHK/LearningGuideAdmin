@@ -5,7 +5,7 @@ import type { PortalPreviewLink, PreviewCourse } from '../contracts/course';
 import { providerItems, strings } from '../contracts/course';
 import { boRequest } from '../lib/api';
 import { categoryLabel } from '../lib/categoryLabel';
-import { languageLabel, learningModeLabel, localizeMissing } from './course-editor/shared';
+import { languageLabel, learningModeLabel, localizeMissing } from './course-editor/shared-utils';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 

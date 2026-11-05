@@ -47,6 +47,9 @@
     "learningAccess": "学习权限与实验"
   },
   "settings": {
+    "stop": "停止生成",
+    "incomplete": "回答未完成",
+    "aborted": "已停止生成",
     "paymentGatewayTitle": "支付网关",
     "paymentGatewayBody": "该配置在 P0 只保留入口，具体参数由单独的 PRD 定义。",
     "notificationConfigurationTitle": "通知配置",

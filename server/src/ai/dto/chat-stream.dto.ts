@@ -25,6 +25,11 @@ export class ChatStreamDto {
   @IsUUID()
   courseId!: string;
 
+  /** 防止共享测试指针被其他员工切换后，屏幕版本与请求知识不一致。 */
+  @IsOptional()
+  @IsUUID()
+  expectedReleaseId?: string;
+
   @IsString()
   @MinLength(1)
   @MaxLength(8000)

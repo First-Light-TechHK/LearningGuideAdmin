@@ -279,6 +279,7 @@ export class PortalProjectionService {
     snapshot: VersionSnapshot,
     media?: { coverUrl: string | null; assetUrl: (assetId: string) => string },
   ) {
+    void media;
     const loc =
       this.pickLocalization(
         snapshot.course.localizations,
@@ -443,9 +444,7 @@ export class PortalProjectionService {
     language: string | undefined,
   ): T | undefined {
     if (!entries?.length) return undefined;
-    return (
-      entries.find((entry) => entry.language === language) ?? entries[0]
-    );
+    return entries.find((entry) => entry.language === language) ?? entries[0];
   }
 
   private totalDuration(

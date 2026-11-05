@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { HistoryItem } from '../src/backoffice/contracts/course'
-import { historyActionLabel, historyDetailText } from '../src/backoffice/pages/course-editor/CourseVersionsSection'
+import { historyActionLabel, historyDetailText } from '../src/backoffice/pages/course-editor/versionHistory';
 
 function item(action: string, detail: unknown, versionNo: number | null = null): HistoryItem {
   return {

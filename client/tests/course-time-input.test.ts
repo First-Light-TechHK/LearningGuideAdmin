@@ -3,7 +3,7 @@ import './support/dom'
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { fmtTimeInput, parseTimeInput } from '../src/backoffice/pages/course-editor/shared'
+import { fmtTimeInput, parseTimeInput } from '../src/backoffice/pages/course-editor/shared-utils';
 
 describe('course time input', () => {
   test('parses mm:ss as minutes and seconds', () => {

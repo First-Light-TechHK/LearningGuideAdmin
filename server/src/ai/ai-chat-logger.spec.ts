@@ -24,6 +24,15 @@ const entry = {
 };
 
 describe('AiChatLogger（§4.4.2 第 7 步）', () => {
+  it('可记录编译指纹，不保存完整 Prompt 或密钥', async () => {
+    await new AiChatLogger().write({ ...entry, promptHash: 'a'.repeat(64) });
+    const parsed = JSON.parse(
+      mockedAppend.mock.calls[0][1] as string,
+    ) as Record<string, unknown>;
+    expect(parsed.promptHash).toBe('a'.repeat(64));
+    expect(parsed).not.toHaveProperty('systemPrompt');
+    expect(parsed).not.toHaveProperty('apiKey');
+  });
   beforeEach(() => {
     mockedMkdir.mockReset().mockResolvedValue(undefined);
     mockedAppend.mockReset().mockResolvedValue(undefined);

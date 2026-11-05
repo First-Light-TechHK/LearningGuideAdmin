@@ -8,28 +8,10 @@ import { UploadProgress } from '../../components/UploadProgress';
 import { UnderstandingPanel } from './UnderstandingPanel';
 import { ExhibitDrawer } from './ExhibitDrawer';
 import { TextEditor } from './TextEditor';
-import {
-  Chip,
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  card,
-  dangerBtn,
-  exhibitTypeLabel,
-  inputStyle,
-  labelStyle,
-  languageLabel,
-  localizeMissing,
-  fmtDuration,
-  fmtDate,
-  TimeInput,
-  primaryBtn,
-  readingTypeLabel,
-} from './shared';
+import { Chip, Field, Modal, TimeInput } from './shared';
+import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
 import { serverText } from '../../lib/i18n/serverText';
-
 
 type UploadResult = { id: string; kind?: string; originalName?: string };
 
@@ -123,56 +105,78 @@ export function CourseContentSection({
   const hasText = course.learningMode !== 'VIDEO_ONLY';
   const lessonCompleteness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === activeLesson?.id);
 
-  useEffect(() => {
-    if (!activeLesson) return;
-    if (activeLesson.id !== activeLessonId) setActiveLessonId(activeLesson.id);
-    const en = loc(activeLesson, 'en-GB');
-    const zh = loc(activeLesson, 'zh-CN');
-    setLessonCode(activeLesson.code);
-    setLessonTitleEn(en?.title ?? activeLesson.code);
-    setLessonTitleZh(zh?.title ?? '');
-    setLessonDescEn(en?.description ?? '');
-    setLessonDescZh(zh?.description ?? '');
-    const currentLoc = loc(activeLesson, contentLanguage);
-    setVideoLps(
-      activeLesson.learningPoints
-        .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-        .map((point) => ({ code: point.code, title: point.title, timeSeconds: point.timeSeconds ?? 0 })),
-    );
-    setTriggerRows(
-      (activeLesson.triggers ?? [])
-        .filter((trigger) => trigger.language === contentLanguage)
-        .map((trigger) => ({ exhibitId: trigger.exhibitId, timeSeconds: trigger.timeSeconds })),
-    );
-    setReadingRows(
-      activeLesson.readings
-        .filter((reading) => reading.language === 'en-GB' || reading.language === contentLanguage)
-        .map((reading) => ({
-          type: reading.type,
-          title: reading.title,
-          author: reading.author ?? '',
-          whyRecommended: reading.whyRecommended ?? '',
-        })),
-    );
-    setTextHtml(currentLoc?.textHtml ?? '');
-  }, [activeLesson?.id, contentLanguage, course]);
+  const [draftSource, setDraftSource] = useState<{
+    lesson: Lesson | undefined;
+    course: CourseDetail;
+    language: string;
+  } | null>(null);
+  if (
+    draftSource?.lesson !== activeLesson ||
+    draftSource?.course !== course ||
+    draftSource?.language !== contentLanguage
+  ) {
+    setDraftSource({ lesson: activeLesson, course, language: contentLanguage });
+    if (activeLesson) {
+      const en = loc(activeLesson, 'en-GB');
+      const zh = loc(activeLesson, 'zh-CN');
+      setLessonCode(activeLesson.code);
+      setLessonTitleEn(en?.title ?? activeLesson.code);
+      setLessonTitleZh(zh?.title ?? '');
+      setLessonDescEn(en?.description ?? '');
+      setLessonDescZh(zh?.description ?? '');
+      const currentLoc = loc(activeLesson, contentLanguage);
+      setVideoLps(
+        activeLesson.learningPoints
+          .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+          .map((point) => ({
+            code: point.code,
+            title: point.title,
+            timeSeconds: point.timeSeconds ?? 0,
+          })),
+      );
+      setTriggerRows(
+        (activeLesson.triggers ?? [])
+          .filter((trigger) => trigger.language === contentLanguage)
+          .map((trigger) => ({ exhibitId: trigger.exhibitId, timeSeconds: trigger.timeSeconds })),
+      );
+      setReadingRows(
+        activeLesson.readings
+          .filter((reading) => reading.language === 'en-GB' || reading.language === contentLanguage)
+          .map((reading) => ({
+            type: reading.type,
+            title: reading.title,
+            author: reading.author ?? '',
+            whyRecommended: reading.whyRecommended ?? '',
+          })),
+      );
+      setTextHtml(currentLoc?.textHtml ?? '');
+    }
+  }
 
-  useEffect(() => {
-    if (!hasVideo && hasText) setStudyTab('text');
-    else if (hasVideo) setStudyTab('video');
-  }, [hasVideo, hasText]);
+  const [studyMode, setStudyMode] = useState<boolean | null>(null);
+  if (studyMode !== hasVideo) {
+    setStudyMode(hasVideo);
+    setStudyTab(hasVideo ? 'video' : 'text');
+  }
 
-  useEffect(() => {
+  const [importLanguage, setImportLanguage] = useState(contentLanguage);
+  if (importLanguage !== contentLanguage) {
+    setImportLanguage(contentLanguage);
     setAllImportLanguage(contentLanguage);
-  }, [contentLanguage]);
+  }
 
-  useEffect(() => {
-    videoAbortRef.current?.abort();
+  const selectedLessonId = activeLesson?.id;
+  const [uploadLessonId, setUploadLessonId] = useState(selectedLessonId);
+  if (uploadLessonId !== selectedLessonId) {
+    setUploadLessonId(selectedLessonId);
     setVideoUpload(null);
     setExhibitUpload(null);
     setVideoPreviewOpen(false);
-  }, [activeLessonId]);
+  }
+  useEffect(() => () => {
+    videoAbortRef.current?.abort();
+  }, [selectedLessonId]);
 
   const textLps = useMemo(() => parseTextLearningPoints(textHtml), [textHtml]);
   const videoDuration = loc(activeLesson, contentLanguage)?.videoDurationSeconds ?? null;
@@ -283,7 +287,7 @@ export function CourseContentSection({
     return L(locale, `上传失败：${code}`, `Upload failed: ${code}`);
   }
 
-  async function uploadVideo(file: File) {
+  async function uploadVideo(file: File, startedAt: number) {
     if (!activeLesson) return;
     if (mediaLimits && file.size > mediaLimits.videoBytes) {
       const message = L(
@@ -298,7 +302,7 @@ export function CourseContentSection({
         size: file.size,
         pct: 0,
         loaded: 0,
-        startedAt: Date.now(),
+        startedAt,
         elapsedMs: 0,
         error: message,
       });
@@ -309,7 +313,6 @@ export function CourseContentSection({
     lastVideoFileRef.current = file;
     const controller = new AbortController();
     videoAbortRef.current = controller;
-    const startedAt = Date.now();
     setVideoUpload({ phase: 'uploading', fileName: file.name, size: file.size, pct: 0, loaded: 0, startedAt, elapsedMs: 0 });
 
     const result = await uploadMediaInChunks<UploadResult>({
@@ -317,16 +320,18 @@ export function CourseContentSection({
       file,
       callbacks: {
         signal: controller.signal,
-        onProgress: (progress) =>
+        onProgress: (progress) => {
+          const elapsedMs = Date.now() - startedAt;
           setVideoUpload((prev) =>
             prev && {
               ...prev,
               phase: 'uploading',
               pct: progress.pct,
               loaded: progress.loaded,
-              elapsedMs: Date.now() - startedAt,
+              elapsedMs,
             },
-          ),
+          );
+        },
         onProcessing: () =>
           setVideoUpload((prev) => prev && { ...prev, phase: 'processing', pct: 100, loaded: prev.size }),
       },
@@ -689,7 +694,7 @@ export function CourseContentSection({
                             </button>
                             <label style={{ ...buttonStyle, padding: '4px 10px', cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
                               {videoBusy ? L(locale, '上传中…', 'Uploading…') : L(locale, '替换视频', 'Replace video')}
-                              <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (!file) return; if (currentVideoLoc?.video && !window.confirm(L(locale, '替换后该课时学员的播放进度会清零（课程完成状态不变）。确认替换？', 'Replacing resets learners’ playback position for this lesson (course completion is kept). Continue?'))) return; void uploadVideo(file); }} />
+                              <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (!file) return; if (currentVideoLoc?.video && !window.confirm(L(locale, '替换后该课时学员的播放进度会清零（课程完成状态不变）。确认替换？', 'Replacing resets learners’ playback position for this lesson (course completion is kept). Continue?'))) return; void uploadVideo(file, Date.now()); }} />
                             </label>
                           </div>
                         </div>
@@ -743,7 +748,7 @@ export function CourseContentSection({
                         </div>
                         <label style={{ ...buttonStyle, cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
                           {videoBusy ? L(locale, '上传中…', 'Uploading…') : L(locale, '上传视频', 'Upload video')}
-                          <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file); event.currentTarget.value = ''; }} />
+                          <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file, Date.now()); event.currentTarget.value = ''; }} />
                         </label>
                       </div>
                     )}
@@ -817,7 +822,7 @@ export function CourseContentSection({
                           disabled={busy || videoBusy}
                           onClick={() => {
                             const file = lastVideoFileRef.current;
-                            if (file) void uploadVideo(file);
+                            if (file) void uploadVideo(file, Date.now());
                           }}
                         >
                           {L(locale, '重试上传', 'Retry upload')}

@@ -1049,7 +1049,14 @@ export class CourseAuthoringService {
       const found = entries.find(
         ([key]) => this.normalizeHeader(key) === normalized,
       );
-      if (found) return String(found[1] ?? '').trim();
+      if (found) {
+        const value = found[1];
+        return typeof value === 'string' ||
+          typeof value === 'number' ||
+          typeof value === 'boolean'
+          ? String(value).trim()
+          : '';
+      }
     }
     return '';
   }

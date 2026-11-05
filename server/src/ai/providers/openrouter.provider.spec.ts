@@ -22,6 +22,27 @@ function requestBody(request: RequestInit): unknown {
 describe('OpenRouterProvider', () => {
   const originalFetch = globalThis.fetch;
 
+  it.each([
+    'data: {"error":{"message":"private provider detail"}}\n',
+    'data: {"choices":[{"error":{"message":"private provider detail"}}]}\n',
+    'data: {broken}\n',
+    'data: {"choices":[{"finish_reason":"error"}]}\n',
+    'data: {"choices":[{"delta":{"content":"partial"}}]}\n',
+  ])('上游错误或缺少结束标记不伪装成功：%s', async (payload) => {
+    globalThis.fetch = jest.fn().mockResolvedValue(responseWith([payload]));
+    const read = async () => {
+      for await (const event of new OpenRouterProvider().streamEvents({
+        model: 'model',
+        messages: [],
+        apiKey: 'test-key',
+        baseUrl: 'https://example.invalid',
+      })) {
+        void event;
+      }
+    };
+    await expect(read()).rejects.toThrow(/LLM 上游/);
+  });
+
   afterEach(() => {
     globalThis.fetch = originalFetch;
     jest.restoreAllMocks();
@@ -52,7 +73,10 @@ describe('OpenRouterProvider', () => {
       events.push(event);
     expect(events).toEqual([
       { type: 'delta', content: 'hello' },
-      { type: 'usage', usage: { inputTokens: 10, outputTokens: 2, reasoningTokens: 1 } },
+      {
+        type: 'usage',
+        usage: { inputTokens: 10, outputTokens: 2, reasoningTokens: 1 },
+      },
       { type: 'finish', reason: 'stop' },
     ]);
     const [, request] = (globalThis.fetch as jest.Mock).mock.calls[0] as [
@@ -100,7 +124,9 @@ describe('OpenRouterProvider', () => {
     globalThis.fetch = jest
       .fn()
       .mockResolvedValue(
-        responseWith(['data: {"choices":[{"delta":{"content":"tail"}}]}']),
+        responseWith([
+          'data: {"choices":[{"delta":{"content":"tail"},"finish_reason":"stop"}]}',
+        ]),
       );
     const deltas: string[] = [];
     for await (const delta of new OpenRouterProvider().stream({

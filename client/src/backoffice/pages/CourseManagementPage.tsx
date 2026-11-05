@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { useEmployee } from '../ShellRoute'
+import { useEmployee } from '../employeeSession';
 import type { CourseList } from '../contracts/course'
 import { useResizableColumns } from '../components/resizableColumns'
-import { Pagination, usePageSize } from '../components/Pagination'
+import { Pagination } from '../components/Pagination';
+import { usePageSize } from '../components/paginationState';
 import { boRequest } from '../lib/api'
 import { categoryLabel } from '../lib/categoryLabel'
 import { uploadFileWithProgress } from '../lib/upload'
@@ -14,7 +15,7 @@ import { serverText } from '../lib/i18n/serverText'
 import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
 import { MenuGuard } from './ModulePages'
-import { languageLabel, learningModeLabel } from './course-editor/shared'
+import { languageLabel, learningModeLabel } from './course-editor/shared-utils';
 
 type JobView = {
   jobId: string
@@ -75,7 +76,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const L = (zh: string, en: string) => (locale.startsWith('zh') ? zh : en)
   const canPublish = employee.role === 'ADMIN' || employee.role === 'OPERATION_ADMIN'
   const [list, setList] = useState<CourseList | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = usePageSize('course-list')
   const [importJob, setImportJob] = useState<JobView | null>(null)
@@ -104,27 +105,41 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     defaultWidths: [300, 104, 120, 160, 130, 136, 176],
   })
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const fetchLoad = useCallback(() => {
     const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (categoryId) query.set('categoryId', categoryId)
-    const result = await boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`)
-    setLoading(false)
-    if (!result.success) {
-      setMessage(t(locale, 'common.sessionUnavailable'))
-      return
-    }
-    // 筛选/删除后总页数变少时把越界页码拉回最后一页，避免停在空白页
-    if (result.data.pages > 0 && page > result.data.pages) {
-      setPage(result.data.pages)
-      return
-    }
-    setList(result.data)
+    return boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`).then((result) => {
+      setLoading(false)
+      if (!result.success) {
+        setMessage(t(locale, 'common.sessionUnavailable'))
+        return
+      }
+      if (result.data.pages > 0 && page > result.data.pages) {
+        setPage(result.data.pages)
+        return
+      }
+      setList(result.data)
+    })
   }, [locale, categoryId, page, pageSize])
 
+  const [loadSource, setLoadSource] = useState(() => ({ locale, categoryId, page, pageSize }))
+  if (
+    loadSource.locale !== locale ||
+    loadSource.categoryId !== categoryId ||
+    loadSource.page !== page ||
+    loadSource.pageSize !== pageSize
+  ) {
+    setLoadSource({ locale, categoryId, page, pageSize })
+    setLoading(true)
+  }
+  const load = useCallback(() => {
+    setLoading(true)
+    return fetchLoad()
+  }, [fetchLoad])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void fetchLoad();
+  }, [fetchLoad]);
 
   useEffect(() => {
     void (async () => {

@@ -12,6 +12,7 @@ import JSZip from 'jszip';
 import { MarkItDown } from 'markitdown-ts';
 import * as XLSX from 'xlsx';
 import WordExtractor from 'word-extractor';
+import { latexToMarkdown } from './latex-to-markdown';
 import { CourseStorageService } from '../commerce-courses/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -23,6 +24,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export const ALLOWED_EXTENSIONS = [
   '.txt',
   '.md',
+  '.tex',
   '.csv',
   '.pdf',
   '.docx',
@@ -254,6 +256,10 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
       if (ext === '.xls') {
         // 旧版 Excel（BIFF）：markitdown-ts 不支持，改用 SheetJS 解析转 Markdown 表格
         markdown = this.xlsToMarkdown(file.buffer).trim();
+      } else if (ext === '.tex') {
+        markdown = latexToMarkdown(
+          new TextDecoder('utf-8', { fatal: true }).decode(file.buffer),
+        );
       } else if (ext === '.doc') {
         // 旧版 Word（OLE 二进制）：markitdown-ts 不支持，改用 word-extractor 提取纯文本
         markdown = (await this.docToMarkdown(file.buffer)).trim();

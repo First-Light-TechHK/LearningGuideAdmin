@@ -229,7 +229,7 @@ function buildInlineDecorations(
   const locale = getLocale()
   const exclusions = collectInlineExclusions(view)
   const overlapsExclusion = (from: number, to: number) =>
-    exclusions.some(([a, b]) => from < b && to > a)
+    exclusions.some(([a, b]) => (a <= from && b > from) || (a < to && b >= to))
 
   const pushMarks = (name: string, from: number, to: number) => {
     const deco =

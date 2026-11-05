@@ -16,23 +16,13 @@ import {
   type MenuProps,
 } from '../ui'
 import { CopyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SendOutlined, UndoOutlined, UserOutlined } from '@ant-design/icons'
-import MDEditor from '@uiw/react-md-editor'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
-import rehypeRaw from 'rehype-raw'
+import { TutorMarkdown } from './TutorMarkdown'
 import { useAiStore, type ChatMessage } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
 import { useAiText } from './i18n'
-import { normalizeTutorMarkdown } from './normalizeTutorMarkdown'
 import { copyToClipboard, stripMarkdown } from './chatUtils'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
-
-const katexPlugins = {
-  remarkPlugins: [remarkGfm, remarkMath],
-  rehypePlugins: [rehypeRaw, rehypeKatex],
-}
 
 /** 默认头像占位（后续可替换为课程/用户自定义头像） */
 const AI_AVATAR = <RobotOutlined />
@@ -262,14 +252,14 @@ function Bubble({
         >
           {hasContent ? (
             <div data-color-mode="light" className={isUser ? 'chat-bubble-user' : undefined}>
-              <MDEditor.Markdown
-                source={normalizeTutorMarkdown(msg.content)}
-                {...katexPlugins}
-                style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
-              />
+              <TutorMarkdown content={msg.content} />
+              {(msg.status === 'error' || msg.status === 'aborted') &&
+                <div role="status">{text(msg.status === 'aborted' ? 'aborted' : 'incomplete')}</div>}
             </div>
           ) : (
-            <Spin size="small" />
+            msg.status === 'error' || msg.status === 'aborted'
+              ? <span role="status">{text(msg.status === 'aborted' ? 'aborted' : 'incomplete')}</span>
+              : <Spin size="small" />
           )}
         </div>
       </div>
@@ -352,6 +342,7 @@ export function ChatWindow() {
   const setMode = useAiStore((s) => s.setMode)
   const newChat = useAiStore((s) => s.newChat)
   const send = useAiStore((s) => s.send)
+  const cancel = useAiStore((s) => s.cancel)
   const retryLastUserMessage = useAiStore((s) => s.retryLastUserMessage)
   const undoLastUserMessage = useAiStore((s) => s.undoLastUserMessage)
   const { text, modeLabel } = useAiText()
@@ -504,11 +495,10 @@ export function ChatWindow() {
         <Button
           type="primary"
           icon={<SendOutlined />}
-          loading={streaming}
-          disabled={!selectedCourseId || !input.trim()}
-          onClick={() => void onSend()}
+          disabled={!selectedCourseId || (!streaming && !input.trim())}
+          onClick={() => streaming ? cancel() : void onSend()}
         >
-          {text('send')}
+          {text(streaming ? 'stop' : 'send')}
         </Button>
       </Space.Compact>
     </Card>

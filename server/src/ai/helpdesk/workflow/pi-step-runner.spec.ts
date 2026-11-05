@@ -116,10 +116,10 @@ describe('PiStepRunner on pi-agent-core', () => {
       toolCalls: 1,
     });
     expect(reply.usage).toEqual({
-      inputTokens: expect.any(Number),
-      outputTokens: expect.any(Number),
-      cacheReadTokens: expect.any(Number),
-      reasoningTokens: expect.any(Number),
+      inputTokens: expect.any(Number) as unknown,
+      outputTokens: expect.any(Number) as unknown,
+      cacheReadTokens: expect.any(Number) as unknown,
+      reasoningTokens: expect.any(Number) as unknown,
     });
     expect(typeof reply.costUsd).toBe('number');
     expect(of(events, 'tool/call')).toEqual([
@@ -645,7 +645,11 @@ describe('PiStepRunner through the pi OpenRouter provider (fake fetch)', () => {
   it('asks OpenRouter for its cheapest providers that take every parameter we send, also for a model missing from the catalog', async () => {
     // owner 2026-10-31：只选最便宜（最快的几家贵 10 到 20 倍）；慢的由 6.3 秒切换兜住
     for (const model of ['deepseek/deepseek-v4.1-flash', TARGET.model]) {
-      const { fetch } = await call(picked, { ...TARGET, model, thinking: 'high' });
+      const { fetch } = await call(picked, {
+        ...TARGET,
+        model,
+        thinking: 'high',
+      });
       const body = JSON.parse(
         (fetch.mock.calls[0] as [unknown, RequestInit])[1].body as string,
       ) as { provider?: unknown };

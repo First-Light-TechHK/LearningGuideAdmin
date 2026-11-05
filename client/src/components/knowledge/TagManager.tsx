@@ -2,7 +2,7 @@ import { Tag, AutoComplete, Button, Space, Popover } from '../ui'
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { useKText } from './i18n'
 
 interface TagManagerProps {

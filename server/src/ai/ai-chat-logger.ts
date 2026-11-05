@@ -30,6 +30,7 @@ export interface AiChatLogEntry {
   historyCount: number;
   latencyMs: number;
   status: AiChatStatus;
+  promptHash?: string;
   error?: string;
   finishReason?: string | null;
   usage?: {
@@ -93,6 +94,7 @@ export class AiChatLogger {
         historyCount: entry.historyCount,
         latencyMs: entry.latencyMs,
         status: entry.status,
+        ...(entry.promptHash ? { promptHash: entry.promptHash } : {}),
         ...(entry.error ? { error: preview(entry.error, ERROR_LIMIT) } : {}),
         ...(entry.finishReason === undefined
           ? {}

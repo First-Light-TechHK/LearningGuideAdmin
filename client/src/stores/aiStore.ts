@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { serverText } from '../backoffice/lib/i18n/serverText'
 import {
   aiApi,
   chatStream,
@@ -15,6 +16,7 @@ export interface ChatMessage {
   role: 'user' | 'ai'
   content: string
   createdAt: string
+  status?: 'streaming' | 'complete' | 'error' | 'aborted'
 }
 
 interface AiForm {
@@ -24,6 +26,9 @@ interface AiForm {
 }
 
 interface AiState {
+  ownerId: string | null
+  controller: AbortController | null
+  selectionId: number
   courses: Course[]
   selectedCourseId: string | null
   /** 对话注入模式（仅 Lecture / Socratic；切换不重置会话，2026-10-27） */
@@ -48,7 +53,8 @@ interface AiState {
   /** 当前课程的 Release 列表（按发布时间倒序；头部 Release 选择器数据源，§4.3.1） */
   releases: ReleaseSummary[]
 
-  init: () => Promise<void>
+  init: (ownerId: string) => Promise<void>
+  cancel: () => void
   selectCourse: (courseId: string) => Promise<void>
   /** 重新拉取当前课程的配置与 Release 列表（进入 AI Tutor 时刷新，避免 Release 列表过期） */
   refreshActiveCourse: () => Promise<void>
@@ -75,24 +81,45 @@ interface AiState {
   isDirty: () => boolean
 }
 
-/** 会话按 courseId 隔离存 localStorage（2026-10-27：不再按模式隔离，模式切换不重置会话） */
-const chatKey = (courseId: string) => `aitutor.chat.${courseId}`
+/** 版本和员工都属于会话边界；无归属的旧 key 不自动迁入。 */
+const chatKey = (ownerId: string, courseId: string, releaseId: string | null) =>
+  `aitutor.chat.v2.${JSON.stringify([ownerId, courseId, releaseId])}`
 
-function loadChat(courseId: string): ChatMessage[] | null {
+function loadChat(ownerId: string | null, courseId: string, releaseId: string | null): ChatMessage[] | null {
+  if (!ownerId) return null
   try {
-    const raw = localStorage.getItem(chatKey(courseId))
-    return raw ? (JSON.parse(raw) as ChatMessage[]) : null
-  } catch {
-    return null
-  }
+    const raw = localStorage.getItem(chatKey(ownerId, courseId, releaseId))
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    if (!Array.isArray(parsed)) return null
+    return parsed.filter((m): m is ChatMessage => Boolean(m &&
+      (m.role === 'user' || m.role === 'ai') && typeof m.content === 'string' &&
+      typeof m.createdAt === 'string' && (m.status === undefined ||
+      ['streaming', 'complete', 'error', 'aborted'].includes(m.status))))
+      .map((m) => m.status === 'streaming' ? { ...m, status: 'aborted' } : m)
+  } catch { return null }
 }
 
-function persistChat(courseId: string, messages: ChatMessage[]) {
-  try {
-    localStorage.setItem(chatKey(courseId), JSON.stringify(messages))
-  } catch {
-    /* 存储满等异常不影响会话 */
+function persistChat(ownerId: string | null, courseId: string, releaseId: string | null, messages: ChatMessage[]) {
+  if (!ownerId) return
+  try { localStorage.setItem(chatKey(ownerId, courseId, releaseId), JSON.stringify(messages)) }
+  catch { /* 存储满等异常不影响会话 */ }
+}
+
+function freshChat(welcome: string | null | undefined): ChatMessage[] {
+  return welcome ? [{ role: 'ai', content: welcome, createdAt: now(), status: 'complete' }] : []
+}
+
+function completeHistory(messages: ChatMessage[], maxTurns: number) {
+  const history: Array<{ role: 'user' | 'assistant'; content: string }> = []
+  for (let i = 0; i < messages.length - 1; i++) {
+    const user = messages[i], ai = messages[i + 1]
+    if (user.role === 'user' && ai.role === 'ai' && ai.status === 'complete' &&
+        user.content.trim() && ai.content.trim()) {
+      history.push({ role: 'user', content: user.content }, { role: 'assistant', content: ai.content })
+      i++
+    }
   }
+  return history.slice(-maxTurns * 2)
 }
 
 const now = () => new Date().toISOString()
@@ -133,6 +160,9 @@ function buildForm(
 }
 
 export const useAiStore = create<AiState>((set, get) => ({
+  ownerId: null,
+  controller: null,
+  selectionId: 0,
   courses: [],
   selectedCourseId: null,
   mode: 'LECTURE',
@@ -151,12 +181,22 @@ export const useAiStore = create<AiState>((set, get) => ({
   tutorsLoading: false,
   releases: [],
 
-  async init() {
+  cancel() { get().controller?.abort() },
+
+  async init(ownerId) {
+    if (get().ownerId !== ownerId) {
+      get().cancel()
+      set({ ownerId, selectedCourseId: null, config: null, messages: [], error: null,
+        form: { systemPrompt: '', welcomeMsg: '', llmModel: '' }, initialForm: null,
+        courses: [], models: [], templates: {}, releases: [], tutors: [], tutorManagerOpen: false,
+        controller: null, streaming: false, selectionId: get().selectionId + 1 })
+    }
     const [courses, models, prompts] = await Promise.all([
       knowledgeApi.listCourses(),
       aiApi.listModels(),
       aiApi.listPrompts(),
     ])
+    if (get().ownerId !== ownerId) return
     const templates: AiState['templates'] = {}
     for (const p of prompts) {
       if (p.mode === 'LECTURE' || p.mode === 'SOCRATIC' || p.mode === 'ASSESSMENT') templates[p.mode] = p
@@ -173,16 +213,16 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   async refreshActiveCourse() {
-    const { selectedCourseId } = get()
-    if (!selectedCourseId) return
+    const { selectedCourseId, ownerId, config: previousConfig, streaming } = get()
+    if (!selectedCourseId || streaming) return
     try {
       const [config, releases] = await Promise.all([
         aiApi.getConfig(selectedCourseId),
         knowledgeApi.listReleases(selectedCourseId),
       ])
+      if (get().ownerId !== ownerId || get().selectedCourseId !== selectedCourseId) return
       if (get().isDirty()) {
-        // 有未保存的配置修改：只刷新版本列表与配置元数据，不覆盖表单。
-        set({ config, releases, error: null })
+        set({ releases, error: null })
       } else {
         const { editMode, templates } = get()
         const form = buildForm(config, templates, editMode)
@@ -191,6 +231,9 @@ export const useAiStore = create<AiState>((set, get) => ({
           releases,
           form,
           initialForm: { ...form },
+          ...(config.releaseId !== previousConfig?.releaseId ? {
+            messages: loadChat(ownerId, selectedCourseId, config.releaseId) ?? freshChat(config.welcomeMsg || templates.LECTURE?.welcomeMsg),
+          } : {}),
           error: null,
         })
       }
@@ -202,26 +245,29 @@ export const useAiStore = create<AiState>((set, get) => ({
   async selectCourse(courseId) {
     // 流式回答进行中不切换课程，否则增量会写进另一门课的会话（QA 2026-10-27 A13）
     if (get().streaming) return
-    const { editMode, templates } = get()
+    const { editMode, templates, ownerId } = get()
+    const selectionId = get().selectionId + 1
+    set({ selectionId })
     try {
       const [config, releases] = await Promise.all([
         aiApi.getConfig(courseId),
         knowledgeApi.listReleases(courseId),
       ])
+      if (get().ownerId !== ownerId || get().selectionId !== selectionId) return
       const form = buildForm(config, templates, editMode)
-      const stored = loadChat(courseId)
+      const stored = loadChat(ownerId, courseId, config.releaseId)
       set({
         selectedCourseId: courseId,
         config,
         releases,
         form,
         initialForm: { ...form },
-        messages: stored ?? (form.welcomeMsg ? [{ role: 'ai', content: form.welcomeMsg, createdAt: now() }] : []),
+        messages: stored ?? freshChat(form.welcomeMsg),
         error: null,
       })
     } catch (e) {
       // 切换失败不抛（避免未捕获 rejection），错误经 error 状态呈现
-      set({ error: (e as Error).message })
+      if (get().ownerId === ownerId && get().selectionId === selectionId) set({ error: (e as Error).message })
     }
   },
 
@@ -359,13 +405,17 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   /** §4.3.1 头部 Release 选择器：切换测试所选 Release 并加载其已保存配置（按当前 editMode） */
   async selectRelease(releaseId) {
-    const { selectedCourseId, streaming } = get()
+    const { selectedCourseId, streaming, ownerId } = get()
     if (!selectedCourseId || streaming) return
+    const selectionId = get().selectionId + 1
+    set({ selectionId })
     try {
       const next = await aiApi.setActiveRelease(selectedCourseId, releaseId)
+      if (get().ownerId !== ownerId || get().selectedCourseId !== selectedCourseId || get().selectionId !== selectionId) return
       const { editMode, templates } = get()
       const form = buildForm(next, templates, editMode)
-      set({ config: next, form, initialForm: { ...form }, error: null })
+      set({ config: next, form, initialForm: { ...form }, error: null,
+        messages: loadChat(get().ownerId, selectedCourseId, next.releaseId) ?? freshChat(form.welcomeMsg) })
     } catch (e) {
       set({ error: (e as Error).message })
       throw e
@@ -390,55 +440,46 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   newChat() {
-    const { selectedCourseId, form, streaming } = get()
+    const { ownerId, selectedCourseId, config, streaming } = get()
     if (!selectedCourseId || streaming) return
-    const fresh = form.welcomeMsg
-      ? [{ role: 'ai' as const, content: form.welcomeMsg, createdAt: now() }]
-      : []
+    const fresh = freshChat(config?.welcomeMsg || get().templates.LECTURE?.welcomeMsg)
     set({ messages: fresh, error: null })
-    persistChat(selectedCourseId, fresh)
+    persistChat(ownerId, selectedCourseId, config?.releaseId ?? null, fresh)
   },
 
   async send(text) {
-    const { selectedCourseId, mode, messages, streaming } = get()
+    const { ownerId, selectedCourseId, config, mode, messages, streaming } = get()
     const content = text.trim()
-    if (!selectedCourseId || !content || streaming) return
-
-    const history = messages
-      .filter((m) => m.content.trim())
-      .slice(mode === 'SOCRATIC' ? -20 : -10)
-      .map((m) => ({ role: m.role === 'ai' ? ('assistant' as const) : ('user' as const), content: m.content }))
-
-    let msgs: ChatMessage[] = [
-      ...messages,
+    if (!ownerId || !selectedCourseId || !config?.releaseId || !content || streaming) return
+    const releaseId = config.releaseId
+    const history = completeHistory(messages, mode === 'SOCRATIC' ? 10 : 6)
+    const controller = new AbortController()
+    let msgs: ChatMessage[] = [...messages,
       { role: 'user', content, createdAt: now() },
-      { role: 'ai', content: '', createdAt: now() },
-    ]
-    set({ messages: msgs, streaming: true, error: null })
-    // 会话按课程隔离：增量先累积在本次请求自己的消息列表里，只有仍停留在发起课程时才写回界面，
-    // 落盘也只写发起课程的会话（QA 2026-10-27 A13）
-    const stillHere = () => get().selectedCourseId === selectedCourseId
-
+      { role: 'ai', content: '', createdAt: now(), status: 'streaming' }]
+    const stillHere = () => get().controller === controller && get().ownerId === ownerId &&
+      get().selectedCourseId === selectedCourseId && get().config?.releaseId === releaseId
+    const updateLast = (patch: Partial<ChatMessage>) => {
+      msgs = [...msgs.slice(0, -1), { ...msgs[msgs.length - 1], ...patch }]
+      if (stillHere()) set({ messages: msgs })
+    }
+    set({ messages: msgs, streaming: true, controller, error: null })
+    let completed = false
     try {
-      await chatStream(
-        { courseId: selectedCourseId, message: content, mode, history },
-        (e) => {
-          if ('delta' in e) {
-            const last = msgs[msgs.length - 1]
-            msgs = [...msgs.slice(0, -1), { ...last, content: last.content + e.delta }]
-            if (stillHere()) set({ messages: msgs })
-          } else if ('error' in e) {
-            if (stillHere()) set({ error: e.error })
-          }
-        },
-      )
+      await chatStream({ courseId: selectedCourseId, expectedReleaseId: releaseId, message: content, mode, history }, (event) => {
+        if ('delta' in event) updateLast({ content: msgs[msgs.length - 1].content + event.delta })
+        else if ('done' in event) completed = true
+      }, controller.signal)
+      if (!completed || !msgs[msgs.length - 1].content.trim()) throw new Error(serverText('AI response was not completed'))
+      updateLast({ status: 'complete' })
     } catch (e) {
-      if (stillHere()) set({ error: (e as Error).message })
+      updateLast({ status: controller.signal.aborted ? 'aborted' : 'error' })
+      if (stillHere() && !controller.signal.aborted) set({ error: (e as Error).message })
     } finally {
-      // 落盘当前会话（§4.3.2：localStorage 持久化上次聊天）
-      const aiEmpty = msgs.length > 0 && msgs[msgs.length - 1].role === 'ai' && !msgs[msgs.length - 1].content
-      persistChat(selectedCourseId, aiEmpty ? msgs.slice(0, -1) : msgs)
-      set({ streaming: false })
+      if (get().controller === controller) {
+        persistChat(ownerId, selectedCourseId, releaseId, msgs)
+        set({ streaming: false, controller: null })
+      }
     }
   },
 
@@ -451,7 +492,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (lastUserIdx === -1) return
     const trimmed = messages.slice(0, lastUserIdx)
     set({ messages: trimmed, error: null })
-    persistChat(selectedCourseId, trimmed)
+    persistChat(get().ownerId, selectedCourseId, get().config?.releaseId ?? null, trimmed)
   },
 
   /** 重新发送最后一条 user 消息：先删掉 user+ai，再 send 原文。
@@ -464,10 +505,10 @@ export const useAiStore = create<AiState>((set, get) => ({
     const originalText = messages[lastUserIdx].content
     const trimmed = messages.slice(0, lastUserIdx)
     set({ messages: trimmed, error: null })
-    persistChat(selectedCourseId, trimmed)
+    persistChat(get().ownerId, selectedCourseId, get().config?.releaseId ?? null, trimmed)
     try {
       await get().send(originalText)
-      return true
+      return get().messages.at(-1)?.status === 'complete'
     } catch {
       return false
     }

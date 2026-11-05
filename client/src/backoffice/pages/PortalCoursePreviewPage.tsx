@@ -5,7 +5,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import type { PortalPreviewDetail } from '../contracts/course'
 import { boRequest } from '../lib/api'
 import { categoryLabel } from '../lib/categoryLabel'
-import { L } from './course-editor/shared'
+import { L } from './course-editor/shared-utils';
 
 /**
  * 自建「Portal 风格」课程预览页（2026-11-01）。

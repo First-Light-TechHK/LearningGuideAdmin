@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import {
   BadRequestException,
@@ -42,6 +43,79 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
   };
 
   let service: AiConfigService;
+
+  it('一轮配置只读一次，Prompt 与模型使用同一 Release 快照', async () => {
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValueOnce({
+      model: 'model-a',
+      mainSystemPrompt: 'MAIN-A',
+      lectureSystemPrompt: 'LECTURE-A',
+      welcomeMsg: 'WELCOME-A',
+      llmProvider: 'openrouter',
+    });
+    const result = await service.resolveTutorRun('c1', 'r1', 'LECTURE');
+    expect(mockPrisma.courseAiConfig.findUnique).toHaveBeenCalledTimes(1);
+    expect(result.runtime.model).toBe('model-a');
+    expect(result.prompts).toEqual({
+      systemPrompt: 'MAIN-A\n\nLECTURE-A',
+      welcomeMsg: 'WELCOME-A',
+    });
+  });
+
+  it('绑定模板缺失时回退库内默认模板，再回退文件', async () => {
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      lectureModeId: 'missing',
+    });
+    mockPrisma.promptTemplate.findUnique.mockResolvedValue(null);
+    mockPrisma.promptTemplate.findFirst.mockResolvedValue({
+      systemPrompt: 'DB_DEFAULT',
+    });
+    expect(
+      (await service.resolvePrompts('c1', 'r1', 'LECTURE')).systemPrompt,
+    ).toBe(`${DEFAULT_MAIN_PROMPT}\n\nDB_DEFAULT`);
+    mockPrisma.promptTemplate.findFirst.mockResolvedValue(null);
+    expect(
+      (await service.resolvePrompts('c1', 'r1', 'LECTURE')).systemPrompt,
+    ).toBe(`${DEFAULT_MAIN_PROMPT}\n\n${DEFAULT_PROMPTS.LECTURE.systemPrompt}`);
+  });
+
+  it.each(['MAIN', 'LECTURE', 'SOCRATIC', 'ASSESSMENT'] as const)(
+    '%s Reset 仅清除当前 Prompt，保留同 Release 的模型与 Welcome',
+    async (mode) => {
+      mockKnowledge.getCourse.mockResolvedValue({
+        id: 'c1',
+        aiTestReleaseId: 'r1',
+      });
+      mockPrisma.courseAiConfig.upsert.mockResolvedValue({});
+      await service.resetConfig('c1', mode);
+      const calls = mockPrisma.courseAiConfig.upsert.mock
+        .calls as unknown as Array<[{ update: Record<string, unknown> }]>;
+      const update = calls[0][0].update;
+      const field = {
+        MAIN: 'mainSystemPrompt',
+        LECTURE: 'lectureSystemPrompt',
+        SOCRATIC: 'socraticSystemPrompt',
+        ASSESSMENT: 'assessmentSystemPrompt',
+      }[mode];
+      expect(update[field]).toBeNull();
+      expect(update).not.toHaveProperty('model');
+      expect(update).not.toHaveProperty('welcomeMsg');
+      expect(
+        Object.keys(update).filter((key) => key.endsWith('SystemPrompt')),
+      ).toEqual([field]);
+    },
+  );
+
+  it('Assessment 单独解析，不混入 MAIN 或其他对话模式', async () => {
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      mainSystemPrompt: 'MAIN',
+      assessmentSystemPrompt: 'ASSESS',
+      lectureSystemPrompt: 'LECTURE',
+      socraticSystemPrompt: 'SOCRATIC',
+      welcomeMsg: 'WELCOME',
+    });
+    const result = await service.resolvePrompts('c1', 'r1', 'ASSESSMENT');
+    expect(result).toEqual({ systemPrompt: 'ASSESS', welcomeMsg: 'WELCOME' });
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -355,7 +429,11 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       systemPrompt: 'L',
       welcomeMsg: 'W',
     });
-    const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+    const upsertArgs = (
+      mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+        [Prisma.CourseAiConfigUpsertArgs]
+      >
+    )[0][0];
     expect(upsertArgs.update).toEqual({
       llmProvider: 'openrouter',
       welcomeMsg: 'W',
@@ -400,7 +478,11 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       systemPrompt: 'A',
       welcomeMsg: 'W',
     });
-    const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+    const upsertArgs = (
+      mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+        [Prisma.CourseAiConfigUpsertArgs]
+      >
+    )[0][0];
     expect(upsertArgs.update).toEqual({
       llmProvider: 'openrouter',
       welcomeMsg: 'W',
@@ -452,7 +534,11 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       llmModel: 'deepseek/deepseek-v4.1-flash',
     });
     expect(mockPrisma.courseAiConfig.findUnique).not.toHaveBeenCalled();
-    const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+    const upsertArgs = (
+      mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+        [Prisma.CourseAiConfigUpsertArgs]
+      >
+    )[0][0];
     expect(upsertArgs.update).not.toHaveProperty('apiKey');
     expect(upsertArgs.update).not.toHaveProperty('welcomeMsg');
   });
@@ -482,7 +568,13 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       llmProvider: 'openrouter',
       llmModel: 'deepseek/deepseek-v4.1-flash',
     });
-    expect(mockPrisma.courseAiConfig.upsert.mock.calls[0][0].where).toEqual({
+    expect(
+      (
+        mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+          [Prisma.CourseAiConfigUpsertArgs]
+        >
+      )[0][0].where,
+    ).toEqual({
       courseId_releaseId: { courseId: 'c1', releaseId: 'r3' },
     });
     expect(view.releaseId).toBe('r3');
@@ -538,7 +630,11 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       versionTag: 'v1',
     });
     const view = await service.resetConfig('c1', 'LECTURE');
-    const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+    const upsertArgs = (
+      mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+        [Prisma.CourseAiConfigUpsertArgs]
+      >
+    )[0][0];
     expect(upsertArgs.update).toEqual({
       lectureSystemPrompt: null,
       lectureModeId: null,
@@ -775,7 +871,11 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
         systemPrompt: 'MAIN_HARD',
         welcomeMsg: 'W',
       });
-      const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+      const upsertArgs = (
+        mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+          [Prisma.CourseAiConfigUpsertArgs]
+        >
+      )[0][0];
       expect(upsertArgs.update).toMatchObject({
         llmProvider: 'openrouter',
         model: 'deepseek/deepseek-v4.1-flash',
@@ -798,7 +898,11 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
         apiKey: null,
       });
       const view = await service.resetConfig('c1', 'MAIN');
-      const upsertArgs = mockPrisma.courseAiConfig.upsert.mock.calls[0][0];
+      const upsertArgs = (
+        mockPrisma.courseAiConfig.upsert.mock.calls as Array<
+          [Prisma.CourseAiConfigUpsertArgs]
+        >
+      )[0][0];
       expect(upsertArgs.update).toEqual({ mainSystemPrompt: null });
       expect(upsertArgs.update).not.toHaveProperty('lectureSystemPrompt');
       expect(upsertArgs.update).not.toHaveProperty('lectureModeId');

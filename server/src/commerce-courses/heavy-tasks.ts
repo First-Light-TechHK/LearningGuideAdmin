@@ -24,7 +24,7 @@ export function runImportWorker<T = unknown>(
       },
     );
     worker.once('error', (err) => {
-      if (!settled) reject(err);
+      if (!settled) reject(err instanceof Error ? err : new Error(String(err)));
     });
     worker.once('exit', (code) => {
       if (!settled && code !== 0)

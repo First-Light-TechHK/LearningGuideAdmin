@@ -34,7 +34,9 @@ const PINNED_SHA256 =
 describe('shared PII scrubber corpus', () => {
   it('is the pinned version (the same bytes as Portal’s copy)', () => {
     const normalized = Buffer.from(raw.toString('utf8').replace(/\r\n/g, '\n'));
-    expect(createHash('sha256').update(normalized).digest('hex')).toBe(PINNED_SHA256);
+    expect(createHash('sha256').update(normalized).digest('hex')).toBe(
+      PINNED_SHA256,
+    );
   });
 
   it('covers zh-CN, zh-TW, en and mixed text', () => {

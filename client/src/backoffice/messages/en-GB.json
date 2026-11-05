@@ -47,6 +47,9 @@
     "learningAccess": "Learning Access & Experiments"
   },
   "settings": {
+    "stop": "Stop",
+    "incomplete": "Incomplete response",
+    "aborted": "Response stopped",
     "paymentGatewayTitle": "Payment Gateway",
     "paymentGatewayBody": "This configuration is an entry point only in P0; its parameters are defined by a separate PRD.",
     "notificationConfigurationTitle": "Notification Configuration",

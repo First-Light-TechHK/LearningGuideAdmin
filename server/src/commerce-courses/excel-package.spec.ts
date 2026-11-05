@@ -1,6 +1,22 @@
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
-import { buildPackageFromRawZip } from './excel-package';
+import { buildPackageFromRawZip, toSeconds } from './excel-package';
+
+describe('Excel time values', () => {
+  it('accepts scalar times without stringifying object cells', () => {
+    expect(toSeconds('01:02:03')).toBe(3723);
+    expect(toSeconds(0.5)).toBe(43200);
+    for (const value of [
+      null,
+      undefined,
+      {},
+      [],
+      { toString: () => '01:00' },
+    ]) {
+      expect(toSeconds(value)).toBeNull();
+    }
+  });
+});
 
 /**
  * 构造一个最小的「新版双语模板」工作簿（Checklist + Course info + Lessons）。
@@ -31,11 +47,27 @@ function newTemplateWorkbook(courseId: string): Buffer {
     ['Lesson title (EN)', 'Lesson one'],
     ['Lesson title (中文)', '第一课'],
     ['Lesson description (EN)', 'desc'],
-    ['#', 'Text mode title – EN', 'Text mode title – 中文', 'Video mode title – EN', 'Video mode title – 中文', 'Video start – EN', 'Video start – 中文'],
+    [
+      '#',
+      'Text mode title – EN',
+      'Text mode title – 中文',
+      'Video mode title – EN',
+      'Video mode title – 中文',
+      'Video start – EN',
+      'Video start – 中文',
+    ],
     [1, 'text lp', '文本学习点', 'video lp', '视频学习点', '0:00', '0:00'],
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(checklist), 'Checklist');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(courseInfo), 'Course info');
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.aoa_to_sheet(checklist),
+    'Checklist',
+  );
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.aoa_to_sheet(courseInfo),
+    'Course info',
+  );
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lessons), 'Lessons');
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }
@@ -49,14 +81,18 @@ async function zipWithXlsx(xlsx: Buffer): Promise<Buffer> {
 describe('buildPackageFromRawZip (new bilingual template)', () => {
   it('uses the Course ID from the Excel Checklist over the TEMP fallback', async () => {
     const bytes = await zipWithXlsx(newTemplateWorkbook('SCI001'));
-    const built = await buildPackageFromRawZip(bytes, { courseCode: 'TEMP002' });
+    const built = await buildPackageFromRawZip(bytes, {
+      courseCode: 'TEMP002',
+    });
     // 回归：曾错误地用兜底编号 TEMP002 覆盖了 Excel 里的真实 Course ID SCI001。
     expect(built.courseCode).toBe('SCI001');
   });
 
   it('falls back to the provided code when the template has no Course ID', async () => {
     const bytes = await zipWithXlsx(newTemplateWorkbook(''));
-    const built = await buildPackageFromRawZip(bytes, { courseCode: 'TEMP007' });
+    const built = await buildPackageFromRawZip(bytes, {
+      courseCode: 'TEMP007',
+    });
     expect(built.courseCode).toBe('TEMP007');
   });
 });

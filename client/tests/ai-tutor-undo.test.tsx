@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { App } from 'antd'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ChatWindow } from '../src/components/ai/ChatWindow'
+import type { AiConfigView } from '../src/api/ai'
 import { useAiStore } from '../src/stores/aiStore'
 import { ShellRoute } from '../src/backoffice/ShellRoute'
 import { WorkspaceAccessProvider } from '../src/backoffice/lib/workspaceAccess'
@@ -26,7 +27,7 @@ async function openChat() {
   server = installFakeServer()
   server.on('GET', '/api/session', { data: { employee: employee('ADMIN') } })
   useAiStore.setState({
-    selectedCourseId: 'undo-course',
+    ownerId: 'employee-1', config: { releaseId: 'r1' } as AiConfigView, selectedCourseId: 'undo-course',
     messages: [
       { role: 'ai', content: 'Welcome', createdAt: '1' },
       { role: 'user', content: original, createdAt: '2' },
@@ -56,7 +57,7 @@ test('确认撤回后原文回填且可编辑，最后一轮从历史和持久�
   fireEvent.click(within(dialog).getByRole('button', { name: 'Undo' }))
   await waitFor(() => assert.equal(input.value, original))
   assert.deepEqual(useAiStore.getState().messages.map((m) => m.content), ['Welcome'])
-  assert.deepEqual(JSON.parse(localStorage.getItem('aitutor.chat.undo-course')!).map((m: { content: string }) => m.content), ['Welcome'])
+  assert.deepEqual(JSON.parse(localStorage.getItem('aitutor.chat.v2.["employee-1","undo-course","r1"]')!).map((m: { content: string }) => m.content), ['Welcome'])
   fireEvent.change(input, { target: { value: 'edited question' } })
   assert.equal(input.value, 'edited question')
 })

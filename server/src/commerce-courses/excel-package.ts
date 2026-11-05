@@ -1,9 +1,9 @@
-﻿import { createHash, randomUUID } from "node:crypto";
-import JSZip from "jszip";
-import * as XLSX from "xlsx";
-import { PACKAGE_FORMAT, PACKAGE_FORMAT_VERSION } from "./contracts/manifest";
-import { convertDocxToHtml } from "./docx-to-html";
-import { mp4DurationSeconds } from "./media-duration";
+﻿import { createHash, randomUUID } from 'node:crypto';
+import JSZip from 'jszip';
+import * as XLSX from 'xlsx';
+import { PACKAGE_FORMAT, PACKAGE_FORMAT_VERSION } from './contracts/manifest';
+import { convertDocxToHtml } from './docx-to-html';
+import { mp4DurationSeconds } from './media-duration';
 import type {
   ExhibitType,
   LearningMode,
@@ -15,35 +15,47 @@ import type {
   PackageReading,
   PackageTextLearningPoint,
   PackageVideoLearningPoint,
-} from "./contracts/manifest";
+} from './contracts/manifest';
 
-const LANG = "en-GB";
+const LANG = 'en-GB';
 
 function sha(buf: Buffer): string {
-  return createHash("sha256").update(buf).digest("hex");
+  return createHash('sha256').update(buf).digest('hex');
 }
 
 function sheetRows(wb: XLSX.WorkBook, name: string): unknown[][] {
-  const key = Object.keys(wb.Sheets).find((k) => k.toLowerCase() === name.toLowerCase());
+  const key = Object.keys(wb.Sheets).find(
+    (k) => k.toLowerCase() === name.toLowerCase(),
+  );
   if (!key) return [];
-  return XLSX.utils.sheet_to_json(wb.Sheets[key], { header: 1, defval: null }) as unknown[][];
+  return XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[key], {
+    header: 1,
+    defval: null,
+  });
 }
 
 function hasSheet(wb: XLSX.WorkBook, name: string): boolean {
-  return Object.keys(wb.Sheets).some((k) => k.toLowerCase() === name.toLowerCase());
+  return Object.keys(wb.Sheets).some(
+    (k) => k.toLowerCase() === name.toLowerCase(),
+  );
 }
 
 function cell(v: unknown): string {
-  return v === null || v === undefined ? "" : String(v).trim();
+  return typeof v === 'string' ||
+    typeof v === 'number' ||
+    typeof v === 'boolean'
+    ? String(v).trim()
+    : '';
 }
 
 /** 把 "mm:ss" / "hh:mm:ss" / Excel 时间小数（以天为单位）都换算成秒。 */
 export function toSeconds(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "number") return Number.isFinite(value) ? Math.round(value * 86400) : null;
-  const text = String(value).trim();
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number')
+    return Number.isFinite(value) ? Math.round(value * 86400) : null;
+  const text = cell(value);
   if (!text) return null;
-  const parts = text.split(":").map((p) => Number(p));
+  const parts = text.split(':').map((p) => Number(p));
   if (parts.length > 0 && parts.every((n) => Number.isFinite(n))) {
     if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
     if (parts.length === 2) return parts[0] * 60 + parts[1];
@@ -53,7 +65,10 @@ export function toSeconds(value: unknown): number | null {
 }
 
 export function numberedLines(raw: string): string[] {
-  return raw.split(/\r?\n/).map((s) => s.replace(/^\s*\d+\.\s*/, "").trim()).filter(Boolean);
+  return raw
+    .split(/\r?\n/)
+    .map((s) => s.replace(/^\s*\d+\.\s*/, '').trim())
+    .filter(Boolean);
 }
 
 interface RawLesson {
@@ -74,22 +89,45 @@ function parseLessons(rows: unknown[][]): RawLesson[] {
     const first = cell(row[0]);
     const head = /^Lesson\s+(\d+)/i.exec(first);
     if (head) {
-      current = { no: Number(head[1]), title: "", description: "", textLps: [], videoLps: [], exhibits: [] };
+      current = {
+        no: Number(head[1]),
+        title: '',
+        description: '',
+        textLps: [],
+        videoLps: [],
+        exhibits: [],
+      };
       out.push(current);
       inVideo = false;
       continue;
     }
     if (!current) continue;
-    if (row.some((v) => cell(v) === "视频开始节点")) { inVideo = true; continue; }
-    if (first === "标题" && cell(row[1])) current.title = cell(row[1]);
-    else if (first === "简述" && cell(row[1])) current.description = cell(row[1]);
-    else if (first.startsWith("文本") && cell(row[1])) current.textLps.push(cell(row[1]));
-    else if (first === "" && cell(row[1]) && row[2] === null && !inVideo) current.textLps.push(cell(row[1]));
+    if (row.some((v) => cell(v) === '视频开始节点')) {
+      inVideo = true;
+      continue;
+    }
+    if (first === '标题' && cell(row[1])) current.title = cell(row[1]);
+    else if (first === '简述' && cell(row[1]))
+      current.description = cell(row[1]);
+    else if (first.startsWith('文本') && cell(row[1]))
+      current.textLps.push(cell(row[1]));
+    else if (first === '' && cell(row[1]) && row[2] === null && !inVideo)
+      current.textLps.push(cell(row[1]));
     else if (inVideo) {
       const lp = cell(row[1]);
-      if (lp && typeof row[2] === "number") current.videoLps.push({ title: lp, timeSeconds: Math.round((row[2] as number) * 86400) });
+      if (lp && typeof row[2] === 'number')
+        current.videoLps.push({
+          title: lp,
+          timeSeconds: Math.round(row[2] * 86400),
+        });
       const ex = cell(row[4]);
-      if (ex) current.exhibits.push({ title: ex, description: cell(row[5]), timeSeconds: typeof row[3] === "number" ? Math.round((row[3] as number) * 86400) : 0 });
+      if (ex)
+        current.exhibits.push({
+          title: ex,
+          description: cell(row[5]),
+          timeSeconds:
+            typeof row[3] === 'number' ? Math.round(row[3] * 86400) : 0,
+        });
     }
   }
   return out;
@@ -97,15 +135,22 @@ function parseLessons(rows: unknown[][]): RawLesson[] {
 
 function parseCourseInfo(rows: unknown[][]): Map<string, string> {
   const info = new Map<string, string>();
-  for (const row of rows) { const k = cell(row?.[0]); if (k) info.set(k, cell(row?.[1])); }
+  for (const row of rows) {
+    const k = cell(row?.[0]);
+    if (k) info.set(k, cell(row?.[1]));
+  }
   return info;
 }
 
 /** 在 Checklist/Course info 等 key→value 表里按标签取值（忽略大小写与首尾空白）。 */
-function readChecklistValue(info: Map<string, string>, label: string): string | undefined {
+function readChecklistValue(
+  info: Map<string, string>,
+  label: string,
+): string | undefined {
   const target = label.trim().toLowerCase();
   for (const [key, value] of info.entries()) {
-    if (key.trim().toLowerCase() === target && value && value.trim()) return value.trim();
+    if (key.trim().toLowerCase() === target && value && value.trim())
+      return value.trim();
   }
   return undefined;
 }
@@ -116,38 +161,57 @@ function parseReadings(rows: unknown[][]): Map<number, PackageReading[]> {
   for (const row of rows) {
     const first = cell(row?.[0]);
     const heading = /Lesson\s+(\d+)\s+Reading list/i.exec(first);
-    if (heading) { current = Number(heading[1]); map.set(current, map.get(current) ?? []); continue; }
+    if (heading) {
+      current = Number(heading[1]);
+      map.set(current, map.get(current) ?? []);
+      continue;
+    }
     if (!current || !first || /^Exhibit\s/i.test(first)) continue;
     const list = map.get(current) ?? [];
-    list.push({ type: "BOOK", title: first });
+    list.push({ type: 'BOOK', title: first });
     map.set(current, list);
   }
   return map;
 }
 
-function parseKnowledge(rows: unknown[][]): Map<number, PackageKnowledgeQuestion[]> {
+function parseKnowledge(
+  rows: unknown[][],
+): Map<number, PackageKnowledgeQuestion[]> {
   const map = new Map<number, PackageKnowledgeQuestion[]>();
   for (const row of rows.slice(1)) {
     const m = /Lesson\s+(\d+)/i.exec(cell(row?.[0]));
     if (!m) continue;
     const n = Number(m[1]);
     const list = map.get(n) ?? [];
-    list.push({ code: `K-${n}-${list.length + 1}`, question: cell(row[2]), referenceAnswer: cell(row[3]) || undefined });
+    list.push({
+      code: `K-${n}-${list.length + 1}`,
+      question: cell(row[2]),
+      referenceAnswer: cell(row[3]) || undefined,
+    });
     map.set(n, list);
   }
   return map;
 }
 
-function parseApplications(rows: unknown[][]): Map<number, { scenario: string; referenceAnswer?: string }> {
+function parseApplications(
+  rows: unknown[][],
+): Map<number, { scenario: string; referenceAnswer?: string }> {
   const map = new Map<number, { scenario: string; referenceAnswer?: string }>();
   for (const row of rows.slice(1)) {
     const m = /Lesson\s+(\d+)/i.exec(cell(row?.[0]));
-    if (m) map.set(Number(m[1]), { scenario: cell(row[1]), referenceAnswer: cell(row[2]) || undefined });
+    if (m)
+      map.set(Number(m[1]), {
+        scenario: cell(row[1]),
+        referenceAnswer: cell(row[2]) || undefined,
+      });
   }
   return map;
 }
 
-function findMedia(map: Map<string, Buffer>, predicate: (name: string) => boolean): { name: string; bytes: Buffer } | null {
+function findMedia(
+  map: Map<string, Buffer>,
+  predicate: (name: string) => boolean,
+): { name: string; bytes: Buffer } | null {
   for (const [name, bytes] of map) if (predicate(name)) return { name, bytes };
   return null;
 }
@@ -158,26 +222,45 @@ const isModelName = (n: string) => /\.(glb|gltf|obj)$/.test(n);
 const isDocxName = (n: string) => /\.docx$/.test(n);
 const isZhName = (n: string) => /中文|zh|cn|chinese|中国/.test(n);
 
-function lessonNameMatch(name: string, lessonId: string, lessonNo: number): boolean {
+function lessonNameMatch(
+  name: string,
+  lessonId: string,
+  lessonNo: number,
+): boolean {
   const id = lessonId.toLowerCase();
   if (id && name.includes(id)) return true;
-  return name.includes(`lesson ${lessonNo}`) || name.includes(`lesson${lessonNo}`) || name.includes(`lesson_${lessonNo}`) || name.includes(`l${String(lessonNo).padStart(3, "0")}`);
+  return (
+    name.includes(`lesson ${lessonNo}`) ||
+    name.includes(`lesson${lessonNo}`) ||
+    name.includes(`lesson_${lessonNo}`) ||
+    name.includes(`l${String(lessonNo).padStart(3, '0')}`)
+  );
 }
 
 function parseStudyMode(value: string): LearningMode {
   const v = value.toLowerCase();
-  if (v.includes("both") || v.includes("video & text") || v.includes("video and text") || (v.includes("video") && v.includes("text"))) return "VIDEO_AND_TEXT";
-  if (v.includes("video")) return "VIDEO_ONLY";
-  if (v.includes("text")) return "TEXT_ONLY";
-  return "VIDEO_AND_TEXT";
+  if (
+    v.includes('both') ||
+    v.includes('video & text') ||
+    v.includes('video and text') ||
+    (v.includes('video') && v.includes('text'))
+  )
+    return 'VIDEO_AND_TEXT';
+  if (v.includes('video')) return 'VIDEO_ONLY';
+  if (v.includes('text')) return 'TEXT_ONLY';
+  return 'VIDEO_AND_TEXT';
 }
 
 function parseLanguages(value: string): string[] {
   const v = value.toLowerCase();
-  const both = (v.includes("english") && (v.includes("chinese") || v.includes("中文"))) || v.includes("both") || v.includes("&");
-  if (both) return ["en-GB", "zh-CN"];
-  if (v.includes("chinese") || v.includes("中文") || v === "zh") return ["zh-CN"];
-  return ["en-GB"];
+  const both =
+    (v.includes('english') && (v.includes('chinese') || v.includes('中文'))) ||
+    v.includes('both') ||
+    v.includes('&');
+  if (both) return ['en-GB', 'zh-CN'];
+  if (v.includes('chinese') || v.includes('中文') || v === 'zh')
+    return ['zh-CN'];
+  return ['en-GB'];
 }
 
 export interface ExcelPackageResult {
@@ -201,9 +284,10 @@ interface RawMedia {
 // 却会在 1 vCPU 的实例上耗掉大量 CPU 与内存，使 ~150MB 素材包的转换/校验
 // 超时（表现为 App Runner/CloudFront 5xx，前端显示 INTERNAL_ERROR）。
 // 这些文件用 STORE 直接存储，只有 manifest/checksums 等文本仍走 DEFLATE。
-const ALREADY_COMPRESSED = /\.(mp4|mov|webm|m4v|png|jpe?g|gif|webp|mp3|m4a|aac|glb|gltf|obj|pdf|zip|docx|xlsx|pptx)$/i;
-function fileCompression(name: string): "STORE" | "DEFLATE" {
-  return ALREADY_COMPRESSED.test(name) ? "STORE" : "DEFLATE";
+const ALREADY_COMPRESSED =
+  /\.(mp4|mov|webm|m4v|png|jpe?g|gif|webp|mp3|m4a|aac|glb|gltf|obj|pdf|zip|docx|xlsx|pptx)$/i;
+function fileCompression(name: string): 'STORE' | 'DEFLATE' {
+  return ALREADY_COMPRESSED.test(name) ? 'STORE' : 'DEFLATE';
 }
 
 function createPackager(): RawMedia {
@@ -229,24 +313,41 @@ export async function buildPackageFromRawZip(
   const media = new Map<string, Buffer>();
   const xlsxFiles: { base: string; entry: JSZip.JSZipObject }[] = [];
   for (const [name, file] of Object.entries(raw.files)) {
-    if (file.dir || name.startsWith("__MACOSX/") || name.includes("/__MACOSX/") || name.endsWith(".DS_Store")) continue;
-    const base = name.split("/").pop() ?? name;
-    if (!base || base.startsWith(".")) continue;
-    if (base.startsWith("~$")) continue; // Excel 临时锁文件（如 ~$xxx.xlsx），跳过
-    if (/\.xlsx$/i.test(base)) { xlsxFiles.push({ base, entry: file }); continue; }
-    media.set(base.toLowerCase(), await file.async("nodebuffer"));
+    if (
+      file.dir ||
+      name.startsWith('__MACOSX/') ||
+      name.includes('/__MACOSX/') ||
+      name.endsWith('.DS_Store')
+    )
+      continue;
+    const base = name.split('/').pop() ?? name;
+    if (!base || base.startsWith('.')) continue;
+    if (base.startsWith('~$')) continue; // Excel 临时锁文件（如 ~$xxx.xlsx），跳过
+    if (/\.xlsx$/i.test(base)) {
+      xlsxFiles.push({ base, entry: file });
+      continue;
+    }
+    media.set(base.toLowerCase(), await file.async('nodebuffer'));
   }
-  if (!xlsxFiles.length) throw new Error("原始素材 ZIP 中找不到 Excel（.xlsx）模板文件");
+  if (!xlsxFiles.length)
+    throw new Error('原始素材 ZIP 中找不到 Excel（.xlsx）模板文件');
 
   // 2) 识别模板格式：含 Checklist/Exhibits 为新双语模板，否则回退旧模板
   let chosen: { wb: XLSX.WorkBook; isNew: boolean; base: string } | null = null;
   for (const f of xlsxFiles) {
-    const bytes = await f.entry.async("nodebuffer");
-    const wb = XLSX.read(bytes, { type: "buffer" });
-    if (hasSheet(wb, "Checklist") || hasSheet(wb, "Exhibits")) { chosen = { wb, isNew: true, base: f.base }; break; }
-    if (!chosen && hasSheet(wb, "course info") && hasSheet(wb, "Lessons")) chosen = { wb, isNew: false, base: f.base };
+    const bytes = await f.entry.async('nodebuffer');
+    const wb = XLSX.read(bytes, { type: 'buffer' });
+    if (hasSheet(wb, 'Checklist') || hasSheet(wb, 'Exhibits')) {
+      chosen = { wb, isNew: true, base: f.base };
+      break;
+    }
+    if (!chosen && hasSheet(wb, 'course info') && hasSheet(wb, 'Lessons'))
+      chosen = { wb, isNew: false, base: f.base };
   }
-  if (!chosen) throw new Error("Excel 模板结构无法识别：缺少 Course info / Lessons 工作表");
+  if (!chosen)
+    throw new Error(
+      'Excel 模板结构无法识别：缺少 Course info / Lessons 工作表',
+    );
 
   if (chosen.isNew) return buildNewTemplatePackage(chosen.wb, media, options);
   return buildLegacyPackage(chosen.wb, media, options);
@@ -280,20 +381,44 @@ function parseNewLessons(rows: unknown[][]): NewLesson[] {
   for (const row of rows) {
     if (!row) continue;
     const first = cell(row[0]);
-    if (first === "Lesson" && cell(row[1])) {
+    if (first === 'Lesson' && cell(row[1])) {
       const m = /(\d+)/.exec(cell(row[1]));
-      cur = { no: m ? Number(m[1]) : out.length + 1, id: "", titleEn: "", titleZh: "", descEn: "", descZh: "", points: [] };
+      cur = {
+        no: m ? Number(m[1]) : out.length + 1,
+        id: '',
+        titleEn: '',
+        titleZh: '',
+        descEn: '',
+        descZh: '',
+        points: [],
+      };
       out.push(cur);
       continue;
     }
     if (!cur) continue;
-    if (first === "Lesson ID") { cur.id = cell(row[1]).toUpperCase(); continue; }
-    if (/^Lesson title \(EN\)/i.test(first)) { cur.titleEn = cell(row[1]); continue; }
-    if (first.includes("Lesson title") && first.includes("中文")) { cur.titleZh = cell(row[1]); continue; }
-    if (/^Lesson description \(EN\)/i.test(first)) { cur.descEn = cell(row[1]); continue; }
-    if (first.includes("Lesson description") && first.includes("中文")) { cur.descZh = cell(row[1]); continue; }
+    if (first === 'Lesson ID') {
+      cur.id = cell(row[1]).toUpperCase();
+      continue;
+    }
+    if (/^Lesson title \(EN\)/i.test(first)) {
+      cur.titleEn = cell(row[1]);
+      continue;
+    }
+    if (first.includes('Lesson title') && first.includes('中文')) {
+      cur.titleZh = cell(row[1]);
+      continue;
+    }
+    if (/^Lesson description \(EN\)/i.test(first)) {
+      cur.descEn = cell(row[1]);
+      continue;
+    }
+    if (first.includes('Lesson description') && first.includes('中文')) {
+      cur.descZh = cell(row[1]);
+      continue;
+    }
     // 学习点表头：["#","Text mode title – EN", ...]
-    if (first === "#" && cell(row[1]).toLowerCase().includes("text mode")) continue;
+    if (first === '#' && cell(row[1]).toLowerCase().includes('text mode'))
+      continue;
     if (/^\d+(\.\d+)?$/.test(first)) {
       cur.points.push({
         code: first,
@@ -311,9 +436,12 @@ function parseNewLessons(rows: unknown[][]): NewLesson[] {
 }
 
 function parseTriggerTimes(value: unknown): number[] {
-  if (value === null || value === undefined || value === "") return [];
-  if (typeof value === "number") { const s = toSeconds(value); return s === null ? [] : [s]; }
-  return String(value)
+  if (value === null || value === undefined || value === '') return [];
+  if (typeof value === 'number') {
+    const s = toSeconds(value);
+    return s === null ? [] : [s];
+  }
+  return cell(value)
     .split(/[,，]/)
     .map((part) => toSeconds(part))
     .filter((n): n is number => n !== null && Number.isFinite(n));
@@ -321,21 +449,22 @@ function parseTriggerTimes(value: unknown): number[] {
 
 function mapExhibitType(value: string, fileName?: string): ExhibitType {
   const v = value.toLowerCase();
-  if (v.includes("3d") || v.includes("model")) return "MODEL3D";
-  if (v.includes("video")) return "VIDEO";
-  if (v.includes("image") || v.includes("photo") || v.includes("picture")) return "IMAGE";
+  if (v.includes('3d') || v.includes('model')) return 'MODEL3D';
+  if (v.includes('video')) return 'VIDEO';
+  if (v.includes('image') || v.includes('photo') || v.includes('picture'))
+    return 'IMAGE';
   if (fileName) {
-    if (isVideoName(fileName)) return "VIDEO";
-    if (isModelName(fileName)) return "MODEL3D";
+    if (isVideoName(fileName)) return 'VIDEO';
+    if (isModelName(fileName)) return 'MODEL3D';
   }
-  return "IMAGE";
+  return 'IMAGE';
 }
 
-function mapReadingType(value: string): PackageReading["type"] {
+function mapReadingType(value: string): PackageReading['type'] {
   const v = value.toLowerCase();
-  if (v.includes("book")) return "BOOK";
-  if (v.includes("paper")) return "PAPER";
-  return "ARTICLE";
+  if (v.includes('book')) return 'BOOK';
+  if (v.includes('paper')) return 'PAPER';
+  return 'ARTICLE';
 }
 
 interface ExhibitRow {
@@ -359,13 +488,14 @@ function parseExhibitRows(rows: unknown[][]): ExhibitRow[] {
     const refId = cell(row[0]).toUpperCase();
     const codeRaw = cell(row[2]).toUpperCase();
     // 跳过表头 / 说明行（如 "Exhibit ID / Exhibit ID"）
-    if (/^EXHIBIT\s*ID$/.test(refId) || /^EXHIBIT\s*ID$/.test(codeRaw)) continue;
+    if (/^EXHIBIT\s*ID$/.test(refId) || /^EXHIBIT\s*ID$/.test(codeRaw))
+      continue;
     if (!refId && !codeRaw) continue;
     // 展品编号优先取第 3 列；没有则从第一列全 ID 末尾推导（SCI001-L01-E01 -> E01）
     let code = codeRaw;
     if (!code) {
       const m = /([A-Za-z]*\d+)$/.exec(refId);
-      code = m ? m[1] : "";
+      code = m ? m[1] : '';
     }
     if (!code) continue;
     out.push({
@@ -394,132 +524,209 @@ async function buildNewTemplatePackage(
   const pkg = createPackager();
 
   // Checklist：语言 / 学习模式 / 课程 ID
-  const checklist = parseCourseInfo(sheetRows(wb, "Checklist"));
-  const studyModeText = checklist.get("Study mode") || "";
+  const checklist = parseCourseInfo(sheetRows(wb, 'Checklist'));
+  const studyModeText = checklist.get('Study mode') || '';
   const learningMode = parseStudyMode(studyModeText);
-  const languages = parseLanguages(checklist.get("Learning language") || "English");
+  const languages = parseLanguages(
+    checklist.get('Learning language') || 'English',
+  );
   const defaultContentLanguage = languages[0] ?? LANG;
-  if (learningMode === "VIDEO_AND_TEXT" || learningMode === "VIDEO_ONLY") {
+  if (learningMode === 'VIDEO_AND_TEXT' || learningMode === 'VIDEO_ONLY') {
     for (const lang of languages) {
-      if (![...media.keys()].some((n) => isVideoName(n) && isZhName(n) === (lang === "zh-CN"))) {
+      if (
+        ![...media.keys()].some(
+          (n) => isVideoName(n) && isZhName(n) === (lang === 'zh-CN'),
+        )
+      ) {
         warnings.push(`学习模式含视频，但未找到 ${lang} 视频文件`);
       }
     }
   }
 
   // Course info
-  const courseRows = sheetRows(wb, "Course info");
+  const courseRows = sheetRows(wb, 'Course info');
   const info: Record<string, { en: string; zh: string }> = {};
   const whatEn: string[] = [];
   const whatZh: string[] = [];
   const provideRows: { preset: string; en: string; zh: string }[] = [];
-  let section: "" | "learn" | "provide" = "";
+  let section: '' | 'learn' | 'provide' = '';
   for (const row of courseRows) {
     if (!row) continue;
     const first = cell(row[0]);
     const lower = first.toLowerCase();
-    if (lower === "category" || lower === "course title" || lower === "short description" || lower === "overview") {
+    if (
+      lower === 'category' ||
+      lower === 'course title' ||
+      lower === 'short description' ||
+      lower === 'overview'
+    ) {
       info[lower] = { en: cell(row[1]), zh: cell(row[2]) };
-      section = "";
+      section = '';
       continue;
     }
-    if (lower === "what you'll learn" || lower === "what you’ll learn") { section = "learn"; continue; }
-    if (lower === "this course provides") { section = "provide"; continue; }
-    if (first === "#") continue;
-    if (section === "learn" && typeof row[0] === "number") { if (cell(row[1])) whatEn.push(cell(row[1])); if (cell(row[2])) whatZh.push(cell(row[2])); continue; }
-    if (section === "provide" && typeof row[0] === "number") { provideRows.push({ preset: cell(row[1]), en: cell(row[2]), zh: cell(row[3]) }); continue; }
+    if (lower === "what you'll learn" || lower === 'what you’ll learn') {
+      section = 'learn';
+      continue;
+    }
+    if (lower === 'this course provides') {
+      section = 'provide';
+      continue;
+    }
+    if (first === '#') continue;
+    if (section === 'learn' && typeof row[0] === 'number') {
+      if (cell(row[1])) whatEn.push(cell(row[1]));
+      if (cell(row[2])) whatZh.push(cell(row[2]));
+      continue;
+    }
+    if (section === 'provide' && typeof row[0] === 'number') {
+      provideRows.push({
+        preset: cell(row[1]),
+        en: cell(row[2]),
+        zh: cell(row[3]),
+      });
+      continue;
+    }
   }
 
-  const titleEn = info["course title"]?.en || checklist.get("Course title") || "Imported Course";
-  const titleZh = info["course title"]?.zh;
-  const category = info["category"]?.en || "Uncategorised";
+  const titleEn =
+    info['course title']?.en ||
+    checklist.get('Course title') ||
+    'Imported Course';
+  const titleZh = info['course title']?.zh;
+  const category = info['category']?.en || 'Uncategorised';
   // Course ID 必须优先取 Excel Checklist 里的值（SCI001 等）；options.courseCode 只是
   // 「模板里没有 Course ID」时的兜底编号（TEMP001…），绝不能反过来覆盖 Excel 里的真实编号。
-  const checklistCourseId = readChecklistValue(checklist, "Course ID");
-  const courseCode = (checklistCourseId || options.courseCode || "C001").trim().toUpperCase();
+  const checklistCourseId = readChecklistValue(checklist, 'Course ID');
+  const courseCode = (checklistCourseId || options.courseCode || 'C001')
+    .trim()
+    .toUpperCase();
   const slug = (options.slug || slugify(titleEn)).trim().toLowerCase();
 
   // 封面
-  const cover = findMedia(media, (n) => isImageName(n) && /课程封面|cover/.test(n));
-  const coverPath = cover ? "media/cover" + extOf(cover.name) : undefined;
-  if (cover) pkg.add(coverPath!, cover.bytes); else warnings.push("未找到课程封面图片");
+  const cover = findMedia(
+    media,
+    (n) => isImageName(n) && /课程封面|cover/.test(n),
+  );
+  const coverPath = cover ? 'media/cover' + extOf(cover.name) : undefined;
+  if (cover) pkg.add(coverPath!, cover.bytes);
+  else warnings.push('未找到课程封面图片');
 
-  const buildProvides = (lang: string) => provideRows.map((p) => {
-    const en = p.en || p.preset;
-    const zh = p.zh;
-    if (p.en || p.zh) return { type: "custom" as const, title: lang === "zh-CN" ? zh || en : en, titleZh: zh || undefined };
-    return { type: "preset" as const, title: p.preset, titleZh: p.zh || undefined };
-  });
+  const buildProvides = (lang: string) =>
+    provideRows.map((p) => {
+      const en = p.en || p.preset;
+      const zh = p.zh;
+      if (p.en || p.zh)
+        return {
+          type: 'custom' as const,
+          title: lang === 'zh-CN' ? zh || en : en,
+          titleZh: zh || undefined,
+        };
+      return {
+        type: 'preset' as const,
+        title: p.preset,
+        titleZh: p.zh || undefined,
+      };
+    });
 
-  const courseLocalized: PackageCourse["localized"] = {};
+  const courseLocalized: PackageCourse['localized'] = {};
   for (const lang of languages) {
-    const isZh = lang === "zh-CN";
-    const pick = (field: string) => (isZh ? info[field]?.zh || info[field]?.en : info[field]?.en) || undefined;
+    const isZh = lang === 'zh-CN';
+    const pick = (field: string) =>
+      (isZh ? info[field]?.zh || info[field]?.en : info[field]?.en) ||
+      undefined;
     courseLocalized[lang] = {
       title: (isZh ? titleZh || titleEn : titleEn).trim(),
-      shortDescription: pick("short description"),
-      overview: pick("overview"),
+      shortDescription: pick('short description'),
+      overview: pick('overview'),
       whatYouLearn: isZh ? (whatZh.length ? whatZh : whatEn) : whatEn,
       provides: buildProvides(lang),
     };
-    if (isZh && !titleZh) warnings.push("课程中文标题为空，已回退英文标题");
+    if (isZh && !titleZh) warnings.push('课程中文标题为空，已回退英文标题');
   }
 
   // 课时
-  const lessonDefs = parseNewLessons(sheetRows(wb, "Lessons")).sort((a, b) => a.no - b.no);
-  if (!lessonDefs.length) throw new Error("Lessons 工作表没有可导入的课时");
-  const exhibitRows = parseExhibitRows(sheetRows(wb, "Exhibits"));
-  const readingRows = sheetRows(wb, "Reading list");
-  const knowledgeRows = sheetRows(wb, "Knowledge test");
-  const applicationRows = sheetRows(wb, "Application test");
+  const lessonDefs = parseNewLessons(sheetRows(wb, 'Lessons')).sort(
+    (a, b) => a.no - b.no,
+  );
+  if (!lessonDefs.length) throw new Error('Lessons 工作表没有可导入的课时');
+  const exhibitRows = parseExhibitRows(sheetRows(wb, 'Exhibits'));
+  const readingRows = sheetRows(wb, 'Reading list');
+  const knowledgeRows = sheetRows(wb, 'Knowledge test');
+  const applicationRows = sheetRows(wb, 'Application test');
 
   const pkgLessons: PackageLesson[] = [];
   for (const def of lessonDefs) {
-    const lessonId = def.id || `L${String(def.no).padStart(3, "0")}`;
-    const localized: Record<string, PackageLesson["localized"][string]> = {};
+    const lessonId = def.id || `L${String(def.no).padStart(3, '0')}`;
+    const localized: Record<string, PackageLesson['localized'][string]> = {};
 
     // 文本正文：优先同目录 docx
-    const docx = findMedia(media, (n) => isDocxName(n) && lessonNameMatch(n, lessonId, def.no) && isZhName(n) === false);
+    const docx = findMedia(
+      media,
+      (n) =>
+        isDocxName(n) &&
+        lessonNameMatch(n, lessonId, def.no) &&
+        isZhName(n) === false,
+    );
     const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
-    const html = converted?.html ?? "";
+    const html = converted?.html ?? '';
     if (!docx) warnings.push(`Lesson ${def.no} 缺少文本课件 DOCX`);
-    if (converted) for (const message of converted.warnings) warnings.push(`Lesson ${def.no} 文本课件：${message}`);
+    if (converted)
+      for (const message of converted.warnings)
+        warnings.push(`Lesson ${def.no} 文本课件：${message}`);
 
     for (const lang of languages) {
-      const isZh = lang === "zh-CN";
-      const title = (isZh ? def.titleZh || def.titleEn : def.titleEn) || `Lesson ${def.no}`;
-      if (isZh && !def.titleZh) warnings.push(`Lesson ${def.no} 中文标题为空，已回退英文标题`);
+      const isZh = lang === 'zh-CN';
+      const title =
+        (isZh ? def.titleZh || def.titleEn : def.titleEn) || `Lesson ${def.no}`;
+      if (isZh && !def.titleZh)
+        warnings.push(`Lesson ${def.no} 中文标题为空，已回退英文标题`);
 
-      const videoFile = findMedia(media, (n) => isVideoName(n) && lessonNameMatch(n, lessonId, def.no) && isZhName(n) === isZh);
-      let video: PackageLesson["localized"][string]["video"] = null;
+      const videoFile = findMedia(
+        media,
+        (n) =>
+          isVideoName(n) &&
+          lessonNameMatch(n, lessonId, def.no) &&
+          isZhName(n) === isZh,
+      );
+      let video: PackageLesson['localized'][string]['video'] = null;
       if (videoFile) {
         const videoPath = `media/video/${lessonId}/${lang}${extOf(videoFile.name)}`;
         pkg.add(videoPath, videoFile.bytes);
         const duration = mp4DurationSeconds(videoFile.bytes);
-        const videoLps: PackageVideoLearningPoint[] = defsVideoPoints(def.points, isZh)
-          .map((p, i) => ({ code: `V-${p.code || i + 1}`, timeSeconds: p.start ?? 0, title: p.title }));
-        video = { file: videoPath, durationSeconds: duration ? Math.round(duration) : undefined, learningPoints: videoLps, exhibitTriggers: [] };
-      } else if (learningMode !== "TEXT_ONLY") {
+        const videoLps: PackageVideoLearningPoint[] = defsVideoPoints(
+          def.points,
+          isZh,
+        ).map((p, i) => ({
+          code: `V-${p.code || i + 1}`,
+          timeSeconds: p.start ?? 0,
+          title: p.title,
+        }));
+        video = {
+          file: videoPath,
+          durationSeconds: duration ? Math.round(duration) : undefined,
+          learningPoints: videoLps,
+          exhibitTriggers: [],
+        };
+      } else if (learningMode !== 'TEXT_ONLY') {
         warnings.push(`Lesson ${def.no} 缺少 ${lang} 视频文件`);
       }
 
-      const textLps: PackageTextLearningPoint[] = (
-        converted?.headings.length
-          ? converted.headings.map((heading, index) => ({
-              code: `T-${heading.code || index + 1}`,
-              heading: heading.title,
-              level: 1,
-            }))
-          : defsTextPoints(def.points, isZh).map((p) => ({
-              code: `T-${p.code}`,
-              heading: p.title,
-              level: 1,
-            }))
-      );
+      const textLps: PackageTextLearningPoint[] = converted?.headings.length
+        ? converted.headings.map((heading, index) => ({
+            code: `T-${heading.code || index + 1}`,
+            heading: heading.title,
+            level: 1,
+          }))
+        : defsTextPoints(def.points, isZh).map((p) => ({
+            code: `T-${p.code}`,
+            heading: p.title,
+            level: 1,
+          }));
 
       localized[lang] = {
         title,
-        description: (isZh ? def.descZh || def.descEn : def.descEn) || undefined,
+        description:
+          (isZh ? def.descZh || def.descEn : def.descEn) || undefined,
         video,
         text: html ? { html, learningPoints: textLps } : null,
       };
@@ -535,38 +742,78 @@ async function buildNewTemplatePackage(
     const exhibits: PackageExhibit[] = [];
     for (const ex of lessonExhibitRows) {
       let code = ex.code;
-      if (usedCodes.has(code)) { let n = 2; while (usedCodes.has(`${ex.code}-${n}`)) n++; code = `${ex.code}-${n}`; warnings.push(`Lesson ${def.no} 展品编号 ${ex.code} 重复，已改为 ${code}`); }
+      if (usedCodes.has(code)) {
+        let n = 2;
+        while (usedCodes.has(`${ex.code}-${n}`)) n++;
+        code = `${ex.code}-${n}`;
+        warnings.push(
+          `Lesson ${def.no} 展品编号 ${ex.code} 重复，已改为 ${code}`,
+        );
+      }
       usedCodes.add(code);
       // 媒体匹配：按“课时号 + 展品号”匹配（lesson1-exhibit-1.png / lesson1-exhibit1缩略图.png 等）
       const exNum = Number((/\d+/.exec(ex.code) || [])[0] || 0);
-      const lessonNoRe = new RegExp(`lesson\\s*0*${def.no}(?!\\d)`, "i");
-      const exhibitRe = exNum ? new RegExp(`exhibit[\\s_-]?0*${exNum}(?!\\d)`, "i") : null;
+      const lessonNoRe = new RegExp(`lesson\\s*0*${def.no}(?!\\d)`, 'i');
+      const exhibitRe = exNum
+        ? new RegExp(`exhibit[\\s_-]?0*${exNum}(?!\\d)`, 'i')
+        : null;
       const matchExhibitMedia = (n: string) => {
-        const base = (n.split("/").pop() ?? n).toLowerCase();
+        const base = (n.split('/').pop() ?? n).toLowerCase();
         if (!lessonNoRe.test(base)) return false;
         return exhibitRe ? exhibitRe.test(base) : /exhibit/i.test(base);
       };
-      const image = findMedia(media, (n) => (isImageName(n) || isVideoName(n) || isModelName(n)) && !/缩略图|thumb/.test(n) && matchExhibitMedia(n));
-      if (!image) { warnings.push(`Lesson ${def.no} 展品「${ex.titleEn || ex.code}」缺少媒体文件，已跳过`); continue; }
+      const image = findMedia(
+        media,
+        (n) =>
+          (isImageName(n) || isVideoName(n) || isModelName(n)) &&
+          !/缩略图|thumb/.test(n) &&
+          matchExhibitMedia(n),
+      );
+      if (!image) {
+        warnings.push(
+          `Lesson ${def.no} 展品「${ex.titleEn || ex.code}」缺少媒体文件，已跳过`,
+        );
+        continue;
+      }
       const file = `media/exhibits/${code}${extOf(image.name)}`;
       pkg.add(file, image.bytes);
-      const thumb = findMedia(media, (n) => isImageName(n) && /缩略图|thumb/.test(n) && matchExhibitMedia(n));
+      const thumb = findMedia(
+        media,
+        (n) => isImageName(n) && /缩略图|thumb/.test(n) && matchExhibitMedia(n),
+      );
       let thumbnail: string | undefined;
-      if (thumb) { thumbnail = `media/exhibits/${code}.thumb${extOf(thumb.name)}`; pkg.add(thumbnail, thumb.bytes); }
-      const localizedEx: PackageExhibit["localized"] = {};
-      for (const lang of languages) {
-        const isZh = lang === "zh-CN";
-        localizedEx[lang] = { title: (isZh ? ex.titleZh || ex.titleEn : ex.titleEn) || code, description: (isZh ? ex.descZh || ex.descEn : ex.descEn) || undefined };
+      if (thumb) {
+        thumbnail = `media/exhibits/${code}.thumb${extOf(thumb.name)}`;
+        pkg.add(thumbnail, thumb.bytes);
       }
-      exhibits.push({ code, type: mapExhibitType(ex.type, image?.name), file, thumbnail, source: ex.sourceEn || undefined, localized: localizedEx });
+      const localizedEx: PackageExhibit['localized'] = {};
+      for (const lang of languages) {
+        const isZh = lang === 'zh-CN';
+        localizedEx[lang] = {
+          title: (isZh ? ex.titleZh || ex.titleEn : ex.titleEn) || code,
+          description: (isZh ? ex.descZh || ex.descEn : ex.descEn) || undefined,
+        };
+      }
+      exhibits.push({
+        code,
+        type: mapExhibitType(ex.type, image?.name),
+        file,
+        thumbnail,
+        source: ex.sourceEn || undefined,
+        localized: localizedEx,
+      });
       // 触发器按语言挂到对应 video 上
       for (const lang of languages) {
-        const isZh = lang === "zh-CN";
+        const isZh = lang === 'zh-CN';
         const times = isZh ? ex.triggersZh : ex.triggersEn;
         const loc = localized[lang];
         if (loc?.video && times.length) {
           loc.video.exhibitTriggers = loc.video.exhibitTriggers ?? [];
-          for (const t of times) loc.video.exhibitTriggers.push({ timeSeconds: t, exhibitRef: code });
+          for (const t of times)
+            loc.video.exhibitTriggers.push({
+              timeSeconds: t,
+              exhibitRef: code,
+            });
         }
       }
     }
@@ -578,7 +825,12 @@ async function buildNewTemplatePackage(
       if (cell(row[0]).toUpperCase() !== lessonId) continue;
       const title = cell(row[3]);
       if (!title) continue;
-      readings.push({ type: mapReadingType(cell(row[2])), title, author: cell(row[4]) || undefined, why: cell(row[5]) || undefined });
+      readings.push({
+        type: mapReadingType(cell(row[2])),
+        title,
+        author: cell(row[4]) || undefined,
+        why: cell(row[5]) || undefined,
+      });
     }
 
     // 知识测试 / 应用测试（数据库为单语，取英文，缺则中文）
@@ -588,11 +840,21 @@ async function buildNewTemplatePackage(
       if (cell(row[0]).toUpperCase() !== lessonId) continue;
       const question = cell(row[3]) || cell(row[5]);
       if (!question) continue;
-      questions.push({ code: `K-${def.no}-${questions.length + 1}`, question, referenceAnswer: cell(row[4]) || cell(row[6]) || undefined });
+      questions.push({
+        code: `K-${def.no}-${questions.length + 1}`,
+        question,
+        referenceAnswer: cell(row[4]) || cell(row[6]) || undefined,
+      });
     }
-    const appRow = applicationRows.find((row) => row && cell(row[0]).toUpperCase() === lessonId);
+    const appRow = applicationRows.find(
+      (row) => row && cell(row[0]).toUpperCase() === lessonId,
+    );
     const appTest = appRow
-      ? { enabled: true, scenario: cell(appRow[2]) || cell(appRow[4]), referenceAnswer: cell(appRow[3]) || cell(appRow[5]) || undefined }
+      ? {
+          enabled: true,
+          scenario: cell(appRow[2]) || cell(appRow[4]),
+          referenceAnswer: cell(appRow[3]) || cell(appRow[5]) || undefined,
+        }
       : undefined;
 
     pkgLessons.push({
@@ -600,7 +862,7 @@ async function buildNewTemplatePackage(
       order: def.no,
       localized,
       exhibits,
-      recommendedReading: readings.length ? { "en-GB": readings } : {},
+      recommendedReading: readings.length ? { 'en-GB': readings } : {},
       knowledgeTest: { enabled: questions.length > 0, questions },
       applicationTest: appTest && appTest.scenario ? appTest : undefined,
     });
@@ -623,17 +885,31 @@ async function buildNewTemplatePackage(
     formatVersion: PACKAGE_FORMAT_VERSION,
     packageId: `raw-template-${randomUUID()}`,
     exportedAt: new Date().toISOString(),
-    source: { environment: "EXCEL_TEMPLATE", courseCode },
+    source: { environment: 'EXCEL_TEMPLATE', courseCode },
     incomplete: warnings.length > 0,
     course,
   };
-  pkg.out.file("manifest.json", JSON.stringify(manifest, null, 2));
-  pkg.out.file("checksums.sha256", pkg.checksums.join("\n"));
-  const bytes = await pkg.out.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-  return { bytes, courseCode, slug, title: titleEn, lessonCount: pkgLessons.length, mediaCount: pkg.checksums.length, warnings };
+  pkg.out.file('manifest.json', JSON.stringify(manifest, null, 2));
+  pkg.out.file('checksums.sha256', pkg.checksums.join('\n'));
+  const bytes = await pkg.out.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+  });
+  return {
+    bytes,
+    courseCode,
+    slug,
+    title: titleEn,
+    lessonCount: pkgLessons.length,
+    mediaCount: pkg.checksums.length,
+    warnings,
+  };
 }
 
-function defsVideoPoints(points: NewLessonRow[], isZh: boolean): { code: string; title: string; start: number | null }[] {
+function defsVideoPoints(
+  points: NewLessonRow[],
+  isZh: boolean,
+): { code: string; title: string; start: number | null }[] {
   const out: { code: string; title: string; start: number | null }[] = [];
   for (const p of points) {
     const title = isZh ? p.videoZh || p.videoEn : p.videoEn;
@@ -643,7 +919,10 @@ function defsVideoPoints(points: NewLessonRow[], isZh: boolean): { code: string;
   return out;
 }
 
-function defsTextPoints(points: NewLessonRow[], isZh: boolean): { code: string; title: string }[] {
+function defsTextPoints(
+  points: NewLessonRow[],
+  isZh: boolean,
+): { code: string; title: string }[] {
   const out: { code: string; title: string }[] = [];
   for (const p of points) {
     const title = isZh ? p.textZh || p.textEn : p.textEn;
@@ -655,11 +934,15 @@ function defsTextPoints(points: NewLessonRow[], isZh: boolean): { code: string; 
 
 function extOf(name: string): string {
   const m = /\.([a-z0-9]+)$/i.exec(name);
-  return m ? "." + m[1].toLowerCase() : ".bin";
+  return m ? '.' + m[1].toLowerCase() : '.bin';
 }
 
 function slugify(text: string): string {
-  const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
   return slug || `course-${Date.now().toString(36)}`;
 }
 
@@ -670,12 +953,12 @@ function slugify(text: string): string {
  * 同时写了中英文的标签（如 "Course ID/课程 ID"）。找不到或为空返回 undefined。
  */
 function readLegacyCourseId(info: Map<string, string>): string | undefined {
-  const norm = (s: string) => s.toLowerCase().replace(/[\s_\-:：/()（）]/g, "");
-  const tokens = ["courseid", "coursecode", "课程id", "课程编号", "课程代码"];
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_\-:：/()（）]/g, '');
+  const tokens = ['courseid', 'coursecode', '课程id', '课程编号', '课程代码'];
   for (const [k, v] of info.entries()) {
     const key = norm(k);
     if (!tokens.some((t) => key.includes(t))) continue;
-    const val = String(v ?? "").trim();
+    const val = String(v ?? '').trim();
     if (val) return val;
   }
   return undefined;
@@ -689,41 +972,77 @@ async function buildLegacyPackage(
   options: { courseCode?: string; slug?: string },
 ): Promise<ExcelPackageResult> {
   const warnings: string[] = [];
-  const requiredSheets = ["course info", "Lessons", "exploration-reading list", "knowledge test", "application test"];
+  const requiredSheets = [
+    'course info',
+    'Lessons',
+    'exploration-reading list',
+    'knowledge test',
+    'application test',
+  ];
   const missing = requiredSheets.filter((name) => !hasSheet(wb, name));
-  if (missing.length) throw new Error(`Excel 缺少 Sheet：${missing.join(", ")}`);
+  if (missing.length)
+    throw new Error(`Excel 缺少 Sheet：${missing.join(', ')}`);
 
   const pkg = createPackager();
-  const info = parseCourseInfo(sheetRows(wb, "course info"));
-  const title = info.get("课程标题") || "Imported Course";
-  const category = info.get("课程分类") || "Uncategorised";
-  const shortDescription = info.get("课程简述") || "";
-  const overview = info.get("overview") || "";
-  const whatYouLearn = numberedLines(info.get("what you'll learn") || "");
-  const provides = numberedLines(info.get("This course provides") || "").map((s) => ({ type: "custom", title: s }));
-  const lessons = parseLessons(sheetRows(wb, "Lessons"));
-  if (!lessons.length) throw new Error("Lessons Sheet 中没有可导入的课时");
-  const readings = parseReadings(sheetRows(wb, "exploration-reading list"));
-  const knowledge = parseKnowledge(sheetRows(wb, "knowledge test"));
-  const applications = parseApplications(sheetRows(wb, "application test"));
+  const info = parseCourseInfo(sheetRows(wb, 'course info'));
+  const title = info.get('课程标题') || 'Imported Course';
+  const category = info.get('课程分类') || 'Uncategorised';
+  const shortDescription = info.get('课程简述') || '';
+  const overview = info.get('overview') || '';
+  const whatYouLearn = numberedLines(info.get("what you'll learn") || '');
+  const provides = numberedLines(info.get('This course provides') || '').map(
+    (s) => ({ type: 'custom', title: s }),
+  );
+  const lessons = parseLessons(sheetRows(wb, 'Lessons'));
+  if (!lessons.length) throw new Error('Lessons Sheet 中没有可导入的课时');
+  const readings = parseReadings(sheetRows(wb, 'exploration-reading list'));
+  const knowledge = parseKnowledge(sheetRows(wb, 'knowledge test'));
+  const applications = parseApplications(sheetRows(wb, 'application test'));
   const excelCode = readLegacyCourseId(info);
-  const courseCode = (excelCode || options.courseCode || "C001").trim().toUpperCase();
+  const courseCode = (excelCode || options.courseCode || 'C001')
+    .trim()
+    .toUpperCase();
   const slug = (options.slug || slugify(courseCode)).trim().toLowerCase();
 
-  const cover = findMedia(media, (n) => n.includes("课程封面") && n.endsWith(".png"));
-  const coverPath = cover ? "media/cover.png" : undefined;
-  if (cover) pkg.add(coverPath!, cover.bytes); else warnings.push("未找到课程封面 PNG");
+  const cover = findMedia(
+    media,
+    (n) => n.includes('课程封面') && n.endsWith('.png'),
+  );
+  const coverPath = cover ? 'media/cover.png' : undefined;
+  if (cover) pkg.add(coverPath!, cover.bytes);
+  else warnings.push('未找到课程封面 PNG');
 
   const pkgLessons: PackageLesson[] = [];
   for (const lesson of lessons) {
-    const code = `L${String(lesson.no).padStart(3, "0")}`;
-    const docx = findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("文本课件") && n.endsWith(".docx"))
-      || findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("文本") && n.endsWith(".docx"));
+    const code = `L${String(lesson.no).padStart(3, '0')}`;
+    const docx =
+      findMedia(
+        media,
+        (n) =>
+          n.includes(`lesson ${lesson.no}`) &&
+          n.includes('文本课件') &&
+          n.endsWith('.docx'),
+      ) ||
+      findMedia(
+        media,
+        (n) =>
+          n.includes(`lesson ${lesson.no}`) &&
+          n.includes('文本') &&
+          n.endsWith('.docx'),
+      );
     const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
-    const html = converted?.html ?? "";
+    const html = converted?.html ?? '';
     if (!docx) warnings.push(`Lesson ${lesson.no} 缺少文本课件 DOCX`);
-    if (converted) for (const message of converted.warnings) warnings.push(`Lesson ${lesson.no} 文本课件：${message}`);
-    const video = findMedia(media, (n) => n.includes(`lesson ${lesson.no}`) && n.includes("视频课件") && n.endsWith(".mp4"));
+    if (converted)
+      for (const message of converted.warnings)
+        warnings.push(`Lesson ${lesson.no} 文本课件：${message}`);
+    const video = findMedia(
+      media,
+      (n) =>
+        n.includes(`lesson ${lesson.no}`) &&
+        n.includes('视频课件') &&
+        n.endsWith('.mp4'),
+    );
     let videoPath: string | undefined;
     let videoDuration: number | null = null;
     if (video) {
@@ -737,25 +1056,78 @@ async function buildLegacyPackage(
     for (let i = 0; i < lesson.exhibits.length; i++) {
       const meta = lesson.exhibits[i];
       const no = i + 1;
-      const image = findMedia(media, (n) => n.includes(`exhibit-${no}`) && n.endsWith(".png") && !n.includes("缩略图"));
-      const thumb = findMedia(media, (n) => n.includes(`exhibit${no}`) && n.includes("缩略图") && n.endsWith(".png"));
-      if (!image) { warnings.push(`Lesson ${lesson.no} 展品「${meta.title}」缺少图片，已跳过`); continue; }
-      const exCode = `E${String(lesson.no).padStart(2, "0")}${String(no).padStart(2, "0")}`;
+      const image = findMedia(
+        media,
+        (n) =>
+          n.includes(`exhibit-${no}`) &&
+          n.endsWith('.png') &&
+          !n.includes('缩略图'),
+      );
+      const thumb = findMedia(
+        media,
+        (n) =>
+          n.includes(`exhibit${no}`) &&
+          n.includes('缩略图') &&
+          n.endsWith('.png'),
+      );
+      if (!image) {
+        warnings.push(
+          `Lesson ${lesson.no} 展品「${meta.title}」缺少图片，已跳过`,
+        );
+        continue;
+      }
+      const exCode = `E${String(lesson.no).padStart(2, '0')}${String(no).padStart(2, '0')}`;
       const imagePath = `media/exhibits/${exCode}.png`;
       pkg.add(imagePath, image.bytes);
       let thumbnailPath: string | undefined;
-      if (thumb) { thumbnailPath = `media/exhibits/${exCode}.thumb.png`; pkg.add(thumbnailPath, thumb.bytes); }
-      exhibits.push({ code: exCode, type: "IMAGE", file: imagePath, thumbnail: thumbnailPath, localized: { [LANG]: { title: meta.title, description: meta.description || undefined } } });
+      if (thumb) {
+        thumbnailPath = `media/exhibits/${exCode}.thumb.png`;
+        pkg.add(thumbnailPath, thumb.bytes);
+      }
+      exhibits.push({
+        code: exCode,
+        type: 'IMAGE',
+        file: imagePath,
+        thumbnail: thumbnailPath,
+        localized: {
+          [LANG]: {
+            title: meta.title,
+            description: meta.description || undefined,
+          },
+        },
+      });
     }
 
-    const textLearningPoints: PackageTextLearningPoint[] = converted?.headings.length
-      ? converted.headings.map((heading, i) => ({ code: `T-${lesson.no}.${heading.code || i + 1}`, heading: heading.title, level: 1 }))
-      : lesson.textLps.map((heading, i) => ({ code: `T-${lesson.no}.${i + 1}`, heading, level: 1 }));
-    const videoLearningPoints: PackageVideoLearningPoint[] = video ? lesson.videoLps.map((lp, i) => ({ code: `V-${lesson.no}.${i + 1}`, timeSeconds: lp.timeSeconds, title: lp.title })) : [];
+    const textLearningPoints: PackageTextLearningPoint[] = converted?.headings
+      .length
+      ? converted.headings.map((heading, i) => ({
+          code: `T-${lesson.no}.${heading.code || i + 1}`,
+          heading: heading.title,
+          level: 1,
+        }))
+      : lesson.textLps.map((heading, i) => ({
+          code: `T-${lesson.no}.${i + 1}`,
+          heading,
+          level: 1,
+        }));
+    const videoLearningPoints: PackageVideoLearningPoint[] = video
+      ? lesson.videoLps.map((lp, i) => ({
+          code: `V-${lesson.no}.${i + 1}`,
+          timeSeconds: lp.timeSeconds,
+          title: lp.title,
+        }))
+      : [];
     const loc = {
       title: lesson.title || `Lesson ${lesson.no}`,
       description: lesson.description || undefined,
-      video: videoPath ? { file: videoPath, durationSeconds: videoDuration ?? undefined, learningPoints: videoLearningPoints, exhibitTriggers: [] } : null,
+      video: videoPath
+        ? {
+            file: videoPath,
+            durationSeconds: videoDuration ?? undefined,
+            learningPoints: videoLearningPoints,
+            exhibitTriggers: [],
+          }
+        : null,
       text: { html, learningPoints: textLearningPoints },
     };
     const qs: PackageKnowledgeQuestion[] = knowledge.get(lesson.no) || [];
@@ -765,9 +1137,17 @@ async function buildLegacyPackage(
       order: lesson.no,
       localized: { [LANG]: loc },
       exhibits,
-      recommendedReading: readings.has(lesson.no) ? { [LANG]: readings.get(lesson.no)! } : {},
+      recommendedReading: readings.has(lesson.no)
+        ? { [LANG]: readings.get(lesson.no)! }
+        : {},
       knowledgeTest: { enabled: qs.length > 0, questions: qs },
-      applicationTest: appTest ? { enabled: true, scenario: appTest.scenario, referenceAnswer: appTest.referenceAnswer } : undefined,
+      applicationTest: appTest
+        ? {
+            enabled: true,
+            scenario: appTest.scenario,
+            referenceAnswer: appTest.referenceAnswer,
+          }
+        : undefined,
     });
   }
 
@@ -775,11 +1155,13 @@ async function buildLegacyPackage(
     code: courseCode,
     slug,
     category,
-    learningMode: "VIDEO_AND_TEXT",
+    learningMode: 'VIDEO_AND_TEXT',
     learningLanguages: [LANG],
     defaultContentLanguage: LANG,
     cover: coverPath,
-    localized: { [LANG]: { title, shortDescription, overview, whatYouLearn, provides } },
+    localized: {
+      [LANG]: { title, shortDescription, overview, whatYouLearn, provides },
+    },
     lessons: pkgLessons,
     trial: { enabled: false, lessons: [] },
   };
@@ -788,12 +1170,23 @@ async function buildLegacyPackage(
     formatVersion: PACKAGE_FORMAT_VERSION,
     packageId: `raw-excel-${randomUUID()}`,
     exportedAt: new Date().toISOString(),
-    source: { environment: "EXCEL_IMPORT", courseCode },
+    source: { environment: 'EXCEL_IMPORT', courseCode },
     incomplete: warnings.length > 0,
     course,
   };
-  pkg.out.file("manifest.json", JSON.stringify(manifest, null, 2));
-  pkg.out.file("checksums.sha256", pkg.checksums.join("\n"));
-  const bytes = await pkg.out.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-  return { bytes, courseCode, slug, title, lessonCount: pkgLessons.length, mediaCount: pkg.checksums.length, warnings };
+  pkg.out.file('manifest.json', JSON.stringify(manifest, null, 2));
+  pkg.out.file('checksums.sha256', pkg.checksums.join('\n'));
+  const bytes = await pkg.out.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+  });
+  return {
+    bytes,
+    courseCode,
+    slug,
+    title,
+    lessonCount: pkgLessons.length,
+    mediaCount: pkg.checksums.length,
+    warnings,
+  };
 }

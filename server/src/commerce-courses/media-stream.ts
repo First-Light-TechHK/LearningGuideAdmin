@@ -95,4 +95,3 @@ function parseRange(
     return 'invalid';
   return { start, end: Math.min(end, total - 1) };
 }
-

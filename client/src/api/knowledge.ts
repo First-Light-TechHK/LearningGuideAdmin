@@ -229,6 +229,7 @@ export interface ConvertedDocument {
 export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.txt',
   '.md',
+  '.tex',
   '.csv',
   '.pdf',
   '.docx',

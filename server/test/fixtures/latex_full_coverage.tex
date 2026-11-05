@@ -1,0 +1,96 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+
+% Upload this UTF-8 file through Backoffice > Knowledge > Upload document.
+% This is a broad regression sample, not an exhaustive LaTeX language test.
+\title{\textbf{**Equations for Lesson 3: Upload Coverage**}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-2em}
+
+% 1. Document structure: expect Markdown headings and paragraphs.
+\section{Document structure}\label{sec:structure}
+\subsection{Subsection}
+\subsubsection{Subsubsection}
+\paragraph{Run-in paragraph heading}First paragraph.\par Second paragraph.
+\subparagraph{Small heading}Additional text.\newline A new line.
+
+% 2. Inline formatting and escapes: expect readable Markdown text.
+\section{Text formatting}
+This is \textbf{bold}, \textit{italic}, \emph{emphasis},
+\textsc{small caps}, \underline{underlined}, and \texttt{monospace}.
+Escaped characters: 25\%, A\&B, \{braces\}, item\_one, and \#tag.
+\noindent A paragraph without indentation.\quad Spaced text.
+\smallskip
+
+% 3. Links: expect Markdown links.
+\section{Links}
+Visit \href{https://example.com/lesson}{the lesson page} or \url{https://example.com}.
+
+% 4. Inline and display math: expect KaTeX-renderable formulas.
+\section{Formula delimiters}
+Inline dollar math: $E=mc^2$ and $\vec{u}=[4,\,1]$.
+Inline parenthesis math: \(a^2+b^2=c^2\).
+\[
+  \frac{dy}{dt}=f(x,u,t)
+\]
+\begin{equation}
+  \int_0^1 x^2\,dx=\frac{1}{3}
+\end{equation}
+\begin{displaymath}
+  \sum_{i=1}^{n}i=\frac{n(n+1)}{2}
+\end{displaymath}
+
+% 5. Alignment: expect aligned/gathered inside $$ and intact \\ line breaks.
+\section{Multiline equations}
+\begin{align*}
+\vec{u} &= [4,\,1], \quad \vec{v}=[2,\,3] \\
+-1\cdot\vec{v} &= [-2,\,-3] \\
+\vec{u}-\vec{v} &= \vec{u}+(-1\cdot\vec{v})=[2,\,-2]
+\end{align*}
+\begin{gather*}
+a+b=b+a \\
+(a+b)+c=a+(b+c)
+\end{gather*}
+\begin{multline*}
+(x_1+x_2+x_3+x_4) \\
+= (x_1+x_2)+(x_3+x_4)
+\end{multline*}
+
+% 6. Lists: expect Markdown bullets and numbered items.
+\section{Lists}
+\begin{itemize}
+\item First bullet.
+\item Second bullet with inline math $x+y$.
+  \begin{enumerate}
+  \item First nested step.
+  \item Second nested step.
+  \end{enumerate}
+\end{itemize}
+
+% 7. Containers: expect readable text without layout wrappers.
+\begin{abstract}
+This abstract summarizes the formula examples.
+\end{abstract}
+\begin{center}
+Centered source text.
+\end{center}
+
+% 8. References, footnotes, quotes and simple tables should be readable.
+% Exact LaTeX numbering and footnote placement are not preserved.
+\section{Review-required examples}
+See Section~\ref{sec:structure}. This \footnote{Footnote content should remain visible.}
+uses a footnote command.
+\begin{quote}
+Quoted source text should become a Markdown blockquote.
+\end{quote}
+\begin{tabular}{ll}
+Term & Meaning \\
+ODE & Ordinary differential equation
+\end{tabular}
+
+\end{document}

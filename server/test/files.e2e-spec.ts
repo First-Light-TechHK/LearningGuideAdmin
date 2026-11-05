@@ -1,3 +1,6 @@
+import type { SuccessResponse, ErrorResponse } from './helpers/http-response';
+import type { Course, Page } from '@prisma/client';
+import type { ConvertedDocument } from '../src/files/files.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
@@ -7,6 +10,8 @@ import { signInAs } from './helpers/employee-session';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { MAX_FILE_SIZE } from '../src/files/files.service';
 import * as XLSX from 'xlsx';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 /**
  * 文档转换 e2e（开发文档 §5.1.5、§3.2.3 两步弹窗流程）。
@@ -28,7 +33,7 @@ describe('Files API (e2e)', () => {
     api = await signInAs(app);
     prisma = app.get(PrismaService);
 
-    const course = await api
+    const course: SuccessResponse<Course> = await api
       .post('/api/courses')
       .send({ title: 'E2E-上传测试课程' })
       .expect(201);
@@ -50,7 +55,7 @@ describe('Files API (e2e)', () => {
 
   it('POST /api/files/convert 上传 md 应返回 title+markdown 且不建页（§5.1.5）', async () => {
     const before = await prisma.page.count({ where: { courseId } });
-    const res = await api
+    const res: SuccessResponse<ConvertedDocument> = await api
       .post('/api/files/convert')
       .attach(
         'file',
@@ -68,6 +73,102 @@ describe('Files API (e2e)', () => {
     expect(await prisma.page.count({ where: { courseId } })).toBe(before);
   });
 
+  it('POST /api/files/convert 上传 tex 应预览 Markdown 且不建页', async () => {
+    const before = await prisma.page.count({ where: { courseId } });
+    const res: SuccessResponse<ConvertedDocument> = await api
+      .post('/api/files/convert')
+      .attach(
+        'file',
+        Buffer.from(String.raw`\title{\textbf{**Energy notes**}}
+\begin{document}
+\maketitle
+\section{Energy}\vspace{1em}
+\paragraph{Result}The result is $E=mc^2$. \custom{source}
+\end{document}`),
+        { filename: 'energy.tex', contentType: 'text/plain' },
+      )
+      .expect(201);
+    expect(res.body.data.title).toBe('energy');
+    expect(res.body.data.markdown).toContain('## Energy');
+    expect(res.body.data.markdown).toContain('# Energy notes');
+    expect(res.body.data.markdown).toContain('##### Result');
+    expect(res.body.data.markdown).toContain('$E=mc^2$');
+    expect(res.body.data.markdown).not.toContain('\\vspace');
+    expect(res.body.data.markdown).toContain('\\custom{source}');
+    expect(await prisma.page.count({ where: { courseId } })).toBe(before);
+  });
+
+  it('POST /api/files/convert 转换编辑器复制的标题、段落和公式片段', async () => {
+    const source = String.raw`\title{\textbf{**Equations for Lesson 3**}}
+\author{}
+\date{}
+\begin{document}
+¤  ¤\maketitle
+¤  ¤\vspace{-2em}
+¤  ¤% -----
+¤  ¤\paragraph{1. General dynamic system (calculus notation)}
+¤  ¤\\[
+¤  ¤\frac{dy}{dt} = f(x, u, t)
+¤  ¤\\]
+\end{document}`.replaceAll('¤', '\u00a0');
+    const res: SuccessResponse<ConvertedDocument> = await api
+      .post('/api/files/convert')
+      .attach('file', Buffer.from(source), {
+        filename: 'lesson-3.tex',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+    expect(res.body.data.markdown).toContain('# Equations for Lesson 3');
+    expect(res.body.data.markdown).toContain(
+      '##### 1. General dynamic system (calculus notation)',
+    );
+    expect(res.body.data.markdown).toContain(
+      '$$\n\\frac{dy}{dt} = f(x, u, t)\n$$',
+    );
+    expect(res.body.data.markdown).not.toContain('\\vspace');
+  });
+
+  it('POST /api/files/convert 保留 align 公式的对齐和换行', async () => {
+    const source = String.raw`\begin{align*}
+\vec{u} &= [4, \, 1] \\
+\vec{v} &= [2, \, 3]
+\end{align*}`;
+    const res: SuccessResponse<ConvertedDocument> = await api
+      .post('/api/files/convert')
+      .attach('file', Buffer.from(source), {
+        filename: 'vectors.tex',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+    expect(res.body.data.markdown).toContain('\\begin{aligned}');
+    expect(res.body.data.markdown).toContain(String.raw`[4, \, 1] \\`);
+    expect(res.body.data.markdown).toContain('\\end{aligned}');
+  });
+
+  it('POST /api/files/convert 全量样本的引用、脚注、引用块和表格可读', async () => {
+    const file = fs.readFileSync(
+      path.resolve(__dirname, 'fixtures/latex_full_coverage.tex'),
+    );
+    const res: SuccessResponse<ConvertedDocument> = await api
+      .post('/api/files/convert')
+      .attach('file', file, {
+        filename: 'latex_full_coverage.tex',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+    expect(res.body.data.markdown).toContain('See Section Document structure.');
+    expect(res.body.data.markdown).toContain(
+      '(Note: Footnote content should remain visible.)',
+    );
+    expect(res.body.data.markdown).toContain(
+      '> Quoted source text should become a Markdown blockquote.',
+    );
+    expect(res.body.data.markdown).toContain(
+      '| Term | Meaning |\n| --- | --- |',
+    );
+    expect(res.body.data.markdown).toContain('$\\vec{u}=[4,\\,1]$');
+  });
+
   it('POST /api/files/convert 上传旧版 .xls 应返回 Markdown 表格（2026-10-19 扩充）', async () => {
     const sheet = XLSX.utils.aoa_to_sheet([
       ['Term', 'Definition'],
@@ -80,7 +181,7 @@ describe('Files API (e2e)', () => {
       bookType: 'biff8',
     }) as Buffer;
 
-    const res = await api
+    const res: SuccessResponse<ConvertedDocument> = await api
       .post('/api/files/convert')
       .attach('file', buffer, { filename: '术语表.xls' })
       .expect(201);
@@ -91,7 +192,7 @@ describe('Files API (e2e)', () => {
   });
 
   it('上传伪装成 .xls 的非表格文件应 400（内容签名校验，2026-10-19）', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('this is not a real xls'), {
         filename: 'fake.xls',
@@ -102,14 +203,14 @@ describe('Files API (e2e)', () => {
   });
 
   it('完整两步流程：convert 预览 → Import 经 §5.1.2 建页并落库', async () => {
-    const conv = await api
+    const conv: SuccessResponse<ConvertedDocument> = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('# Import 测试\n\n内容', 'utf8'), {
         filename: 'import-doc.md',
         contentType: 'text/markdown',
       })
       .expect(201);
-    const created = await api
+    const created: SuccessResponse<Page> = await api
       .post(`/api/courses/${courseId}/pages`)
       .send({ title: conv.body.data.title, contentMd: conv.body.data.markdown })
       .expect(201);
@@ -123,7 +224,7 @@ describe('Files API (e2e)', () => {
   });
 
   it('上传白名单外扩展名（.exe）应 400 且提示支持格式（§10.1）', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('MZ\x90\x00binary'), {
         filename: 'virus.exe',
@@ -134,12 +235,12 @@ describe('Files API (e2e)', () => {
   });
 
   it('未附带 file 字段应 400', async () => {
-    const res = await api.post('/api/files/convert').expect(400);
+    const res: ErrorResponse = await api.post('/api/files/convert').expect(400);
     expect(res.body.error.message).toContain('未选择文件');
   });
 
   it('超过 15MB 应 400（multer 超限经 413 映射，§10.1）', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/files/convert')
       .attach('file', Buffer.alloc(MAX_FILE_SIZE + 1, 0x41), {
         filename: 'big.md',
@@ -151,7 +252,7 @@ describe('Files API (e2e)', () => {
   });
 
   it('错误信封不泄露堆栈/内部路径（§9）', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/files/convert')
       .attach('file', Buffer.from('garbage'), { filename: 'x.pdf' })
       .expect(400);

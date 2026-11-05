@@ -88,3 +88,6 @@ HelpDesk（2026-10-28，见开发文档 §4A.7–§4A.9）：`admin` 角色挂�
 2. **分开部署**：DEV/SIT 用同一镜像起 `APP_ROLES=admin,ks` 和 `APP_ROLES=agent` 两组服务，Agent 配 `KS_BASE_URL` / `KS_SERVICE_TOKEN`。部署由运维决定，代码已就绪。
 3. **Portal 侧**：Portal 调 Agent 改为按调用方发服务令牌并带作用域。
 4. **检索**：KS 提供检索接口（替换目前把整份 Release 拼进上下文的做法），属于 KS 负责人的范围。
+## 2026-11-05 lint 边界修正
+
+KS 的 PrismaKnowledgeClient 仅依赖 `ks/contract/embedding-client.ts` 的查询向量契约与注入令牌。KnowledgeModule 将现有 EmbeddingService 以 useExisting 绑定该令牌，避免 KS 直接 import Agent 实现；HTTP / 向量参数与运行策略不变。
