@@ -32,6 +32,7 @@ export class SyncController {
   /** 内容同步已禁用（2026-10-22 拍板：本期只同步标题） */
   @Post('all')
   syncAll(_dto: SyncRequestDto) {
+    void _dto;
     throw new BadRequestException({
       code: 'CONTENT_SYNC_DISABLED',
       message: '本期仅同步课程与课时标题，正文内容同步已禁用',

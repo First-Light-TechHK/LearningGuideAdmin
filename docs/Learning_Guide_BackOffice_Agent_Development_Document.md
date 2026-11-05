@@ -340,9 +340,9 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 #### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
 - **入口**：树中 Page 节点悬停菜单「上传文档建页」→ 打开弹窗（不再直接调系统文件选择器）
-- **弹窗两步**（按用户设计稿）：
-  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按**实际白名单 10 格式**显示（设计稿中 epub/ppt 不支持；xls/doc 已于 2026-10-19 扩充支持）；Next 进入解析
-  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → markitdown-ts **本地**转换 → 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/courses/:courseId/pages`（§5.1.2）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
+- **弹窗两步**（按用户设计稿；2026-11-05 增加单文件 UTF-8 `.tex`）：
+  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按实际白名单显示（设计稿中 epub/ppt 不支持；xls/doc 已于 2026-10-19 扩充，tex 于 2026-11-05 扩充）；Next 进入解析
+  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → 常规格式由 markitdown-ts **本地**转换，`.tex` 使用保守转换分支，保留 `$...$`/`$$...$$` 公式，转换章节、段落、列表、强调和链接；纯排版间距命令忽略，未知命令及外部文件/图片引用保留为可见原文供用户检查 → 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/courses/:courseId/pages`（§5.1.2）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
 - **失败**：格式不支持/超限/转换失败/结果为空均 400（统一响应格式），弹窗内提示；Cancel 或关闭弹窗则什么都不落（转换阶段不建页、不落盘，内存 Buffer 直转）
 - 音视频文件**不在本轮范围**（2026-10-15 拍板，随 §12 事项 #4 真实外部源接入一并设计）
 
@@ -722,6 +722,10 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 ---
 
+### 4.5 AI Tutor 母版迁移（2026-11-04）
+
+用户确认以 `AITutor-main` 通用对话为基座，在现有 BackOffice 中实施。最新契约与实施阶段见 [母版迁移实施记录](AI_tutor/Motherbase_Refactor.md)，优先于本节较早的历史轮数和 localStorage 隔离说明。Release / Online / 四套 Prompt 的配置与发布语义保留；单次请求绑定有效配置，增量转发、取消与失败终态显式处理；后台会话按员工、课程、Release 隔离，模式共享历史。Lecture 最近六个完整成功轮次，Socratic 十轮。Assessment 保留独立配置，实际评分后置。
+
 ## 4A. 模块 C：HelpDesk 工单（Tickets v1，2026-10-28 新增）
 
 > 依据：`lg-helpdesk/tickets-v1-spec.md` §1/§4/§5（Integration）/§7（2026-10-28 用户拍板：「每个工单就是一个小卡片在 Back Office 上 … 按原有 UI UX 风格 … TDD 锁住」）。v1 不做：飞书同步、前端埋点、AI 客服、SaaS。
@@ -994,7 +998,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；本地转 Markdown（markitdown-ts 为主；`.xls`→SheetJS `xlsx`、`.doc`→`word-extractor`，2026-10-19 扩充），返回 `{ title, markdown }`；**不建页**——用户在弹窗预览确认后经 §5.1.2 `POST /api/courses/:courseId/pages` 建页；校验/转换失败 400 |
+| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；本地转 Markdown（markitdown-ts 为主；`.xls`→SheetJS `xlsx`、`.doc`→`word-extractor`、单文件 UTF-8 `.tex`→保守 LaTeX 转换），返回 `{ title, markdown }`；**不建页**——用户在弹窗预览确认后经 §5.1.2 `POST /api/courses/:courseId/pages` 建页；校验/转换失败 400 |
 
 > 原 `POST /api/files/upload`（转换+建页一步完成）已废弃（2026-10-15），被两步流程取代。
 
@@ -1356,7 +1360,7 @@ NODE_ENV=development
 
 # 文件上传配置
 MAX_FILE_SIZE=15728640  # 15MB
-ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍板白名单一致（2026-10-15 更正、2026-10-19 扩充 doc/xls；实际实现为 files.service.ts 常量，不读该 env）
+ALLOWED_EXTENSIONS="txt,md,tex,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 白名单一致；实际实现为 files.service.ts 常量，不读该 env
 ```
 
 ---
@@ -1404,6 +1408,12 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍
 > **白名单改拍（2026-10-15，用户裁决）**：原表（含 xls/doc/ppt/epub）按 markitdown-ts 实测支持面调整——旧二进制格式 xls/doc/ppt 与 epub 不支持（上传时明确提示「格式暂不支持」）。
 >
 > **白名单扩充（2026-10-19，用户裁决）**：重新支持旧版二进制 **.doc / .xls**——`.xls` 用 SheetJS（`xlsx`）解析转 Markdown 表格，`.doc` 用 `word-extractor` 提取纯文本；其余格式仍由 markitdown-ts 转换（ppt/epub 仍不支持）。**限制说明：`.doc` 仅提取纯文本，不含标题层级 / 表格 / 图片**。
+
+> **LaTeX 扩充（2026-11-05）**：支持单文件 UTF-8 `.tex`，将 `\title` 转为一级标题、`\paragraph`/`\subparagraph` 转为五/六级标题、`\par` 转为空行，并转换其他章节、列表、强调和链接，保留公式；`\vspace` 等纯间距命令忽略，未知命令与外部资源引用保留原文以便预览检查。上传单个 `.tex` 不会读取其引用的其他文件；无效 UTF-8、空文件及超限文件仍拒绝。
+
+> **编辑器复制兼容**：转换前将不换行空格视为普通缩进并去除正文共同缩进；独占行的 `\\[`/`\\]` 视为被额外转义的展示公式边界。支持 `equation`/`align`/`gather`/`multline`/`displaymath` 公式环境，`textsc`/`underline`/`texttt` 文本样式、`newline`/`linebreak` 换行和 `center`/`abstract` 容器。同文档标题后的 `\label`/`\ref` 转为标题文字，简单 `\footnote` 转为行内 Note，`quote` 转为 Markdown 引用块，简单 `tabular` 转为 Markdown 表格；复杂表格、自定义宏与无法解析的跨文档引用保持原文，需在导入预览中检查。
+
+> **多行公式**：`align`/`align*` 与 `multline`/`multline*` 转为 `$$` 内的 `aligned`，`gather`/`gather*` 转为 `gathered`，保留 `&` 对齐标记和 `\\` 换行。直接在 Markdown 中输入 `$$` 时，也必须自行包裹 `aligned` 并使用双反斜杠换行。
 >
 > **Import 请求体上限（2026-10-27 修复）**：上传弹窗的 Import 经 `POST /api/courses/:courseId/pages` 以 JSON 提交 `contentMd`（整份转换结果），而 Express body-parser 默认 JSON 上限仅 **100KB**；大文档（如 500 页 PDF）会在进入控制器前被拒（413，对外曾误报 500）。现于 `configureApp` 显式把 JSON 请求体上限放宽至 **25MB**（覆盖 15MB 原文件的 Markdown 膨胀与 JSON 转义开销），并在全局过滤器把 body-parser 的 `entity.too.large` 映射为 **400 VALIDATION_ERROR + 可读提示**；前端 `createPage` / `updatePage` 超时同步放宽至 120s。超过 25MB 的文档仍需拆分后再上传（拆分方案待评估）。
 
@@ -1442,3 +1452,7 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍
 6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？（2026-10-14 拍板：**不落库**；上次会话经浏览器 localStorage 持久化，New Chat 清空；无长期记忆需求，见 §4.3.2）
 7. **前端框架最终选定**：React + Vite 还是 Next.js？
 8. **部署环境**：生产环境部署在何处？（云服务器、Vercel + Railway 等）
+
+### 2026-11-05 遗留质量检查清理
+
+全仓 ESLint/Oxlint 已清至 0 errors / 0 warnings，未调整规则。表单重置与异步加载分开，组件/工具导出拆开以支持 Fast Refresh，KS 查询向量通过契约令牌注入。完整单测后端 1784 passed / 166 skipped、前端 503 passed；types/build 通过。经用户确认，前端已加入 app/vendor 分包配置，保持 500 kB 阈值；实际构建 34 个 JS 文件、最大 293019 bytes，无构建警告。独立 Review 与手动验收待执行。文件清单和验证命令见 docs/AI_tutor/Motherbase_Refactor.md §8。

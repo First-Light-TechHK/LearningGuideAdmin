@@ -23,7 +23,7 @@ import { errorMessage } from '../lib/helpdeskFormat'
 import { helpDeskPageControls } from '../lib/helpdeskView'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
-import { useWorkspaceAccess } from '../lib/workspaceAccess'
+import { useWorkspaceAccess } from '../lib/workspaceAccessState';
 
 /**
  * Help Desk（Tickets v2，Figma 1324:2 / 1379:2 / 1379:299）：页头 +「+ Add FAQ」（两个 Tab 都有）+ 两个 Tab。

@@ -42,10 +42,14 @@ export class OperationsService {
           sortOrder: entry.sortOrder,
           code: course?.code ?? '—',
           title: course
-            ? summaryTitle(course.localizations, course.defaultContentLanguage, {
-                slug: course.slug,
-                code: course.code,
-              })
+            ? summaryTitle(
+                course.localizations,
+                course.defaultContentLanguage,
+                {
+                  slug: course.slug,
+                  code: course.code,
+                },
+              )
             : '—',
           category: course?.category?.name ?? null,
           liveStatus: course?.liveStatus ?? 'OFFLINE',

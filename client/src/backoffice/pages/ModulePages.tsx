@@ -12,7 +12,7 @@ import {
   DEFAULT_LANDING_MENU,
   type MenuKey,
 } from '../rbac/permissions'
-import { useEmployee } from '../ShellRoute'
+import { useEmployee } from '../employeeSession';
 import { EmployeeAccountClient } from './EmployeeAccountPage'
 
 const MENU_LABEL: Record<MenuKey, string> = {

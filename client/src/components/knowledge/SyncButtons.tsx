@@ -2,7 +2,7 @@ import { App, Button, Space } from '../ui'
 import { SyncOutlined } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import type { SyncSummary } from '../../api/knowledge'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 

@@ -95,7 +95,7 @@ describe('TagsService', () => {
         where: { name: 'Trimmed' },
       });
       expect(mockPrisma.tag.create).toHaveBeenCalledWith({
-        data: { name: 'Trimmed', color: expect.any(String) },
+        data: { name: 'Trimmed', color: expect.any(String) as unknown },
       });
     });
   });

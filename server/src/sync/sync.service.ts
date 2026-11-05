@@ -113,6 +113,7 @@ export class SyncService {
 
   /** 执行标题同步（幂等；不覆盖正文） */
   async sync(externalId: string, _mode: SyncMode): Promise<SyncSummary> {
+    void _mode;
     const ext = await this.catalogue.getCourse(externalId);
     if (!ext) {
       // 映射表外课程（本地独有）：无可同步项，保持原样

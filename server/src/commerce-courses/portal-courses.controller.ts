@@ -58,10 +58,7 @@ export class PortalCoursesController {
   }
 
   @Get('media/:courseId/cover')
-  async cover(
-    @Param('courseId') courseId: string,
-    @Res() res: Response,
-  ) {
+  async cover(@Param('courseId') courseId: string, @Res() res: Response) {
     const media = await this.projection.getCoverBytes(courseId);
     if (!media || !(await sendMedia(res, this.storage, media))) {
       throw new NotFoundException({

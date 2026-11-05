@@ -1,4 +1,4 @@
-import { buttonStyle } from '../pages/course-editor/shared'
+import { buttonStyle } from '../pages/course-editor/shared-utils';
 import { formatBytes } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'

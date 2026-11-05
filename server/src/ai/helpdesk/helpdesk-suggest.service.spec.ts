@@ -288,7 +288,7 @@ describe('Helpdesk suggest: happy path', () => {
     expect(context.name).toBe('pick_faq');
     expect(spec.tool).toEqual({
       name: 'pick_faq',
-      description: expect.any(String),
+      description: expect.any(String) as unknown,
       // intent 在前：模型先分类再选
       enumArgs: {
         intent: [
@@ -1136,7 +1136,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
       category: 'technical_support',
       parentRunId: ROOT,
       traceId: TRACE,
-      spanId: expect.stringMatching(/^[0-9a-f]{16}$/),
+      spanId: expect.stringMatching(/^[0-9a-f]{16}$/) as unknown,
       parentSpanId: '00f067aa0ba902b7',
       input: { subject: input.subject, message: input.message },
     });
@@ -1152,7 +1152,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
       reason: 'answered',
       faqId: candidates[0].id,
       model: 'test/cheap-model',
-      latencyMs: expect.any(Number),
+      latencyMs: expect.any(Number) as unknown,
       alternatives: [],
     });
   });

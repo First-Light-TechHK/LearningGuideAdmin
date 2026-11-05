@@ -104,26 +104,38 @@ export function EnquiriesView({ locale, ticketId, canWrite, onTrace }: Props) {
 
   /* ---------------------------------- 列表 ---------------------------------- */
 
-  const loadList = useCallback(async () => {
+  const fetchLoadList = useCallback(() => {
     const id = ++listRequest.current
-    setListLoading(true)
-    setListError(null)
-    const result = await listEnquiries({ q, status, category, tag, flagged })
-    if (id !== listRequest.current) return
-    if (result.ok) {
-      setRows(result.data.tickets)
-      setNextCursor(result.data.nextCursor)
-    } else {
-      setRows([])
-      setNextCursor(null)
-      setListError(result.code)
-    }
-    setListLoading(false)
+    return listEnquiries({ q, status, category, tag, flagged }).then((result) => {
+      if (id !== listRequest.current) return
+      if (result.ok) {
+        setRows(result.data.tickets)
+        setNextCursor(result.data.nextCursor)
+      } else {
+        setRows([])
+        setNextCursor(null)
+        setListError(result.code)
+      }
+      setListLoading(false)
+    })
   }, [q, status, category, tag, flagged])
 
+  const [loadSource, setLoadSource] = useState(() => ({ q, status, category, tag, flagged }))
+  if (
+    loadSource.q !== q ||
+    loadSource.status !== status ||
+    loadSource.category !== category ||
+    loadSource.tag !== tag ||
+    loadSource.flagged !== flagged
+  ) {
+    setLoadSource({ q, status, category, tag, flagged })
+    setListLoading(true)
+    setListError(null)
+  }
+
   useEffect(() => {
-    void loadList()
-  }, [loadList])
+    void fetchLoadList();
+  }, [fetchLoadList]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore || listLoading) return
@@ -206,11 +218,16 @@ export function EnquiriesView({ locale, ticketId, canWrite, onTrace }: Props) {
     [adopt],
   )
 
-  useEffect(() => {
+  const [panelTicket, setPanelTicket] = useState(ticketId)
+  if (panelTicket !== ticketId) {
+    setPanelTicket(ticketId)
     setNotice(null)
     setDetailError(null)
     // 在别的卡片上点 Email student / Internal notes：选中那张并保持面板展开
     setPanel((current) => (current && current.id === ticketId ? current : null))
+  }
+
+  useEffect(() => {
     if (!ticketId) return
     let cancelled = false
     void (async () => {

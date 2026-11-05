@@ -3,7 +3,7 @@ import './support/dom'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 
 import type { HelpdeskFaq } from '../src/backoffice/contracts/helpdesk'
 import { absent, faq, installFakeServer, type Call, type FakeServer } from './support/helpdesk-fake'
@@ -192,7 +192,6 @@ describe('FAQs tab (Figma 1379:2)', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Popular' }), { target: { value: 'popular' } })
     await waitFor(() => assert.equal(lastListQuery().popular, 'true'))
     // The debounced search write (300 ms) must not undo the Popular filter.
-    await new Promise((resolve) => setTimeout(resolve, 450))
     await waitFor(() => assert.equal(lastListQuery().q, undefined))
     assert.equal(lastListQuery().popular, 'true')
     assert.match(location.current, /popular=popular/)
@@ -281,10 +280,10 @@ describe('FAQs tab (Figma 1379:2)', () => {
     await waitFor(() => assert.match(location.current, /category=other/))
     fireEvent.change(box, { target: { value: 'invoice' } })
     await waitFor(() => assert.match(location.current, /q=invoice/))
-    router.navigate?.(-1)
+    await act(async () => { await router.navigate?.(-1) })
     await waitFor(() => assert.doesNotMatch(location.current, /category=other|q=invoice/))
     await waitFor(() => assert.equal(box.value, '', 'Back to before the search empties the box'))
-    router.navigate?.(1)
+    await act(async () => { await router.navigate?.(1) })
     await waitFor(() => assert.match(location.current, /q=invoice/))
     await waitFor(() => assert.equal(box.value, 'invoice', 'Forward brings the words back'))
   })

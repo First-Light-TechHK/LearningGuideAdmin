@@ -9,7 +9,7 @@ import { useLocale } from '../lib/navigation'
 import { studentsApi } from '../lib/studentsApi'
 import { formatStudentDate, studentErrorText } from '../lib/studentsFormat'
 import { isActionAllowed } from '../rbac/permissions'
-import { useEmployee } from '../ShellRoute'
+import { useEmployee } from '../employeeSession';
 import { MenuGuard } from './ModulePages'
 
 type Pending = { kind: 'save' } | { kind: 'emergency'; feature: FeatureKey; off: boolean }
@@ -46,14 +46,15 @@ function LearningAccessInner() {
     setDraft(values)
   }, [])
 
-  const load = useCallback(async () => {
-    const result = await studentsApi.settings()
-    if (result.ok) {
-      apply(result.data)
-      setErrorCode(null)
-    } else {
-      setErrorCode(result.code)
-    }
+  const load = useCallback(() => {
+    return studentsApi.settings().then((result) => {
+      if (result.ok) {
+        apply(result.data)
+        setErrorCode(null)
+      } else {
+        setErrorCode(result.code)
+      }
+    })
   }, [apply])
 
   useEffect(() => {

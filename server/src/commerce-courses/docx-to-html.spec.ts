@@ -28,8 +28,7 @@ describe('normalizeDocxHtml', () => {
   });
 
   it('unwraps single-cell tables used for figure + caption', () => {
-    const html =
-      '<table><tr><td><p>caption</p></td></tr></table><p>after</p>';
+    const html = '<table><tr><td><p>caption</p></td></tr></table><p>after</p>';
     expect(normalizeDocxHtml(html)).toBe('<p>caption</p><p>after</p>');
   });
 

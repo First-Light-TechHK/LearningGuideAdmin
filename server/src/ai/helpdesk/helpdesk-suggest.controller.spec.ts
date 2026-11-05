@@ -101,7 +101,7 @@ describe('Helpdesk suggest integration endpoints', () => {
     expect(res.body).toEqual({ suggestion });
     expect(service.suggest).toHaveBeenCalledWith(body, {
       traceparent: undefined,
-      signal: expect.any(AbortSignal),
+      signal: expect.any(AbortSignal) as unknown,
     });
     expect(resolveSession).not.toHaveBeenCalled();
   });

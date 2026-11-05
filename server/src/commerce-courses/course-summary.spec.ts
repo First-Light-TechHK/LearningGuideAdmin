@@ -36,11 +36,23 @@ describe('pickSummaryLocalization', () => {
 
 describe('summaryTitle', () => {
   it('uses the localized title', () => {
-    expect(summaryTitle([zhEmpty, en], 'en-GB', { slug: 'modeling-life', code: 'SCI001' })).toBe('Modeling life');
+    expect(
+      summaryTitle([zhEmpty, en], 'en-GB', {
+        slug: 'modeling-life',
+        code: 'SCI001',
+      }),
+    ).toBe('Modeling life');
   });
 
   it('falls back to slug, then code, when all titles are blank', () => {
-    expect(summaryTitle([zhEmpty], 'zh-CN', { slug: 'modeling-life', code: 'SCI001' })).toBe('modeling-life');
-    expect(summaryTitle([zhEmpty], 'zh-CN', { slug: '', code: 'SCI001' })).toBe('SCI001');
+    expect(
+      summaryTitle([zhEmpty], 'zh-CN', {
+        slug: 'modeling-life',
+        code: 'SCI001',
+      }),
+    ).toBe('modeling-life');
+    expect(summaryTitle([zhEmpty], 'zh-CN', { slug: '', code: 'SCI001' })).toBe(
+      'SCI001',
+    );
   });
 });

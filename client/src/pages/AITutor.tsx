@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useEmployee } from '../backoffice/employeeSession';
 import { ConfigPanel } from '../components/ai/ConfigPanel'
 import { ChatWindow } from '../components/ai/ChatWindow'
 import { TutorManagerModal } from '../components/ai/TutorManagerModal'
@@ -67,10 +68,18 @@ export function AITutorTopBar() {
  */
 export function AITutor() {
   const init = useAiStore((s) => s.init)
+  const cancel = useAiStore((s) => s.cancel)
+  const ownerId = useAiStore((s) => s.ownerId)
+  const { employeeId } = useEmployee()
 
   useEffect(() => {
-    void init()
-  }, [init])
+    void init(employeeId).catch((error: Error) => {
+      if (useAiStore.getState().ownerId === employeeId) useAiStore.setState({ error: error.message })
+    })
+    return () => cancel()
+  }, [init, cancel, employeeId])
+
+  if (ownerId !== employeeId) return null
 
   return (
     <div style={{ height: '100%', display: 'flex', gap: tokens.spacing.md }}>

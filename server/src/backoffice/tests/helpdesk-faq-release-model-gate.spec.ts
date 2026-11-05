@@ -60,7 +60,7 @@ const snapshot: FaqReleaseSnapshot = {
       position: 0,
       labelEn: null,
       labelZh: null,
-    } as FaqReleaseSnapshot['edges'][number],
+    },
   ],
   phrasings: [],
 };

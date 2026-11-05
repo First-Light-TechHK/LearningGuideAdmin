@@ -92,7 +92,7 @@ test('界面文字不能写死中文：要走 t() 或 L()', () => {
   const allowed = /^(backoffice\/lib\/i18n\/|backoffice\/lib\/categoryLabel\.ts|backoffice\/components\/LocaleSwitch\.tsx|backoffice\/lib\/helpdeskGraph\.ts|backoffice\/lib\/helpdeskChanges\.ts)/
   const bad: string[] = []
   for (const path of sources) {
-    const rel = path.slice(src.length + 1)
+    const rel = path.slice(src.length + 1).replaceAll('\\', '/')
     if (allowed.test(rel)) continue
     const file = parse(path)
     walk(file, (node) => {

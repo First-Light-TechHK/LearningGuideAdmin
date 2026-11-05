@@ -1,3 +1,4 @@
+import express from 'express';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,13 +36,19 @@ describe('build identity', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('changes with the entry document and is stable otherwise', () => {
-    writeFileSync(join(dir, 'index.html'), '<html><script src="/assets/index-AAA.js"></script></html>');
+    writeFileSync(
+      join(dir, 'index.html'),
+      '<html><script src="/assets/index-AAA.js"></script></html>',
+    );
     const first = readBuildVersion(dir);
     expect(first).toMatch(/^[a-f0-9]{16}$/);
     expect(readBuildVersion(dir)).toBe(first);
 
     // A new build rewrites the hashed asset name, so the identity must move.
-    writeFileSync(join(dir, 'index.html'), '<html><script src="/assets/index-BBB.js"></script></html>');
+    writeFileSync(
+      join(dir, 'index.html'),
+      '<html><script src="/assets/index-BBB.js"></script></html>',
+    );
     expect(readBuildVersion(dir)).not.toBe(first);
   });
 
@@ -52,7 +59,8 @@ describe('build identity', () => {
 
 describe('GET /version.json', () => {
   it('is no-store and carries the identity', () => {
-    let handler: ((req: unknown, res: ReturnType<typeof fakeRes>) => void) | undefined;
+    let handler:
+      ((req: unknown, res: ReturnType<typeof fakeRes>) => void) | undefined;
     const express = {
       get(path: string, fn: typeof handler) {
         expect(path).toBe('/version.json');
@@ -62,14 +70,17 @@ describe('GET /version.json', () => {
     registerVersionRoute(express, 'abcdef1234567890');
     const res = fakeRes();
     handler!(null, res);
-    expect(res.headers['cache-control']).toBe('no-store, no-cache, must-revalidate, proxy-revalidate');
+    expect(res.headers['cache-control']).toBe(
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
     expect(res.headers.pragma).toBe('no-cache');
     expect(res.headers.expires).toBe('0');
     expect(JSON.parse(res.body)).toEqual({ version: 'abcdef1234567890' });
   });
 
   it('still answers when the service has no front-end build', () => {
-    let handler: ((req: unknown, res: ReturnType<typeof fakeRes>) => void) | undefined;
+    let handler:
+      ((req: unknown, res: ReturnType<typeof fakeRes>) => void) | undefined;
     registerVersionRoute({ get: (_p, fn) => void (handler = fn) }, null);
     const res = fakeRes();
     handler!(null, res);
@@ -78,13 +89,18 @@ describe('GET /version.json', () => {
 });
 
 describe('entry document build meta', () => {
-  const html = '<!doctype html><html><head><title>x</title></head><body></body></html>';
+  const html =
+    '<!doctype html><html><head><title>x</title></head><body></body></html>';
 
   it('names the build the client is actually running', () => {
     const withMeta = withBuildMeta(html, 'abc123');
-    expect(withMeta).toContain(`<meta name="${BUILD_META_NAME}" content="abc123"`);
+    expect(withMeta).toContain(
+      `<meta name="${BUILD_META_NAME}" content="abc123"`,
+    );
     // Injected before </head> so it is parsed before the module script runs.
-    expect(withMeta.indexOf(BUILD_META_NAME)).toBeLessThan(withMeta.indexOf('</head>'));
+    expect(withMeta.indexOf(BUILD_META_NAME)).toBeLessThan(
+      withMeta.indexOf('</head>'),
+    );
   });
 
   it('is idempotent and leaves a build-less document untouched', () => {
@@ -98,7 +114,9 @@ describe('setNoStore', () => {
   it('applies the same headers every caller relies on', () => {
     const res = fakeRes();
     setNoStore(res);
-    expect(res.headers['cache-control']).toBe('no-store, no-cache, must-revalidate, proxy-revalidate');
+    expect(res.headers['cache-control']).toBe(
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
   });
 });
 
@@ -113,31 +131,33 @@ describe('route ordering against the SPA fallback', () => {
   let base: string;
 
   beforeAll(async () => {
-    // CommonJS require keeps this spec runnable under jest's default vm without
-    // --experimental-vm-modules (dynamic import() is unavailable there).
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const express = require('express');
     dir = mkdtempSync(join(tmpdir(), 'lg-route-'));
-    writeFileSync(join(dir, 'index.html'), '<html><head></head><body><div id="root"></div></body></html>');
+    writeFileSync(
+      join(dir, 'index.html'),
+      '<html><head></head><body><div id="root"></div></body></html>',
+    );
     const version = readBuildVersion(dir);
 
     const app = express();
     app.use(express.static(dir, { index: false }));
-    registerVersionRoute(app as never, version);
-    app.get(/^\/(?!api(?:\/|$)|health$).*/, (_req: unknown, res: never) => {
-      const out = res as unknown as { setHeader: (n: string, v: string) => void; sendFile: (p: string) => void };
-      setNoStore(out as never);
+    registerVersionRoute(app, version);
+    app.get(/^\/(?!api(?:\/|$)|health$).*/, (_req, res) => {
+      const out = res as unknown as {
+        setHeader: (n: string, v: string) => void;
+        sendFile: (p: string) => void;
+      };
+      setNoStore(out);
       out.sendFile(join(dir, 'index.html'));
     });
 
     server = app.listen(0);
-    await new Promise(resolve => server.once('listening', resolve));
+    await new Promise((resolve) => server.once('listening', resolve));
     const address = server.address() as import('node:net').AddressInfo;
     base = `http://127.0.0.1:${address.port}`;
   });
 
   afterAll(async () => {
-    await new Promise(resolve => server.close(resolve));
+    await new Promise((resolve) => server.close(resolve));
     rmSync(dir, { recursive: true, force: true });
   });
 

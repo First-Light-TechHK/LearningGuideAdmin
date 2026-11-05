@@ -146,7 +146,6 @@ describe('list and URL filters', () => {
     fireEvent.click(screen.getByRole('button', { name: /Filter enquiries/ }))
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'OPEN' } })
     await waitFor(() => assert.match(location.current, /status=OPEN/))
-    await new Promise((resolve) => setTimeout(resolve, 450))
     await waitFor(() => assert.match(location.current, /q=reset/))
     assert.match(location.current, /status=OPEN/)
     await waitFor(() => {

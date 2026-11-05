@@ -5,7 +5,7 @@ import { knowledgeApi, type ReleaseSummary } from '../../api/knowledge'
 import { DownloadOutlined } from '@ant-design/icons'
 import { CloseIcon } from '../icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 import { formatDateTime } from '../../backoffice/lib/i18n/format'
@@ -36,14 +36,13 @@ export function PublishPanel() {
   const [publishing, setPublishing] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
-  const loadReleases = useCallback(async () => {
+  const loadReleases = useCallback(() => {
     const map: Record<string, ReleaseSummary[]> = {}
-    await Promise.all(
+    return Promise.all(
       courses.map(async (c) => {
         map[c.id] = await knowledgeApi.listReleases(c.id)
       }),
-    )
-    setLatest(map)
+    ).then(() => setLatest(map))
   }, [courses])
 
   useEffect(() => {

@@ -23,12 +23,16 @@ export class CommerceCoursesService {
   ) {}
 
   /** 读取课程封面的存储位置（Admin 预览用）。 */
-  async getCoverBytes(
-    id: string,
-  ): Promise<{ storageKey: string; extension: string; size: number | null } | null> {
+  async getCoverBytes(id: string): Promise<{
+    storageKey: string;
+    extension: string;
+    size: number | null;
+  } | null> {
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      select: { cover: { select: { storageKey: true, extension: true, size: true } } },
+      select: {
+        cover: { select: { storageKey: true, extension: true, size: true } },
+      },
     });
     if (!course?.cover) return null;
     return {
@@ -42,7 +46,11 @@ export class CommerceCoursesService {
   async getMediaBytes(
     id: string,
     assetId: string,
-  ): Promise<{ storageKey: string; extension: string; size: number | null } | null> {
+  ): Promise<{
+    storageKey: string;
+    extension: string;
+    size: number | null;
+  } | null> {
     const asset = await this.prisma.courseMediaAsset.findUnique({
       where: { id: assetId },
       select: { courseId: true, storageKey: true, extension: true, size: true },

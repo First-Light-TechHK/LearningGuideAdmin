@@ -1,3 +1,5 @@
+import type { Express, Request, Response } from 'express';
+import type { ServerResponse } from 'node:http';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -33,20 +35,26 @@ function serveBackOfficeUi(app: NestExpressApplication) {
     index: false,
     maxAge: 31_536_000_000,
     immutable: true,
-    setHeaders: (res: any, filePath: string) => {
+    setHeaders: (res: ServerResponse, filePath: string) => {
       if (basename(filePath) === 'index.html') setNoStore(res);
     },
   });
-  const express = app.getHttpAdapter().getInstance();
+  const express: Express = app.getHttpAdapter().getInstance();
   // 必须在 SPA 回退路由之前注册，否则 /version.json 会被前端回退先吃掉。
   const buildVersion = readBuildVersion(clientDir);
-  const indexHtml = withBuildMeta(readFileSync(indexFile, 'utf8'), buildVersion);
+  const indexHtml = withBuildMeta(
+    readFileSync(indexFile, 'utf8'),
+    buildVersion,
+  );
   registerVersionRoute(express, buildVersion);
-  express.get(/^\/(?!api(?:\/|$)|health$).*/, (_req, res: any) => {
-    setNoStore(res);
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(indexHtml);
-  });
+  express.get(
+    /^\/(?!api(?:\/|$)|health$).*/,
+    (_req: Request, res: Response) => {
+      setNoStore(res);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(indexHtml);
+    },
+  );
   Logger.log(
     `前端由本服务提供：${clientDir}（构建 ${buildVersion ?? 'unknown'}）`,
     'Bootstrap',

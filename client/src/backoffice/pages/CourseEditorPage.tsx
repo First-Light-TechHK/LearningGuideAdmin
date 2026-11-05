@@ -7,7 +7,7 @@ import type {
   HistoryPage,
   TrialSettings,
 } from '../contracts/course';
-import { useEmployee } from '../ShellRoute';
+import { useEmployee } from '../employeeSession';
 import { boRequest } from '../lib/api';
 import { isActionAllowed } from '../rbac/permissions';
 import { categoryLabel } from '../lib/categoryLabel';
@@ -16,16 +16,7 @@ import { CourseInfoSection } from './course-editor/CourseInfoSection';
 import { CourseContentSection } from './course-editor/CourseContentSection';
 import { CourseTrialSection } from './course-editor/CourseTrialSection';
 import { CourseVersionsSection } from './course-editor/CourseVersionsSection';
-import {
-  L,
-  buttonStyle,
-  fmtDate,
-  inputStyle,
-  languageLabel,
-  learningModeLabel,
-  liveStatusLabel,
-  primaryBtn,
-} from './course-editor/shared';
+import { L, buttonStyle, fmtDate, inputStyle, languageLabel, learningModeLabel, liveStatusLabel, primaryBtn } from './course-editor/shared-utils';
 
 type Tab = 'info' | 'content' | 'trial' | 'versions';
 
@@ -50,32 +41,56 @@ export function CourseEditorPage() {
   const [notice, setNotice] = useState('');
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const [detail, trialResult, versionsResult, historyResult, categoriesResult] = await Promise.all([
+  const fetchLoad = useCallback(() => {
+    return Promise.all([
       boRequest<CourseDetail>(`/api/backoffice/courses/${courseId}`),
       boRequest<TrialSettings>(`/api/backoffice/courses/${courseId}/trial`),
       boRequest<CourseVersion[]>(`/api/backoffice/courses/${courseId}/versions`),
-      boRequest<HistoryPage>(`/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`),
+      boRequest<HistoryPage>(
+        `/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`,
+      ),
       boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`),
-    ]);
-    setLoading(false);
-    if (!detail.success) {
-      setNotice(`${L(locale, '课程加载失败', 'Could not load course')}: ${detail.message ?? detail.error}`);
-      return;
-    }
-    setCourse(detail.data);
-    setContentLanguage(detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB');
-    setActiveLessonId((current) => current || detail.data.lessons[0]?.id || '');
-    if (trialResult.success) setTrial(trialResult.data);
-    if (versionsResult.success) setVersions(versionsResult.data);
-    if (historyResult.success) setHistory(historyResult.data);
-    if (categoriesResult.success) setCategories(categoriesResult.data);
-  }, [courseId, historyPage]);
+    ]).then(([detail, trialResult, versionsResult, historyResult, categoriesResult]) => {
+      setLoading(false);
+      if (!detail.success) {
+        setNotice(
+          `${L(locale, '课程加载失败', 'Could not load course')}: ${detail.message ?? detail.error}`,
+        );
+        return;
+      }
+      setCourse(detail.data);
+      setContentLanguage(
+        detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB',
+      );
+      setActiveLessonId((current) =>
+        detail.data.lessons.some((lesson) => lesson.id === current)
+          ? current
+          : detail.data.lessons[0]?.id || '',
+      );
+      if (trialResult.success) setTrial(trialResult.data);
+      if (versionsResult.success) setVersions(versionsResult.data);
+      if (historyResult.success) setHistory(historyResult.data);
+      if (categoriesResult.success) setCategories(categoriesResult.data);
+    });
+  }, [courseId, historyPage, locale]);
+
+  const [loadSource, setLoadSource] = useState(() => ({ courseId, historyPage, locale }));
+  if (
+    loadSource.courseId !== courseId ||
+    loadSource.historyPage !== historyPage ||
+    loadSource.locale !== locale
+  ) {
+    setLoadSource({ courseId, historyPage, locale });
+    setLoading(true);
+  }
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetchLoad();
+  }, [fetchLoad]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void fetchLoad();
+  }, [fetchLoad]);
 
   const liveVersion = useMemo(() => versions.find((version) => version.isLive), [versions]);
   const localizedCategories = useMemo(

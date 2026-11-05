@@ -1,3 +1,11 @@
+import type { SuccessResponse, ErrorResponse } from './helpers/http-response';
+import type {
+  AiConfigView,
+  PromptTemplateView,
+  LearnerTutorView,
+  AiTutorListView,
+} from '../src/ai/ai-config.service';
+import type { Release } from '@prisma/client';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { App } from 'supertest/types';
@@ -26,7 +34,7 @@ describe('AI API (e2e)', () => {
     name: 'openrouter',
     async *stream(opts: LlmStreamOptions): AsyncGenerator<string> {
       lastOpts = opts;
-      yield 'Hello';
+      yield await Promise.resolve('Hello');
       yield '!';
     },
   };
@@ -74,7 +82,7 @@ describe('AI API (e2e)', () => {
     // 2026-10-20 纯快照改拍（§3.4.3）：Create Release 不再自动激活，
     // 故夹具课程发布后须显式 Set Live，使 chat-stream 知识源读到该 Release 快照。
     // 快照仅含 SYNCED 节点（STALE 被排除在发布之外）。
-    const relRes = await api
+    const relRes: SuccessResponse<Release> = await api
       .post(`/api/courses/${courseId}/release`)
       .send({ revisionNotes: 'e2e 初始发布' })
       .expect(201);
@@ -102,7 +110,9 @@ describe('AI API (e2e)', () => {
   });
 
   it('GET /api/ai/models 返回 env 模型清单（§4.2.3，数据源 AI_AVAILABLE_MODELS）', async () => {
-    const res = await api.get('/api/ai/models').expect(200);
+    const res: SuccessResponse<string[]> = await api
+      .get('/api/ai/models')
+      .expect(200);
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body.data.length).toBeGreaterThan(0);
     expect(
@@ -111,7 +121,9 @@ describe('AI API (e2e)', () => {
   });
 
   it('GET /api/ai/prompts 返回默认模板（§4.2.4）', async () => {
-    const res = await api.get('/api/ai/prompts').expect(200);
+    const res: SuccessResponse<PromptTemplateView[]> = await api
+      .get('/api/ai/prompts')
+      .expect(200);
     expect(res.body.data.length).toBeGreaterThanOrEqual(2);
     expect(
       res.body.data.every((t: { isDefault: boolean }) => t.isDefault),
@@ -119,7 +131,9 @@ describe('AI API (e2e)', () => {
   });
 
   it('GET /api/ai/config/:courseId 无配置时返回默认视图且无 apiKey 字段', async () => {
-    const res = await api.get(`/api/ai/config/${courseId}`).expect(200);
+    const res: SuccessResponse<AiConfigView> = await api
+      .get(`/api/ai/config/${courseId}`)
+      .expect(200);
     expect(res.body.data).toEqual(
       expect.objectContaining({
         llmProvider: 'openrouter',
@@ -136,7 +150,7 @@ describe('AI API (e2e)', () => {
   });
 
   it('PUT /api/ai/config 加密存储 apiKey，任何响应不含明文（§2 红线）', async () => {
-    const res = await api
+    const res: SuccessResponse<AiConfigView> = await api
       .put('/api/ai/config')
       .send({
         courseId,
@@ -193,7 +207,7 @@ describe('AI API (e2e)', () => {
         },
       },
     });
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/ai/chat-stream')
       .send({ courseId: unpublished.id, message: 'hi', mode: 'LECTURE' })
       .expect(400);
@@ -220,7 +234,7 @@ describe('AI API (e2e)', () => {
   });
 
   it('POST /api/ai/chat-stream 缺 message 应 400（§4.4.2 第 1 步）', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/ai/chat-stream')
       .send({ courseId, mode: 'LECTURE' })
       .expect(400);
@@ -228,7 +242,7 @@ describe('AI API (e2e)', () => {
   });
 
   it('POST /api/ai/chat-stream 课程不存在应 404', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .post('/api/ai/chat-stream')
       .send({
         courseId: '00000000-0000-0000-0000-000000000000',
@@ -245,7 +259,7 @@ describe('AI API (e2e)', () => {
     });
     // 限流在知识源校验之前触发（streamChat 第 1 步），但为保持"前 10 次可达链路"语义，先发布空快照
     // 2026-10-20 改拍：AI 配置按 Release 维度保存，故须先发布 Release 再保存配置
-    const rlRel = await api
+    const rlRel: SuccessResponse<Release> = await api
       .post(`/api/courses/${rlCourse.id}/release`)
       .send({ revisionNotes: 'e2e 限流课发布' })
       .expect(201);
@@ -281,7 +295,7 @@ describe('AI API (e2e)', () => {
   });
 
   it('POST /api/ai/config/:courseId/reset 清除该模式自定义恢复默认（§4.2.4）', async () => {
-    const res = await api
+    const res: SuccessResponse<AiConfigView> = await api
       .post(`/api/ai/config/${courseId}/reset`)
       .send({ mode: 'SOCRATIC' })
       .expect(201);
@@ -304,7 +318,7 @@ describe('AI API (e2e)', () => {
       })
       .expect(200);
     // 保存 SOCRATIC 自定义
-    const soc = await api
+    const soc: SuccessResponse<AiConfigView> = await api
       .put('/api/ai/config')
       .send({
         courseId,
@@ -321,7 +335,7 @@ describe('AI API (e2e)', () => {
     expect(soc.body.data.model).toBe('test/model-soc');
 
     // 重置 LECTURE → 只清 LECTURE，SOCRATIC 保留
-    const r = await api
+    const r: SuccessResponse<AiConfigView> = await api
       .post(`/api/ai/config/${courseId}/reset`)
       .send({ mode: 'LECTURE' })
       .expect(201);
@@ -331,7 +345,7 @@ describe('AI API (e2e)', () => {
   });
 
   it('PUT /api/ai/config/:courseId/online 切换 Online 即时生效（§4.2.6）', async () => {
-    const on = await api
+    const on: SuccessResponse<AiConfigView> = await api
       .put(`/api/ai/config/${courseId}/online`)
       .send({ online: true })
       .expect(200);
@@ -342,7 +356,7 @@ describe('AI API (e2e)', () => {
     });
     expect(stored?.aiTutorOnline).toBe(true);
 
-    const off = await api
+    const off: SuccessResponse<AiConfigView> = await api
       .put(`/api/ai/config/${courseId}/online`)
       .send({ online: false })
       .expect(200);
@@ -350,7 +364,7 @@ describe('AI API (e2e)', () => {
   });
 
   it('PUT /api/ai/config/:courseId/online 非布尔值应 400（§4.2.6/§9.3）', async () => {
-    const res = await api
+    const res: ErrorResponse = await api
       .put(`/api/ai/config/${courseId}/online`)
       .send({ online: 'yes' })
       .expect(400);
@@ -359,11 +373,11 @@ describe('AI API (e2e)', () => {
 
   it('PUT active-release + POST set-live：测试选中与上线切换（§4.3.1/§3.4.4，2026-10-20）', async () => {
     // 再发布一个 Release（纯快照，不改 Live 指针，§3.4.3）
-    const rel2 = await api
+    const rel2: SuccessResponse<Release> = await api
       .post(`/api/courses/${courseId}/release`)
       .send({ revisionNotes: 'e2e 第二次发布' })
       .expect(201);
-    const release2Id = rel2.body.data.id as string;
+    const release2Id = rel2.body.data.id;
 
     // 将新 Release 设为上线版本（轻量 set-live）→ currentReleaseId=release2Id
     await api
@@ -372,7 +386,7 @@ describe('AI API (e2e)', () => {
       .expect(201);
 
     // 测试选中旧 Release（即原 releaseId），其非上线版本 → isLive=false
-    const pick = await api
+    const pick: SuccessResponse<AiConfigView> = await api
       .put(`/api/ai/config/${courseId}/active-release`)
       .send({ releaseId })
       .expect(200);
@@ -404,7 +418,9 @@ describe('AI API (e2e)', () => {
       .expect(400);
 
     // 再看 config → 测试所选 == 上线 → isLive=true
-    const after = await api.get(`/api/ai/config/${courseId}`).expect(200);
+    const after: SuccessResponse<AiConfigView> = await api
+      .get(`/api/ai/config/${courseId}`)
+      .expect(200);
     expect(after.body.data.releaseId).toBe(releaseId);
     expect(after.body.data.isLive).toBe(true);
 
@@ -427,7 +443,10 @@ describe('AI API (e2e)', () => {
     });
     const publish = (revisionNotes: string) =>
       api.post(`/api/courses/${dupCourse.id}/release`).send({ revisionNotes });
-    const [first, second] = await Promise.all([publish('DUP'), publish('DUP')]);
+    const [first, second]: [
+      SuccessResponse<Release>,
+      SuccessResponse<Release>,
+    ] = await Promise.all([publish('DUP'), publish('DUP')]);
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
     expect(second.body.data.id).toBe(first.body.data.id);
@@ -445,11 +464,11 @@ describe('AI API (e2e)', () => {
       data: { title: 'AI-E2E配置隔离课' },
     });
     // R1：发布后在 R1 保存自定义 prompt/welcome/model/key
-    const r1 = await api
+    const r1: SuccessResponse<Release> = await api
       .post(`/api/courses/${isoCourse.id}/release`)
       .send({ revisionNotes: 'R1' })
       .expect(201);
-    const r1Id = r1.body.data.id as string;
+    const r1Id = r1.body.data.id;
     // 纯快照下发布不自动激活，须显式选择测试 Release 才能保存配置（§3.4.3/§5.2）
     await api
       .put(`/api/ai/config/${isoCourse.id}/active-release`)
@@ -469,14 +488,14 @@ describe('AI API (e2e)', () => {
       .expect(200);
 
     // R2：发布快照时沿用当前测试所选版本（R1）的配置（QA 2026-10-27 A3）
-    const r2 = await api
+    const r2: SuccessResponse<Release> = await api
       .post(`/api/courses/${isoCourse.id}/release`)
       .send({ revisionNotes: 'R2' })
       .expect(201);
-    const r2Id = r2.body.data.id as string;
+    const r2Id = r2.body.data.id;
 
     // 切到 R2 → 回退默认视图
-    const atR2 = await api
+    const atR2: SuccessResponse<AiConfigView> = await api
       .put(`/api/ai/config/${isoCourse.id}/active-release`)
       .send({ releaseId: r2Id })
       .expect(200);
@@ -498,7 +517,7 @@ describe('AI API (e2e)', () => {
       .expect(200);
 
     // 切回 R1 → 回显 R1 保存的自定义配置与 key（隔离生效）
-    const backR1 = await api
+    const backR1: SuccessResponse<AiConfigView> = await api
       .put(`/api/ai/config/${isoCourse.id}/active-release`)
       .send({ releaseId: r1Id })
       .expect(200);
@@ -515,11 +534,13 @@ describe('AI API (e2e)', () => {
     const fresh = await prisma.course.create({
       data: { title: 'AI-E2E首发课' },
     });
-    const rel = await api
+    const rel: SuccessResponse<Release> = await api
       .post(`/api/courses/${fresh.id}/release`)
       .send({ revisionNotes: '首发' })
       .expect(201);
-    const cfg = await api.get(`/api/ai/config/${fresh.id}`).expect(200);
+    const cfg: SuccessResponse<AiConfigView> = await api
+      .get(`/api/ai/config/${fresh.id}`)
+      .expect(200);
     expect(cfg.body.data.releaseId).toBe(rel.body.data.id);
     expect(cfg.body.data.isLive).toBe(false);
     await api
@@ -549,7 +570,7 @@ describe('AI API (e2e)', () => {
     const shared = await prisma.course.create({
       data: { title: 'AI-E2E限流分桶课', externalId: 'ai-e2e-quota' },
     });
-    const rel = await api
+    const rel: SuccessResponse<Release> = await api
       .post(`/api/courses/${shared.id}/release`)
       .send({ revisionNotes: 'q' })
       .expect(201);
@@ -582,7 +603,7 @@ describe('AI API (e2e)', () => {
     const race = await prisma.course.create({
       data: { title: 'AI-E2E并发课' },
     });
-    const base = await api
+    const base: SuccessResponse<Release> = await api
       .post(`/api/courses/${race.id}/release`)
       .send({ revisionNotes: 'base' })
       .expect(201);
@@ -591,11 +612,11 @@ describe('AI API (e2e)', () => {
       .send({ releaseId: base.body.data.id })
       .expect(201);
     for (let i = 0; i < 8; i++) {
-      const victim = await api
+      const victim: SuccessResponse<Release> = await api
         .post(`/api/courses/${race.id}/release`)
         .send({ revisionNotes: `v${i}` })
         .expect(201);
-      const victimId = victim.body.data.id as string;
+      const victimId = victim.body.data.id;
       await Promise.all([
         api.delete(`/api/releases/${victimId}`),
         api
@@ -619,18 +640,22 @@ describe('AI API (e2e)', () => {
   });
 
   it('GET /api/ai/tutors 返回全部 AI Tutor 及 Online 状态（§4.2.6）', async () => {
-    const res = await api.get('/api/ai/tutors').expect(200);
+    const res: SuccessResponse<AiTutorListView[]> = await api
+      .get('/api/ai/tutors')
+      .expect(200);
     expect(Array.isArray(res.body.data)).toBe(true);
     const row = res.body.data.find(
       (t: { courseId: string }) => t.courseId === courseId,
-    );
+    )!;
     expect(row).toBeTruthy();
     expect(typeof row.title).toBe('string');
     expect(typeof row.online).toBe('boolean');
   });
 
   it('GET /api/user/ai-tutors 返回用户侧可用性列表且不含敏感字段（§4.2.6/§5.2）', async () => {
-    const res = await api.get('/api/user/ai-tutors').expect(200);
+    const res: SuccessResponse<LearnerTutorView[]> = await api
+      .get('/api/user/ai-tutors')
+      .expect(200);
     expect(Array.isArray(res.body.data)).toBe(true);
     // 仅返回已映射 Portal 的课程（externalId 非空）；每条含 online/available 布尔值
     for (const row of res.body.data) {
@@ -671,7 +696,7 @@ describe('AI API (e2e)', () => {
       where: { id: courseId },
       data: { aiTutorOnline: false },
     });
-    const offline = await api
+    const offline: ErrorResponse = await api
       .post('/api/user/ai/chat-stream')
       .send({
         externalCourseId: 'ai-e2e-learner',

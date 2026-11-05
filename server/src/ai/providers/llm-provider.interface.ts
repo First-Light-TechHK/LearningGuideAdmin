@@ -17,6 +17,7 @@ export interface LlmStreamOptions {
   baseUrl: string;
   temperature?: number;
   maxOutputTokens?: number;
+  reasoningEffort?: 'low' | 'none';
   signal?: AbortSignal;
   timeoutMs?: number;
   onEvent?: (event: Exclude<LlmStreamEvent, { type: 'delta' }>) => void;
@@ -33,7 +34,11 @@ export type LlmStreamEvent =
   | { type: 'delta'; content: string }
   | {
       type: 'usage';
-      usage: { inputTokens?: number; outputTokens?: number };
+      usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+        reasoningTokens?: number;
+      };
     }
   | { type: 'finish'; reason: string | null };
 

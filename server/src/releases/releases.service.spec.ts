@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ReleasesService } from './releases.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -74,10 +75,11 @@ describe('ReleasesService', () => {
     });
     expect(mockTx.courseAiConfig.create).not.toHaveBeenCalled();
     // 快照仅收录 SYNCED 节点：事务内查询条件应带 syncState 过滤
-    const courseQuery = mockTx.course.findUnique.mock.calls[0][0] as Record<
-      string,
-      never
-    >;
+    const courseQuery = (
+      mockTx.course.findUnique.mock.calls as Array<
+        [Prisma.CourseFindUniqueArgs]
+      >
+    )[0][0];
     expect(JSON.stringify(courseQuery)).toContain('SYNCED');
   });
 
@@ -100,7 +102,13 @@ describe('ReleasesService', () => {
 
     await service.publish('c1', { revisionNotes: 'v2' });
 
-    expect(mockTx.courseAiConfig.findUnique.mock.calls[0][0].where).toEqual({
+    expect(
+      (
+        mockTx.courseAiConfig.findUnique.mock.calls as Array<
+          [Prisma.CourseAiConfigFindUniqueArgs]
+        >
+      )[0][0].where,
+    ).toEqual({
       courseId_releaseId: { courseId: 'c1', releaseId: 'live' },
     });
     expect(mockTx.courseAiConfig.create).toHaveBeenCalledWith({
@@ -188,7 +196,11 @@ describe('ReleasesService', () => {
     expect(list.map((r) => r.isActive)).toEqual([true, false]);
     expect(list.map((r) => r.isTestSelected)).toEqual([false, true]);
     expect(list.map((r) => r.isEditing)).toEqual([false, true]);
-    const select = mockPrisma.release.findMany.mock.calls[0][0] as {
+    const select = (
+      mockPrisma.release.findMany.mock.calls as Array<
+        [Prisma.ReleaseFindManyArgs]
+      >
+    )[0][0] as {
       select: { snapshotData?: unknown };
     };
     expect(select.select.snapshotData).toBeUndefined();
@@ -294,7 +306,10 @@ describe('ReleasesService', () => {
     });
     // 快照节点重建：2 pages，sortOrder 按快照顺序
     expect(mockTx.page.create).toHaveBeenCalledTimes(2);
-    expect(mockTx.page.create.mock.calls[1][0].data).toMatchObject({
+    expect(
+      (mockTx.page.create.mock.calls as Array<[Prisma.PageCreateArgs]>)[1][0]
+        .data,
+    ).toMatchObject({
       title: '第二章',
       contentMd: '# keep',
       sortOrder: 1,

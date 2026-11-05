@@ -1588,3 +1588,19 @@
 ## AI Tutor SSE 断流取消（2026-11-02）
 - Controller 在 Response close 时中止请求，AbortSignal 传至 Provider；60 秒 timeout；取消错误不触发首字节重试。
 - SSE 与 service 用例覆盖取消和 listener 清理；定向 ESLint、全 server typecheck、2 suites / 14 tests 通过；独立审查待进行。
+
+## 2026-11-04：AI Tutor 母版迁移首轮实现
+
+- 用户授权在 AI_Tutor_改进版（基线 af89717）以相邻 AITutor-main 为基座；仅改 KnowledgeSystem。设计与完整文件清单见 docs/AI_tutor/Motherbase_Refactor.md。
+- 保留测试/Live Release、Online、MAIN/Lecture/Socratic/Assessment 及配置覆盖规则；单次读取运行配置；小 Release 完整上下文，大包保留既有检索与专项回归。日志新增 Prompt hash。
+- 真实逐块输出、上游错误/截断检测、取消和失败终态；后台历史按员工/课程/Release 隔离，只有完整成功轮次进入下一轮。后台 expectedReleaseId 校验屏幕版本；公式与引用 AST 分开处理，中英文错误映射同步。
+- 验证：后端定向 ESLint、全量 tsc、build 通过，完整单测 1770 passed / 166 skipped；前端 lint、tsc、build 通过，完整单测 500 passed，最后调整后的 Tutor+i18n 22 passed。
+- 后端全量 ESLint 仍有 695 errors / 11 warnings。HEAD 与当前变动 tracked TS 逐一比较，无新增错误并消除 2 项旧错误；未批量修复无关代码。
+- 独立 Review 尚未执行，未取得 APPROVE；真实模型、数据库 e2e 与界面验收待执行。多路线试跑、展品、持久学习状态和实际 Assessment 评分后置。没有改依赖/schema/环境/CI，没有 commit/push/部署。
+
+## 2026-11-05：全仓遗留 errors / warnings 清理
+
+- 后端 ESLint 从 695 errors / 11 warnings 清至 0 / 0，前端 Oxlint 从 61 warnings 清至 0；保留规则。修正响应/mock/Express 类型、邮箱限流漏 await、控制字符检查及 KS 对 Embedding 实现的直接依赖。
+- 拆开组件/工具导出以支持 Fast Refresh；表单与目录树按输入变化重置，异步结果在请求回调采用，工具栏订阅 CodeMirror。补离线回归并清除测试 act 警告。
+- lint → types → tests 通过：后端 1784 passed / 166 skipped；前端 503 passed；两端 build 通过。完整命令与文件清单见 docs/AI_tutor/Motherbase_Refactor.md §8。
+- 用户确认后已加入 vite.config.ts 的 app/vendor 分包规则（maxSize 750000）；实际构建为 34 个 JS 文件，最大 293019 bytes，无构建警告，原 500 kB 阈值保留。再次执行前端 lint、types、完整测试（503 passed）和 build 均通过。独立 Review、数据库 e2e、手动 UI/真实模型验收仍待执行。无 commit / push / 部署。

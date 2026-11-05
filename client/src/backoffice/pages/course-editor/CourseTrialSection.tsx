@@ -1,17 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { CourseDetail, TrialSettings, TrialRow } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
-import {
-  Chip,
-  L,
-  TimeInput,
-  buttonStyle,
-  card,
-  languageLabel,
-  primaryBtn,
-  trialStatusLabel,
-} from './shared';
+import { Chip, TimeInput } from './shared';
+import { L, buttonStyle, card, languageLabel, primaryBtn, trialStatusLabel } from './shared-utils';
 
 const PLAN_TERM_OPTIONS = [1, 3, 6, 12];
 
@@ -52,14 +44,22 @@ export function CourseTrialSection({
   const [cutoffLanguage, setCutoffLanguage] = useState(contentLanguage);
   const activeCutoffLanguage = languages.includes(cutoffLanguage) ? cutoffLanguage : contentLanguage;
 
-  useEffect(() => {
+  const [previousTrial, setPreviousTrial] = useState<typeof trial | null>(null);
+  if (previousTrial !== trial) {
+    setPreviousTrial(trial);
+
     setEnabled(trial.enabled);
     setRows(trial.rows);
-  }, [trial]);
 
-  useEffect(() => {
+  }
+
+  const [previousCourse, setPreviousCourse] = useState<typeof course | null>(null);
+  if (previousCourse !== course) {
+    setPreviousCourse(course);
+
     setLocalPlans(course.plans ?? []);
-  }, [course]);
+
+  }
 
   function toggleRow(lessonId: string) {
     setRows((current) => {

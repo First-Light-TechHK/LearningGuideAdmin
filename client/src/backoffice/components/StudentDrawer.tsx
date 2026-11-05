@@ -72,16 +72,26 @@ export function StudentDrawer({
     setReason('')
   }, [])
 
-  const load = useCallback(async () => {
-    setLoadError(null)
-    const result = await studentsApi.detail(studentId)
-    if (result.ok) apply(result.data)
-    else setLoadError(result.code)
+  const fetchLoad = useCallback(() => {
+    return studentsApi.detail(studentId).then((result) => {
+      if (result.ok) apply(result.data)
+      else setLoadError(result.code)
+    })
   }, [studentId, apply])
 
+  const [loadSource, setLoadSource] = useState(() => ({ studentId }))
+  if (loadSource.studentId !== studentId) {
+    setLoadSource({ studentId })
+    setLoadError(null)
+  }
+  const load = useCallback(() => {
+    setLoadError(null)
+    return fetchLoad()
+  }, [fetchLoad])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void fetchLoad();
+  }, [fetchLoad]);
 
   const dirty = useMemo(() => {
     if (!detail || !draft) return false

@@ -38,6 +38,9 @@ export function summaryTitle(
   defaultContentLanguage: string,
   fallbacks: { slug: string; code: string },
 ): string {
-  const localized = pickSummaryLocalization(localizations, defaultContentLanguage);
+  const localized = pickSummaryLocalization(
+    localizations,
+    defaultContentLanguage,
+  );
   return localized?.title?.trim() || fallbacks.slug || fallbacks.code;
 }

@@ -30,9 +30,27 @@ export interface AiChatLogEntry {
   historyCount: number;
   latencyMs: number;
   status: AiChatStatus;
+  promptHash?: string;
   error?: string;
   finishReason?: string | null;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    reasoningTokens?: number;
+  };
+  attempts?: Array<{
+    attempt: number;
+    finishReason?: string | null;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      reasoningTokens?: number;
+    };
+    answerChars: number;
+    latencyMs: number;
+    maxOutputTokens: number;
+    reasoningEffort?: 'low' | 'none';
+  }>;
   question: string;
   answer: string;
 }
@@ -76,11 +94,13 @@ export class AiChatLogger {
         historyCount: entry.historyCount,
         latencyMs: entry.latencyMs,
         status: entry.status,
+        ...(entry.promptHash ? { promptHash: entry.promptHash } : {}),
         ...(entry.error ? { error: preview(entry.error, ERROR_LIMIT) } : {}),
         ...(entry.finishReason === undefined
           ? {}
           : { finishReason: entry.finishReason }),
         ...(entry.usage ? { usage: entry.usage } : {}),
+        ...(entry.attempts ? { attempts: entry.attempts } : {}),
         questionChars: entry.question.length,
         answerChars: entry.answer.length,
         question: preview(entry.question, PREVIEW_LIMIT),

@@ -1,24 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import type { CourseDetail, CourseLocalization } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
-import {
-  Chip,
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  card,
-  dangerBtn,
-  inputStyle,
-  labelStyle,
-  languageLabel,
-  learningModeLabel,
-  primaryBtn,
-} from './shared';
+import { Chip, Field, Modal } from './shared';
+import { L, buttonStyle, card, dangerBtn, inputStyle, labelStyle, languageLabel, learningModeLabel, primaryBtn } from './shared-utils';
 
 type Category = { id: string; name: string };
 
@@ -113,7 +101,10 @@ export function CourseInfoSection({
   const mediaLimits = useMediaLimits();
   const learnFocus = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
+  const [previousCourse, setPreviousCourse] = useState<typeof course | null>(null);
+  if (previousCourse !== course) {
+    setPreviousCourse(course);
+
     const enLoc = loc(course, 'en-GB') ?? loc(course, 'en');
     const zhLoc = loc(course, 'zh-CN') ?? loc(course, 'zh');
     setSlug(course.slug);
@@ -148,7 +139,8 @@ export function CourseInfoSection({
         };
       }),
     );
-  }, [course]);
+
+  }
 
   const incompleteLearn = learnRows.filter((row) => !row.en.trim() || !row.zh.trim()).length;
   const incompleteProvides = providesRows.filter((row) => !row.en.trim() || !row.zh.trim()).length;

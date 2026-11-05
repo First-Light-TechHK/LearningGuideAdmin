@@ -75,7 +75,7 @@ export function createReleaseAnswerer(
           const runId = uuidv7();
           let reply: Reply | null = null;
           try {
-            reply = (await service.suggest(
+            reply = await service.suggest(
               {
                 learnerId: `release-eval-${runId}`,
                 locale,
@@ -87,7 +87,7 @@ export function createReleaseAnswerer(
                 context: { sessionId: uuidv7() },
               },
               { signal },
-            )) as Reply;
+            );
           } catch {
             reply = null;
           }

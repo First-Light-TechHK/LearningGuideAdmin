@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import '../students.css'
-import { Pagination, usePageSize } from '../components/Pagination'
+import { Pagination } from '../components/Pagination';
+import { usePageSize } from '../components/paginationState';
 import { SearchIcon } from '../components/icons'
 import { StudentDrawer } from '../components/StudentDrawer'
 import {
@@ -21,7 +22,7 @@ import { useLocale } from '../lib/navigation'
 import { studentsApi, type StudentFilters } from '../lib/studentsApi'
 import { formatStudentDate, initialOf, studentErrorText } from '../lib/studentsFormat'
 import { canViewMenu, isActionAllowed, settingsSubHref } from '../rbac/permissions'
-import { useEmployee } from '../ShellRoute'
+import { useEmployee } from '../employeeSession';
 import { MenuGuard } from './ModulePages'
 
 const EMPTY_FILTERS: StudentFilters = { q: '', status: 'all', subscription: 'all', special: 'all' }
@@ -67,26 +68,36 @@ function StudentManagementInner() {
   const [errorCode, setErrorCode] = useState<string | null>(null)
   const requestId = useRef(0)
 
-  const load = useCallback(async () => {
+  const fetchLoad = useCallback(() => {
     const id = ++requestId.current
-    setLoading(true)
-    const result = await studentsApi.list(query, page, pageSize)
-    if (id !== requestId.current) return
-    setLoading(false)
-    if (result.ok) {
-      setData(result.data)
-      setErrorCode(null)
-      // 筛选后总数变少时，当前页可能越界
-      const lastPage = Math.max(1, Math.ceil(result.data.total / pageSize))
-      if (page > lastPage) setPage(lastPage)
-    } else {
-      setErrorCode(result.code)
-    }
+    return studentsApi.list(query, page, pageSize).then((result) => {
+      if (id !== requestId.current) return
+      setLoading(false)
+      if (result.ok) {
+        setData(result.data)
+        setErrorCode(null)
+        // 筛选后总数变少时，当前页可能越界
+        const lastPage = Math.max(1, Math.ceil(result.data.total / pageSize))
+        if (page > lastPage) setPage(lastPage)
+      } else {
+        setErrorCode(result.code)
+      }
+    })
   }, [query, page, pageSize])
 
+  const [loadSource, setLoadSource] = useState(() => ({ query, page, pageSize }))
+  if (loadSource.query !== query || loadSource.page !== page || loadSource.pageSize !== pageSize) {
+    setLoadSource({ query, page, pageSize })
+    setLoading(true)
+  }
+  const load = useCallback(() => {
+    setLoading(true)
+    return fetchLoad()
+  }, [fetchLoad])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void fetchLoad();
+  }, [fetchLoad]);
 
   // 搜索框 300ms 防抖；下拉立即生效
   useEffect(() => {

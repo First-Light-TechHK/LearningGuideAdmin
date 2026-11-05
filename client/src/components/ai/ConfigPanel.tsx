@@ -3,7 +3,7 @@ import { App, Button, Card, Divider, Input, Popconfirm, Segmented, Select, Space
 import { useAiStore } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
 import { useAiText } from './i18n'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 
 const { Text } = Typography

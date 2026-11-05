@@ -97,7 +97,9 @@ export function extractDocxHeadings(html: string): DocxHeading[] {
   return headings;
 }
 
-export async function convertDocxToHtml(bytes: Buffer): Promise<DocxHtmlResult> {
+export async function convertDocxToHtml(
+  bytes: Buffer,
+): Promise<DocxHtmlResult> {
   let html: string;
   const warnings: string[] = [];
   try {

@@ -263,15 +263,17 @@ function toRelease(row: Row): FaqReleaseRow {
     createdAt: iso(row.created_at),
     publishedBy: (row.published_by as string | null) ?? null,
     publishedAt: isoOrNull(row.published_at),
-    evalRun: row.eval_run_id
-      ? {
-          id: String(row.eval_run_id),
-          startedAt: isoOrNull(row.eval_started_at),
-          heartbeatAt: isoOrNull(row.eval_heartbeat_at),
-          progress:
-            (row.eval_progress as FaqReleaseEvalRun['progress'] | null) ?? null,
-        }
-      : null,
+    evalRun:
+      typeof row.eval_run_id === 'string' && row.eval_run_id
+        ? {
+            id: row.eval_run_id,
+            startedAt: isoOrNull(row.eval_started_at),
+            heartbeatAt: isoOrNull(row.eval_heartbeat_at),
+            progress:
+              (row.eval_progress as FaqReleaseEvalRun['progress'] | null) ??
+              null,
+          }
+        : null,
   };
 }
 

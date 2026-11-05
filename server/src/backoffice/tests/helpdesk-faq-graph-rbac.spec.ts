@@ -58,7 +58,10 @@ const graph = {
 const unsubscribe = jest.fn();
 const releases = {
   list: jest.fn(() => Promise.resolve({ releases: [], published: null })),
-  onChange: jest.fn((_listener: () => void) => unsubscribe),
+  onChange: jest.fn((_listener: () => void) => {
+    void _listener;
+    return unsubscribe;
+  }),
   working: jest.fn(() =>
     Promise.resolve({ checks: {}, diff: {}, published: null }),
   ),
