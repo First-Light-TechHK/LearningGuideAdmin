@@ -26,6 +26,10 @@ import {
   visibleTutorAnswer,
 } from './tutor/dialogue-runtime';
 import { buildTutorContext, loadTutorRelease } from './tutor/course-context';
+import {
+  imageAfterParagraph,
+  selectKnowledgeImages,
+} from './tutor/knowledge-images';
 import { selectRecentCompleteTurns } from './tutor/conversation-history';
 import {
   RateLimitService,
@@ -359,6 +363,10 @@ export class AiChatService {
       });
       const messages = compiled.messages;
       promptHash = compiled.promptHash;
+      const images =
+        input.channel === 'admin'
+          ? selectKnowledgeImages(context, courseId, question)
+          : [];
 
       const provider = this.registry.get(runtime.provider);
       const MAX_RETRIES = 2;
@@ -368,6 +376,9 @@ export class AiChatService {
         attempt += 1;
         let started = false;
         let attemptAnswer = '';
+        let visibleLength = 0;
+        let pending = '';
+        const placedImages = new Set<string>();
         let recorded = false;
         const attemptStartedAt = Date.now();
         const reasoningEffort =
@@ -412,12 +423,39 @@ export class AiChatService {
             input.signal?.throwIfAborted();
             attemptAnswer += delta;
             const visible = visibleTutorAnswer(attemptAnswer, input.mode);
-            if (visible.length > answer.length) {
-              if (!started) progress('first_delta', attempt);
-              started = true;
-              const next = visible.slice(answer.length);
-              answer = visible;
-              yield next;
+            if (visible.length > visibleLength) {
+              pending += visible.slice(visibleLength);
+              visibleLength = visible.length;
+              if (images.length) {
+                let boundary = pending.indexOf('\n\n');
+                while (boundary >= 0) {
+                  const paragraph = pending.slice(0, boundary);
+                  pending = pending.slice(boundary + 2);
+                  const candidate = images.find(
+                    (item) =>
+                      !placedImages.has(item.url) &&
+                      !answer.includes(item.url) &&
+                      !paragraph.includes(item.url) &&
+                      imageAfterParagraph(paragraph, item),
+                  );
+                  const image = candidate
+                    ? imageAfterParagraph(paragraph, candidate)
+                    : '';
+                  if (candidate) placedImages.add(candidate.url);
+                  const next = paragraph + (image ?? '') + '\n\n';
+                  if (!started) progress('first_delta', attempt);
+                  started = true;
+                  answer += next;
+                  yield next;
+                  boundary = pending.indexOf('\n\n');
+                }
+              } else {
+                if (!started) progress('first_delta', attempt);
+                started = true;
+                answer += pending;
+                yield pending;
+                pending = '';
+              }
             }
           }
           recordAttempt();
@@ -443,9 +481,20 @@ export class AiChatService {
             input.mode,
             true,
           );
-          if (finalAnswer.length > answer.length) {
-            const next = finalAnswer.slice(answer.length);
-            answer = finalAnswer;
+          pending += finalAnswer.slice(visibleLength);
+          if (pending) {
+            const candidate = images.find(
+              (item) =>
+                !placedImages.has(item.url) &&
+                !answer.includes(item.url) &&
+                !pending.includes(item.url) &&
+                imageAfterParagraph(pending, item),
+            );
+            const image = candidate
+              ? imageAfterParagraph(pending, candidate)
+              : '';
+            const next = pending + (image ?? '');
+            answer += next;
             yield next;
           }
           finished = true;
