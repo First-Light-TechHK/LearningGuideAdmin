@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { OpenRouterHttpError } from './providers/openrouter.provider';
 import { AiChatLogger, type AiChatLogEntry } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
@@ -321,6 +322,24 @@ describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
     expect(entry.answer).toBe('');
   });
 
+  it.each([403, 404])(
+    '上游 %s 拒绝不重复调用，诊断只写服务端日志',
+    async (status) => {
+      let calls = 0;
+      const { service, entryOf } = setup(async function* () {
+        calls += 1;
+        throw new OpenRouterHttpError(status, `code=${status} provider=Google`);
+      });
+      await expect(collect(service.streamChat(dto()))).rejects.toThrow(
+        `LLM 上游返回 ${status}`,
+      );
+      expect(calls).toBe(1);
+      expect(entryOf().error).toBe(
+        `LLM 上游返回 ${status} (code=${status} provider=Google)`,
+      );
+    },
+  );
+
   it('客户端提前断开：日志记 aborted', async () => {
     const { service, write, entryOf } = setup(async function* () {
       yield 'A';
@@ -360,6 +379,39 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     locale: 'en-GB' as const,
     history: [],
     ...over,
+  });
+
+  it('Group Study 仅在相关段落插入学员图片地址', async () => {
+    const asset = '22222222-2222-4222-8222-222222222222.png';
+    const source = `/api/files/images/${COURSE_ID}/${asset}`;
+    const { service, knowledge } = setup(async function* () {
+      yield '状态变量描述系统的当前数值。\n\n';
+      yield '下一段讨论变化率。';
+    });
+    (knowledge.getRelease as jest.Mock).mockResolvedValue({
+      id: LIVE_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'v1',
+      pages: [
+        { title: 'Lesson 1', contentMd: `状态变量。![状态变量图](${source})` },
+      ],
+    });
+
+    await expect(
+      collect(
+        service.streamLearnerChat(
+          learnerDto({
+            externalCourseId: 'modeling-life',
+            message: '解释状态变量',
+            channel: 'study-group',
+          }),
+        ),
+      ),
+    ).resolves.toBe(
+      '状态变量描述系统的当前数值。\n\n' +
+        `![状态变量图](/api/user/courses/modeling-life/images/${asset})\n\n` +
+        '下一段讨论变化率。',
+    );
   });
 
   it('Online 关闭时拒绝，并记录 learner 错误日志', async () => {
@@ -1122,6 +1174,108 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(knowledge.retrieveChunks).not.toHaveBeenCalled();
   });
 
+  it.each([
+    '你是谁？',
+    '你好，你是谁？',
+    '请介绍一下你自己。',
+    '你能干什么？',
+    '你知道 Learning Guide 吗？',
+    'Hello, who are you?',
+    'What can you do?',
+    'Do you know Learning Guide?',
+  ])('无检索命中时把 Tutor profile 交给模型回答：%s', async (message) => {
+    const stream = jest.fn(async function* () {
+      yield 'model-generated profile answer';
+    });
+    const { service, knowledge } = setup(stream);
+    (knowledge.retrieveChunks as jest.Mock).mockResolvedValue([]);
+    const answer = await collect(service.streamChat({ ...dto(), message }));
+    expect(answer).toBe('model-generated profile answer');
+    expect(knowledge.retrieveChunks).toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
+  it('问候后询问身份时由模型灵活回答，无检索命中也不拒答', async () => {
+    let prompt = '';
+    const stream = jest.fn(async function* (opts: LlmStreamOptions) {
+      prompt = opts.messages[0].content;
+      yield '你好！我是 Learning Guide 的 AI Tutor，可以陪你学习这门课。';
+    });
+    const { service, knowledge } = setup(stream);
+    (knowledge.retrieveChunks as jest.Mock).mockResolvedValue([]);
+    await expect(
+      collect(service.streamChat({ ...dto(), message: '你好，你是谁？' })),
+    ).resolves.toContain('我是 Learning Guide 的 AI Tutor');
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(prompt).toContain('at most two short sentences');
+    expect(prompt).toContain('Do not expand into platform features');
+  });
+
+  it('寒暄不放宽课程事实与平台业务问题的证据边界', async () => {
+    const stream = jest.fn(async function* () {
+      yield 'unexpected';
+    });
+    const { service, knowledge } = setup(stream);
+    (knowledge.retrieveChunks as jest.Mock).mockResolvedValue([]);
+    for (const message of [
+      '你好，请解释向量',
+      '你好，你是谁？请解释向量',
+      '你好，Learning Guide 收费多少？',
+    ]) {
+      await expect(
+        collect(service.streamChat({ ...dto(), message })),
+      ).resolves.toContain('当前课程资料');
+    }
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it('多个 profile 问题一起回答，混合课程问题仍走正常检索', async () => {
+    let calls = 0;
+    const stream = jest.fn(async function* () {
+      calls += 1;
+      yield calls === 1
+        ? '我是 Learning Guide 的 AI Tutor，可以陪你学习。'
+        : '向量有大小和方向。[1]\n\nSources\n[1] Modeling Life';
+    });
+    const { service, knowledge } = setup(stream);
+    const profile = await collect(
+      service.streamChat({ ...dto(), message: '你是谁，你能做什么？' }),
+    );
+    expect(profile).toContain('AI Tutor');
+    expect(knowledge.retrieveChunks).toHaveBeenCalled();
+
+    const course = await collect(
+      service.streamChat({ ...dto(), message: '你是谁？请解释向量。' }),
+    );
+    expect(course).toContain('向量有大小和方向');
+    expect(knowledge.retrieveChunks).toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledTimes(2);
+  });
+
+  it('学员端也能回答 profile，平台业务问题不会误判成 Tutor profile', async () => {
+    const stream = jest.fn(async function* () {
+      yield 'Learning Guide 是我所在的学习平台。';
+    });
+    const { service, knowledge } = setup(stream);
+    (knowledge.retrieveChunks as jest.Mock).mockResolvedValue([]);
+    await expect(
+      collect(
+        service.streamLearnerChat(
+          learnerDto({ message: '你知道Learning Guide吗？' }),
+        ),
+      ),
+    ).resolves.toContain('Learning Guide 是我所在的学习平台');
+    expect(knowledge.retrieveChunks).toHaveBeenCalled();
+
+    await expect(
+      collect(
+        service.streamChat({ ...dto(), message: 'Learning Guide 收费多少？' }),
+      ),
+    ).resolves.toContain('当前课程资料');
+    expect(knowledge.retrieveChunks).toHaveBeenCalled();
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
   it('SOCRATIC 天气拒答承接会话提问，LECTURE 保留原路由', async () => {
     const { service, knowledge } = setup(async function* () {
       await Promise.resolve();
@@ -1185,6 +1339,60 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(entryOf().answer).toBe('');
   });
 
+  it('Qwen 使用低推理强度和独立输出预算，耗尽时保留 usage', async () => {
+    let outputBudget: number | undefined;
+    let effort: string | undefined;
+    const { service, configs, entryOf } = setup(async function* (opts) {
+      await Promise.resolve();
+      outputBudget = opts.maxOutputTokens;
+      effort = opts.reasoningEffort;
+      opts.onEvent?.({
+        type: 'usage',
+        usage: { outputTokens: 4096, reasoningTokens: 4096 },
+      });
+      opts.onEvent?.({ type: 'finish', reason: 'length' });
+    });
+    (configs.resolveRuntime as jest.Mock).mockResolvedValueOnce({
+      provider: 'openrouter',
+      model: 'qwen/qwen3.6-flash',
+      apiKey: 'test-key',
+      baseUrl: 'https://example.invalid',
+    });
+    await expect(collect(service.streamChat(dto()))).rejects.toThrow(
+      'AI 回答达到输出上限，内容未完成',
+    );
+    expect(outputBudget).toBe(4096);
+    expect(effort).toBe('low');
+    expect(entryOf().finishReason).toBe('length');
+    expect(entryOf().usage).toEqual({
+      outputTokens: 4096,
+      reasoningTokens: 4096,
+    });
+  });
+
+  it('Gemini 3.5 Flash 为正文预留输出预算并降低推理强度', async () => {
+    let outputBudget: number | undefined;
+    let effort: string | undefined;
+    const { service, configs } = setup(async function* (opts) {
+      await Promise.resolve();
+      outputBudget = opts.maxOutputTokens;
+      effort = opts.reasoningEffort;
+      yield '完整回答';
+    });
+    (configs.resolveRuntime as jest.Mock).mockResolvedValueOnce({
+      provider: 'openrouter',
+      model: 'google/gemini-3.5-flash',
+      apiKey: 'test-key',
+      baseUrl: 'https://example.invalid',
+    });
+
+    await expect(collect(service.streamChat(dto()))).resolves.toContain(
+      '完整回答',
+    );
+    expect(outputBudget).toBe(4096);
+    expect(effort).toBe('low');
+  });
+
   it('Provider 达到输出上限时不把截断内容记为成功', async () => {
     const { service, entryOf } = setup(async function* (opts) {
       await Promise.resolve();
@@ -1200,7 +1408,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(entryOf().attempts?.[0]?.answerChars).toBe('partial answer'.length);
   });
 
-  it('为所有Tutor模型统一提供2048输出tokens预算', async () => {
+  it('其他Tutor模型沿用2048输出tokens预算', async () => {
     let maxOutputTokens: number | undefined;
     const { service, configs } = setup(async function* (opts) {
       await Promise.resolve();

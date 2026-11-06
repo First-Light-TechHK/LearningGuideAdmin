@@ -61,6 +61,33 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     });
   });
 
+  it.each([
+    ['deepseek/deepseek-r1', 'deepseek/deepseek-r1-0528'],
+    ['google/gemma-4-31b-it:free', 'google/gemma-4-31b-it'],
+    [
+      'nvidia/nemotron-3-super-120b-a12b:free',
+      'nvidia/nemotron-3-super-120b-a12b',
+    ],
+  ])('旧模型 %s 在配置视图和对话中使用 %s', async (oldModel, newModel) => {
+    mockKnowledge.getCourse.mockResolvedValue({
+      id: 'c1',
+      currentReleaseId: 'r1',
+      aiTestReleaseId: null,
+      aiTutorOnline: false,
+      externalId: null,
+    });
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      model: oldModel,
+      llmProvider: 'openrouter',
+      apiKey: null,
+    });
+
+    expect((await service.getConfig('c1')).model).toBe(newModel);
+    expect(
+      (await service.resolveTutorRun('c1', 'r1', 'LECTURE')).runtime.model,
+    ).toBe(newModel);
+  });
+
   it('绑定模板缺失时回退库内默认模板，再回退文件', async () => {
     mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
       lectureModeId: 'missing',

@@ -8,6 +8,17 @@ import { tokens } from '../../theme/tokens'
 
 const { Text } = Typography
 
+const modelLabels: Record<string, string> = {
+  'deepseek/deepseek-v4.1-flash': 'DeepSeek: V4.1 Flash',
+  'deepseek/deepseek-r1-0528': 'DeepSeek: R1 0528',
+  'openai/gpt-4o-mini': 'OpenAI: GPT-4o Mini',
+  'anthropic/claude-haiku-5.5': 'Anthropic: Claude Haiku 5.5',
+  'google/gemini-3.5-flash': 'Google: Gemini 3.5 Flash',
+  'qwen/qwen3.6-flash': 'Qwen: Qwen3.6 Flash',
+  'google/gemma-4-31b-it': 'Google: Gemma 4 31B',
+  'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA: Nemotron 3 Super',
+}
+
 /** 区块样式：flex 纵向，label 固定、输入区填满剩余高度 */
 const sectionStyle: React.CSSProperties = {
   display: 'flex',
@@ -267,7 +278,10 @@ export function ConfigPanel() {
             placeholder={text('selectModel')}
             disabled={!access.canEdit}
             onChange={(v) => patchForm({ llmModel: v })}
-            options={models.map((m) => ({ value: m, label: m }))}
+            options={models.map((m) => ({
+              value: m,
+              label: modelLabels[m] ?? m,
+            }))}
             style={{ width: '100%' }}
           />
         </div>

@@ -1324,7 +1324,7 @@ JWT_SECRET="your-super-secret-jwt-key-change-in-production"
 OPENROUTER_API_KEY="sk-or-xxx"
 OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
 # 模型列表接口（GET /api/ai/models）数据源，逗号分隔；第一个为默认模型（§4.2.3）
-AI_AVAILABLE_MODELS="deepseek/deepseek-v4.1-flash,deepseek/deepseek-r1,openai/gpt-4o-mini,anthropic/claude-haiku-5.5,google/gemini-3.5-flash,qwen/qwen3.6-flash,google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free"
+AI_AVAILABLE_MODELS="deepseek/deepseek-v4.1-flash,deepseek/deepseek-r1-0528,openai/gpt-4o-mini,anthropic/claude-haiku-5.5,google/gemini-3.5-flash,qwen/qwen3.6-flash,google/gemma-4-31b-it,nvidia/nemotron-3-super-120b-a12b"
 
 # CourseAiConfig.apiKey 加密密钥（AES-256-GCM；64 位 hex 即 32 字节，2026-10-14 拍板）
 AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"

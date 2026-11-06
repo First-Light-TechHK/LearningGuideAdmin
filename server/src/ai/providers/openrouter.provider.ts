@@ -7,6 +7,21 @@ import {
   LlmTimeoutError,
 } from './llm-provider.interface';
 
+export class OpenRouterHttpError extends HttpException {
+  constructor(
+    readonly upstreamStatus: number,
+    readonly diagnostic: string,
+  ) {
+    super(`LLM 上游返回 ${upstreamStatus}`, HttpStatus.BAD_GATEWAY);
+  }
+}
+
+function safeDiagnostic(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,80}$/.test(value)
+    ? value
+    : undefined;
+}
+
 /**
  * OpenRouter 适配器（§4.4.2 第 5 步；§12 事项 #2 拍板：OpenAI 兼容接口）。
  * 走 /chat/completions 流式协议（SSE），不依赖任何厂商 SDK。
@@ -73,11 +88,36 @@ export class OpenRouterProvider implements LlmProvider {
     }
 
     if (!res.ok || !res.body) {
-      // 状态码透传语义：4xx/5xx 均视为上游调用失败（对外消息不带上游细节，§9）
-      throw new HttpException(
-        `LLM 上游返回 ${res.status}`,
-        res.status >= 500 ? HttpStatus.BAD_GATEWAY : HttpStatus.BAD_GATEWAY,
-      );
+      // 只保留上游机器字段；错误正文可能含用户输入或凭据，不写日志。
+      let diagnostic = '';
+      try {
+        const payload = (await res.json()) as {
+          error?: {
+            code?: unknown;
+            type?: unknown;
+            metadata?: Record<string, unknown>;
+          };
+        };
+        const code = payload.error?.code;
+        const fields = {
+          code: safeDiagnostic(
+            typeof code === 'number' || typeof code === 'string'
+              ? String(code)
+              : undefined,
+          ),
+          type: safeDiagnostic(payload.error?.type),
+          limitSource: safeDiagnostic(payload.error?.metadata?.limit_source),
+          errorType: safeDiagnostic(payload.error?.metadata?.error_type),
+          provider: safeDiagnostic(payload.error?.metadata?.provider_name),
+        };
+        diagnostic = Object.entries(fields)
+          .filter((entry): entry is [string, string] => !!entry[1])
+          .map(([name, value]) => `${name}=${value}`)
+          .join(' ');
+      } catch {
+        // 非 JSON 错误仍保留 HTTP 状态，供日志区分。
+      }
+      throw new OpenRouterHttpError(res.status, diagnostic);
     }
 
     const reader = res.body.getReader();

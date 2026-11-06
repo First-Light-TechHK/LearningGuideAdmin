@@ -15,6 +15,7 @@ import { problem } from '../../common/problem';
 import { AllExceptionsFilter } from '../../common/filters/all-exceptions.filter';
 import { TransformInterceptor } from '../../common/interceptors/transform.interceptor';
 import { HELPDESK_QA_SOURCE } from '../../contracts/helpdesk-qa';
+import { TUTOR_IMAGE_SOURCE } from '../../contracts/tutor-image';
 import { KNOWLEDGE_CLIENT } from '../../ks/contract/knowledge-client';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AiModule } from '../ai.module';
@@ -387,6 +388,11 @@ describe('AiModule.register wiring (agent role owns suggest)', () => {
           adminApi: false,
           learnerApi,
           knowledge: { provide: KNOWLEDGE_CLIENT, useValue: {} },
+          files: {
+            module: class TestTutorImageModule {},
+            providers: [{ provide: TUTOR_IMAGE_SOURCE, useValue: {} }],
+            exports: [TUTOR_IMAGE_SOURCE],
+          },
           helpdeskQa: {
             provide: HELPDESK_QA_SOURCE,
             useValue: {

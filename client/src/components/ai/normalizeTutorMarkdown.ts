@@ -2,10 +2,12 @@
 export function normalizeTutorMarkdown(raw: string): string {
   if (!raw || typeof raw !== 'string') return ''
   const protectedToken = /(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\1[ \t]*(?=\n|$)|$)|(`+)[^\n]*?\2|\\\[[\s\S]*?(?:\\\]|$)|\\\([\s\S]*?(?:\\\)|$)|(?<!\\)\$\$[\s\S]*?(?:\$\$|$)|(?<!\\)\$(?!\$)[^$\n]*(?:\$|(?=\n|$))/g
-  const prose = (text: string) => text.replace(
-    /^Sources[ \t]*\n((?:\[\d+\][^\n]*(?:\n|$))+)[ \t]*$/m,
-    (_match, entries: string) => `> Sources\n>\n${entries.trimEnd().split('\n').map((line) => `> ${line}`).join('\n')}\n`,
-  )
+  const prose = (text: string) => text
+    .replace(/^(?: {4,}|\t+)(?=(?:\*\*|[-*] |Sources[ \t]*$|\[\d+\][ \t]))/gm, '')
+    .replace(
+      /^Sources[ \t]*\n((?:\[\d+\][^\n]*(?:\n|$))+)[ \t]*$/m,
+      (_match, entries: string) => `> Sources\n>\n${entries.trimEnd().replace(/[ \t]+(?=\[\d+\][ \t])/g, '\n').split('\n').map((line) => `> ${line}`).join('\n>\n')}\n`,
+    )
   let result = '', start = 0
   for (const match of raw.matchAll(protectedToken)) {
     result += prose(raw.slice(start, match.index))

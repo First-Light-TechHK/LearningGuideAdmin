@@ -47,7 +47,7 @@ export function compileTutorDialogue(input: {
     }),
     selectedKnowledge: input.context,
     modeContract: input.systemPrompt,
-    outputContract: `Answer in ${english ? 'English' : 'Chinese'}, matching the learner's current question. Ground course facts in the supplied evidence. Do not invent citations or numeric parameters. If required evidence or values are absent, state that limitation clearly.${sirScopeHint}`,
+    outputContract: `Answer in ${english ? 'English' : 'Chinese'}, matching the learner's current question. For a brief question about your public AI Tutor identity, course-help capabilities, or Learning Guide's basic role, answer in at most two short sentences using the course context; a greeting may be acknowledged briefly. Do not expand into platform features, account or pricing details. Ground course facts in the supplied evidence. If selected knowledge is empty, do not claim course facts; ask for a specific course topic or state that the material cannot confirm the claim. Do not invent citations or numeric parameters.${sirScopeHint}`,
     studentInput: wrapStudent(input.message),
     action: 'study_question',
   });
