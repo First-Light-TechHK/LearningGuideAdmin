@@ -196,6 +196,7 @@ export function PublishPanel() {
         footer={null}
         onCancel={() => setHistoryCourse(null)}
         width={640}
+        styles={{ body: { maxHeight: 300, overflowY: 'auto' } }}
       >
         {historyList.length === 0 ? (
           <Typography.Text type="secondary">{text('publish.noHistory')}</Typography.Text>
@@ -205,7 +206,14 @@ export function PublishPanel() {
             return (
               <div
                 key={r.id}
-                style={{ marginBottom: tokens.spacing.md, display: 'flex', alignItems: 'flex-start' }}
+                style={{
+                  marginBottom: tokens.spacing.md,
+                  padding: tokens.spacing.md,
+                  border: `1px solid ${tokens.color.border}`,
+                  borderRadius: tokens.radius.md,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                }}
               >
                 <div style={{ flex: 1 }}>
                   <Tag color={r.isActive ? 'green' : 'geekblue'}>{r.versionTag}</Tag>

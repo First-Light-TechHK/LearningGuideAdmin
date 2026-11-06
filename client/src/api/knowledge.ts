@@ -160,7 +160,7 @@ export const knowledgeApi = {
       .then((r) => r.data),
 
   /**
-   * 导出 Release 快照为 ZIP（方案 B，2026-10-30 新增）。
+   * 导出 Release 快照为 ZIP；有图片的页面为 DOCX，其余为 MD。
    * 后端返回 application/zip，客户端触发浏览器下载。
    * 错误处理对齐 axios http 拦截器：401/403 通知会话变更，解析后端统一错误信封。
    */
