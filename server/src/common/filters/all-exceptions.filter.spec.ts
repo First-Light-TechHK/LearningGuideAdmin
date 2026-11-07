@@ -9,7 +9,10 @@ import { AllExceptionsFilter } from './all-exceptions.filter';
 
 describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部细节）', () => {
   const filter = new AllExceptionsFilter();
-  let mockResponse: { status: jest.Mock; json: jest.Mock };
+  let mockResponse: {
+    status: jest.Mock;
+    json: jest.Mock<void, [Record<string, unknown>]>;
+  };
   let mockHost: ArgumentsHost;
 
   beforeEach(() => {
@@ -18,7 +21,7 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     mockResponse = {
       status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
+      json: jest.fn<void, [Record<string, unknown>]>(),
     };
     mockHost = {
       switchToHttp: () => ({
@@ -32,7 +35,7 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
   });
 
   function getBody(): Record<string, unknown> {
-    return mockResponse.json.mock.calls[0][0] as Record<string, unknown>;
+    return mockResponse.json.mock.calls[0][0];
   }
 
   it('BadRequestException 应映射为 400 + VALIDATION_ERROR', () => {
@@ -137,6 +140,8 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
     expect(bodyStr).not.toContain('admin');
     expect(bodyStr).not.toContain('internal');
     // 原始错误仍写入服务器日志
-    expect(Logger.prototype.error).toHaveBeenCalled();
+    expect(
+      jest.mocked(Logger.prototype).error.mock.calls.length,
+    ).toBeGreaterThan(0);
   });
 });

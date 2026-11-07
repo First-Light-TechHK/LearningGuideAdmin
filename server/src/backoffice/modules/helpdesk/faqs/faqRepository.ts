@@ -104,6 +104,7 @@ export type FaqPatch = Partial<
     | 'entry'
     | 'category'
     | 'popular'
+    | 'popularRank'
     | 'questionEn'
     | 'answerEn'
     | 'questionZh'
@@ -151,7 +152,7 @@ export type FaqRepository = {
   ) => Promise<HelpdeskFaq | null>;
 };
 
-const COLUMNS = `id, key, node_type, entry, category, popular, question_en, answer_en,
+const COLUMNS = `id, key, node_type, entry, category, popular, popular_rank, question_en, answer_en,
   question_zh, answer_zh, keywords, signals, status, version, created_by, updated_by,
   created_at, updated_at`;
 /** 员工端读卡的列（FAQ 审核队列 faqReview.ts 复用，和 toFaq 配套）。 */
@@ -163,6 +164,7 @@ const PATCH_COLUMNS: Record<keyof FaqPatch, string> = {
   entry: 'entry',
   category: 'category',
   popular: 'popular',
+  popularRank: 'popular_rank',
   questionEn: 'question_en',
   answerEn: 'answer_en',
   questionZh: 'question_zh',
@@ -196,6 +198,13 @@ function nodeTypeOf(value: unknown): FaqNodeType {
     : 'answer';
 }
 
+function rankOf(value: unknown): number | null {
+  const rank = Number(value);
+  return value === null || value === undefined || !Number.isInteger(rank)
+    ? null
+    : rank;
+}
+
 export function toFaq(row: Row): HelpdeskFaq {
   return {
     id: String(row.id),
@@ -204,6 +213,7 @@ export function toFaq(row: Row): HelpdeskFaq {
     entry: row.entry !== false,
     category: row.category as FaqCategory,
     popular: row.popular === true,
+    popularRank: rankOf(row.popular_rank),
     questionEn: String(row.question_en),
     answerEn: String(row.answer_en),
     questionZh: String(row.question_zh),
@@ -298,7 +308,8 @@ export function searchTerms(text: string): {
  * 先按五路取命中的行再打分：
  * - 英文全文：WHERE 就是索引表达式 @@ to_tsquery($3)（直接写在 WHERE 里，规划器按实参估算才会选
  *   GIN 索引；helpdesk-faqs-repository.pg.spec.ts 对本条 SQL 做 EXPLAIN 锁定）；不看界面语言
- *   （中文句子里的英文词也算）。只有这一路命中的行才算 ts_rank；
+ *   （中文句子里的英文词也算）。只有这一路命中的行才算 ts_rank：问题（标题）权重 1.0、答案 0.05，
+ *   再乘 2（用户 2026-11-03「应该匹配标题」；S650 英文第 1 名命中 41% → 49%，中文不变）；
  * - 拼写容错：生成列 typo_keys 与查询键有交集（GIN 索引，迁移 20261029150000）；
  * - 关键词：整句包含关键词，或词是关键词的前缀（扫已发布的行）；
  * - 中文双字：问题、答案或学员问法里出现（扫已发布的行，一遍同时得到每个双字的文档频率与每行的命中）。
@@ -379,7 +390,9 @@ WITH input AS (
 ), scored AS (
   SELECT f.*,
          CASE WHEN t.id IS NULL THEN 0
-              ELSE ts_rank(to_tsvector('english', f.question_en || ' ' || f.answer_en), i.tsq) END AS text_rank,
+              ELSE 2 * ts_rank('{0.05,0.1,0.4,1.0}'::float4[],
+                               setweight(to_tsvector('english', f.question_en), 'A')
+                               || setweight(to_tsvector('english', f.answer_en), 'D'), i.tsq) END AS text_rank,
          CASE WHEN pm.id IS NULL THEN 0 ELSE ts_rank(f.phrasing_tsv, i.tsq) END AS phrasing_rank,
          (SELECT count(*) FROM unnest(f.keywords) AS k
            WHERE k <> '' AND position(lower(k) IN i.body) > 0) AS keyword_hits,
@@ -483,9 +496,9 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
           `INSERT INTO helpdesk_faqs
              (id, category, popular, question_en, answer_en, question_zh, answer_zh,
               keywords, status, version, idempotency_key, created_by, updated_by, signals,
-              key, node_type, entry)
+              key, node_type, entry, popular_rank)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, 1, $10, $11, $11, $12::text[],
-                   $13, $14, $15)
+                   $13, $14, $15, $16)
            ON CONFLICT (idempotency_key) DO NOTHING
            RETURNING ${COLUMNS}`,
           [
@@ -505,6 +518,7 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
             faq.key === '' ? null : faq.key,
             faq.type,
             faq.entry,
+            faq.popularRank,
           ],
         );
         if (rows.length === 0) {
@@ -604,7 +618,9 @@ export function createPgFaqRepository(db: SqlDb = defaultDb): FaqRepository {
             AND NOT (id::text = ANY ($5::text[]))
             AND ($6::boolean IS NOT TRUE OR entry)
             AND node_type = ANY ($7::text[])
-          ORDER BY popular DESC, (category = $4::text) IS TRUE DESC,
+          ORDER BY popular DESC,
+                   CASE WHEN popular THEN popular_rank END ASC NULLS LAST,
+                   (category = $4::text) IS TRUE DESC,
                    updated_at DESC, id DESC
           LIMIT $3`,
         params,

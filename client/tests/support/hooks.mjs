@@ -5,7 +5,7 @@ const RELATIVE = /^\.{1,2}\//
 
 export async function resolve(specifier, context, nextResolve) {
   if (RELATIVE.test(specifier) && !/\.[cm]?[jt]sx?$|\.json$|\.css$/.test(specifier)) {
-    for (const candidate of [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`, `${specifier}/index.tsx`]) {
+    for (const candidate of [`${specifier}.ts`, `${specifier}.tsx`, `${specifier}/index.ts`, `${specifier}/index.tsx`, `${specifier}.js`]) {
       try {
         return await nextResolve(candidate, context)
       } catch {

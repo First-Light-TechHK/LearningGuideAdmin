@@ -353,6 +353,7 @@ export async function pgQaSource(
           // v5 Part A: the eval library carries no signals yet; v5 graph: every eval FAQ is an
           // entry answer, and the database derives its key from the English question
           signals: [],
+          popularRank: null,
           key: '',
           type: 'answer',
           entry: true,
@@ -597,7 +598,7 @@ export async function fakeTopCandidateSource(): Promise<ModelSource> {
         const [first] = shape.ids;
         const call =
           shape.kind === 'explain'
-            ? pi.ai.fauxToolCall('explain', { covered: false })
+            ? pi.ai.fauxToolCall('explain', { covered: 'no' })
             : pi.ai.fauxToolCall('pick_faq', {
                 intent: 'question',
                 faqId: first ?? 'none',

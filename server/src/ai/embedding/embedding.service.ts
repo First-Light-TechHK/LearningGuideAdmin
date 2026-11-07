@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { KnowledgeUnavailableError } from '../../ks/contract/knowledge-client';
 
 /**
  * Embedding 服务（RAG，2026-10-26 新增）。
@@ -55,17 +56,30 @@ export class EmbeddingService {
    * 错误仅落服务器日志，对外抛出通用错误（§9 安全）。
    */
   private async callEmbeddingApi(input: string[]): Promise<number[][]> {
-    const res = await fetch(`${this.baseUrl}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        input,
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.model,
+          input,
+        }),
+      });
+    } catch (error) {
+      const cause = error instanceof Error ? error.cause : undefined;
+      const code =
+        cause && typeof cause === 'object' && 'code' in cause
+          ? cause.code
+          : undefined;
+      this.logger.warn(
+        `Embedding API 连接失败：${error instanceof Error ? error.message : 'unknown'}${typeof code === 'string' ? ` (${code})` : ''}`,
+      );
+      throw new KnowledgeUnavailableError('向量检索无法连接');
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');

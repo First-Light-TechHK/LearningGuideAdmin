@@ -5,7 +5,7 @@ import type { PortalPreviewLink, PreviewCourse } from '../contracts/course';
 import { providerItems, strings } from '../contracts/course';
 import { boRequest } from '../lib/api';
 import { categoryLabel } from '../lib/categoryLabel';
-import { languageLabel, learningModeLabel } from './course-editor/shared';
+import { languageLabel, learningModeLabel, localizeMissing } from './course-editor/shared-utils';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -79,6 +79,10 @@ export function CoursePreviewPage() {
   const activeLesson = useMemo(
     () => course?.lessons.find((lesson) => lesson.id === activeLessonId) ?? course?.lessons[0] ?? null,
     [course, activeLessonId],
+  );
+  const pendingLessons = useMemo(
+    () => (course?.completeness.steps.content.lessons ?? []).filter((lesson) => !lesson.studyComplete),
+    [course],
   );
 
   if (error) return <section className="card cardGrow"><p>{error}</p></section>;
@@ -167,7 +171,50 @@ export function CoursePreviewPage() {
               </button>
             );
           })}
-          {course.lessons.length === 0 && <p style={{ opacity: 0.7 }}>{L(locale, '暂无完成的课时。完成 Study & Exploration 后才会显示。', 'No completed lessons yet. A lesson appears after Study & Exploration is complete.')}</p>}
+          {course.lessons.length === 0 && (
+            <div style={{ borderRadius: 12, border: '1px dashed #E0C48A', background: '#FFFBF0', padding: '12px 14px' }}>
+              {pendingLessons.length === 0 ? (
+                <>
+                  <p style={{ margin: 0, opacity: 0.75 }}>
+                    {L(
+                      locale,
+                      '保存成功不代表课时已达到学员端展示条件。学员大纲只显示学习与探索内容已完成的课时。',
+                      'A successful save does not mean a lesson is ready for learners. The outline only shows lessons with completed Study & Exploration.',
+                    )}
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontSize: 13 }}>
+                    <Link to={`/${locale}/course/${courseId}`}>{L(locale, '去编辑课程并添加课时', 'Open the editor to add lessons')}</Link>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <strong style={{ fontSize: 14 }}>
+                    {L(
+                      locale,
+                      '学员端大纲只列出学习与探索内容已完成的课时，以下课时尚未完成：',
+                      'The learner outline only lists lessons whose Study & Exploration is complete. Still incomplete:',
+                    )}
+                  </strong>
+                  <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 13, lineHeight: 1.9 }}>
+                    {pendingLessons.map((lesson) => {
+                      const shown = lesson.missing.slice(0, 6).map((item) => localizeMissing(locale, item));
+                      const rest = lesson.missing.length - shown.length;
+                      return (
+                        <li key={lesson.lessonId}>
+                          <strong>{lesson.code}</strong>{' — '}
+                          {shown.join(locale.startsWith('zh') ? '；' : '; ')}
+                          {rest > 0 ? L(locale, ` 等共 ${lesson.missing.length} 项`, ` (+${rest} more)`) : ''}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p style={{ margin: '8px 0 0', fontSize: 13 }}>
+                    <Link to={`/${locale}/course/${courseId}`}>{L(locale, '返回编辑继续完善并保存', 'Back to the editor to finish and save')}</Link>
+                  </p>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

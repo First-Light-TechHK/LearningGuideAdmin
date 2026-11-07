@@ -5,9 +5,10 @@ import { knowledgeApi, type ReleaseSummary } from '../../api/knowledge'
 import { DownloadOutlined } from '@ant-design/icons'
 import { CloseIcon } from '../icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
+import { formatDateTime } from '../../backoffice/lib/i18n/format'
 
 /**
  * Releases 版本发布面板（§3.4；2026-10-15 激活版本模型；2026-10-19 由 Publish 更名为 Releases）：
@@ -23,7 +24,7 @@ import { useKText } from './i18n'
  */
 export function PublishPanel() {
   const { message, modal } = App.useApp()
-  const { text } = useKText()
+  const { locale, text } = useKText()
   /** PRD §3.2/§3.3：发布/切换版本是 PUBLISH、删除版本是 DELETE；View/Edit 不显示 */
   const access = useWorkspaceAccess()
   const courses = useKnowledgeStore((s) => s.courses)
@@ -35,14 +36,13 @@ export function PublishPanel() {
   const [publishing, setPublishing] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
-  const loadReleases = useCallback(async () => {
+  const loadReleases = useCallback(() => {
     const map: Record<string, ReleaseSummary[]> = {}
-    await Promise.all(
+    return Promise.all(
       courses.map(async (c) => {
         map[c.id] = await knowledgeApi.listReleases(c.id)
       }),
-    )
-    setLatest(map)
+    ).then(() => setLatest(map))
   }, [courses])
 
   useEffect(() => {
@@ -196,6 +196,7 @@ export function PublishPanel() {
         footer={null}
         onCancel={() => setHistoryCourse(null)}
         width={640}
+        styles={{ body: { maxHeight: 300, overflowY: 'auto' } }}
       >
         {historyList.length === 0 ? (
           <Typography.Text type="secondary">{text('publish.noHistory')}</Typography.Text>
@@ -205,7 +206,14 @@ export function PublishPanel() {
             return (
               <div
                 key={r.id}
-                style={{ marginBottom: tokens.spacing.md, display: 'flex', alignItems: 'flex-start' }}
+                style={{
+                  marginBottom: tokens.spacing.md,
+                  padding: tokens.spacing.md,
+                  border: `1px solid ${tokens.color.border}`,
+                  borderRadius: tokens.radius.md,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                }}
               >
                 <div style={{ flex: 1 }}>
                   <Tag color={r.isActive ? 'green' : 'geekblue'}>{r.versionTag}</Tag>
@@ -224,7 +232,7 @@ export function PublishPanel() {
                   {r.isActive && <Tag color="green">{text('publish.tagLive')}</Tag>}
                   {r.isTestSelected && <Tag>{text('publish.tagTesting')}</Tag>}
                   <Typography.Text type="secondary">
-                    {new Date(r.createdAt).toLocaleString()}
+                    {formatDateTime(locale, r.createdAt)}
                   </Typography.Text>
                   {/* editing 版本不可再「切换到此版本」（2026-10-20 三次改拍） */}
                   {access.canPublish && historyCourse && !r.isEditing && (

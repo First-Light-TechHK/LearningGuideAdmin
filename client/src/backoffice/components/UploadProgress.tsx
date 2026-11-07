@@ -1,5 +1,7 @@
-import { buttonStyle } from '../pages/course-editor/shared'
+import { buttonStyle } from '../pages/course-editor/shared-utils';
 import { formatBytes } from '../lib/upload'
+import { t } from '../lib/i18n/messages'
+import { useLocale } from '../lib/navigation'
 
 const TONES = {
   active: { bar: '#1D6BFF', bg: '#EEF3FF', border: '#D7E3FF', text: '#2B58C8' },
@@ -32,6 +34,7 @@ export function UploadProgress({
   onCancel?: () => void
   cancelLabel?: string
 }) {
+  const locale = useLocale()
   const palette = TONES[tone]
   const percent = typeof pct === 'number' ? Math.max(0, Math.min(100, Math.round(pct))) : null
   const speed =
@@ -57,7 +60,7 @@ export function UploadProgress({
           {percent !== null && <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>{percent}%</span>}
           {onCancel && (
             <button type="button" style={{ ...buttonStyle, padding: '3px 10px', fontSize: 12 }} onClick={onCancel}>
-              {cancelLabel ?? '取消'}
+              {cancelLabel ?? t(locale, 'common.cancel')}
             </button>
           )}
         </span>
@@ -88,7 +91,7 @@ export function UploadProgress({
             </span>
           )}
           {speed ? <span> · {formatBytes(speed)}/s</span> : null}
-          {remaining !== null && remaining > 1 ? <span> · 约剩 {Math.ceil(remaining)}s</span> : null}
+          {remaining !== null && remaining > 1 ? <span> · {t(locale, 'common.remainingSeconds', { seconds: Math.ceil(remaining) })}</span> : null}
           {detail ? <span> · {detail}</span> : null}
         </div>
       )}

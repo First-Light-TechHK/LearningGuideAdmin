@@ -16,7 +16,8 @@ import {
   PlusIcon,
   SearchIcon,
 } from "../components/icons";
-import { Pagination, usePageSize } from "../components/Pagination";
+import { Pagination } from '../components/Pagination';
+import { usePageSize } from '../components/paginationState';
 import type { Locale } from "../lib/i18n/config";
 import { t } from "../lib/i18n/messages";
 import { boFetch } from "../lib/api";
@@ -81,43 +82,54 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     defaultWidths: [300, 180, 140, 240, 158],
   });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErrorCode(null);
-    try {
-      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-      if (appliedFilters.email.trim() !== "") params.set("email", appliedFilters.email.trim());
-      if (appliedFilters.role !== "") params.set("role", appliedFilters.role);
-      if (appliedFilters.status !== "") params.set("status", appliedFilters.status);
+  const fetchLoad = useCallback(() => {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (appliedFilters.email.trim() !== "") params.set("email", appliedFilters.email.trim());
+    if (appliedFilters.role !== "") params.set("role", appliedFilters.role);
+    if (appliedFilters.status !== "") params.set("status", appliedFilters.status);
 
-      const response = await boFetch(`/api/admin/employees?${params.toString()}`);
-      const payload = (await response.json()) as {
-        success: boolean;
-        data: EmployeeListResult | null;
-        error: ErrorCode | null;
-      };
-      if (!payload.success || !payload.data) {
-        setErrorCode(payload.error ?? "INTERNAL_ERROR");
-        return;
-      }
+    return boFetch(`/api/admin/employees?${params.toString()}`)
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          success: boolean;
+          data: EmployeeListResult | null;
+          error: ErrorCode | null;
+        };
+        if (!payload.success || !payload.data) {
+          setErrorCode(payload.error ?? "INTERNAL_ERROR");
+          return;
+        }
 
-      // 筛选/删除后总数变少时，把越界的页码拉回最后一页，避免停在空白页
-      const lastPage = Math.max(1, Math.ceil(payload.data.total / payload.data.pageSize));
-      if (page > lastPage) {
-        setPage(lastPage);
-        return;
-      }
-      setData(payload.data);
-    } catch {
-      setErrorCode("INTERNAL_ERROR");
-    } finally {
-      setLoading(false);
-    }
+        // 筛选/删除后总数变少时，把越界的页码拉回最后一页，避免停在空白页
+        const lastPage = Math.max(1, Math.ceil(payload.data.total / payload.data.pageSize));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
+        setData(payload.data);
+      })
+      .catch(() => setErrorCode("INTERNAL_ERROR"))
+      .finally(() => setLoading(false));
   }, [appliedFilters, page, pageSize]);
 
+  const [loadSource, setLoadSource] = useState(() => ({ appliedFilters, page, pageSize }));
+  if (
+    loadSource.appliedFilters !== appliedFilters ||
+    loadSource.page !== page ||
+    loadSource.pageSize !== pageSize
+  ) {
+    setLoadSource({ appliedFilters, page, pageSize });
+    setLoading(true);
+    setErrorCode(null);
+  }
+  const load = useCallback(() => {
+    setLoading(true);
+    setErrorCode(null);
+    return fetchLoad();
+  }, [fetchLoad]);
   useEffect(() => {
-    void load();
-  }, [load]);
+    void fetchLoad();
+  }, [fetchLoad]);
 
   // 表格/页面滚动或窗口变化时关闭行菜单，避免 fixed 菜单停在旧位置
   useEffect(() => {

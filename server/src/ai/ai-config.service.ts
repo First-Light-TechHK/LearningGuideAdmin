@@ -25,6 +25,16 @@ import {
   type PromptMode,
 } from './prompt-defaults';
 
+const REPLACED_MODELS: Record<string, string> = {
+  'deepseek/deepseek-r1': 'deepseek/deepseek-r1-0528',
+  'google/gemma-4-31b-it:free': 'google/gemma-4-31b-it',
+  'nvidia/nemotron-3-super-120b-a12b:free': 'nvidia/nemotron-3-super-120b-a12b',
+};
+
+function currentModel(model: string): string {
+  return REPLACED_MODELS[model] ?? model;
+}
+
 /** 单模式的 AI 配置视图（2026-10-27：仅含 System Prompt；Welcome / Model 已提升为课程级共享） */
 export interface AiModeView {
   /** 该模式自定义 System Prompt 覆盖值（null = 未自定义，前端回退该模式模板默认值） */
@@ -472,19 +482,31 @@ export class AiConfigService implements OnModuleInit {
           where: { courseId_releaseId: { courseId, releaseId } },
         })
       : null;
+    return this.promptsFromConfig(cfg, mode);
+  }
+
+  private async promptsFromConfig(
+    cfg: CourseAiConfig | null,
+    mode: PromptMode,
+  ): Promise<ResolvedPrompts> {
     const modeIdField =
       mode === 'LECTURE'
         ? cfg?.lectureModeId
         : mode === 'SOCRATIC'
           ? cfg?.socraticModeId
           : cfg?.assessmentModeId;
-    const template = modeIdField
+    let template = modeIdField
       ? await this.prisma.promptTemplate.findUnique({
           where: { id: modeIdField },
         })
       : await this.prisma.promptTemplate.findFirst({
           where: { mode, isDefault: true },
         });
+    if (modeIdField && !template?.systemPrompt) {
+      template = await this.prisma.promptTemplate.findFirst({
+        where: { mode, isDefault: true },
+      });
+    }
     // System Prompt 按模式取自定义覆盖 → 模板 → 文件默认
     const customPrompt =
       mode === 'LECTURE'
@@ -529,6 +551,26 @@ export class AiConfigService implements OnModuleInit {
           where: { courseId_releaseId: { courseId, releaseId } },
         })
       : null;
+    void _mode;
+    return this.runtimeFromConfig(cfg);
+  }
+
+  /** 同一轮使用同一份配置，避免并发 Save 混合模型与 Prompt。 */
+  async resolveTutorRun(
+    courseId: string,
+    releaseId: string,
+    mode: 'LECTURE' | 'SOCRATIC',
+  ) {
+    const cfg = await this.prisma.courseAiConfig.findUnique({
+      where: { courseId_releaseId: { courseId, releaseId } },
+    });
+    return {
+      runtime: this.runtimeFromConfig(cfg),
+      prompts: await this.promptsFromConfig(cfg, mode),
+    };
+  }
+
+  private runtimeFromConfig(cfg: CourseAiConfig | null) {
     const apiKey = cfg?.apiKey
       ? this.crypto.decrypt(cfg.apiKey)
       : (this.config.get<string>('OPENROUTER_API_KEY') ?? '');
@@ -539,7 +581,7 @@ export class AiConfigService implements OnModuleInit {
     }
     return {
       provider: cfg?.llmProvider ?? 'openrouter',
-      model: cfg?.model ?? this.defaultModel(),
+      model: currentModel(cfg?.model ?? this.defaultModel()),
       apiKey,
       baseUrl:
         this.config.get<string>('OPENROUTER_BASE_URL') ??
@@ -598,7 +640,7 @@ export class AiConfigService implements OnModuleInit {
       llmProvider: cfg?.llmProvider ?? 'openrouter',
       // 2026-10-29：main 为共享主提示词（讲授/苏格拉底拼接最前）；Welcome / Model 为课程级共享；System Prompt 按模式分开
       welcomeMsg: cfg?.welcomeMsg ?? null,
-      model: cfg?.model ?? this.defaultModel(),
+      model: currentModel(cfg?.model ?? this.defaultModel()),
       main: {
         systemPrompt: cfg?.mainSystemPrompt ?? null,
       },

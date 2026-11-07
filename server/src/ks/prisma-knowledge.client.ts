@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { lockCourseRow } from '../prisma/course-lock';
-import { EmbeddingService } from '../ai/embedding/embedding.service';
+import {
+  EMBEDDING_QUERY_CLIENT,
+  type EmbeddingQueryClient,
+} from './contract/embedding-client';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   KnowledgeClient,
@@ -32,7 +35,8 @@ const COURSE_FIELDS = {
 export class PrismaKnowledgeClient implements KnowledgeClient {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly embedding: EmbeddingService,
+    @Inject(EMBEDDING_QUERY_CLIENT)
+    private readonly embedding: EmbeddingQueryClient,
   ) {}
 
   getCourse(courseId: string): Promise<KnowledgeCourse | null> {

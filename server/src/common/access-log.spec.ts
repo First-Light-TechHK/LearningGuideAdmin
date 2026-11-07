@@ -25,7 +25,8 @@ describe('accessLog（2026-10-28 复盘 A4）', () => {
   beforeEach(() => {
     logged = [];
     delete process.env.ACCESS_LOG;
-    const { Logger } = jest.requireActual('@nestjs/common');
+    const { Logger } =
+      jest.requireActual<typeof import('@nestjs/common')>('@nestjs/common');
     spy = jest
       .spyOn(Logger.prototype, 'log')
       .mockImplementation((message: unknown) => {
@@ -47,7 +48,7 @@ describe('accessLog（2026-10-28 复盘 A4）', () => {
     (res as unknown as EventEmitter).emit('finish');
 
     expect(logged).toHaveLength(1);
-    const entry = JSON.parse(logged[0]);
+    const entry = JSON.parse(logged[0]) as Record<string, unknown>;
     expect(entry).toMatchObject({
       type: 'access',
       method: 'GET',

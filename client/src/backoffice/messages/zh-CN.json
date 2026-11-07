@@ -26,7 +26,10 @@
     "copied": "已复制",
     "language": "语言",
     "retry": "重试",
-    "sessionUnavailable": "暂时无法连接服务器确认登录状态，请检查网络后重试。"
+    "sessionUnavailable": "暂时无法连接服务器确认登录状态，请检查网络后重试。",
+    "remainingSeconds": "约剩 {seconds} 秒",
+    "resizeColumn": "调整列宽",
+    "resizeColumnHint": "拖动调整列宽，双击恢复默认"
   },
   "nav": {
     "course": "课程",
@@ -40,9 +43,13 @@
     "employeeAccount": "员工账号",
     "paymentGateway": "支付网关",
     "notificationConfiguration": "通知配置",
-    "toggleSidebar": "切换侧边栏"
+    "toggleSidebar": "切换侧边栏",
+    "learningAccess": "学习权限与实验"
   },
   "settings": {
+    "stop": "停止生成",
+    "incomplete": "回答未完成",
+    "aborted": "已停止生成",
     "paymentGatewayTitle": "支付网关",
     "paymentGatewayBody": "该配置在 P0 只保留入口，具体参数由单独的 PRD 定义。",
     "notificationConfigurationTitle": "通知配置",
@@ -131,7 +138,8 @@
     "collapse": "收起侧边栏",
     "expand": "展开侧边栏",
     "role": "角色",
-    "settingsSection": "设置"
+    "settingsSection": "设置",
+    "switchLanguage": "Switch to English (UK)"
   },
   "course": {
     "title": "课程",
@@ -150,7 +158,7 @@
   "operations": {
     "title": "运营位",
     "popularCourses": "热门课程",
-    "discoveryBanner": "发现页 Banner",
+    "discoveryBanner": "发现页横幅",
     "publish": "发布"
   },
   "history": {
@@ -260,7 +268,8 @@
     "PASSWORD_TOO_WEAK": "密码未满足最低强度要求。",
     "PASSWORD_MISMATCH": "两次输入的密码不一致。",
     "PASSWORD_SAME_AS_CURRENT": "新密码不能与当前密码相同。",
-    "INTERNAL_ERROR": "系统出现异常，请重试。"
+    "INTERNAL_ERROR": "系统出现异常，请重试。",
+    "serverGeneric": "操作失败，请重试。"
   },
   "aiTutor": {
     "title": "AI 导师",
@@ -289,11 +298,11 @@
     "saveFailed": "保存失败",
     "onlineOn": "已上线（对用户侧开放）",
     "onlineOff": "已下线（不对用户侧开放）",
-    "onlineNotSynced": "请先在 Portal 同步该课程后再开启 Online",
-    "onlineNoLive": "请先将某个版本设为上线后再开启 Online",
+    "onlineNotSynced": "请先在 Portal 同步该课程后再开启上线",
+    "onlineNoLive": "请先将某个版本设为上线后再开启上线",
     "chatNoRelease": "请先选择测试版本或将某个版本设为上线",
     "unpublished": "未发布",
-    "noReleases": "暂无 Release",
+    "noReleases": "暂无发布版本",
     "live": "已上线",
     "testing": "测试中",
     "setLive": "设为上线",
@@ -349,7 +358,7 @@
       "allCoursesPlaceholder": "全部课件（选择课程作为同步目标）"
     },
     "search": {
-      "placeholder": "搜索标题或 heading…"
+      "placeholder": "搜索标题…"
     },
     "tree": {
       "sortFailed": "排序保存失败",
@@ -361,8 +370,8 @@
       "newPage": "新建页面",
       "uploadDoc": "上传文档建页",
       "deleteCourse": "删除课程",
-      "emptyAll": "暂无课件，请在上方选择同步目标后 Sync",
-      "emptyCourse": "该课程尚未同步，点击下方 Sync 拉取",
+      "emptyAll": "暂无课件，请在上方选择同步目标后同步",
+      "emptyCourse": "该课程尚未同步，点击下方同步按钮拉取",
       "noMatch": "无匹配结果",
       "dragReorder": "拖拽调整顺序",
       "staleTooltip": "该节点与外部源不同步，不会作为 AI Tutor 知识库使用",
@@ -394,8 +403,8 @@
       "deleteVersionAria": "删除版本 {version}",
       "publishModalTitle": "发布课程「{title}」全部页面快照",
       "publish": "发布",
-      "publishHint": "Create Release 将发布整个课程下所有页面的快照（非单个页面）。",
-      "notesPlaceholder": "Revision Notes（必填）",
+      "publishHint": "创建发布版本将发布整个课程下所有页面的快照（非单个页面）。",
+      "notesPlaceholder": "修订说明（必填）",
       "tagEditing": "编辑中",
       "tagLive": "线上",
       "tagTesting": "测试中",
@@ -524,7 +533,8 @@
       "enquiries": "工单",
       "faqs": "常见问题",
       "candidates": "FAQ 候选",
-      "data": "HelpDesk 数据"
+      "data": "HelpDesk 数据",
+      "changes": "修改记录"
     },
     "searchPlaceholder": "搜索学员或工单...",
     "filter": "筛选工单",
@@ -711,7 +721,8 @@
       "REWRITE_UNAVAILABLE": "这个环境还没接上 AI（缺 OpenRouter 的 key），先手动改。",
       "REWRITE_FAILED": "AI 这次没按要求改，换个说法再试。",
       "REWRITE_TIMEOUT": "AI 这次太慢没回来，过一会儿再试，或者先手动改。",
-      "REWRITE_RATE_LIMITED": "一分钟内让 AI 改太多次了，稍等一下再试。"
+      "REWRITE_RATE_LIMITED": "一分钟内让 AI 改太多次了，稍等一下再试。",
+      "FAQ_RELEASE_EVALUATING": "这个版本正在检查，请等结果出来。"
     },
     "addFaq": "新增常见问题",
     "actions": {
@@ -919,6 +930,13 @@
         "english": "英文",
         "chinese": "中文",
         "drafted": "草稿 待核实：保存前请核实每一个事实。保存即发布。"
+      },
+      "tabs": {
+        "details": "详情",
+        "graph": "追问与问法",
+        "history": "修改历史",
+        "historyCount": "修改历史（{count}）",
+        "label": "FAQ 分区"
       }
     },
     "preview": {
@@ -952,7 +970,7 @@
         "choice": "答案框里写一句提问，学员从 2–4 个选项里选一个；不要写数字或链接。"
       },
       "entry": "入口问题",
-      "entryHint": "可以直接匹配学员的新问题，也可以作为 chip 展示。只在某张卡片之后才有意义的追问请关掉。",
+      "entryHint": "可以直接匹配学员的新问题，也可以作为快捷选项展示。只在某张卡片之后才有意义的追问请关掉。",
       "signals": "学员情境",
       "signalsHint": "处于这些情境的学员会优先看到这张卡片。",
       "key": "标识：{key}",
@@ -1029,7 +1047,7 @@
         "choice_prompt": "选择题的提问不能包含数字或链接。",
         "follow_ups": "追问超过 6 条。",
         "language": "缺少英文或中文。",
-        "label_length": "chip 或选项的文字太长。",
+        "label_length": "快捷选项的文字太长。",
         "answer_blocks": "有一种语言的答案是空的。",
         "map_shape": "流程树或对象表里有节点放错了层级。",
         "map_placement": "有卡挂在了不能挂卡的节点上（只能挂在步骤、岔子或格子上）。",
@@ -1084,9 +1102,9 @@
     "releases": {
       "button": "版本发布",
       "title": "版本发布",
-      "subtitle": "学员只看到已上线的版本。改动要创建新版本、通过检查和评测、再发布后才会上线。",
+      "subtitle": "用户只看到已上线的版本。改动要生成新版本、通过检查、再发布后才会上线。",
       "live": "当前上线：v{version}",
-      "none": "还没有发布过版本，学员看到的是逐条保存的常见问题。",
+      "none": "还没有发布过版本，用户看到的是逐条保存的常见问题。",
       "working": "相对当前上线版本的改动",
       "noChanges": "相对当前上线版本没有改动。",
       "diff": {
@@ -1109,7 +1127,7 @@
         "answerEn": "英文答案",
         "questionZh": "中文问题",
         "answerZh": "中文答案",
-        "signals": "学员情境",
+        "signals": "用户情境",
         "keywords": "关键词",
         "kind": "连接类型",
         "position": "顺序",
@@ -1120,9 +1138,9 @@
       "checksPassed": "全部检查通过",
       "checksFailed": "{count} 个问题需要处理",
       "counts": "{nodes} 个问题、{entries} 个入口、{choices} 道选择题、{edges} 条连接、{phrasings} 种问法",
-      "create": "发布新版本",
-      "creating": "检查中…",
-      "createHint": "冻结工作副本，然后运行图检查和评测。发布之前不会上线。",
+      "create": "生成新版本",
+      "creating": "生成中…",
+      "createHint": "冻结工作副本，然后在后台运行图检查、检索检查和真流程抽样（约 3–5 分钟）。发布之前不会上线。",
       "sameAsLatest": "相对 v{version} 没有改动，没有新建版本。",
       "created": "已创建 v{version}。",
       "history": "版本历史",
@@ -1135,10 +1153,11 @@
       },
       "status": {
         "draft": "待发布",
-        "evaluating": "评测中",
+        "evaluating": "检查中",
         "published": "已上线",
         "rejected": "未通过",
-        "superseded": "已被替换"
+        "superseded": "已被替换",
+        "interrupted": "检查中断"
       },
       "passed": "通过",
       "failed": "未通过",
@@ -1149,7 +1168,7 @@
       "misses": "{count} 个用例没有命中",
       "publish": "发布 v{version}",
       "publishShort": "发布",
-      "publishConfirm": "发布 v{version}？学员大约一分钟内就会看到。",
+      "publishConfirm": "发布 v{version}？用户大约一分钟内就会看到。",
       "confirmNo": "取消",
       "publishedNotice": "v{version} 已上线。",
       "recheck": "重新检查",
@@ -1164,7 +1183,18 @@
       "empty": "还没有版本。",
       "loading": "加载中…",
       "createdOn": "创建于 {date}",
-      "checksValue": "图检查：{result}"
+      "checksValue": "图检查：{result}",
+      "createdChecking": "已生成 v{version}，正在后台检查（约 3–5 分钟）。可以先关掉这个窗口，回来再看结果。",
+      "recheckStarted": "v{version} 已开始重新检查。",
+      "progress": {
+        "starting": "检查中…",
+        "retrieval": "检查中：检索",
+        "vectors": "检查中：准备向量",
+        "model": "检查中：真流程抽样 {done} / {total}"
+      },
+      "interruptedHint": "检查没跑完（服务重启或部署打断了它）。点「重新检查」再跑一次。",
+      "model": "真流程抽样{result}：错卡 {wrong}%，{cases} 题，约 ¥{cny}",
+      "modelNotRun": "真流程抽样：未运行"
     },
     "candidates": {
       "search": "搜索话题、问题或例句...",
@@ -1800,6 +1830,451 @@
           "language": "AI 把{field}改成了别的语言，已保留原文。"
         }
       }
+    },
+    "changes": {
+      "note": "FAQ、追问、选项、问法和版本的每一次改动都记在这里：谁改的、什么时候改的、改了什么。记录不能修改或删除。",
+      "search": "搜索问题、key 或文字...",
+      "everyone": "所有人",
+      "system": "系统",
+      "systemHint": "种子数据或自动写入",
+      "formerEmployee": "已不在的员工",
+      "byLabel": "修改人",
+      "typeLabel": "改动类型",
+      "rangeLabel": "时间范围",
+      "types": {
+        "all": "全部改动",
+        "faq": "FAQ",
+        "follow_up": "追问",
+        "option": "选项",
+        "phrasing": "问法",
+        "release": "版本"
+      },
+      "ranges": {
+        "all": "全部时间",
+        "today": "今天",
+        "7d": "最近 7 天",
+        "30d": "最近 30 天",
+        "90d": "最近 90 天"
+      },
+      "count": "{count} 条改动",
+      "countOne": "1 条改动",
+      "columns": {
+        "when": "时间",
+        "by": "修改人",
+        "what": "改了什么",
+        "change": "改动",
+        "action": "操作"
+      },
+      "viewDetails": "查看详情",
+      "viewDetailsLabel": "查看详情：{action}，{title}",
+      "showing": "第 {from}–{to} 条，共 {total} 条改动",
+      "empty": "还没有改动记录。",
+      "emptyFiltered": "没有符合搜索或筛选条件的改动。",
+      "faqFilter": "只看这条 FAQ：{question}",
+      "faqFilterUnknown": "只看一条 FAQ",
+      "clearFaq": "看全部 FAQ",
+      "subjects": {
+        "faq": "FAQ",
+        "follow_up": "追问",
+        "option": "选项",
+        "phrasing": "问法",
+        "release": "版本"
+      },
+      "actions": {
+        "created": "新建",
+        "edited": "修改",
+        "archived": "删除",
+        "added": "添加",
+        "changed": "改文字",
+        "reordered": "调整顺序",
+        "removed": "移除",
+        "version_created": "新建版本",
+        "published": "发布",
+        "rolled_back": "回滚"
+      },
+      "version": "版本 {version}",
+      "popular": "热门",
+      "empty_value": "（空）",
+      "status": {
+        "published": "在用",
+        "archived": "已删除"
+      },
+      "fields": {
+        "key": "Key",
+        "type": "卡片类型",
+        "entry": "入口问题",
+        "category": "分类",
+        "popular": "热门 FAQ",
+        "questionEn": "问题（英文）",
+        "answerEn": "答案（英文）",
+        "questionZh": "问题（中文）",
+        "answerZh": "答案（中文）",
+        "keywords": "关键词",
+        "signals": "用户情境",
+        "status": "状态",
+        "kind": "类型",
+        "position": "位置",
+        "labelEn": "显示文字（英文）",
+        "labelZh": "显示文字（中文）"
+      },
+      "summary": {
+        "archived": "已从帮助中心和 AI 客服中移除",
+        "noFields": "保存了，但没有字段变化",
+        "shown": "排在{position}",
+        "unlinked": "不再出现在这张卡片之后",
+        "moved": "从{from}移到{to}",
+        "customText": "自定义文字：{text}",
+        "questionText": "显示问题本身",
+        "phrasing": "“{text}”（{language}）",
+        "published": "用户现在看到版本 {version}",
+        "rolledBack": "复制版本 {version}，并立即发布",
+        "checksPassed": "检查通过",
+        "problems": "检查发现 {count} 个问题"
+      },
+      "learners": {
+        "title": "用户是否已看到",
+        "live": "已看到",
+        "pending": "还没有",
+        "pendingHint": "下一次发布版本后生效",
+        "rolledBack": "版本 {version} 起上线过，后来被回滚撤下。下一次发布后重新生效。",
+        "liveIn": "从版本 {version} 起上线",
+        "liveNow": "保存即生效（还没有发布过版本）"
+      },
+      "details": {
+        "title": "改动详情",
+        "whoWhen": "谁、什么时候",
+        "changedBy": "修改人",
+        "timeZone": "{zone} 时间",
+        "what": "改了什么",
+        "whatCount": "改了什么（{count} 个字段）",
+        "whatOne": "改了什么（1 个字段）",
+        "before": "改前",
+        "after": "改后",
+        "legend": "没变的字段不显示。红色 = 删掉的，绿色 = 加上的。",
+        "listChanges": "{field}的变化",
+        "openFaq": "打开这条 FAQ",
+        "close": "关闭",
+        "versionLine": "版本 {from} → {to}",
+        "newVersion": "版本 {to}",
+        "phrasing": "问法",
+        "language": "语言",
+        "source": "来源",
+        "sources": {
+          "staff": "BackOffice",
+          "flywheel": "FAQ 候选"
+        },
+        "parent": "出现在",
+        "child": "问题",
+        "release": "版本",
+        "releaseFrom": "复制自",
+        "problems": "检查发现的问题",
+        "faqGone": "这条 FAQ 后来被删除了。"
+      },
+      "history": {
+        "hint": "这条 FAQ、它的追问和问法每一次保存的改动，新的在前。",
+        "wentLive": "上线",
+        "wentLiveLine": "随版本 {version} 发布",
+        "view": "查看改动",
+        "hide": "收起改动",
+        "openLog": "在修改记录中打开",
+        "empty": "还没有改动。",
+        "truncated": "这里只列出最新的 {count} 条，完整记录请在修改记录中查看。",
+        "more": "显示更多",
+        "loading": "加载中…"
+      }
     }
+  },
+  "students": {
+    "title": "学生管理",
+    "subtitle": "查看学生账号、订阅和单人学习权限。",
+    "featureSettings": "功能权限设置",
+    "countTotal": "学生总数",
+    "countActive": "启用账号",
+    "countInactive": "停用账号",
+    "searchPlaceholder": "搜索姓名或邮箱",
+    "searchLabel": "搜索学生",
+    "statusFilter": "状态",
+    "subscriptionFilter": "订阅",
+    "specialFilter": "特殊权限",
+    "status": {
+      "all": "全部状态",
+      "active": "启用",
+      "inactive": "停用"
+    },
+    "subscriptionOption": {
+      "all": "全部订阅",
+      "current": "有订阅",
+      "none": "无订阅",
+      "grace": "扣款失败（宽限期）",
+      "ending": "已取消，仍可用"
+    },
+    "specialOption": {
+      "all": "全部特殊权限",
+      "any": "有单人设置",
+      "none": "无单人设置",
+      "improve_tutor": "Improve Tutor",
+      "ai_support_assistant": "AI 客服"
+    },
+    "reset": "重置筛选",
+    "col": {
+      "student": "学生",
+      "email": "邮箱",
+      "status": "状态",
+      "subscription": "订阅",
+      "special": "特殊权限",
+      "registered": "注册时间",
+      "action": "操作"
+    },
+    "view": "查看",
+    "viewStudent": "查看 {name}",
+    "none": "无",
+    "noSubscription": "无订阅",
+    "subscriptionsCount": "{count} 个订阅",
+    "featuresEnabled": "{count} 项单人设置",
+    "denied": "{feature}（禁用）",
+    "noEmail": "无邮箱",
+    "pendingShort": "待验证",
+    "loading": "正在加载学生…",
+    "empty": "没有符合筛选条件的学生。",
+    "emptyAll": "还没有学生注册。",
+    "loadError": "学生列表加载失败。",
+    "retry": "重试",
+    "notConnected": "学生管理还没接上 Portal（PORTAL_HELPDESK_BASE_URL / PORTAL_HELPDESK_TOKEN）。",
+    "accountStatus": {
+      "active": "启用",
+      "inactive": "停用"
+    },
+    "subState": {
+      "active": "生效中",
+      "cancel_at_period_end": "已取消",
+      "grace": "宽限期",
+      "expired": "已结束",
+      "trial_canceled": "试用已取消"
+    },
+    "feature": {
+      "improve_tutor": "Improve Tutor",
+      "ai_support_assistant": "AI 客服"
+    },
+    "featureHint": {
+      "improve_tutor": "查看依据并提交更好的答案。",
+      "ai_support_assistant": "用 FAQ 回答平台问题。"
+    }
+  },
+  "studentDrawer": {
+    "title": "学生详情",
+    "close": "关闭",
+    "studentId": "学生 ID：{id}",
+    "copyId": "复制 ID",
+    "copied": "已复制",
+    "registered": "注册于 {date}",
+    "emailState": {
+      "verified": "邮箱已验证",
+      "pending": "邮箱待验证",
+      "admin_exempt": "邮箱已人工核验"
+    },
+    "emailChanged": "{name} 于 {date} 修改了邮箱 · {reference}",
+    "exemptBy": "{name} 于 {date} 人工核验 · {reference}",
+    "profile": "资料",
+    "country": "国家 / 地区",
+    "ageRange": "年龄段",
+    "education": "学历",
+    "interests": "兴趣领域",
+    "language": "语言",
+    "signIn": "登录方式",
+    "notProvided": "未填写",
+    "signInMethod": {
+      "email": "邮箱",
+      "google": "Google",
+      "wechat": "微信"
+    },
+    "noPassword": "未设置密码",
+    "languageName": {
+      "en-GB": "英语（英国）",
+      "zh-CN": "简体中文"
+    },
+    "subscription": "订阅",
+    "subscriptionCount": "订阅（{count}）",
+    "noSubscription": "当前没有订阅。",
+    "renews": "续费日：{date}",
+    "endsOn": "到期：{date}",
+    "graceUntil": "扣款失败 · 可用到 {date}",
+    "endedOn": "已结束：{date}",
+    "aiTutor": "不限次 AI Tutor",
+    "coursesOnly": "课程",
+    "device": {
+      "pc": "PC",
+      "mobile": "手机"
+    },
+    "trial": "试用",
+    "viewReceipt": "查看收据",
+    "showEnded": "显示 {count} 个已结束",
+    "hideEnded": "收起已结束",
+    "access": "学习权限与实验",
+    "accessHint": "单人设置覆盖全局默认，不改变订阅。",
+    "override": {
+      "default": "全局默认",
+      "allow": "允许",
+      "deny": "禁用"
+    },
+    "overrideLabel": "{feature} 单人设置",
+    "effective": {
+      "on": "已开启",
+      "off": "未开启"
+    },
+    "reason": {
+      "account_inactive": "账号已停用",
+      "emergency_off": "已对所有人紧急关闭",
+      "missing_prerequisite": "需要 AI Tutor 订阅",
+      "override_deny": "单人禁用",
+      "override_allow": "单人允许",
+      "global_on": "全局默认开",
+      "global_off": "全局默认关"
+    },
+    "unsaved": "有未保存的修改",
+    "changeReason": "修改原因",
+    "changeReasonPlaceholder": "例如：试点名单、工单号",
+    "overridesKept": "单人设置会保留，重新启用后继续生效。",
+    "experiment": "学习实验",
+    "comingSoon": "即将推出",
+    "actions": "账号操作",
+    "actionsHint": "停用账号不会取消学生的 Stripe 订阅。",
+    "sendReset": "发送重置密码链接",
+    "sendSetup": "发送设置密码链接",
+    "resendVerification": "重发验证邮件",
+    "editEmail": "修改邮箱",
+    "deactivate": "停用账号",
+    "activate": "启用账号",
+    "passwordBlocked": {
+      "inactive": "请先启用账号再发送密码链接。",
+      "no_email": "这个账号没有邮箱。",
+      "email_unverified": "密码链接只能发到已验证或已人工核验的邮箱。"
+    },
+    "cancel": "取消",
+    "save": "保存修改",
+    "saving": "正在保存…",
+    "saved": "已保存，学生下一次请求时生效。",
+    "inactiveBanner": "这个账号已停用",
+    "inactiveBody": "{name} 于 {date} 停用。原因：{reason}。登录和产品使用都被拦截，订阅照常扣费。",
+    "readOnly": "只读。你的角色可以查看这个学生，但不能修改。",
+    "loadError": "学生详情加载失败。",
+    "notFound": "这个学生已不存在。",
+    "discardTitle": "放弃未保存的修改？",
+    "discardBody": "学习权限的修改还没保存。",
+    "discard": "放弃",
+    "keepEditing": "继续编辑",
+    "orderId": "订单 {id}"
+  },
+  "studentModal": {
+    "confirm": "确认",
+    "cancel": "取消",
+    "reason": "原因",
+    "reasonPlaceholder": "发生了什么，以及工单号",
+    "deactivateTitle": "停用 {name}？",
+    "deactivateBody": "会立即在所有设备上退出，并且在重新启用前无法用邮箱、Google 或微信登录。数据和单人设置都会保留。",
+    "deactivateBilling": "不影响扣费。订阅会照常续费，如需取消或退款请到 Stripe 处理。",
+    "deactivateConfirm": "停用",
+    "activateTitle": "启用 {name}？",
+    "activateBody": "恢复登录和产品使用，单人设置重新生效。不会验证邮箱，也不改订阅。",
+    "activateConfirm": "启用",
+    "emailTitle": "修改主邮箱",
+    "emailCurrent": "当前：{email}",
+    "emailNew": "新邮箱",
+    "emailReason": "原因或工单号",
+    "emailStandard": "会给新邮箱发验证链接，点开前状态是待验证。新旧邮箱都会收到通知，学生会被退出登录。",
+    "emailExempt": "已人工核验邮箱归属（管理员豁免）",
+    "emailExemptRef": "工单号或核验方式",
+    "emailExemptWarn": "这是员工的核验记录，不代表学生点过验证链接，会作为安全事件记录。",
+    "emailSend": "发送验证链接",
+    "emailSave": "确认并保存",
+    "passwordResetTitle": "发送重置密码链接",
+    "passwordSetupTitle": "发送设置密码链接",
+    "passwordTo": "发给 {email}",
+    "passwordResetBody": "学生会收到一个一次性、会过期的链接，用后替换当前密码并退出其他设备。",
+    "passwordSetupBody": "这个账号还没有密码。链接可以让学生设置一个邮箱登录密码，Google 或微信仍然保持绑定。",
+    "passwordSend": "发送链接",
+    "resendTitle": "重发验证邮件",
+    "resendBody": "新的验证链接会发到 {email}，之前的链接失效。",
+    "resendSend": "发送",
+    "required": "必填",
+    "invalidEmail": "请输入有效的邮箱地址。"
+  },
+  "studentNotice": {
+    "deactivate": "账号已停用。",
+    "activate": "账号已启用。",
+    "change_email": "邮箱已修改，验证链接已发送。",
+    "change_email_exempt": "邮箱已修改并标记为人工核验。",
+    "change_email_unsent": "邮箱已修改，但验证邮件没发出去。请点「重发验证邮件」。",
+    "resend_verification": "验证邮件已发送。",
+    "send_password_link": "密码链接已发送。"
+  },
+  "studentError": {
+    "STUDENTS_NOT_CONNECTED": "学生管理还没接上 Portal。",
+    "STUDENTS_UNAVAILABLE": "Portal 没有响应，请重试。",
+    "STUDENT_NOT_FOUND": "这个学生已不存在。",
+    "VERSION_CONFLICT": "刚有人改过，请刷新看最新内容后再试。",
+    "EMAIL_TAKEN": "这个邮箱属于另一个账号。这里不会合并账号，请走账号找回流程。",
+    "EMAIL_UNVERIFIED": "邮箱需要先验证或人工核验。",
+    "ACCOUNT_INACTIVE": "请先启用账号。",
+    "RATE_LIMITED": "刚发过链接，请等一分钟再发。",
+    "EMAIL_UNAVAILABLE": "这个环境还没配置发邮件。",
+    "EMAIL_DELIVERY_FAILED": "邮件没发出去，请重试。",
+    "NOT_AUTHORISED": "你的角色不能做这个修改。",
+    "INVALID_INPUT": "请检查填写的内容后重试。",
+    "default": "出错了，请重试。"
+  },
+  "learningAccess": {
+    "title": "学习权限与实验",
+    "subtitle": "管理学生能用哪些功能。实验功能即将推出。",
+    "save": "保存修改",
+    "saving": "正在保存…",
+    "discard": "放弃",
+    "unsaved": "有未保存的修改",
+    "featureAccess": "功能权限",
+    "featureAccessHint": "选择哪些功能对所有符合条件的学生开放。",
+    "globalDefault": "全局默认",
+    "on": "开",
+    "off": "关",
+    "footnote": "全局关闭后，仍可以在学生管理里给单个学生开启。",
+    "overrides": "单人设置：{allow} 个允许 · {deny} 个禁用",
+    "updated": "{name} 于 {date} 最后修改",
+    "emergencyOff": "紧急关闭",
+    "resume": "恢复",
+    "emergencyStatus": "已对所有人关闭",
+    "emergencyBanner": "{feature} 已对所有人关闭",
+    "emergencyBody": "{name} 于 {date} 关闭。原因：{reason}。单人允许的学生也用不了。全局默认和单人设置都保留。",
+    "emergencyTitle": "对所有人关闭 {feature}？",
+    "emergencyConfirmBody": "所有学生下一次请求时就用不了，包括单人允许的。其他设置不变，点恢复就回到原来的状态。",
+    "emergencyConfirm": "关闭",
+    "resumeTitle": "恢复 {feature}？",
+    "resumeBody": "回到全局默认和单人设置决定的状态。",
+    "resumeConfirm": "恢复",
+    "confirmOnTitle": "对所有符合条件的学生开启 {feature}？",
+    "confirmOnBody": "约 {count} 个按全局默认的学生会在下一次请求时开始可用。",
+    "confirmOnDeny": "{deny} 个单人禁用的学生仍然不能用；{allow} 个单人允许的不变。",
+    "confirmOffTitle": "把 {feature} 的默认改成关？",
+    "confirmOffBody": "按全局默认的学生下一次请求时就不能用了。{allow} 个单人允许的学生仍然可以用。",
+    "reason": "原因",
+    "reasonPlaceholder": "发布说明或工单号",
+    "confirm": "确认",
+    "cancel": "取消",
+    "readOnly": "只读。你的角色可以查看这些设置，但不能修改。",
+    "saved": "已保存，学生下一次请求时生效。",
+    "loadError": "设置加载失败。",
+    "retry": "重试",
+    "experiments": "实验",
+    "comingSoon": "即将推出",
+    "experimentsBody": "AI Tutor 策略、横幅位置和订阅价格的 A/B 测试，敬请期待！",
+    "experimentTags": {
+      "tutor": "AI Tutor 策略",
+      "banner": "横幅位置",
+      "pricing": "订阅价格"
+    },
+    "feature": "功能"
+  },
+  "errorBoundary": {
+    "title": "页面渲染异常",
+    "detail": "错误信息：{message}",
+    "unknown": "未知错误",
+    "reload": "重新加载"
   }
 }

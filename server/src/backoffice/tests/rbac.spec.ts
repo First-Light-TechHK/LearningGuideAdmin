@@ -46,10 +46,10 @@ describe('action level', () => {
       isActionAllowed('GRAPHIC_DESIGNER', 'course', 'PUBLISH'),
       false,
     );
-    // 课程内容编辑面在 Knowledge：Edit 能力同样落在 Knowledge 上
+    // REQ-0236：Course 之外的菜单全部 View，Knowledge 不能改
     assert.equal(
       isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'EDIT_EXISTING'),
-      true,
+      false,
     );
     assert.equal(
       isActionAllowed('GRAPHIC_DESIGNER', 'knowledge', 'VIEW'),
@@ -121,7 +121,7 @@ describe('settings sub-navigation', () => {
       assert.equal(subs.includes('employeeAccount'), false, role);
       assert.deepEqual(
         subs,
-        ['paymentGateway', 'notificationConfiguration'],
+        ['paymentGateway', 'notificationConfiguration', 'learningAccess'],
         role,
       );
     }
@@ -135,6 +135,10 @@ describe('settings sub-navigation', () => {
     assert.equal(
       settingsSubHref('en-GB', 'notificationConfiguration'),
       '/en-GB/settings/notification-configuration',
+    );
+    assert.equal(
+      settingsSubHref('en-GB', 'learningAccess'),
+      '/en-GB/settings/learning-access',
     );
   });
 });

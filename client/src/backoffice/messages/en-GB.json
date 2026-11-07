@@ -26,7 +26,10 @@
     "copied": "Copied",
     "language": "Language",
     "retry": "Try again",
-    "sessionUnavailable": "We could not reach the server to check your session. Please check your connection and try again."
+    "sessionUnavailable": "We could not reach the server to check your session. Please check your connection and try again.",
+    "remainingSeconds": "about {seconds}s left",
+    "resizeColumn": "Resize column",
+    "resizeColumnHint": "Drag to resize, double-click to reset"
   },
   "nav": {
     "course": "Course",
@@ -40,9 +43,13 @@
     "employeeAccount": "Employee Account",
     "paymentGateway": "Payment Gateway",
     "notificationConfiguration": "Notification Configuration",
-    "toggleSidebar": "Toggle sidebar"
+    "toggleSidebar": "Toggle sidebar",
+    "learningAccess": "Learning Access & Experiments"
   },
   "settings": {
+    "stop": "Stop",
+    "incomplete": "Incomplete response",
+    "aborted": "Response stopped",
     "paymentGatewayTitle": "Payment Gateway",
     "paymentGatewayBody": "This configuration is an entry point only in P0; its parameters are defined by a separate PRD.",
     "notificationConfigurationTitle": "Notification Configuration",
@@ -131,7 +138,8 @@
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
     "role": "Role",
-    "settingsSection": "Settings"
+    "settingsSection": "Settings",
+    "switchLanguage": "切换到简体中文"
   },
   "course": {
     "title": "Course",
@@ -260,7 +268,8 @@
     "PASSWORD_TOO_WEAK": "The password does not meet the minimum requirements.",
     "PASSWORD_MISMATCH": "The two passwords do not match.",
     "PASSWORD_SAME_AS_CURRENT": "The new password must be different from your current password.",
-    "INTERNAL_ERROR": "Something went wrong. Please try again."
+    "INTERNAL_ERROR": "Something went wrong. Please try again.",
+    "serverGeneric": "Something went wrong. Please try again."
   },
   "aiTutor": {
     "title": "AI Tutor",
@@ -524,7 +533,8 @@
       "enquiries": "Enquiries",
       "faqs": "FAQs",
       "candidates": "FAQ candidates",
-      "data": "HelpDesk data"
+      "data": "HelpDesk data",
+      "changes": "Change Log"
     },
     "searchPlaceholder": "Search students or enquiries...",
     "filter": "Filter enquiries",
@@ -711,7 +721,8 @@
       "REWRITE_UNAVAILABLE": "AI is not connected in this environment yet (no OpenRouter key). Edit by hand for now.",
       "REWRITE_FAILED": "AI did not edit the card as asked. Try saying it another way.",
       "REWRITE_TIMEOUT": "AI took too long this time. Try again shortly, or edit by hand.",
-      "REWRITE_RATE_LIMITED": "Too many AI edits in a minute. Wait a moment and try again."
+      "REWRITE_RATE_LIMITED": "Too many AI edits in a minute. Wait a moment and try again.",
+      "FAQ_RELEASE_EVALUATING": "This version is being checked. Wait for the result."
     },
     "addFaq": "Add FAQ",
     "actions": {
@@ -919,6 +930,13 @@
         "english": "English",
         "chinese": "Chinese",
         "drafted": "Draft, to be verified: check every fact before you save. Saving publishes the FAQ."
+      },
+      "tabs": {
+        "details": "Details",
+        "graph": "Follow-ups & phrasings",
+        "history": "History",
+        "historyCount": "History ({count})",
+        "label": "FAQ sections"
       }
     },
     "preview": {
@@ -1084,9 +1102,9 @@
     "releases": {
       "button": "Releases",
       "title": "Releases",
-      "subtitle": "Learners only see the live version. Edits go live after you create a new version, it passes the checks and the eval, and you publish it.",
+      "subtitle": "Users only see the live version. Edits go live after you create a new version, it passes the checks, and you publish it.",
       "live": "Live: v{version}",
-      "none": "No version has been published yet, so learners see each FAQ as soon as it is saved.",
+      "none": "No version has been published yet, so users see each FAQ as soon as it is saved.",
       "working": "Changes since the live version",
       "noChanges": "No changes since the live version.",
       "diff": {
@@ -1121,8 +1139,8 @@
       "checksFailed": "{count} problems to fix",
       "counts": "{nodes} questions, {entries} entries, {choices} choice questions, {edges} links, {phrasings} phrasings",
       "create": "Create new version",
-      "creating": "Checking…",
-      "createHint": "Freezes the working copy, then runs the graph checks and the eval. Nothing goes live until you publish.",
+      "creating": "Creating…",
+      "createHint": "Freezes the working copy, then runs the graph checks, the retrieval check and the live-pipeline sample in the background (about 3–5 minutes). Nothing goes live until you publish.",
       "sameAsLatest": "Nothing changed since v{version}, so no new version was created.",
       "created": "v{version} created.",
       "history": "Version history",
@@ -1135,10 +1153,11 @@
       },
       "status": {
         "draft": "Ready",
-        "evaluating": "Evaluating",
+        "evaluating": "Checking",
         "published": "Live",
         "rejected": "Did not pass",
-        "superseded": "Replaced"
+        "superseded": "Replaced",
+        "interrupted": "Check interrupted"
       },
       "passed": "Passed",
       "failed": "Failed",
@@ -1149,7 +1168,7 @@
       "misses": "{count} cases were not matched",
       "publish": "Publish v{version}",
       "publishShort": "Publish",
-      "publishConfirm": "Publish v{version}? Learners will start seeing it within about a minute.",
+      "publishConfirm": "Publish v{version}? Users will start seeing it within about a minute.",
       "confirmNo": "Cancel",
       "publishedNotice": "v{version} is live.",
       "recheck": "Check again",
@@ -1164,7 +1183,18 @@
       "empty": "No versions yet.",
       "loading": "Loading…",
       "createdOn": "Created {date}",
-      "checksValue": "Graph checks: {result}"
+      "checksValue": "Graph checks: {result}",
+      "createdChecking": "v{version} created and being checked in the background (about 3–5 minutes). You can close this window and come back for the result.",
+      "recheckStarted": "v{version} is being checked again.",
+      "progress": {
+        "starting": "Checking…",
+        "retrieval": "Checking: retrieval",
+        "vectors": "Checking: preparing vectors",
+        "model": "Checking: live-pipeline sample {done} / {total}"
+      },
+      "interruptedHint": "The check did not finish (a restart or deploy stopped it). Use Check again to run it again.",
+      "model": "Live-pipeline sample {result}: wrong card {wrong}%, {cases} questions, about ¥{cny}",
+      "modelNotRun": "Live-pipeline sample: not run"
     },
     "candidates": {
       "search": "Search topics, questions or examples...",
@@ -1800,6 +1830,451 @@
           "language": "AI changed the language of {field}, so the original is kept."
         }
       }
+    },
+    "changes": {
+      "note": "Every change to FAQs, follow-ups, options, phrasings and releases is recorded here: who changed it, when, and what changed. Records cannot be edited or deleted.",
+      "search": "Search by question, key or text...",
+      "everyone": "Everyone",
+      "system": "System",
+      "systemHint": "Seed or automatic",
+      "formerEmployee": "Former employee",
+      "byLabel": "Changed by",
+      "typeLabel": "Change type",
+      "rangeLabel": "Date range",
+      "types": {
+        "all": "All changes",
+        "faq": "FAQs",
+        "follow_up": "Follow-ups",
+        "option": "Options",
+        "phrasing": "Phrasings",
+        "release": "Releases"
+      },
+      "ranges": {
+        "all": "All time",
+        "today": "Today",
+        "7d": "Last 7 days",
+        "30d": "Last 30 days",
+        "90d": "Last 90 days"
+      },
+      "count": "{count} changes",
+      "countOne": "1 change",
+      "columns": {
+        "when": "When",
+        "by": "Changed by",
+        "what": "What changed",
+        "change": "Change",
+        "action": "Action"
+      },
+      "viewDetails": "View details",
+      "viewDetailsLabel": "View details: {action}, {title}",
+      "showing": "Showing {from}–{to} of {total} changes",
+      "empty": "No changes recorded yet.",
+      "emptyFiltered": "No changes match your search or filters.",
+      "faqFilter": "Changes to: {question}",
+      "faqFilterUnknown": "Changes to one FAQ",
+      "clearFaq": "Show all FAQs",
+      "subjects": {
+        "faq": "FAQ",
+        "follow_up": "Follow-up",
+        "option": "Option",
+        "phrasing": "Phrasing",
+        "release": "Release"
+      },
+      "actions": {
+        "created": "Created",
+        "edited": "Edited",
+        "archived": "Deleted",
+        "added": "Added",
+        "changed": "Text changed",
+        "reordered": "Reordered",
+        "removed": "Removed",
+        "version_created": "Version created",
+        "published": "Published",
+        "rolled_back": "Rolled back"
+      },
+      "version": "Version {version}",
+      "popular": "Popular",
+      "empty_value": "(empty)",
+      "status": {
+        "published": "Live",
+        "archived": "Deleted"
+      },
+      "fields": {
+        "key": "Key",
+        "type": "Card type",
+        "entry": "Entry question",
+        "category": "Category",
+        "popular": "Popular FAQ",
+        "questionEn": "Question (English)",
+        "answerEn": "Answer (English)",
+        "questionZh": "Question (Chinese)",
+        "answerZh": "Answer (Chinese)",
+        "keywords": "Keywords",
+        "signals": "Learner situations",
+        "status": "Status",
+        "kind": "Kind",
+        "position": "Position",
+        "labelEn": "Text shown (English)",
+        "labelZh": "Text shown (Chinese)"
+      },
+      "summary": {
+        "archived": "Removed from Help Centre and AI Support",
+        "noFields": "Saved with no field changed",
+        "shown": "Shown {position}",
+        "unlinked": "No longer shown after this card",
+        "moved": "Moved {from} → {to}",
+        "customText": "Custom text: {text}",
+        "questionText": "Shows the question itself",
+        "phrasing": "“{text}” ({language})",
+        "published": "Learners now see version {version}",
+        "rolledBack": "Copy of version {version}, published straight away",
+        "checksPassed": "Checks passed",
+        "problems": "{count} problems found"
+      },
+      "learners": {
+        "title": "Learners see it",
+        "live": "Yes",
+        "pending": "Not yet",
+        "pendingHint": "Goes live with the next published release",
+        "rolledBack": "Was live from version {version}, then taken back by a rollback. Goes live again with the next release.",
+        "liveIn": "Live since version {version}",
+        "liveNow": "Live as soon as it was saved (no release published yet)"
+      },
+      "details": {
+        "title": "Change details",
+        "whoWhen": "Who and when",
+        "changedBy": "Changed by",
+        "timeZone": "{zone} time",
+        "what": "What changed",
+        "whatCount": "What changed ({count} fields)",
+        "whatOne": "What changed (1 field)",
+        "before": "Before",
+        "after": "After",
+        "legend": "Unchanged fields are not shown. Red = removed, green = added.",
+        "listChanges": "{field} changes",
+        "openFaq": "Open this FAQ",
+        "close": "Close",
+        "versionLine": "Version {from} → {to}",
+        "newVersion": "Version {to}",
+        "phrasing": "Phrasing",
+        "language": "Language",
+        "source": "Added from",
+        "sources": {
+          "staff": "BackOffice",
+          "flywheel": "FAQ candidates"
+        },
+        "parent": "Shown after",
+        "child": "Question",
+        "release": "Release",
+        "releaseFrom": "Copied from",
+        "problems": "Problems found by the checks",
+        "faqGone": "This FAQ has since been deleted."
+      },
+      "history": {
+        "hint": "Every saved change to this FAQ, its follow-ups and its phrasings. Newest first.",
+        "wentLive": "Went live",
+        "wentLiveLine": "Published in release version {version}",
+        "view": "View changes",
+        "hide": "Hide changes",
+        "openLog": "Open in Change Log",
+        "empty": "No changes yet.",
+        "truncated": "Only the latest {count} changes are listed here. Open the Change Log to see them all.",
+        "more": "Show more",
+        "loading": "Loading…"
+      }
     }
+  },
+  "students": {
+    "title": "Student Management",
+    "subtitle": "View student accounts, subscriptions and individual learning access.",
+    "featureSettings": "Feature Access Settings",
+    "countTotal": "Total Students",
+    "countActive": "Active Accounts",
+    "countInactive": "Inactive Accounts",
+    "searchPlaceholder": "Search name or email",
+    "searchLabel": "Search students",
+    "statusFilter": "Status",
+    "subscriptionFilter": "Subscription",
+    "specialFilter": "Special access",
+    "status": {
+      "all": "All statuses",
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "subscriptionOption": {
+      "all": "All subscriptions",
+      "current": "With a subscription",
+      "none": "No subscription",
+      "grace": "Payment issue (grace period)",
+      "ending": "Cancelled, still active"
+    },
+    "specialOption": {
+      "all": "Any special access",
+      "any": "Has an individual override",
+      "none": "No individual override",
+      "improve_tutor": "Improve Tutor",
+      "ai_support_assistant": "AI Support Assistant"
+    },
+    "reset": "Reset filters",
+    "col": {
+      "student": "Student",
+      "email": "Email",
+      "status": "Status",
+      "subscription": "Subscription",
+      "special": "Special Access",
+      "registered": "Registered",
+      "action": "Action"
+    },
+    "view": "View",
+    "viewStudent": "View {name}",
+    "none": "None",
+    "noSubscription": "No subscription",
+    "subscriptionsCount": "{count} subscriptions",
+    "featuresEnabled": "{count} overrides",
+    "denied": "{feature} (Deny)",
+    "noEmail": "No email",
+    "pendingShort": "Pending verification",
+    "loading": "Loading students…",
+    "empty": "No students match these filters.",
+    "emptyAll": "No students have registered yet.",
+    "loadError": "Students could not be loaded.",
+    "retry": "Retry",
+    "notConnected": "Student Management is not connected to Portal yet (PORTAL_HELPDESK_BASE_URL / PORTAL_HELPDESK_TOKEN).",
+    "accountStatus": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "subState": {
+      "active": "Active",
+      "cancel_at_period_end": "Cancelled",
+      "grace": "Grace period",
+      "expired": "Ended",
+      "trial_canceled": "Trial cancelled"
+    },
+    "feature": {
+      "improve_tutor": "Improve Tutor",
+      "ai_support_assistant": "AI Support Assistant"
+    },
+    "featureHint": {
+      "improve_tutor": "Review evidence and suggest better answers.",
+      "ai_support_assistant": "Answer platform questions using FAQs."
+    }
+  },
+  "studentDrawer": {
+    "title": "Student Details",
+    "close": "Close",
+    "studentId": "Student ID: {id}",
+    "copyId": "Copy ID",
+    "copied": "Copied",
+    "registered": "Registered {date}",
+    "emailState": {
+      "verified": "Email verified",
+      "pending": "Email pending verification",
+      "admin_exempt": "Email Admin-exempt"
+    },
+    "emailChanged": "Email changed by {name} on {date} · {reference}",
+    "exemptBy": "Ownership attested by {name} on {date} · {reference}",
+    "profile": "Profile",
+    "country": "Country / Region",
+    "ageRange": "Age range",
+    "education": "Education",
+    "interests": "Areas of interest",
+    "language": "Language",
+    "signIn": "Sign-in methods",
+    "notProvided": "Not provided",
+    "signInMethod": {
+      "email": "Email",
+      "google": "Google",
+      "wechat": "WeChat"
+    },
+    "noPassword": "no password set",
+    "languageName": {
+      "en-GB": "English (UK)",
+      "zh-CN": "Chinese (Simplified)"
+    },
+    "subscription": "Subscription",
+    "subscriptionCount": "Subscription ({count})",
+    "noSubscription": "No current subscription.",
+    "renews": "Renews: {date}",
+    "endsOn": "Access ends: {date}",
+    "graceUntil": "Payment failed · access until {date}",
+    "endedOn": "Ended: {date}",
+    "aiTutor": "Unlimited AI Tutor",
+    "coursesOnly": "Courses",
+    "device": {
+      "pc": "PC",
+      "mobile": "Mobile"
+    },
+    "trial": "Trial",
+    "viewReceipt": "View Receipt",
+    "showEnded": "Show {count} ended",
+    "hideEnded": "Hide ended",
+    "access": "Learning Access & Experiments",
+    "accessHint": "Special access overrides the global default; it does not change the subscription.",
+    "override": {
+      "default": "Global default",
+      "allow": "Allow",
+      "deny": "Deny"
+    },
+    "overrideLabel": "{feature} override",
+    "effective": {
+      "on": "Enabled",
+      "off": "Disabled"
+    },
+    "reason": {
+      "account_inactive": "Account inactive",
+      "emergency_off": "Switched off for everyone",
+      "missing_prerequisite": "Needs an AI Tutor subscription",
+      "override_deny": "Deny override",
+      "override_allow": "Allow override",
+      "global_on": "Global default is On",
+      "global_off": "Global default is Off"
+    },
+    "unsaved": "Unsaved changes",
+    "changeReason": "Reason for change",
+    "changeReasonPlaceholder": "e.g. pilot group, ticket number",
+    "overridesKept": "Overrides are kept and apply again after reactivation.",
+    "experiment": "Learning Experiment",
+    "comingSoon": "Coming soon",
+    "actions": "Account Actions",
+    "actionsHint": "Deactivating access does not cancel the student's Stripe subscription.",
+    "sendReset": "Send Password Reset",
+    "sendSetup": "Send Password Setup Link",
+    "resendVerification": "Resend Verification Email",
+    "editEmail": "Edit Email",
+    "deactivate": "Deactivate Account",
+    "activate": "Activate Account",
+    "passwordBlocked": {
+      "inactive": "Activate the account before sending a password link.",
+      "no_email": "This account has no email address.",
+      "email_unverified": "A password link can only go to a verified or Admin-exempt email."
+    },
+    "cancel": "Cancel",
+    "save": "Save Changes",
+    "saving": "Saving…",
+    "saved": "Changes saved. They apply on the student's next request.",
+    "inactiveBanner": "This account is inactive",
+    "inactiveBody": "Deactivated by {name} on {date}. Reason: {reason}. Sign-in and product access are blocked; subscriptions keep billing.",
+    "readOnly": "View only. Your role can see this student but not change it.",
+    "loadError": "Student details could not be loaded.",
+    "notFound": "This student no longer exists.",
+    "discardTitle": "Discard unsaved changes?",
+    "discardBody": "Your Learning Access changes have not been saved.",
+    "discard": "Discard",
+    "keepEditing": "Keep editing",
+    "orderId": "Order {id}"
+  },
+  "studentModal": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "reason": "Reason",
+    "reasonPlaceholder": "What happened and the support reference",
+    "deactivateTitle": "Deactivate {name}?",
+    "deactivateBody": "They will be signed out everywhere and cannot sign in by email, Google or WeChat until activated. Their data and Learning Access overrides are kept.",
+    "deactivateBilling": "Billing is not affected. Subscriptions keep renewing; cancel or refund in Stripe if needed.",
+    "deactivateConfirm": "Deactivate",
+    "activateTitle": "Activate {name}?",
+    "activateBody": "Sign-in and product access are restored. Saved overrides apply again. This does not verify the email or change subscriptions.",
+    "activateConfirm": "Activate",
+    "emailTitle": "Edit primary email",
+    "emailCurrent": "Current: {email}",
+    "emailNew": "New email",
+    "emailReason": "Reason or ticket",
+    "emailStandard": "A verification link is sent to the new email; it stays Pending verification until used. Both addresses are told. The student is signed out.",
+    "emailExempt": "Ownership was verified manually (Admin-exempt)",
+    "emailExemptRef": "Ticket or procedure reference",
+    "emailExemptWarn": "This records a staff attestation, not a click by the student. It is logged as a security event.",
+    "emailSend": "Send verification link",
+    "emailSave": "Confirm and save",
+    "passwordResetTitle": "Send password reset link",
+    "passwordSetupTitle": "Send password setup link",
+    "passwordTo": "To {email}",
+    "passwordResetBody": "The student gets a single-use link that expires. Using it replaces the current password and signs out other sessions.",
+    "passwordSetupBody": "This account has no password yet. The link lets the student create one for email sign-in; Google or WeChat stays linked.",
+    "passwordSend": "Send link",
+    "resendTitle": "Resend verification email",
+    "resendBody": "A new verification link goes to {email}. Earlier links stop working.",
+    "resendSend": "Send",
+    "required": "Required",
+    "invalidEmail": "Enter a valid email address."
+  },
+  "studentNotice": {
+    "deactivate": "Account deactivated.",
+    "activate": "Account activated.",
+    "change_email": "Email changed. Verification link sent.",
+    "change_email_exempt": "Email changed and marked Admin-exempt.",
+    "change_email_unsent": "Email changed, but the verification email was not delivered. Use Resend Verification Email.",
+    "resend_verification": "Verification email sent.",
+    "send_password_link": "Password link sent."
+  },
+  "studentError": {
+    "STUDENTS_NOT_CONNECTED": "Student Management is not connected to Portal yet.",
+    "STUDENTS_UNAVAILABLE": "Portal did not answer. Try again.",
+    "STUDENT_NOT_FOUND": "This student no longer exists.",
+    "VERSION_CONFLICT": "Someone else changed this just now. Reload to see the latest, then try again.",
+    "EMAIL_TAKEN": "This email belongs to another account. Accounts are never merged here; use the account recovery process.",
+    "EMAIL_UNVERIFIED": "The email must be verified or Admin-exempt first.",
+    "ACCOUNT_INACTIVE": "Activate the account first.",
+    "RATE_LIMITED": "A link was sent moments ago. Wait a minute before sending another.",
+    "EMAIL_UNAVAILABLE": "Email sending is not set up in this environment.",
+    "EMAIL_DELIVERY_FAILED": "The email could not be sent. Try again.",
+    "NOT_AUTHORISED": "Your role cannot make this change.",
+    "INVALID_INPUT": "Check the fields and try again.",
+    "default": "Something went wrong. Try again."
+  },
+  "learningAccess": {
+    "title": "Learning Access & Experiments",
+    "subtitle": "Manage feature availability for students. Experiments are coming soon.",
+    "save": "Save Changes",
+    "saving": "Saving…",
+    "discard": "Discard",
+    "unsaved": "Unsaved changes",
+    "featureAccess": "Feature Access",
+    "featureAccessHint": "Choose which features are available to all eligible students.",
+    "globalDefault": "Global Default",
+    "on": "On",
+    "off": "Off",
+    "footnote": "When turned off globally, a feature can still be enabled for individual students in Student Management.",
+    "overrides": "Individual overrides: {allow} Allow · {deny} Deny",
+    "updated": "Last changed by {name} on {date}",
+    "emergencyOff": "Emergency off",
+    "resume": "Resume",
+    "emergencyStatus": "Switched off for everyone",
+    "emergencyBanner": "{feature} is switched off for everyone",
+    "emergencyBody": "By {name} on {date}. Reason: {reason}. This also blocks students with an Allow override. The global default and overrides are kept.",
+    "emergencyTitle": "Switch {feature} off for everyone?",
+    "emergencyConfirmBody": "Every student loses it on their next request, including those with an Allow override. Nothing else changes; Resume brings back the previous behaviour.",
+    "emergencyConfirm": "Switch off",
+    "resumeTitle": "Resume {feature}?",
+    "resumeBody": "Access goes back to the global default and individual overrides.",
+    "resumeConfirm": "Resume",
+    "confirmOnTitle": "Turn on {feature} for everyone eligible?",
+    "confirmOnBody": "About {count} eligible students on Global default will get it on their next request.",
+    "confirmOnDeny": "{deny} students with Deny stay blocked; {allow} with Allow are unchanged.",
+    "confirmOffTitle": "Turn off {feature} by default?",
+    "confirmOffBody": "Students on Global default lose it on their next request. {allow} students with Allow keep it.",
+    "reason": "Reason",
+    "reasonPlaceholder": "Release note or ticket",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "readOnly": "View only. Your role can see these settings but not change them.",
+    "saved": "Settings saved. They apply on each student's next request.",
+    "loadError": "Settings could not be loaded.",
+    "retry": "Retry",
+    "experiments": "Experiments",
+    "comingSoon": "Coming Soon",
+    "experimentsBody": "Explore A/B testing for AI Tutor strategies, banner placements and subscription pricing. Stay tuned!",
+    "experimentTags": {
+      "tutor": "AI Tutor strategies",
+      "banner": "Banner placements",
+      "pricing": "Subscription pricing"
+    },
+    "feature": "Feature"
+  },
+  "errorBoundary": {
+    "title": "This page could not be displayed",
+    "detail": "Details: {message}",
+    "unknown": "Unknown error",
+    "reload": "Reload"
   }
 }

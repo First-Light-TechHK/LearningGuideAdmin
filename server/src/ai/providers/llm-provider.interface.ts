@@ -15,9 +15,39 @@ export interface LlmStreamOptions {
   /** 实际调用使用的明文 key（课程级解密值或 env 全局 key），绝不落日志/响应 */
   apiKey: string;
   baseUrl: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  reasoningEffort?: 'low' | 'none';
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  onEvent?: (event: Exclude<LlmStreamEvent, { type: 'delta' }>) => void;
 }
 
-export interface LlmProvider {
+export class LlmTimeoutError extends Error {
+  constructor() {
+    super('LLM request timed out');
+    this.name = 'LlmTimeoutError';
+  }
+}
+
+export type LlmStreamEvent =
+  | { type: 'delta'; content: string }
+  | {
+      type: 'usage';
+      usage: {
+        inputTokens?: number;
+        outputTokens?: number;
+        reasoningTokens?: number;
+      };
+    }
+  | { type: 'finish'; reason: string | null };
+
+export interface LlmEventProvider {
+  /** Optional metadata stream; legacy callers continue using LlmProvider.stream. */
+  streamEvents?(opts: LlmStreamOptions): AsyncGenerator<LlmStreamEvent>;
+}
+
+export interface LlmProvider extends LlmEventProvider {
   /** 与 CourseAiConfig.llmProvider 对应的标识，如 "openrouter" */
   readonly name: string;
   /** 流式对话：逐个产出文本增量（delta），正常结束即迭代完成 */

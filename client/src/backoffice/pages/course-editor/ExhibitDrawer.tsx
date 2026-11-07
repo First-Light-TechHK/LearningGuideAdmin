@@ -5,18 +5,8 @@ import { boRequest } from '../../lib/api';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
-import {
-  Chip,
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  dangerBtn,
-  exhibitTypeLabel,
-  inputStyle,
-  languageLabel,
-  primaryBtn,
-} from './shared';
+import { Chip, Field, Modal } from './shared';
+import { L, buttonStyle, dangerBtn, exhibitTypeLabel, inputStyle, languageLabel, primaryBtn } from './shared-utils';
 
 type Asset = { id: string; kind?: string; originalName?: string; size?: number; mimeType?: string };
 

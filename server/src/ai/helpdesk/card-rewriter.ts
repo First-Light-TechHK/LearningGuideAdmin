@@ -18,7 +18,7 @@ import type {
 
 /**
  * BackOffice「AI 按指令改卡」的模型调用（契约 contracts/helpdesk-card-rewrite.ts）：
- * - 和 Helpdesk 回答同一个模型（DeepSeek，suggestModel）与 key（OPENROUTER_API_KEY 每次现读，没有 = disabled）；
+ * - 和 Helpdesk 回答同一个模型（缺省 gemma-4-31b，suggestModel，见 contracts/helpdesk-defaults.ts）与 key（OPENROUTER_API_KEY 每次现读，没有 = disabled）；
  * - 一次调用、不重试、有期限（整张卡 45 秒、一段 20 秒），不开思考（员工在等）；
  * - 整张卡：工具 rewrite_card，只给改了的字段的全文（没改的不给），分类是枚举（keep = 不改）；
  * - 一段：工具 rewrite_selection，只给那一段的新文字；拼回原文由 BackOffice 的代码做；

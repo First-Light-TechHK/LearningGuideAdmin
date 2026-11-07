@@ -140,6 +140,75 @@ export function describeAgentEventLog(
       await expect(log.chain(other)).resolves.toEqual([other]);
     });
 
+    it('counts model output health per step after a time: invalid calls, guard rejections, failures', async () => {
+      // 2031：和别的用例的事件分开（PostgreSQL 实现共用一张表）
+      const t = (s: number) => new Date(Date.UTC(2031, 0, 1, 0, 0, s));
+      const end = (s: number, data: NewAgentEvent['data']): NewAgentEvent => ({
+        type: 'step/end',
+        time: t(s),
+        data,
+      });
+      await log.append(uuidv7(), [
+        end(0, { name: 'zz_explain', kind: 'agent', outcome: 'called' }),
+        end(1, { name: 'zz_explain', kind: 'agent', outcome: 'no_call' }),
+        end(2, { name: 'zz_explain', kind: 'agent', outcome: 'error' }),
+        end(3, { name: 'zz_explain', kind: 'agent', outcome: 'aborted' }),
+        end(4, {
+          name: 'zz_ground',
+          kind: 'code',
+          output: { guard: { result: 'fallback', reason: 'script' } },
+        }),
+        // the model said the card does not cover it: not a guard rejection
+        end(5, {
+          name: 'zz_ground',
+          kind: 'code',
+          output: { guard: { result: 'fallback', reason: 'not_covered' } },
+        }),
+        end(6, {
+          name: 'zz_ground',
+          kind: 'code',
+          output: { guard: { result: 'passed', reason: null } },
+        }),
+        end(7, { name: 'zz_ground', kind: 'code', error: { code: 'x' } }),
+        // not a step end, or without name / kind: ignored
+        {
+          type: 'step/start',
+          time: t(8),
+          data: { name: 'zz_explain', kind: 'agent' },
+        },
+        end(9, { kind: 'agent', outcome: 'no_call' }),
+      ]);
+      // before the window: ignored
+      await log.append(uuidv7(), [
+        {
+          type: 'step/end',
+          time: new Date(Date.UTC(2030, 11, 31)),
+          data: { name: 'zz_explain', kind: 'agent', outcome: 'no_call' },
+        },
+      ]);
+      const rows = (await log.stepHealth(t(0))).filter((r) =>
+        r.step.startsWith('zz_'),
+      );
+      expect(rows).toEqual([
+        {
+          step: 'zz_explain',
+          kind: 'agent',
+          total: 4,
+          invalid: 1,
+          guardFallbacks: 0,
+          failures: 2,
+        },
+        {
+          step: 'zz_ground',
+          kind: 'code',
+          total: 4,
+          invalid: 0,
+          guardFallbacks: 1,
+          failures: 1,
+        },
+      ]);
+    });
+
     it('after 90 days clears only the learner text fields, nothing else', async () => {
       const old = uuidv7();
       const fresh = uuidv7();

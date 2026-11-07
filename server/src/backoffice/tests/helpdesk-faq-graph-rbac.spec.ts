@@ -55,8 +55,13 @@ const graph = {
   ),
   deletePhrasing: jest.fn(() => Promise.resolve({ deleted: true })),
 };
+const unsubscribe = jest.fn();
 const releases = {
   list: jest.fn(() => Promise.resolve({ releases: [], published: null })),
+  onChange: jest.fn((_listener: () => void) => {
+    void _listener;
+    return unsubscribe;
+  }),
   working: jest.fn(() =>
     Promise.resolve({ checks: {}, diff: {}, published: null }),
   ),
@@ -255,6 +260,54 @@ describe('FAQ question tree endpoints', () => {
       expect(releases.rollback).toHaveBeenCalledWith(actor, '1');
     },
   );
+
+  it('the release stream is a long SSE connection for VIEW roles (not the version route), and ends when the browser leaves', async () => {
+    await request(server())
+      .get('/api/helpdesk/faq-releases/stream')
+      .expect(401);
+    const httpServer = server() as import('node:http').Server;
+    if (!httpServer.listening)
+      await new Promise<void>((r) => httpServer.listen(0, r));
+    const { port } = httpServer.address() as import('node:net').AddressInfo;
+    const { get } = await import('node:http');
+    const received = await new Promise<{
+      type: string | undefined;
+      text: string;
+    }>((resolve, reject) => {
+      const req = get(
+        {
+          port,
+          path: '/api/helpdesk/faq-releases/stream',
+          headers: { Cookie: as(viewRoles[0]) },
+        },
+        (res) => {
+          let text = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk: string) => {
+            text += chunk;
+            if (text.includes('event: releases')) {
+              req.destroy();
+              resolve({ type: res.headers['content-type'], text });
+            }
+          });
+        },
+      );
+      req.on('error', (error) => {
+        if (!(error as NodeJS.ErrnoException).code?.includes('RESET'))
+          reject(error);
+      });
+    });
+    expect(received.type).toMatch(/^text\/event-stream/);
+    expect(received.text.startsWith('retry: 3000\n\n')).toBe(true);
+    expect(received.text).toContain(
+      'event: releases\ndata: {"releases":[],"published":null}\n\n',
+    );
+    expect(releases.get).not.toHaveBeenCalled();
+    expect(releases.onChange).toHaveBeenCalledTimes(1);
+    // the browser left: the subscription is dropped
+    await new Promise((r) => setTimeout(r, 50));
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
 
   it('turns a business error into the envelope with its status and code', async () => {
     graph.createEdge.mockImplementationOnce(() =>

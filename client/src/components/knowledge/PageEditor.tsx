@@ -4,7 +4,9 @@ import type { MenuProps } from '../ui'
 import { EditOutlined, EyeOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
 import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
+import rehypeRaw from 'rehype-raw'
 import 'katex/dist/katex.min.css'
 import type { EditorView } from '@codemirror/view'
 import { EditorSelection } from '@codemirror/state'
@@ -12,9 +14,11 @@ import { clearLocalDraft, localDraftKey, registerDraftFlusher, useKnowledgeStore
 import { MarkdownSourceEditor } from './MarkdownSourceEditor'
 import { MarkdownToolbar } from './MarkdownToolbar'
 import { insertSnippet, toggleLinePrefix } from './markdownCommands'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
+import { knowledgeApi } from '../../api/knowledge'
+import { formatDateTime } from '../../backoffice/lib/i18n/format'
 
 /**
  * Page 编辑器（2026-10-29 改版：Markdown 源码编辑 + 预览）。
@@ -29,9 +33,31 @@ import { useKText } from './i18n'
  */
 
 /** 与 AI Tutor / Portal 一致的 Markdown+KaTeX 渲染插件 */
+function sanitizeHtml() {
+  const tags = new Set(['div', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'b', 'i', 'img'])
+  const attrs = new Set(['className', 'colSpan', 'rowSpan', 'alt', 'src'])
+  return (tree: { children?: unknown[] }) => {
+    const clean = (node: unknown): unknown[] => {
+      if (!node || typeof node !== 'object') return []
+      const item = node as { type?: string; tagName?: string; properties?: Record<string, unknown>; children?: unknown[] }
+      if (item.type === 'element') {
+        if (!tags.has(item.tagName ?? '')) return []
+        item.properties = Object.fromEntries(Object.entries(item.properties ?? {}).filter(([key]) => attrs.has(key)))
+        if (item.tagName === 'img') {
+          const src = String(item.properties?.src ?? '')
+          if (!/^(https?:\/\/|\/api\/files\/images\/)/i.test(src)) return []
+        }
+      }
+      if (item.children) item.children = item.children.flatMap(clean)
+      return [item]
+    }
+    if (tree.children) tree.children = tree.children.flatMap(clean)
+  }
+}
+
 const katexPlugins = {
-  remarkPlugins: [remarkMath],
-  rehypePlugins: [rehypeKatex],
+  remarkPlugins: [remarkGfm, remarkMath],
+  rehypePlugins: [rehypeRaw, sanitizeHtml, rehypeKatex],
 }
 
 /** 浏览器刷新/关闭页面时的本地草稿兜底 key（与 store 共用，保持单一 key 规则） */
@@ -43,10 +69,10 @@ interface LocalDraft {
 }
 
 /** 本地草稿时间展示（恢复确认弹窗用） */
-function formatSavedAt(savedAt?: number): string {
+function formatSavedAt(locale: string, savedAt?: number): string {
   if (!savedAt) return ''
   try {
-    return new Date(savedAt).toLocaleString()
+    return formatDateTime(locale, savedAt)
   } catch {
     return ''
   }
@@ -74,7 +100,7 @@ export function PageEditor() {
   const tocScrollTarget = useKnowledgeStore((s) => s.tocScrollTarget)
   const clearTocScrollTarget = useKnowledgeStore((s) => s.clearTocScrollTarget)
   const { modal } = App.useApp()
-  const { text } = useKText()
+  const { locale, text } = useKText()
   /** PRD §3.2/§3.3：View 角色只读，Edit/Full 才可改既有内容 */
   const access = useWorkspaceAccess()
 
@@ -89,6 +115,7 @@ export function PageEditor() {
   const [insertTableRows, setInsertTableRows] = useState(3)
   const [insertTableCols, setInsertTableCols] = useState(3)
   const titleBeforeEdit = useRef('')
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   const viewRef = useRef<EditorView | null>(null)
   /** 写回 draft 的防抖定时器 + 稳定回调（供防抖与 store flusher 共用） */
@@ -147,9 +174,12 @@ export function PageEditor() {
   }, [])
 
   // 切换页面：退出预览态，回到源码编辑
-  useEffect(() => {
+  const [previewPage, setPreviewPage] = useState(draft?.pageId)
+  if (previewPage !== draft?.pageId) {
+    setPreviewPage(draft?.pageId)
     setPreview(false)
-  }, [draft?.pageId])
+  }
+  if (tocScrollTarget && preview) setPreview(false)
 
   // TOC 跳转：源码态直接定位；预览态先切回编辑再定位
   useEffect(() => {
@@ -160,7 +190,6 @@ export function PageEditor() {
       scrollToHeading(view, target)
     } else if (target) {
       pendingHeadingRef.current = target
-      setPreview(false)
     }
     clearTocScrollTarget()
   }, [tocScrollTarget, clearTocScrollTarget])
@@ -225,7 +254,7 @@ export function PageEditor() {
       return
     }
     const pageId = d.pageId
-    const when = formatSavedAt(local.savedAt)
+    const when = formatSavedAt(locale, local.savedAt)
     modal.confirm({
       title: text('editor.draftTitle'),
       content: text('editor.draftContent', {
@@ -242,7 +271,7 @@ export function PageEditor() {
       },
       onCancel: () => clearLocalDraft(pageId),
     })
-  }, [draft?.pageId, access.canEdit, modal])
+  }, [draft?.pageId, access.canEdit, modal, locale, text])
 
   /** 临时诊断（仅开发模式）：主线程 >120ms 的长任务；验证改版效果后可删除 */
   useEffect(() => {
@@ -339,7 +368,7 @@ export function PageEditor() {
       // 行内片段：不补空行，插入 `$x$` 并选中 x
       insertSnippet(target, '$x$', { select: { from: 1, to: 2 } })
     } else if (key === 'image') {
-      insertWithSelection(`![${text('editor.snippet.imageAlt')}](https://)`, 'https://')
+      imageInputRef.current?.click()
     } else if (key === 'code') {
       insertWithSelection(`\`\`\`\n${text('editor.snippet.code')}\n\`\`\``, text('editor.snippet.code'))
     } else if (key === 'quote') {
@@ -495,6 +524,28 @@ export function PageEditor() {
           )}
           <div style={{ flex: 1, minHeight: 0 }}>
             {/* 右键插入菜单（M1）：表格 / 公式 / 图片 / 代码块 / 引用 / 分割线 */}
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              hidden
+              onChange={async (event) => {
+                const file = event.currentTarget.files?.[0]
+                event.currentTarget.value = ''
+                const courseId = useKnowledgeStore.getState().selectedCourseId
+                const target = viewRef.current
+                const pageId = useKnowledgeStore.getState().draft?.pageId
+                if (!file || !courseId || !target || !pageId) return
+                try {
+                  const { url } = await knowledgeApi.uploadImage(file, courseId)
+                  if (viewRef.current !== target || useKnowledgeStore.getState().draft?.pageId !== pageId) return
+                  const alt = file.name.replace(/\.[^.]+$/, '').replace(/[\\[\]]/g, '\\$&')
+                  insertSnippet(target, `![${alt}](${url})`, { block: true })
+                } catch {
+                  modal.error({ title: text('editor.insert.image'), content: text('editor.saveFailed') })
+                }
+              }}
+            />
             <Dropdown
               menu={{ items: insertMenuItems, onClick: onInsertMenuClick }}
               trigger={['contextMenu']}

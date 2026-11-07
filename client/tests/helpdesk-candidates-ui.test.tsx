@@ -213,7 +213,7 @@ afterEach(() => {
 })
 
 describe('FAQ candidates queue (G4)', () => {
-  test('four tabs; the queue is sorted by count with the source mix, suggestion and status counts', async () => {
+  test('five tabs; the queue is sorted by count with the source mix, suggestion and status counts', async () => {
     serve(refundGroup, cardGroup)
     await openQueue()
     assert.deepEqual(
@@ -223,6 +223,7 @@ describe('FAQ candidates queue (G4)', () => {
         ['FAQs', 'false'],
         ['FAQ candidates', 'true'],
         ['HelpDesk data', 'false'],
+        ['Change Log', 'false'],
       ],
     )
     assert.deepEqual(lastListQuery(), { status: 'new', page: '1', pageSize: '20' })
@@ -615,7 +616,10 @@ describe('candidate actions (FULL)', () => {
     assert.equal(parent.checked, true)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Write the follow-up' }))
     const editor = await screen.findByRole('dialog', { name: 'Add FAQ' })
+    // 卡片类型 / 入口在「Follow-ups & phrasings」页签（Figma 草案 2.9）
+    fireEvent.click(within(editor).getByRole('tab', { name: 'Follow-ups & phrasings' }))
     assert.equal((within(editor).getByRole('checkbox', { name: 'Entry question' }) as HTMLInputElement).checked, false)
+    fireEvent.click(within(editor).getByRole('tab', { name: 'Details' }))
     absent(within(editor).queryByRole('region', { name: 'Draft, to be verified' }))
     fireEvent.change(within(editor).getByLabelText(/^Answer \(English\)/), { target: { value: 'Check the card details.' } })
     fireEvent.change(within(editor).getByLabelText(/^Question \(Chinese\)/), { target: { value: '为什么卡被拒？' } })

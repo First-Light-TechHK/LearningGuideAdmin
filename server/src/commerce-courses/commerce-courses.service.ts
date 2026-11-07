@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStorageService } from './storage.service';
 import { computeCompleteness } from './completeness';
+import { pickSummaryLocalization, summaryTitle } from './course-summary';
 import { detailToCompletenessInput } from './version-snapshot';
 import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
 import { syncTextLearningPoints } from './course-authoring.service';
@@ -21,31 +22,45 @@ export class CommerceCoursesService {
     private readonly publishing: PublishingService,
   ) {}
 
-  /** 读取课程封面字节（Admin 预览用）�?*/
-  async getCoverBytes(
-    id: string,
-  ): Promise<{ bytes: Buffer; extension: string } | null> {
+  /** 读取课程封面的存储位置（Admin 预览用）。 */
+  async getCoverBytes(id: string): Promise<{
+    storageKey: string;
+    extension: string;
+    size: number | null;
+  } | null> {
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id },
-      select: { cover: { select: { storageKey: true, extension: true } } },
+      select: {
+        cover: { select: { storageKey: true, extension: true, size: true } },
+      },
     });
     if (!course?.cover) return null;
-    const bytes = await this.storage.getMedia(course.cover.storageKey);
-    return { bytes, extension: course.cover.extension };
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
   }
 
-  /** 读取课程某媒体资产字节（Admin 预览用，仅限该课程内资产）�?*/
+  /** 读取课程某媒体资产的存储位置（Admin 预览用，仅限该课程内资产）。 */
   async getMediaBytes(
     id: string,
     assetId: string,
-  ): Promise<{ bytes: Buffer; extension: string } | null> {
+  ): Promise<{
+    storageKey: string;
+    extension: string;
+    size: number | null;
+  } | null> {
     const asset = await this.prisma.courseMediaAsset.findUnique({
       where: { id: assetId },
-      select: { courseId: true, storageKey: true, extension: true },
+      select: { courseId: true, storageKey: true, extension: true, size: true },
     });
     if (!asset || asset.courseId !== id) return null;
-    const bytes = await this.storage.getMedia(asset.storageKey);
-    return { bytes, extension: asset.extension };
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
   }
 
   async list(query: {
@@ -97,7 +112,12 @@ export class CommerceCoursesService {
     const liveVersions = liveVersionIds.length
       ? await this.prisma.courseVersion.findMany({
           where: { id: { in: liveVersionIds } },
-          select: { id: true, versionLabel: true, wentLiveAt: true, createdAt: true },
+          select: {
+            id: true,
+            versionLabel: true,
+            wentLiveAt: true,
+            createdAt: true,
+          },
         })
       : [];
     const liveVersionById = new Map(
@@ -530,7 +550,9 @@ export class CommerceCoursesService {
           where: { id: lessonId },
           data: {
             ...(body.code !== undefined ? { code: body.code.trim() } : {}),
-            ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+            ...(body.sortOrder !== undefined
+              ? { sortOrder: body.sortOrder }
+              : {}),
           },
         });
         if (
@@ -538,25 +560,26 @@ export class CommerceCoursesService {
           body.description !== undefined ||
           body.textHtml !== undefined
         ) {
-          const existing = await tx.lessonLocalization.findUnique({
-            where: { lessonId_language: { lessonId, language } },
-            select: { title: true, description: true, textHtml: true },
-          });
-          const payload = {
-            title: body.title ?? existing?.title ?? 'Untitled',
-            description:
-              body.description !== undefined
-                ? body.description
-                : (existing?.description ?? null),
-            textHtml:
-              body.textHtml !== undefined
-                ? body.textHtml
-                : (existing?.textHtml ?? null),
-          };
+          // 只写本次提交的字段：先读后整行写回会在并发保存（例如标题与正文
+          // 同时提交）时用旧值互相覆盖，把正文 textHtml 清空并连带删除文本学习点。
           await tx.lessonLocalization.upsert({
             where: { lessonId_language: { lessonId, language } },
-            create: { lessonId, language, ...payload },
-            update: payload,
+            create: {
+              lessonId,
+              language,
+              title: body.title ?? 'Untitled',
+              description: body.description ?? null,
+              textHtml: body.textHtml ?? null,
+            },
+            update: {
+              ...(body.title !== undefined ? { title: body.title } : {}),
+              ...(body.description !== undefined
+                ? { description: body.description }
+                : {}),
+              ...(body.textHtml !== undefined
+                ? { textHtml: body.textHtml }
+                : {}),
+            },
           });
           if (body.textHtml !== undefined) {
             await syncTextLearningPoints(tx, lessonId, language, body.textHtml);
@@ -667,6 +690,7 @@ export class CommerceCoursesService {
     id: string;
     code: string;
     slug: string;
+    defaultContentLanguage: string;
     learningMode: string;
     learningLanguages: unknown;
     lifecycleStatus: string;
@@ -683,13 +707,23 @@ export class CommerceCoursesService {
     }[];
     _count: { lessons: number };
   }) {
-    const defaultLoc = row.localizations[0];
+    // localizations 的返回顺序不稳定（没有 orderBy，Postgres 堆顺序可能因更新而改变），
+    // 若直接取 [0]，可能拿到「添加学习语言」时以空标题占位的本地化记录，导致列表里
+    // 课程名为空。选择规则见 pickSummaryLocalization。
+    const localized = pickSummaryLocalization(
+      row.localizations,
+      row.defaultContentLanguage,
+    );
+    const title = summaryTitle(row.localizations, row.defaultContentLanguage, {
+      slug: row.slug,
+      code: row.code,
+    });
     return {
       id: row.id,
       code: row.code,
       slug: row.slug,
-      title: defaultLoc?.title ?? row.slug,
-      subtitle: defaultLoc?.shortDescription ?? null,
+      title,
+      subtitle: localized?.shortDescription ?? null,
       category: row.category
         ? { id: row.category.id, name: row.category.name }
         : null,

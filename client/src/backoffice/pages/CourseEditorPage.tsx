@@ -7,29 +7,27 @@ import type {
   HistoryPage,
   TrialSettings,
 } from '../contracts/course';
+import { useEmployee } from '../employeeSession';
 import { boRequest } from '../lib/api';
+import { isActionAllowed } from '../rbac/permissions';
 import { categoryLabel } from '../lib/categoryLabel';
 
 import { CourseInfoSection } from './course-editor/CourseInfoSection';
 import { CourseContentSection } from './course-editor/CourseContentSection';
 import { CourseTrialSection } from './course-editor/CourseTrialSection';
 import { CourseVersionsSection } from './course-editor/CourseVersionsSection';
-import {
-  L,
-  buttonStyle,
-  fmtDate,
-  inputStyle,
-  languageLabel,
-  learningModeLabel,
-  liveStatusLabel,
-  primaryBtn,
-} from './course-editor/shared';
+import { L, buttonStyle, fmtDate, inputStyle, languageLabel, learningModeLabel, liveStatusLabel, primaryBtn } from './course-editor/shared-utils';
 
 type Tab = 'info' | 'content' | 'trial' | 'versions';
 
 export function CourseEditorPage() {
   const { courseId = '', locale = 'en-GB' } = useParams();
   const navigate = useNavigate();
+  // REQ-0236：Edit 级（Graphic Designer）只改已有课程内容；发布 / 导入导出 / 上下线 /
+  // 恢复版本，以及试看和价格（商业配置）只给 Course=Full。后端是最终边界，这里只收起按钮。
+  const employee = useEmployee();
+  const canPublish = isActionAllowed(employee.role, 'course', 'PUBLISH');
+  const canManageCommerce = isActionAllowed(employee.role, 'course', 'CREATE');
   const [course, setCourse] = useState<CourseDetail | null>(null);
   const [trial, setTrial] = useState<TrialSettings | null>(null);
   const [versions, setVersions] = useState<CourseVersion[]>([]);
@@ -43,32 +41,56 @@ export function CourseEditorPage() {
   const [notice, setNotice] = useState('');
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const [detail, trialResult, versionsResult, historyResult, categoriesResult] = await Promise.all([
+  const fetchLoad = useCallback(() => {
+    return Promise.all([
       boRequest<CourseDetail>(`/api/backoffice/courses/${courseId}`),
       boRequest<TrialSettings>(`/api/backoffice/courses/${courseId}/trial`),
       boRequest<CourseVersion[]>(`/api/backoffice/courses/${courseId}/versions`),
-      boRequest<HistoryPage>(`/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`),
+      boRequest<HistoryPage>(
+        `/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`,
+      ),
       boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`),
-    ]);
-    setLoading(false);
-    if (!detail.success) {
-      setNotice(`Could not load course: ${detail.message ?? detail.error}`);
-      return;
-    }
-    setCourse(detail.data);
-    setContentLanguage(detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB');
-    setActiveLessonId((current) => current || detail.data.lessons[0]?.id || '');
-    if (trialResult.success) setTrial(trialResult.data);
-    if (versionsResult.success) setVersions(versionsResult.data);
-    if (historyResult.success) setHistory(historyResult.data);
-    if (categoriesResult.success) setCategories(categoriesResult.data);
-  }, [courseId, historyPage]);
+    ]).then(([detail, trialResult, versionsResult, historyResult, categoriesResult]) => {
+      setLoading(false);
+      if (!detail.success) {
+        setNotice(
+          `${L(locale, '课程加载失败', 'Could not load course')}: ${detail.message ?? detail.error}`,
+        );
+        return;
+      }
+      setCourse(detail.data);
+      setContentLanguage(
+        detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB',
+      );
+      setActiveLessonId((current) =>
+        detail.data.lessons.some((lesson) => lesson.id === current)
+          ? current
+          : detail.data.lessons[0]?.id || '',
+      );
+      if (trialResult.success) setTrial(trialResult.data);
+      if (versionsResult.success) setVersions(versionsResult.data);
+      if (historyResult.success) setHistory(historyResult.data);
+      if (categoriesResult.success) setCategories(categoriesResult.data);
+    });
+  }, [courseId, historyPage, locale]);
+
+  const [loadSource, setLoadSource] = useState(() => ({ courseId, historyPage, locale }));
+  if (
+    loadSource.courseId !== courseId ||
+    loadSource.historyPage !== historyPage ||
+    loadSource.locale !== locale
+  ) {
+    setLoadSource({ courseId, historyPage, locale });
+    setLoading(true);
+  }
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetchLoad();
+  }, [fetchLoad]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void fetchLoad();
+  }, [fetchLoad]);
 
   const liveVersion = useMemo(() => versions.find((version) => version.isLive), [versions]);
   const localizedCategories = useMemo(
@@ -87,7 +109,7 @@ export function CourseEditorPage() {
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course`)}>← {L(locale, '课程列表', 'Course Overview')}</button>
           <div>
-            <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title ?? course.code}</h1>
+            <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title?.trim() || course.localizations.find((item) => item.title.trim())?.title || course.code}</h1>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>
               {course.code} · {course.category ? categoryLabel(locale, course.category.name) : L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
             </div>
@@ -112,7 +134,7 @@ export function CourseEditorPage() {
         <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14, background: '#F5F8FF' }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
           <div style={{ fontSize: 13 }}>
-            {liveVersion ? `${liveVersion.versionLabel} · ${liveStatusLabel(locale, course.liveStatus)} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
+            {liveVersion ? `${liveVersion.versionLabel} · ${liveStatusLabel(locale, course.liveStatus)} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt, locale)}` : L(locale, '从未发布', 'Not published')}
           </div>
         </div>
       </div>
@@ -138,12 +160,14 @@ export function CourseEditorPage() {
             {item.label} · {stepLabel(item.complete)}
           </button>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')}</span>
-          <select value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
-            {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
-          </select>
-        </div>
+        {course.learningLanguages.length > 1 && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#5A6577' }}>{L(locale, '内容语言', 'Content language')}</span>
+            <select value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
+              {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
       {notice && <p role="status" style={{ padding: 10, background: /fail|error|invalid/i.test(notice) ? '#FDECEC' : '#F3F7FF', borderRadius: 8, marginTop: 14 }}>{notice}</p>}
@@ -151,8 +175,8 @@ export function CourseEditorPage() {
       <div style={{ marginTop: 16 }}>
         {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} onNext={() => setTab('content')} />}
         {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
-        {tab === 'trial' && trial && <CourseTrialSection locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} contentLanguage={contentLanguage} />}
-        {tab === 'versions' && <CourseVersionsSection locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
+        {tab === 'trial' && trial && <CourseTrialSection canManage={canManageCommerce} locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} contentLanguage={contentLanguage} />}
+        {tab === 'versions' && <CourseVersionsSection canPublish={canPublish} locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
       </div>
     </section>
   );

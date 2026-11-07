@@ -46,6 +46,7 @@ function faq(overrides: Partial<HelpdeskFaq> = {}): HelpdeskFaq {
     entry: true,
     category: 'account_technical',
     popular: false,
+    popularRank: null,
     questionEn: `Question ${counter}`,
     answerEn: 'Answer',
     questionZh: `问题 ${counter}`,
@@ -774,6 +775,40 @@ describeDb('Helpdesk FAQ repository (PostgreSQL)', () => {
       await expect(
         find('en-GB', null, "password' OR 1=1; -- & | ! ( ) :* <-> %_"),
       ).resolves.toEqual([expect.objectContaining({ id: reset.id })]);
+    });
+
+    it('ranks an English match in the question (title) above the same word repeated in an answer (owner 2026-11-03)', async () => {
+      const inAnswer = (
+        await repo.insert(
+          faq({
+            questionEn: 'Visiting the office',
+            answerEn:
+              'Your PIN opens the door; type the PIN twice, then a new PIN is sent.',
+            category: 'other',
+          }),
+          EMP,
+          null,
+        )
+      ).faq;
+      const inTitle = (
+        await repo.insert(
+          faq({
+            questionEn: 'Where do I find my PIN?',
+            answerEn: 'Ask at the front desk.',
+            category: 'other',
+          }),
+          EMP,
+          null,
+        )
+      ).faq;
+      try {
+        expect(
+          (await find('en-GB', null, 'pin')).map((c) => c.id).slice(0, 2),
+        ).toEqual([inTitle.id, inAnswer.id]);
+      } finally {
+        for (const row of [inAnswer, inTitle])
+          await repo.update(row.id, 1, { status: 'archived' }, 'archive', EMP);
+      }
     });
 
     it('reads one published FAQ by id for a chip, never an archived one', async () => {

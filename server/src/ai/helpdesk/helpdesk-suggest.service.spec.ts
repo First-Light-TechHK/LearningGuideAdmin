@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { HttpException } from '@nestjs/common';
 
 import type {
@@ -287,7 +288,7 @@ describe('Helpdesk suggest: happy path', () => {
     expect(context.name).toBe('pick_faq');
     expect(spec.tool).toEqual({
       name: 'pick_faq',
-      description: expect.any(String),
+      description: expect.any(String) as unknown,
       // intent 在前：模型先分类再选
       enumArgs: {
         intent: [
@@ -896,10 +897,10 @@ describe('Helpdesk suggest v2: separate rate limits', () => {
 
 describe('Helpdesk suggest: model choice', () => {
   it('uses the model fixed in code; HELPDESK_SUGGEST_MODEL only overrides it', () => {
-    // 用户 2026-10-30：DeepSeek（deepseek-v4.1-flash）为主模型，gemini-2.5-flash 只作对照
-    expect(suggestModel({})).toBe('deepseek/deepseek-v4.1-flash');
+    // owner 2026-11-03：缺省就是分级方案的小模型（contracts/helpdesk-defaults.ts），不再是 DeepSeek
+    expect(suggestModel({})).toBe('google/gemma-4-31b-it');
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: '  ' })).toBe(
-      'deepseek/deepseek-v4.1-flash',
+      'google/gemma-4-31b-it',
     );
     expect(suggestModel({ HELPDESK_SUGGEST_MODEL: ' x/y ' })).toBe('x/y');
     // AI Tutor 的模型列表不影响推荐用的模型（DEV 上排第一的是 deepseek）
@@ -907,15 +908,15 @@ describe('Helpdesk suggest: model choice', () => {
       suggestModel({
         AI_AVAILABLE_MODELS: 'openai/gpt-4o-mini, deepseek/deepseek-v4.1-flash',
       }),
-    ).toBe('deepseek/deepseek-v4.1-flash');
+    ).toBe('google/gemma-4-31b-it');
   });
 
-  it('the chat thinks high unless HELPDESK_SUGGEST_THINKING names another level (read on every call); the ticket form never thinks', async () => {
-    // 用户 2026-10-30：DeepSeek 开 thinking。盲评：high 档错卡最少（长对话 0.45%，off 1.45%）
-    expect(suggestThinking({})).toBe('high');
+  it('the chat does not think unless HELPDESK_SUGGEST_THINKING names a level (read on every call); the ticket form never thinks', async () => {
+    // 分级方案的小模型不开思考（2026-11-03；DeepSeek 时缺省 high）
+    expect(suggestThinking({})).toBe('off');
     expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: ' LOW ' })).toBe('low');
-    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'off' })).toBe('off');
-    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'high' })).toBe('high');
+    expect(suggestThinking({ HELPDESK_SUGGEST_THINKING: 'max' })).toBe('off');
     // 提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天：不思考、3.5 秒
     for (const env of [{}, { HELPDESK_SUGGEST_THINKING: 'low' }])
       expect(suggestLimits(false, env)).toEqual({
@@ -931,11 +932,16 @@ describe('Helpdesk suggest: model choice', () => {
       expect(context.model).not.toHaveProperty('thinking');
   });
 
-  it('cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
+  it('does not think by default; cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
     // 用户 2026-10-30：思考截在 6.3 秒（盲评 high 档 p95 6.3 秒、p99 12.6 秒），同时发不思考的后备
     expect(SUGGEST_THINKING_CUTOFF_MS).toBe(6_300);
     expect(SUGGEST_THINKING_DEADLINE_MS).toBe(8_000);
     expect(suggestLimits(true, {})).toEqual({
+      thinking: 'off',
+      deadlineMs: 3_500,
+      stepMs: 3_000,
+    });
+    expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'high' })).toEqual({
       thinking: 'high',
       deadlineMs: 8_000,
       stepMs: 8_000,
@@ -1130,7 +1136,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
       category: 'technical_support',
       parentRunId: ROOT,
       traceId: TRACE,
-      spanId: expect.stringMatching(/^[0-9a-f]{16}$/),
+      spanId: expect.stringMatching(/^[0-9a-f]{16}$/) as unknown,
       parentSpanId: '00f067aa0ba902b7',
       input: { subject: input.subject, message: input.message },
     });
@@ -1146,7 +1152,7 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
       reason: 'answered',
       faqId: candidates[0].id,
       model: 'test/cheap-model',
-      latencyMs: expect.any(Number),
+      latencyMs: expect.any(Number) as unknown,
       alternatives: [],
     });
   });
@@ -1328,6 +1334,55 @@ describe('Helpdesk suggest v2: agent event log (dsh SessionEvent)', () => {
     const purge = jest.spyOn(ctx.events, 'purgeLearnerText');
     await ctx.service.suggest(input);
     expect(purge).toHaveBeenCalledWith(new Date(now - 90 * 24 * 3_600_000));
+  });
+
+  it('checks model output health at most every 15 minutes and logs one WARN line per degraded step', async () => {
+    let now = Date.UTC(2026, 10, 2, 8, 0, 0);
+    const ctx = setup({ now: () => now });
+    const stepHealth = jest.spyOn(ctx.events, 'stepHealth').mockResolvedValue([
+      {
+        step: 'explain',
+        kind: 'agent',
+        total: 40,
+        invalid: 30,
+        guardFallbacks: 0,
+        failures: 0,
+      },
+      {
+        step: 'pick_faq',
+        kind: 'agent',
+        total: 40,
+        invalid: 1,
+        guardFallbacks: 0,
+        failures: 0,
+      },
+    ]);
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    await ctx.service.suggest(input);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stepHealth).toHaveBeenCalledWith(new Date(now - 60 * 60_000));
+    const lines = warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes('model_output_degraded'));
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      type: 'helpdesk',
+      event: 'model_output_degraded',
+      step: 'explain',
+      invalidRate: 0.75,
+      threshold: 0.05,
+      windowMinutes: 60,
+    });
+    // within 15 minutes: no second check; after: checks again
+    now += 14 * 60_000;
+    await ctx.service.suggest(input);
+    expect(stepHealth).toHaveBeenCalledTimes(1);
+    now += 60_000;
+    await ctx.service.suggest(input);
+    expect(stepHealth).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });
 

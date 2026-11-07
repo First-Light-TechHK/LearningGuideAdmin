@@ -6,6 +6,10 @@ import {
   type HelpdeskQaCandidate,
   type HelpdeskQaSource,
 } from '../../../../contracts/helpdesk-qa';
+import {
+  HELPDESK_DEFAULTS,
+  helpdeskSetting,
+} from '../../../../contracts/helpdesk-defaults';
 import { splitAnswerBlocks } from './faqBlocks';
 import { FAQ_LIMITS, localised, type HelpdeskFaq } from './faqContracts';
 import { createPgFaqGraphRepository } from './faqGraphRepository';
@@ -16,7 +20,11 @@ import {
   type SqlDb,
 } from './faqRepository';
 import { locatorHead, locatorIndex, type FaqSnapshotMap } from './faqMap';
-import type { FaqReleaseSource, FaqSnapshotNode } from './faqRelease';
+import type {
+  FaqReleaseSnapshot,
+  FaqReleaseSource,
+  FaqSnapshotNode,
+} from './faqRelease';
 import { createPgFaqReleaseSource } from './faqReleaseService';
 import {
   createEnvFaqVectorSearch,
@@ -25,6 +33,8 @@ import {
   retrievalMode,
   warmFaqVectors,
   withFaqVectorSearch,
+  FAQ_VECTOR_LIMITS,
+  type FaqVectorHit,
   type FaqVectorSearch,
 } from './faqVectors';
 
@@ -60,6 +70,14 @@ export type HelpdeskQaSourceDeps = {
   liveEdges: () => Promise<QaEdge[]>;
   /** 定位方式（每次现读；缺省 flat）。 */
   locator?: () => LocatorMode;
+  /** 候选范围（每次现读；缺省 tree）：all = 平铺，见 searchScope()。 */
+  searchScope?: () => SearchScope;
+  /**
+   * 向量排序（faqVectors.ts）：精排的召回池要的向量那一路。不给 → 没有 findVectorCandidates 的结果（[]）。
+   */
+  vectors?: FaqVectorSearch;
+  /** 向量那一路的期限（缺省 FAQ_VECTOR_LIMITS.queryTimeoutMs）。 */
+  vectorTimeoutMs?: number;
 };
 
 export const LOCATOR_MODES = ['flat', 'hybrid'] as const;
@@ -69,6 +87,24 @@ export function locatorMode(env: NodeJS.ProcessEnv): LocatorMode {
   return env.HELPDESK_LOCATOR?.trim().toLowerCase() === 'hybrid'
     ? 'hybrid'
     : 'flat';
+}
+
+/**
+ * 候选范围（HELPDESK_SEARCH_SCOPE，每次现读）。owner 2026-11-02 定了平铺，2026-11-03 起是缺省：
+ * - tree（要显式设）：普通检索只搜入口卡；屏幕上有卡时先给它的子卡和树上近亲；
+ * - all（缺省）：平铺。每张已发布的答案卡都直接参与检索，不管是不是入口；不按父子边加子卡、近亲，
+ *   边只留给显示（追问 chip、选项卡）。要和「追问卡的问题单独看也完整」的卡库一起开
+ *   （三组终测 2026-11-02：平铺与树准确率打平，单问中位 1.1 秒 vs 1.9 秒、每次更便宜）。
+ */
+export const SEARCH_SCOPES = ['tree', 'all'] as const;
+export type SearchScope = (typeof SEARCH_SCOPES)[number];
+
+export function searchScope(env: NodeJS.ProcessEnv): SearchScope {
+  const value = env.HELPDESK_SEARCH_SCOPE?.trim().toLowerCase();
+  return (
+    SEARCH_SCOPES.find((scope) => scope === value) ??
+    HELPDESK_DEFAULTS.searchScope
+  );
 }
 
 type View = {
@@ -130,6 +166,10 @@ export function createHelpdeskQaSource(
     relation: HelpdeskQaCandidate['relation'],
   ): HelpdeskQaCandidate {
     const text = localised(faq, locale);
+    const parent = v.edges
+      .filter((edge) => edge.kind === 'follow_up' && edge.childId === faq.id)
+      .map((edge) => v.nodes.get(edge.parentId))
+      .find((node) => node !== undefined);
     return {
       id: faq.id,
       category: faq.category,
@@ -142,6 +182,7 @@ export function createHelpdeskQaSource(
         .filter((edge) => edge.kind === 'option' && edge.childId === faq.id)
         .map((edge) => edge.parentId),
       relation,
+      ...(parent ? { under: localised(parent, locale).question } : {}),
     };
   }
 
@@ -155,7 +196,9 @@ export function createHelpdeskQaSource(
       const locale = search.locale;
       const limit = Math.min(search.limit, FAQ_LIMITS.candidatesMax);
       const v = await view(true);
-      const contextId = search.nodeId?.toLowerCase();
+      const flat = (deps.searchScope?.() ?? 'tree') === 'all';
+      // 平铺：屏幕上的卡片不决定候选（不加子卡、近亲）；入口限制也去掉（hybrid 的结构排序因此不生效）
+      const contextId = flat ? undefined : search.nodeId?.toLowerCase();
       const children = contextId
         ? v.edges
             .filter((edge) => edge.parentId === contextId)
@@ -180,7 +223,7 @@ export function createHelpdeskQaSource(
         }
         relatives.delete(contextId);
       }
-      const entryOnly = search.entryOnly ?? true;
+      const entryOnly = flat ? false : (search.entryOnly ?? true);
       const types = search.types ?? ['answer'];
       const deepWanted =
         entryOnly && types.includes('answer')
@@ -203,7 +246,10 @@ export function createHelpdeskQaSource(
                   ? (['answer', 'choice'] as const)
                   : search.types,
             }
-          : { entryOnly: search.entryOnly, types: search.types }),
+          : {
+              entryOnly: flat ? false : search.entryOnly,
+              types: search.types,
+            }),
       });
       const scored = new Map<string, ScoredFaq>(
         searched.map((faq) => [faq.id, faq]),
@@ -338,6 +384,49 @@ export function createHelpdeskQaSource(
       return out;
     },
 
+    async findVectorCandidates(search) {
+      if (!deps.vectors || !isHelpdeskLocale(search.locale)) return [];
+      const locale = search.locale;
+      const v = await view(true);
+      if (v.release === null || search.text.trim() === '') return [];
+      const controller = new AbortController();
+      let timer: NodeJS.Timeout | undefined;
+      const timedOut = new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(null);
+          controller.abort();
+        }, deps.vectorTimeoutMs ?? FAQ_VECTOR_LIMITS.queryTimeoutMs);
+        timer.unref?.();
+      });
+      let ranked: FaqVectorHit[] | null;
+      try {
+        ranked = await Promise.race([
+          deps.vectors.rank(v.release, search.text, controller.signal),
+          timedOut,
+        ]);
+      } catch {
+        ranked = null;
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!ranked) return [];
+      const release = v.release;
+      const hits = ranked
+        .filter((hit) => hit.type === 'answer' || hit.type === 'choice')
+        .slice(
+          0,
+          Math.max(0, Math.min(search.limit, FAQ_LIMITS.publicLimitMax)),
+        );
+      const rows = await Promise.all(
+        hits.map((hit) => repository.getPublished(hit.id, { release })),
+      );
+      return rows.flatMap((faq, index) =>
+        faq
+          ? [candidate(faq, hits[index].similarity, locale, v, 'search')]
+          : [],
+      );
+    },
+
     async findPopular(search) {
       if (!isHelpdeskLocale(search.locale)) return [];
       const locale = search.locale;
@@ -372,21 +461,45 @@ export function createPgHelpdeskQaSource(
   vectors: FaqVectorSearch = db
     ? createEnvFaqVectorSearch(db)
     : sharedFaqVectorSearch(),
+  /**
+   * 钉在一个（还没发布的）候选版本上：发布前的真流程抽样检查用（faqReleaseModelGate.ts）。
+   * 缺省 = 上线的版本（生产）。
+   */
+  pinned?: { version: number; snapshot: FaqReleaseSnapshot },
 ): HelpdeskQaSource {
   const graph = createPgFaqGraphRepository(db);
   const source = createHelpdeskQaSource({
+    vectors,
     // 候选检索按 HELPDESK_RETRIEVAL（每次现读，缺省 lexical = 和以前一样只走字词）
     repository: withFaqVectorSearch(repository ?? createPgFaqRepository(db), {
       vectors,
       mode: () => retrievalMode(process.env),
       onError: logFaqVectorSearchError,
     }),
-    releases: createPgFaqReleaseSource(graph),
+    releases: pinned
+      ? {
+          current: () =>
+            Promise.resolve({
+              version: pinned.version,
+              publishedAt: '',
+              snapshot: pinned.snapshot,
+            }),
+        }
+      : createPgFaqReleaseSource(graph),
     liveEdges: () => graph.allEdges(),
     locator: () => locatorMode(process.env),
+    searchScope: () => searchScope(process.env),
   });
-  // 向量检索开着时，启动就把上线版本的向量读进内存（约 1 秒），免得最先几个提问等不到、退回字词检索
-  if (retrievalMode(process.env) !== 'lexical')
+  // 向量检索或精排（精排的召回池含向量那一路）开着时，启动就把上线版本的向量读进内存（约 1 秒），
+  // 免得最先几个提问等不到、退回字词检索
+  if (pinned) return source;
+  if (
+    retrievalMode(process.env) !== 'lexical' ||
+    helpdeskSetting(
+      process.env.HELPDESK_RERANK_MODEL,
+      HELPDESK_DEFAULTS.rerankModel,
+    ) !== null
+  )
     void warmFaqVectors(
       vectors,
       () => source.releaseVersion?.() ?? Promise.resolve(null),

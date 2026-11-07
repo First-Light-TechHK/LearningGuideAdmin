@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-11-02 ｜ Portal 投影 v1.2：试看截止点 + Range 媒体 + 「在 Portal 中预览」可试播
+
+- **用户拍板**：（1）「在 Portal 中预览」必须严格走 `docs/Portal_Projection_API.md` 定义的 Admin 课程投影接口，
+  因为它的目的就是验证后续正式 Portal 课程页要消费的同一份契约；（2）预览必须能看正文/视频（可试播）；
+  （3）三个入口（课程编辑、学员视角预览、在 Portal 中预览）与正式 Portal 必须读同一个 S3 课程资产，不产生副本。
+- **变更清单**：
+  - `storage.service.ts`：`StorageDriver` 增加 `getRange`（S3 `Range` / 本地 `fd.read`）与 `size`（HEAD / stat）；
+    `CourseStorageService` 暴露 `getMediaRange` / `mediaSize`。
+  - 新增 `media-stream.ts`：统一媒体输出，支持 HTTP `Range` → `206` + `Content-Range` + `Accept-Ranges: bytes`，
+    单次最多 8MB，超出按分段返回；正式 Portal、Admin 预览、编辑预览共用同一实现。
+  - `portal-courses.controller.ts` / `commerce-courses.controller.ts`：媒体端点改为通过 `sendMedia` 输出；
+    投影服务不再把整份 Buffer 读进内存，只返回 `storageKey / extension / size`。
+  - 新增预览媒体端点：`GET /api/backoffice/courses/:id/portal-preview/cover?token=` 与
+    `GET /api/backoffice/courses/:id/portal-preview/media/:assetId?token=`（员工会话 + preview token，
+    不要求课程 `ONLINE`，读的是同一个 `CourseMediaAsset.storageKey`）。
+  - `portal-projection.service.ts`：`toDetail` 增加 `sections[].lessons[].trial`
+    （`videoCutoffSeconds` 按内容语言、`textCutoffLearningPointId`、`textCutoffCode`）；
+    新增 `getPreviewCoverBytes` / `getPreviewMediaBytes`。
+  - `PortalCoursePreviewPage.tsx`：渲染视频 `<video controls>` 与文本正文、展品节点，媒体 URL 映射到预览端点；
+    移除「课时正文与视频请在学员视角预览中查看」的旧提示。
+  - 文档：`docs/Portal_Projection_API.md` 升级 v1.2（端点表、Range 说明、预览媒体、契约一致性要求、OpenAPI schema）。
+- **自测证据**：
+  - server：`node node_modules/typescript/bin/tsc -p tsconfig.build.json --noEmit` 通过；
+    `jest --config test/jest-e2e.json --testPathPatterns portal-projection` 8/8 通过
+    （新增覆盖：预览封面/视频读取、`Range` 返回 `206` + `e2e-` 4 字节、跨课程 token 401、`trial` 截止点字段）。
+  - client：`tsc -p tsconfig.app.json --noEmit` 通过。
+- **审查结论**：待 Review Agent 审查。
+- **Git**：未提交，未推送。
+- **下一步**：正式 Portal 课程页改为消费 `/api/portal/v1/courses/:id` + `/api/portal/v1/media/**`（带 `X-API-Key` 与 origin 拼接）；
+  Portal 侧按 `sections[].lessons[].trial` 裁剪视频/正文；确认 `/api/portal/v1` 的 `AUTH_TOKEN` 与 Portal 环境一致。
+
+---
+
 ## 2026-10-30 ｜ Course P1b：Draft → Publish → Version / History / Operations / Stripe / 学员预览（Admin server + client）
 
 - **用户拍板**：依据 `docs/Course_Management_PRD_v2_Aligned_Design.md`（Final，2026-10-30）§12 路线开始 P1b 开发；设计中待确认事项按 PRD 默认规则落地（History 只记录 PRD §21 明确的 6 类操作 + Operations Publish + Create course；Lesson 软删除新增 `archivedAt`；Popular/Banner 各自 Publish）。
@@ -1489,3 +1522,85 @@
   - N3：`mathCache` 命中时 `delete + set` 移到队尾，改为真正 LRU（容量 500）
   - 审查结论：M3 APPROVE（0 Blocking）；剩余非阻塞项（500 页性能实测、HTMLBlock/多行 InlineCode 的 `$$` 排除、KaTeX 错误回退口径、客户端测试基建）已记录待后续
   - 验证：`npm run build`、`npm run lint`（0 error / 12 warning）
+
+## AI Tutor P1 离线审核包校验（2026-11-02）
+- 依据：根目录 `AI_Tutor_Architecture.md` §3.2 与 `AI_Tutor_Implementation_Plan.md` §3。
+- 新增无副作用的 reviewed package validator 和边界单测；校验快照绑定、锚点重建、卡字段/审核状态/卡哈希及来源和链接闭包。
+- 仅为离线契约校验：不认证 reviewer、不写数据库、不替换 ready 包、不接入 Tutor 请求；P1/P2 仍未完成。
+- 最终验证：定向 ESLint 通过、`tsc --noEmit` 通过、Tutor 单测 7 suites / 27 tests 通过。独立 Review Agent 审查进行中。
+- 独立审查首轮指出 validated result 与候选对象共享引用；已深拷贝 manifest/cards 并增加变异回归，修复后 ESLint、typecheck、Tutor 7 suites / 27 tests 通过，等待复审。
+- 独立复审 APPROVE（无 Blocking）；审核包离线校验单元完成。
+
+## AI Tutor P1 glossary 契约（2026-11-02）
+- 将 `glossary` 与唯一 conceptId、双语标签/别名纳入审核包校验；卡片需与其 concept identity 一致，验证后集合按稳定 ID 排序。
+- 验证：定向 ESLint、严格定向 tsc 通过；Tutor 7 suites / 28 tests 通过。全项目 tsc 仍被并行工作区 `files.controller.ts` / `FilesService` 未提交改动阻断（重复导入与缺方法类型错误），未修改该模块。
+
+## AI Tutor P2.1 Validator 纯函数（2026-11-02）
+- 添加规则优先、分类器结构检查、低置信澄清和异常 fail-closed 的离线编排原语；不接 Provider、检索、Tutor 或旧 chat 路径。
+- 验证：定向 ESLint、严格定向 tsc 通过；Tutor 8 suites / 40 tests 通过。全项目 tsc 被并行 files 模块改动阻断，尚未复绿。
+
+## AI Tutor P2 Validator 修正与 Planner 校验（2026-11-02）
+- P2.1 修复非法 rules 容器会抛出的问题，添加 fail-closed 用例；P2.2 新增 Planner slice 对包内知识 ID 与 glossary 术语的类型化校验。
+- 两者都是离线纯函数，不接主请求链。定向 ESLint/严格 tsc 通过；Tutor 9 suites / 46 tests 通过；独立复审待完成。
+
+## AI Tutor P2.4 Compiler 字段哈希（2026-11-02）
+- Compiler 添加各字段 SHA-256 manifest（答案轮含 Field 6，Field 8 哈希原文），Prompt hash 算最终 messages。
+- 定向 lint/严格 tsc 与 3 项 Compiler tests 通过；当前仍未接入 chat runtime。
+- P2.2 稀疏数组/action 运行时校验的首轮审查建议已修复；P2.4 Compiler 字段哈希已实现。当前共同验证：定向 lint/严格 tsc 通过，Tutor 9 suites / 47 tests 通过，独立复审待进行。
+
+## AI Tutor P2.3 确定性 Selector（2026-11-02）
+- 新增 package selector：必需 Planner 引用、卡链接和来源闭包、稳定排序、2–5 卡及工程预算、证据引用白名单和排除理由。
+- 使用 UTF-8 bytes/4 作为离线估算；不接运行时，不当真实 tokenizer 成绩。Validator/Planner/Compiler/Selector 合并复审待进行；Tutor 10 suites / 51 tests 通过。
+- P2.1–P2.4 纯函数模块独立复审 APPROVE；复审 26 个目标用例通过，server 全项目 `tsc --noEmit` 通过。
+
+## AI Tutor P2.5 Provider 兼容扩展（2026-11-02）
+- Provider 添加可选模型参数、取消/超时和 usage/finish 事件流；OpenRouter 实现映射；保留旧 stream 消费方式。
+- 定向 lint、server 全项目 typecheck、Provider+Tutor 54 tests 通过。非流式结构化任务与主链路接入待后续实现，独立审查待进行。
+- 全仓只读 ESLint 当前有 361 errors / 5 warnings，未改无关文件；Provider 改动文件定向 ESLint 通过，全 server typecheck 通过，Provider+Tutor 54 tests 通过。
+
+## AI Tutor P3 migration 提案（2026-11-02）
+- 新增 `docs/AI_tutor/P3_Schema_Proposal.md`，具体列出会话、学习状态、turn、trace 的字段/索引与事务/幂等设计，保留旧 AiChatSession 及 Release 删除语义。
+- 当前是待数据治理和主体信任审批的提案；未改 schema、未生成 migration、未写生产数据。
+- P2.5 Provider 变更经独立审查 APPROVE；非阻塞建议后续补真实 abort/timeout 触发测试。审查方运行 Provider+AiChatService 12 tests 通过。
+
+## AI Tutor P5 场景适配与 Fluency 评测结构（2026-11-02）
+- 新增科学展品上下文适配边界纯函数及合成 reducer 测试，覆盖客户端状态篡改、版本冲突、action 拒绝和无动作篡改；P5-S1 独立审查 APPROVE（1 suite / 5 tests）。
+- 新增 Fluency 评测结果结构校验，确保 trace 标识、理解与语用分离、P 六维/F 九维独立及 hard failure 单列。该校验不证明 trace 存在或评分正确；独立审查待进行。
+- 验证：四个新增源码/测试文件定向 ESLint 通过；全 server `npx --no-install tsc --noEmit` 通过；Tutor 12 suites / 60 tests 通过。P5-F 独立审查 APPROVE（1 suite / 4 tests）；真实课程包、人工复核与模型评测尚未完成。
+
+## AI Tutor P5-H2 Weimar E15 门控（2026-11-02）
+- 根据用户提供的 Reasoning Enhancement Pack，新增 W14/E15 六条件确定性门控函数；将该 PoC 的模型条件作为工程规则移植，不将其视为真实历史概率或本仓库现有 simulator。纯函数只校验状态形状，不证明状态来自服务端；未来接入须由服务器 reducer 重算。
+- 合成测试覆盖六项必要条件分别失败和输入校验；全 Tutor 13 suites / 68 tests、全 server typecheck、六个相关文件定向 lint 通过；独立审查 APPROVE，无 Blocking。
+
+## AI Tutor 首批运行时接线（2026-11-02）
+- `AiChatService` 两入口接固定字段 Compiler；检索最多5个 chunk/1100 KS tokenCount，空命中和无 chunk 可装入均在模型调用前受控失败。
+- 新增空命中短路和 Group Study 字段编译用例。Service 定向 ESLint、server typecheck 通过；AI chat service 11 tests 通过。Spec ESLint 有18项既有规则错误，未批量改动。
+- 本批独立审查 APPROVE，无 Blocking；已按建议更新 buildContext 旧注释。Validator/Planner、审核包选择、服务端会话和trace仍未接入。
+
+## AI Tutor 对话历史规整（2026-11-02）
+- 以纯函数筛选最近六个完整相邻 user/assistant 轮次，过滤孤立/未完成历史，接入共享 chat service。
+- service/history lint（源码文件）与全 server typecheck 通过；AiChatService + Tutor 15 suites / 82 tests 通过；独立审查待进行。
+
+## AI Tutor 模式化 Provider 参数（2026-11-02）
+- Lecture/Socratic 分别传 temperature 0.25/0.45 和 maxOutputTokens 900；Group Study 复用 Lecture 参数。
+- Service ESLint、server typecheck 和 AiChatService + Tutor 15 suites / 82 tests 通过；独立审查待进行。
+
+## AI Tutor SSE 断流取消（2026-11-02）
+- Controller 在 Response close 时中止请求，AbortSignal 传至 Provider；60 秒 timeout；取消错误不触发首字节重试。
+- SSE 与 service 用例覆盖取消和 listener 清理；定向 ESLint、全 server typecheck、2 suites / 14 tests 通过；独立审查待进行。
+
+## 2026-11-04：AI Tutor 母版迁移首轮实现
+
+- 用户授权在 AI_Tutor_改进版（基线 af89717）以相邻 AITutor-main 为基座；仅改 KnowledgeSystem。设计与完整文件清单见 docs/AI_tutor/Motherbase_Refactor.md。
+- 保留测试/Live Release、Online、MAIN/Lecture/Socratic/Assessment 及配置覆盖规则；单次读取运行配置；小 Release 完整上下文，大包保留既有检索与专项回归。日志新增 Prompt hash。
+- 真实逐块输出、上游错误/截断检测、取消和失败终态；后台历史按员工/课程/Release 隔离，只有完整成功轮次进入下一轮。后台 expectedReleaseId 校验屏幕版本；公式与引用 AST 分开处理，中英文错误映射同步。
+- 验证：后端定向 ESLint、全量 tsc、build 通过，完整单测 1770 passed / 166 skipped；前端 lint、tsc、build 通过，完整单测 500 passed，最后调整后的 Tutor+i18n 22 passed。
+- 后端全量 ESLint 仍有 695 errors / 11 warnings。HEAD 与当前变动 tracked TS 逐一比较，无新增错误并消除 2 项旧错误；未批量修复无关代码。
+- 独立 Review 尚未执行，未取得 APPROVE；真实模型、数据库 e2e 与界面验收待执行。多路线试跑、展品、持久学习状态和实际 Assessment 评分后置。没有改依赖/schema/环境/CI，没有 commit/push/部署。
+
+## 2026-11-05：全仓遗留 errors / warnings 清理
+
+- 后端 ESLint 从 695 errors / 11 warnings 清至 0 / 0，前端 Oxlint 从 61 warnings 清至 0；保留规则。修正响应/mock/Express 类型、邮箱限流漏 await、控制字符检查及 KS 对 Embedding 实现的直接依赖。
+- 拆开组件/工具导出以支持 Fast Refresh；表单与目录树按输入变化重置，异步结果在请求回调采用，工具栏订阅 CodeMirror。补离线回归并清除测试 act 警告。
+- lint → types → tests 通过：后端 1784 passed / 166 skipped；前端 503 passed；两端 build 通过。完整命令与文件清单见 docs/AI_tutor/Motherbase_Refactor.md §8。
+- 用户确认后已加入 vite.config.ts 的 app/vendor 分包规则（maxSize 750000）；实际构建为 34 个 JS 文件，最大 293019 bytes，无构建警告，原 500 kB 阈值保留。再次执行前端 lint、types、完整测试（503 passed）和 build 均通过。独立 Review、数据库 e2e、手动 UI/真实模型验收仍待执行。无 commit / push / 部署。

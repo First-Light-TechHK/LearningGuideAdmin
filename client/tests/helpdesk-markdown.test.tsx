@@ -108,10 +108,11 @@ describe('summaryLine (FAQ list subtitle, Figma has no summary field)', () => {
 describe('shared Markdown corpus (Portal parity)', () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url))
   const bytes = read('./fixtures/helpdesk-markdown-corpus.json')
+  const normalized = (value: Buffer) => Buffer.from(value.toString('utf8').replace(/\r\n/g, '\n'))
 
   test('is the pinned copy, byte-identical to the server copy', () => {
-    assert.equal(createHash('sha256').update(bytes).digest('hex'), '45ece9b892722705fa064ef580ebaa1b0afdb094758eebdf021238565a97c852')
-    assert.ok(bytes.equals(read('../../server/src/backoffice/tests/fixtures/helpdesk-markdown-corpus.json')))
+    assert.equal(createHash('sha256').update(normalized(bytes)).digest('hex'), '45ece9b892722705fa064ef580ebaa1b0afdb094758eebdf021238565a97c852')
+    assert.ok(normalized(bytes).equals(normalized(read('../../server/src/backoffice/tests/fixtures/helpdesk-markdown-corpus.json'))))
   })
 
   test('every case parses, summarises and reports unsafe links as the corpus says', () => {

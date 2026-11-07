@@ -340,9 +340,9 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 #### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
 - **入口**：树中 Page 节点悬停菜单「上传文档建页」→ 打开弹窗（不再直接调系统文件选择器）
-- **弹窗两步**（按用户设计稿）：
-  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按**实际白名单 10 格式**显示（设计稿中 epub/ppt 不支持；xls/doc 已于 2026-10-19 扩充支持）；Next 进入解析
-  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → markitdown-ts **本地**转换 → 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/courses/:courseId/pages`（§5.1.2）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
+- **弹窗两步**（按用户设计稿；2026-11-05 增加单文件 UTF-8 `.tex`）：
+  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按实际白名单显示（设计稿中 epub/ppt 不支持；xls/doc 已于 2026-10-19 扩充，tex 于 2026-11-05 扩充）；Next 进入解析
+  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → 常规格式由 markitdown-ts **本地**转换，`.tex` 使用保守转换分支，保留 `$...$`/`$$...$$` 公式，转换章节、段落、列表、强调和链接；纯排版间距命令忽略，未知命令及外部文件/图片引用保留为可见原文供用户检查 → 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/courses/:courseId/pages`（§5.1.2）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
 - **失败**：格式不支持/超限/转换失败/结果为空均 400（统一响应格式），弹窗内提示；Cancel 或关闭弹窗则什么都不落（转换阶段不建页、不落盘，内存 Buffer 直转）
 - 音视频文件**不在本轮范围**（2026-10-15 拍板，随 §12 事项 #4 真实外部源接入一并设计）
 
@@ -722,6 +722,10 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 ---
 
+### 4.5 AI Tutor 母版迁移（2026-11-04）
+
+用户确认以 `AITutor-main` 通用对话为基座，在现有 BackOffice 中实施。最新契约与实施阶段见 [母版迁移实施记录](AI_tutor/Motherbase_Refactor.md)，优先于本节较早的历史轮数和 localStorage 隔离说明。Release / Online / 四套 Prompt 的配置与发布语义保留；单次请求绑定有效配置，增量转发、取消与失败终态显式处理；后台会话按员工、课程、Release 隔离，模式共享历史。Lecture 最近六个完整成功轮次，Socratic 十轮。Assessment 保留独立配置，实际评分后置。
+
 ## 4A. 模块 C：HelpDesk 工单（Tickets v1，2026-10-28 新增）
 
 > 依据：`lg-helpdesk/tickets-v1-spec.md` §1/§4/§5（Integration）/§7（2026-10-28 用户拍板：「每个工单就是一个小卡片在 Back Office 上 … 按原有 UI UX 风格 … TDD 锁住」）。v1 不做：飞书同步、前端埋点、AI 客服、SaaS。
@@ -880,8 +884,8 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
   - 新表 `helpdesk_faq_edges`（DAG：parent → child，follow_up | option，position，label_en/zh 可空 = 子节点的问题；两端 FK ON DELETE RESTRICT；UNIQUE (parent, child)；CHECK parent ≠ child）、`helpdesk_faq_edge_revisions`（只追加：改前 / 改后、谁、何时）、`helpdesk_faq_phrasings`（en-GB / zh-CN / zh-TW，≤200 字，staff | flywheel | seed，UNIQUE (faq_id, locale, lower(text))）、`helpdesk_faq_releases`（version 唯一；状态 draft | evaluating | published | rejected | superseded；snapshot 写入后不再改、行不删除（触发器）；部分唯一索引保证至多一行 published）、`helpdesk_faq_release_nodes`（发布版本的检索行，从快照派生、与快照同一事务写入、只追加；列名与 `helpdesk_faqs` 相同）。
 - **编辑**（`faqGraphService.ts` + `faqGraphRepository.ts`，原生 SQL）：边的 kind 由父节点类型决定；choice 至多 4 个选项（文字 ≤24 中文字 / 40 英文字符）、answer 至多 6 条追问；**成环在同一事务里用递归 CTE 拒绝**，所有边的写入先拿同一把事务级 advisory 锁，两条互相指向的并发边不可能都通过；每次建 / 改 / 删 / 重排都追加修订。节点字段 key / type / entry 走原来的 `PUT /api/helpdesk/faqs/:id`（不带就保留原值，旧的编辑器不受影响）；choice 节点的提问不许数字、链接、邮箱；**归档一个还有已发布父节点的节点 → 409 `FAQ_HAS_PARENTS`**（消息里列出父节点）。
 - **图检查**（`faqGraphChecks.ts` `checkFaqGraph`，纯函数）：边的两端都在快照里（没归档）、不重复、无环（DFS）、离最近入口 ≤4 条边、非入口节点都能从入口走到、option 只从 choice 出 / follow_up 只从 answer 出、choice 2–4 个选项且提问不陈述事实、answer ≤6 条追问、两种语言都在且覆盖文字两种语言要么都给要么都不给、解析后的选项文字 ≤24 / 40、answer 两种语言都切得出块。
-- **发布**（`faqReleaseService.ts`）：「发布新版本」= REPEATABLE READ 读一份工作表 → `freezeSnapshot`（只要已发布节点，块此时切好，同一父节点下 position 重编为 0..n-1）→ 图检查 → 写入版本与检索行 → 检查过了才跑评测门（evaluating）→ 过 = draft（可以发布），不过 = rejected。工作表和最新版本（或当前发布的）一模一样 → 不新建（幂等）。发布 = 同一事务里旧的 → superseded、这一版 → published（已发布再发布 = 原样返回）。回滚 = 把曾经上线过的版本的快照复制成新版本并立刻发布（不再跑评测，报告写明来源；图检查照跑；当前上线的就来自它 → 原样返回）。
-- **评测门**（`faqReleaseGate.ts`）：缺省是免费的检索评测 —— 每个入口 answer 节点的中英问题与每一种问法检索那一版快照（生产同一条候选 SQL），recall@8 ≥ 95% 且比当前发布版本低不超过 1 个点；没过的用例至多 50 条写进报告。真模型评测在开关 `HELPDESK_RELEASE_MODEL_EVAL=on` 后面（由组装时给的 model 门执行；开着却没给 → 不通过）；测试里永远关着。
+- **发布**（`faqReleaseService.ts`）：「发布新版本」= REPEATABLE READ 读一份工作表 → `freezeSnapshot`（只要已发布节点，块此时切好，同一父节点下 position 重编为 0..n-1）→ 图检查 → 写入版本与检索行 → 检查过了才跑评测门（evaluating）→ 过 = draft（可以发布），不过 = rejected。工作表和最新版本（或当前发布的）一模一样 → 不新建（幂等）。发布 = 同一事务里旧的 → superseded、这一版 → published（已发布再发布 = 原样返回）。回滚 = 把曾经上线过的版本的快照复制成新版本并立刻发布（不再跑评测，报告写明来源；图检查照跑；当前上线的就来自它 → 原样返回）。 **后台检查**（2026-11-03）：生产里「发布新版本」/「重新检查」立刻返回 evaluating，检查在后台跑；`helpdesk_faq_releases` 新列 `eval_run_id` / `eval_started_at` / `eval_heartbeat_at` / `eval_progress`（迁移 `20261103120000_helpdesk_faq_release_eval_runs`），每 30 秒心跳并写进度（retrieval / vectors / model n/total）；心跳超过 3 分钟没动 = 「检查中断」（服务重启、部署打断），可以重新检查，新的一次用 run id 做 CAS 接管，旧的那次的进度与结果都写不进去（它也会收到 abort）。正在检查的再点 → 409 `FAQ_RELEASE_EVALUATING`。列表里每个 evaluating 版本带 `evaluation {state running|interrupted, startedAt, progress}`。
+- **评测门**（`faqReleaseGate.ts`）：缺省是免费的检索评测 —— 每个入口 answer 节点的中英问题与每一种问法检索那一版快照（生产同一条候选 SQL），recall@8 ≥ 95% 且比当前发布版本低不超过 1 个点；没过的用例至多 50 条写进报告。检索过了再跑**真流程抽样**（owner 2026-11-03 选「抽样跑测试集」，`faqReleaseModelGate.ts`）：题目 = S650 dev 集（`release-eval/s650-dev.jsonl`，生成的题，不含用户数据；按 id 的 SHA-256 固定取 300 条）+ 相对上线版本改动过的卡的全部题（至多 200）+ 员工接受过的回归用例（至多 100）；每题走生产同一条流程（`src/ai/helpdesk/release-answerer.ts`：同一个 `HelpdeskSuggestService`，候选钉在这一版快照上，关键词 + 向量召回、精排、小模型选卡作答；先等这一版的向量算好），不写建议表、链路只在内存。自动打分：出的卡是金卡 / 可接受卡 / 入口祖先 = 对；该 no_match 却出卡 = 错；寒暄出卡只记 extraCard；没回复单列 errors。过线：错卡率 ≤ 2%、比上线版本高不超过 1 个点、errors ≤ 5%；预算 0.5 美元（到了就停、判不通过）。一次约 ¥1、3–5 分钟。没有 `OPENROUTER_API_KEY` / 没余额 → 不通过并写明，不悄悄算过。只在 app.module 组装了答题器时开（生产）；`HELPDESK_RELEASE_MODEL_EVAL=off` 关掉；NODE_ENV=test 不组装。
 - **运行时的唯一开关**（`faqQaSource.ts` `createPgHelpdeskQaSource`；`FaqService.published` / `publishedOne`）：有发布版本 → Agent 的候选、单条、热门与 Portal 的 FAQ 列表 / 单条都只读那一版（检索走 `helpdesk_faq_release_nodes`，节点、块与边来自快照，按发布行 id 缓存在进程里）；还没有 → 照旧读逐条发布的行。员工改了工作表，学员看到的要等下一次发布。`releaseVersion()` 给 assist log。
 - **检索**：候选 SQL 由 `candidatesSql('live' | 'release')` 生成（同一条 SQL，只换表并加版本条件），加了问法一路（英文全文 `phrasing_tsv` + 中文双字，繁体问法也对得上），并支持 `entryOnly`（缺省 true）与节点类型（缺省只要 answer，旧的 Portal 不会渲染 choice）。屏幕上有卡片（`nodeId`）时：先是它的全部子节点（命中的按得分在前），再是它父节点的其它子节点里命中的，最后是普通检索。候选多带 `type`、`entry`、`blocks`、`optionOf`（哪些 choice 节点把它当选项）、`relation`（child / sibling / search）。
 - **种子**（`faqLibrarySeed.ts` + 命令行 `npm run seed:helpdesk-faqs -- <library.json> [--employee-id <uuid>] [--no-release]`，脚本在 `eval/helpdesk/`，不进 nest build）：读 v1 / v2 库文件（key、signals、phrasings、parentKey、followUps、choice 的 options、`source: "existing:<id>"` 按 id 认领旧行）→ 经正常的服务层按 key 幂等写入 → 建版本 v1 并发布。不删除库里没有的东西。2026-10-29 的正式库（99 条）在本地临时库上跑过：v1 发布，检索评测 recall@8 100%（198 例），第二次运行 99 条不变、不新建版本。
@@ -908,7 +912,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - **FAQ 抽屉的「追问与选项」**（`client/src/backoffice/helpdesk/FaqGraphSection.tsx`）：卡片类型 answer / choice（单选；choice 时答案框是一句提问，前端与服务端同样拒绝数字、链接、邮箱）、入口问题开关、学员情境多选（`FAQ_SIGNALS`，中英标签，按优先级排序）——这三项属于草稿，跟「Save FAQ」一起 PUT。编辑已有 FAQ 时另有立即写入工作副本的部分：子节点列表（choice 显示 A/B/C/D；拖动或上移 / 下移按钮排序 → `PUT …/edges/order`；改显示文字，两种语言要么都填要么都空，选项 ≤24 / 40、追问 ≤200 → `PUT /faq-edges/:id`；移除 → `DELETE`）、「添加已有问题」（搜索，自己不出现、已连的标「已添加」）、「新建追问 / 新建选项」（新建一条同分类、非入口的 answer FAQ 再连上，带 Idempotency-Key）、到上限（选项 4、追问 6）时两个按钮禁用；学员的问法（en-GB / zh-CN / zh-TW，≤200 字，至多 30 种；来源 flywheel / seed 标出）。新建 FAQ 时只显示三项草稿字段与「先保存再添加」。错误码都有中英文案（`FAQ_EDGE_CYCLE`、`FAQ_HAS_PARENTS`…）。
 - **问题树**（`FaqTreeDrawer.tsx`，FAQs 表格每行「问题树」，VIEW 也能开）：`GET …/tree` 的缩进大纲，根与第一层展开，逐个展开 / 收起（按钮 `aria-expanded`）与全部展开 / 收起；选项标 A/B/C/D，覆盖文字与问题不同时两者都显示；共享节点标「也出现在 N 处」并列出另外的父问题；图检查的提醒（层级、孤立、缺语言…，按规则本地化）挂在节点下；环与超深分支标出。
 - **对话预览**（`FaqChatPreview.tsx`，问题树抽屉的第二个 Tab）：`GET /api/helpdesk/faq-releases/preview?locale=` 取工作副本的 Portal 投影，`client/src/backoffice/lib/helpdeskGraph.ts` `previewTurn` 按 Portal 点击时的规则渲染：answer = 固定开场「好的，这个问题可以这样处理：」/「Here's how to sort this out:」→ 引用卡片「来自：<问题>」+ 整条答案 → 固定结尾 →「你可能还想问：」至多 4 个追问（多出的条数提示员工）；choice = 提问 + A/B/C/D 按钮；只用边种类对、子节点在的边。EN / 中文切换（学员点过的路径保留），可选起点（入口节点，热门在前），重新开始。不模拟打字提问（那要问模型）。
-- **版本发布**（`FaqReleasesDrawer.tsx`，FAQs Tab 页头「版本发布」）：当前上线版本；工作副本相对它的差异（问题 / 连接的新增、修改（列出字段）、移除，问法增减）与图检查（问题按 key + 规则文案）；「发布新版本」（FULL）→ `POST /faq-releases`，提示「已创建 vN」或「没有改动」；版本历史（状态、发布 / 创建时间、检查与评测 recall@8、没命中的用例数、每个版本的改动）；「发布 vN」与「回滚到此版本」都先确认，「重新检查」不需要；按钮只在服务端会成功时出现（`releaseActions`）。VIEW 只看。
+- **版本发布**（`FaqReleasesDrawer.tsx`，FAQs Tab 页头「版本发布」）：当前上线版本；工作副本相对它的差异（问题 / 连接的新增、修改（列出字段）、移除，问法增减）与图检查（问题按 key + 规则文案）；「发布新版本」（FULL）→ `POST /faq-releases`，提示「已创建 vN」或「没有改动」；版本历史（状态、发布 / 创建时间、检查与评测 recall@8、没命中的用例数、每个版本的改动）；「发布 vN」与「回滚到此版本」都先确认，「重新检查」不需要；按钮只在服务端会成功时出现（`releaseActions`）。VIEW 只看。 2026-11-03：按钮改叫「生成新版本」（它只生成版本、不上线）；抽屉开着时一直连着版本列表的长连接（owner 2026-11-03「端口应该常连」：`GET /api/helpdesk/faq-releases/stream`，SSE，权限同列表 VIEW；`faqReleaseStream.ts`：连上先推一次，`FaqReleaseService.onChange` 在开始 / 进度 / 结果 / 发布时立刻推，服务端另外对数据库补查（有版本在检查时 3 秒、没有时 30 秒，只在列表变了才推），以覆盖跑在别的实例上的检查与心跳停了变「检查中断」；每 20 秒一行注释防负载均衡断开；断了 EventSource 按 retry 3 秒重连），浏览器不定时重读；结果栏显示进度（「检查中：真流程抽样 120 / 300」），出结果后多一行「真流程抽样通过：错卡 1.0%，300 题，约 ¥0.94」（没过时带原因）；心跳停了状态显示「检查中断」+ 提示，可「重新检查」。锁定：`tests/helpdesk-graph-ui.test.tsx`、浏览器 E2E `e2e/helpdesk-releases.e2e.test.mjs`（真 EventSource，含重连、打开后不再读列表）、`helpdesk-faq-release-stream.spec.ts`、`helpdesk-faq-graph-rbac.spec.ts`（HTTP 层 SSE）。
 - **测试**：`client/tests/helpdesk-graph.test.ts`（重排、文字与问法校验、大纲、预览的三段式与模板、≤4 个追问、起点、版本操作、每条规则与状态都有中英文案）、`client/tests/helpdesk-graph-ui.test.tsx`（经 HelpDeskPage 与假的 BackOffice Server：上面每个流程，含拖动、VIEW 只读、Escape）、`helpdesk-faqs.test.ts`（草稿的 type / entry / signals、choice 提问校验）；服务端 `helpdesk-faq-graph.pg.spec.ts`（preview：工作副本与版本、语言、错误）与 `helpdesk-faq-graph-rbac.spec.ts`（preview 是 VIEW 的读接口，不被当成版本号）。
 
 ### 4A.16 v5 终检修复（2026-10-30；推送等 FKO 扩写与剩下的真实测试都做完再一起推 V4，2026-10-29 用户）
@@ -921,6 +925,29 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 - **种子**（`faqLibrarySeed.ts`）：key 认领不到时按英文问题（去空白、小写）认领唯一、没被别的 key 用的旧行，并在报告里写一条警告；命令行参数严格解析（`parseSeedArgs`，不认识的参数退出码 2），报告有失败退出码 1（`seedExitCode`）。已知限制：种子不删除、不重排已有的连接。
 - **BackOffice 可访问性**（待视觉验收）：问题树改成嵌套的 `<ul>`（每层有 `aria-label`，选项字母读作「选项 A：」）；问题树编辑每个操作后焦点落到合理的位置，并在 `aria-live="polite"` 里播报（已添加、已新建、已移除、已保存文字、已移动、问法增删）；版本发布的确认取消后焦点回到打开它的按钮。
 
+
+---
+
+### 4A.17 分级小模型方案是缺省（2026-11-03，owner：「默认模型这里都要改」「推到线上也是要用我们的最新方案」）
+
+代码缺省就是这一套，部署只要 `OPENROUTER_API_KEY`；缺省值集中在 `server/src/contracts/helpdesk-defaults.ts`（Agent 与 BackOffice 两边都读），环境变量只用来临时换掉某一层，设成 `off` 关掉那一层（见 §8）。
+
+| 层 | 做什么 | 缺省 | 变量 |
+|---|---|---|---|
+| L1 召回 | 字词检索 ∪ 向量前 10；平铺，所有已发布答案卡都参与，边只给显示（追问 chip、选项卡）；向量与精排还按「上一句 → 这一句」再查一次，取高分 | bge-m3、平铺、带上一句 | `HELPDESK_EMBED_MODEL`、`HELPDESK_SEARCH_SCOPE`、`HELPDESK_QUERY_CONTEXT` |
+| L2 精排 | 召回池精排，留前 5 张；第一名 ≥ 0.816 且领先 ≥ 0.05 → 直接给卡，不调模型 | Voyage rerank-2.5-lite | `HELPDESK_RERANK_MODEL`、`HELPDESK_RERANK_KEEP`、`HELPDESK_RERANK_DIRECT` |
+| L3 小模型 | 挑卡、解释、寒暄（只分类 / 抽取，参数枚举锁定；守卫不过 → 退回固定流程） | gemma-4-31b，不开思考 | `HELPDESK_SUGGEST_MODEL`、`HELPDESK_SUGGEST_THINKING` |
+
+- 所有调用经 OpenRouter，按价格选最便宜的提供方（`provider.sort = price`）；BackOffice 的「AI 按指令改卡」与缺口挖掘用同一个 L3 模型。
+- 向量：发布新版本时自动算；服务启动时把线上版本缺的向量补上（按文本哈希，算过的不再算，写入 `ON CONFLICT DO NOTHING`），部署不用手动跑 `helpdesk:faq-vectors`。向量或精排失败、超时 → 退回字词检索 / 原顺序，学员照样拿到候选。
+- 模型输出健康：近 60 分钟任一步非法调用、被守卫退回或出错超过 5%（至少 20 次）→ 日志 WARN `model_output_degraded`；`GET /api/helpdesk/agent-runs/health?hours=24` 可查。不做页面（PRD 没有设计）。
+- 依据（v3.3 卡库 685 张，2026-11-03 终测，Claude 盲评，是 AI 评不是人工）：错卡 S650 test 0.19% / 多轮 0.91% / 闲聊 1.20%；每答 ¥0.0010 / 0.0023 / 0.0019；p50 / p95 1.2 / 3.6 秒、2.4 / 5.6 秒、2.2 / 4.7 秒。多轮集用于诊断过，数字偏乐观。
+
+### 4A.18 其它 Helpdesk 文档（2026-11-05）
+
+- 数据飞轮、FAQ 候选与审核（含 `faq-candidates/:id/review`、`faq-map`）、HelpDesk 数据页（趋势图、每日工单数）：[Helpdesk_Data_Flywheel.md](Helpdesk_Data_Flywheel.md)。
+- FAQ 修改记录（Change Log 标签、改动详情、每张卡的历史）：[Helpdesk_FAQ_Change_Log.md](Helpdesk_FAQ_Change_Log.md)。
+- Portal 一侧（学员页、聊天面板、Help Centre、迁移 017–026）：Portal 仓库 `docs/phase1/helpdesk-tickets.md`，先看它的 §0「Current state」。
 
 ---
 
@@ -979,7 +1006,7 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；本地转 Markdown（markitdown-ts 为主；`.xls`→SheetJS `xlsx`、`.doc`→`word-extractor`，2026-10-19 扩充），返回 `{ title, markdown }`；**不建页**——用户在弹窗预览确认后经 §5.1.2 `POST /api/courses/:courseId/pages` 建页；校验/转换失败 400 |
+| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；本地转 Markdown（markitdown-ts 为主；`.xls`→SheetJS `xlsx`、`.doc`→`word-extractor`、单文件 UTF-8 `.tex`→保守 LaTeX 转换），返回 `{ title, markdown }`；**不建页**——用户在弹窗预览确认后经 §5.1.2 `POST /api/courses/:courseId/pages` 建页；校验/转换失败 400 |
 
 > 原 `POST /api/files/upload`（转换+建页一步完成）已废弃（2026-10-15），被两步流程取代。
 
@@ -1297,7 +1324,7 @@ JWT_SECRET="your-super-secret-jwt-key-change-in-production"
 OPENROUTER_API_KEY="sk-or-xxx"
 OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
 # 模型列表接口（GET /api/ai/models）数据源，逗号分隔；第一个为默认模型（§4.2.3）
-AI_AVAILABLE_MODELS="deepseek/deepseek-v4.1-flash,deepseek/deepseek-r1,openai/gpt-4o-mini,anthropic/claude-haiku-5.5,google/gemini-3.5-flash,qwen/qwen3.6-flash,google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free"
+AI_AVAILABLE_MODELS="deepseek/deepseek-v4.1-flash,deepseek/deepseek-r1-0528,openai/gpt-4o-mini,anthropic/claude-haiku-5.5,google/gemini-3.5-flash,qwen/qwen3.6-flash,google/gemma-4-31b-it,nvidia/nemotron-3-super-120b-a12b"
 
 # CourseAiConfig.apiKey 加密密钥（AES-256-GCM；64 位 hex 即 32 字节，2026-10-14 拍板）
 AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
@@ -1320,8 +1347,24 @@ PORTAL_HELPDESK_TOKEN=
 # HelpDesk Portal → Admin（2026-10-28，§4A.9）：/api/integration/helpdesk/** 的 Bearer 令牌（与 Portal 的
 # ADMIN_HELPDESK_TOKEN 相同），每次请求现读；为空 → 503 integration_disabled
 ADMIN_HELPDESK_TOKEN=
-# 推荐答案用的模型（§4A.8）；可不设，代码缺省 google/gemini-2.5-flash，只在要换模型时设
-HELPDESK_SUGGEST_MODEL=
+# Helpdesk 分级方案（§4A.17）：代码缺省就是这一套，下面都不用设；只在临时换掉某一层时设，off = 关掉那一层
+# HELPDESK_SUGGEST_MODEL=google/gemma-4-31b-it
+# HELPDESK_SUGGEST_THINKING=off
+# HELPDESK_EMBED_MODEL=baai/bge-m3
+# HELPDESK_RERANK_MODEL=voyageai/rerank-2.5-lite
+# HELPDESK_RERANK_KEEP=5
+# HELPDESK_RERANK_DIRECT=0.816,0.05
+# HELPDESK_SEARCH_SCOPE=all
+# HELPDESK_QUERY_CONTEXT=on
+# HELPDESK_MODEL_HEALTH_ALERT=0.05
+# FAQ 候选的字词检索方式：lexical（缺省；向量走 L2 精排的召回池）/ vector / hybrid（RRF 合并）；向量失败或超时 1.2 秒 → 这一次退回字词
+# HELPDESK_RETRIEVAL=lexical
+# 新问题的候选怎么排（每次现读）：flat（缺省）/ hybrid（流程树与对象表里结构最像的前 3 张放最前，原候选一张不少；要先 seed:helpdesk-faq-map 再发布）
+# HELPDESK_LOCATOR=flat
+# 追问卡带上父卡的问题（精排与挑卡都看「父问题 → 追问」）：on 才开，缺省关
+# HELPDESK_CARD_CONTEXT=on
+# 演示数据：只有部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后自动灌一次；off 关掉；SIT / UAT / PROD 永远不灌
+# HELPDESK_DEMO_DATA=off
 # 只给评测脚本 npm run eval:helpdesk 用（§4A.11），服务不读：真模型评测的花费上限（美元，缺省 5）
 # HELPDESK_EVAL_BUDGET_USD=5
 # FAQ 问题树发布时也跑真模型评测（§4A.13）：on 才跑，缺省关；开着却没组装 model 评测门 → 版本不通过
@@ -1333,7 +1376,7 @@ NODE_ENV=development
 
 # 文件上传配置
 MAX_FILE_SIZE=15728640  # 15MB
-ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍板白名单一致（2026-10-15 更正、2026-10-19 扩充 doc/xls；实际实现为 files.service.ts 常量，不读该 env）
+ALLOWED_EXTENSIONS="txt,md,tex,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 白名单一致；实际实现为 files.service.ts 常量，不读该 env
 ```
 
 ---
@@ -1381,6 +1424,12 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍
 > **白名单改拍（2026-10-15，用户裁决）**：原表（含 xls/doc/ppt/epub）按 markitdown-ts 实测支持面调整——旧二进制格式 xls/doc/ppt 与 epub 不支持（上传时明确提示「格式暂不支持」）。
 >
 > **白名单扩充（2026-10-19，用户裁决）**：重新支持旧版二进制 **.doc / .xls**——`.xls` 用 SheetJS（`xlsx`）解析转 Markdown 表格，`.doc` 用 `word-extractor` 提取纯文本；其余格式仍由 markitdown-ts 转换（ppt/epub 仍不支持）。**限制说明：`.doc` 仅提取纯文本，不含标题层级 / 表格 / 图片**。
+
+> **LaTeX 扩充（2026-11-05）**：支持单文件 UTF-8 `.tex`，将 `\title` 转为一级标题、`\paragraph`/`\subparagraph` 转为五/六级标题、`\par` 转为空行，并转换其他章节、列表、强调和链接，保留公式；`\vspace` 等纯间距命令忽略，未知命令与外部资源引用保留原文以便预览检查。上传单个 `.tex` 不会读取其引用的其他文件；无效 UTF-8、空文件及超限文件仍拒绝。
+
+> **编辑器复制兼容**：转换前将不换行空格视为普通缩进并去除正文共同缩进；独占行的 `\\[`/`\\]` 视为被额外转义的展示公式边界。支持 `equation`/`align`/`gather`/`multline`/`displaymath` 公式环境，`textsc`/`underline`/`texttt` 文本样式、`newline`/`linebreak` 换行和 `center`/`abstract` 容器。同文档标题后的 `\label`/`\ref` 转为标题文字，简单 `\footnote` 转为行内 Note，`quote` 转为 Markdown 引用块，简单 `tabular` 转为 Markdown 表格；复杂表格、自定义宏与无法解析的跨文档引用保持原文，需在导入预览中检查。
+
+> **多行公式**：`align`/`align*` 与 `multline`/`multline*` 转为 `$$` 内的 `aligned`，`gather`/`gather*` 转为 `gathered`，保留 `&` 对齐标记和 `\\` 换行。直接在 Markdown 中输入 `$$` 时，也必须自行包裹 `aligned` 并使用双反斜杠换行。
 >
 > **Import 请求体上限（2026-10-27 修复）**：上传弹窗的 Import 经 `POST /api/courses/:courseId/pages` 以 JSON 提交 `contentMd`（整份转换结果），而 Express body-parser 默认 JSON 上限仅 **100KB**；大文档（如 500 页 PDF）会在进入控制器前被拒（413，对外曾误报 500）。现于 `configureApp` 显式把 JSON 请求体上限放宽至 **25MB**（覆盖 15MB 原文件的 Markdown 膨胀与 JSON 转义开销），并在全局过滤器把 body-parser 的 `entity.too.large` 映射为 **400 VALIDATION_ERROR + 可读提示**；前端 `createPage` / `updatePage` 超时同步放宽至 120s。超过 25MB 的文档仍需拆分后再上传（拆分方案待评估）。
 
@@ -1419,3 +1468,7 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍
 6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？（2026-10-14 拍板：**不落库**；上次会话经浏览器 localStorage 持久化，New Chat 清空；无长期记忆需求，见 §4.3.2）
 7. **前端框架最终选定**：React + Vite 还是 Next.js？
 8. **部署环境**：生产环境部署在何处？（云服务器、Vercel + Railway 等）
+
+### 2026-11-05 遗留质量检查清理
+
+全仓 ESLint/Oxlint 已清至 0 errors / 0 warnings，未调整规则。表单重置与异步加载分开，组件/工具导出拆开以支持 Fast Refresh，KS 查询向量通过契约令牌注入。完整单测后端 1784 passed / 166 skipped、前端 503 passed；types/build 通过。经用户确认，前端已加入 app/vendor 分包配置，保持 500 kB 阈值；实际构建 34 个 JS 文件、最大 293019 bytes，无构建警告。独立 Review 与手动验收待执行。文件清单和验证命令见 docs/AI_tutor/Motherbase_Refactor.md §8。

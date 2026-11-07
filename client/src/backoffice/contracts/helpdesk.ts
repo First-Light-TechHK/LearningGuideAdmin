@@ -416,8 +416,19 @@ export type FaqReleaseEvalReport = {
   summary: string;
   ranAt: string;
   metrics: Record<string, number>;
-  misses: { nodeId: string; key: string; locale: string; source: string; text: string; rank: number | null }[];
+  /** retrieval：没进前 8 的用例；model（真流程抽样）：答错卡或没得到回答的问题（expected / got）。 */
+  misses: { nodeId?: string; key?: string; locale: string; source: string; text: string; rank?: number | null; expected?: string; got?: string }[];
   sourceVersion?: number;
+  /** combined：检索检查与真流程抽样各一份。 */
+  parts?: FaqReleaseEvalReport[];
+};
+
+/** 检查进行到哪一步（后台检查，owner 2026-11-03）。 */
+export type FaqReleaseEvaluation = {
+  /** interrupted：心跳停了（服务重启、部署打断），可以重新检查。 */
+  state: 'running' | 'interrupted';
+  startedAt: string | null;
+  progress: { stage: 'retrieval' | 'vectors' | 'model' | string; done: number; total: number } | null;
 };
 
 export type FaqRelease = {
@@ -434,6 +445,8 @@ export type FaqRelease = {
   publishedAt: string | null;
   /** draft，且检查与评测都过了。 */
   publishable: boolean;
+  /** 只有 status = evaluating 时有（旧的服务端没有这个字段）。 */
+  evaluation?: FaqReleaseEvaluation | null;
 };
 
 export type FaqReleaseList = { releases: FaqRelease[]; published: number | null };
@@ -850,6 +863,71 @@ export type FlywheelMetrics = {
   totals: MetricsRow[];
   topGaps: GapGroupRow[];
   ticketFaqs: TicketFaqRow[];
+};
+
+/* ------------------------- FAQ 修改记录（Change Log，Figma 草案 2.6–2.9） ------------------------- */
+
+/** 与服务端 faqChangeLog.ts 一致。 */
+export const FAQ_CHANGE_SUBJECTS = ["faq", "follow_up", "option", "phrasing", "release"] as const;
+export type FaqChangeSubject = (typeof FAQ_CHANGE_SUBJECTS)[number];
+
+export type FaqChangeAction =
+  | "created"
+  | "edited"
+  | "archived"
+  | "added"
+  | "changed"
+  | "reordered"
+  | "removed"
+  | "version_created"
+  | "published"
+  | "rolled_back";
+
+export type FaqFieldChange = { field: string; before: unknown; after: unknown };
+
+export type FaqChangeNode = {
+  id: string;
+  key: string;
+  questionEn: string;
+  questionZh: string;
+  status: "published" | "archived";
+};
+
+/** name = 登录邮箱 @ 之前（与会话显示名一致）；空 = 账号已不在。 */
+export type FaqChangePerson = { id: string; name: string; role: string | null; email: string | null };
+
+export type FaqChange = {
+  id: string;
+  at: string;
+  /** null = 种子脚本 / 系统写入。 */
+  employee: FaqChangePerson | null;
+  subject: FaqChangeSubject;
+  action: FaqChangeAction;
+  faq: FaqChangeNode | null;
+  child: FaqChangeNode | null;
+  phrasing: { locale: string; text: string; source: string } | null;
+  release: { version: number; status: FaqReleaseStatus; sourceVersion: number | null; problems: number } | null;
+  version: { from: number | null; to: number } | null;
+  changes: FaqFieldChange[];
+  /** 学员是否已看到（版本事件为 null）。 */
+  learners: "live" | "pending" | null;
+  liveIn: number | null;
+};
+
+export type FaqChangePage = {
+  changes: FaqChange[];
+  total: number;
+  page: number;
+  pageSize: number;
+  people: FaqChangePerson[];
+};
+
+export type FaqHistoryPage = {
+  changes: FaqChange[];
+  total: number;
+  page: number;
+  pageSize: number;
+  truncated: boolean;
 };
 
 /**

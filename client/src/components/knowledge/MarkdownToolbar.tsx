@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { Button, Space, Tooltip } from '../ui'
 import { syntaxTree } from '@codemirror/language'
 import type { EditorState } from '@codemirror/state'
@@ -52,8 +52,7 @@ function markActive(state: EditorState, names: ReadonlySet<string>): boolean {
   return false
 }
 
-function computeActive(view: EditorView): ActiveState {
-  const state = view.state
+function computeActive(state: EditorState): ActiveState {
   const line = state.doc.lineAt(state.selection.main.head)
   const text = line.text
   return {
@@ -69,29 +68,31 @@ function computeActive(view: EditorView): ActiveState {
 }
 
 export function MarkdownToolbar({ view, disabled }: Props) {
-  const [active, setActive] = useState<ActiveState>(EMPTY_ACTIVE)
   const { text } = useKText()
 
   // 选区/光标变化时刷新高亮（CM6 无 React 状态，这里用原生事件兜住）
-  useEffect(() => {
-    if (!view) {
-      setActive(EMPTY_ACTIVE)
-      return
-    }
-    const sync = () => setActive(computeActive(view))
-    sync()
-    const onSelectionChange = () => sync()
-    view.dom.addEventListener('keyup', sync)
-    view.dom.addEventListener('mouseup', sync)
-    view.dom.addEventListener('focus', sync)
-    document.addEventListener('selectionchange', onSelectionChange)
-    return () => {
-      view.dom.removeEventListener('keyup', sync)
-      view.dom.removeEventListener('mouseup', sync)
-      view.dom.removeEventListener('focus', sync)
-      document.removeEventListener('selectionchange', onSelectionChange)
-    }
-  }, [view])
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      if (!view) return () => {}
+      view.dom.addEventListener('keyup', notify)
+      view.dom.addEventListener('mouseup', notify)
+      view.dom.addEventListener('focus', notify)
+      document.addEventListener('selectionchange', notify)
+      return () => {
+        view.dom.removeEventListener('keyup', notify)
+        view.dom.removeEventListener('mouseup', notify)
+        view.dom.removeEventListener('focus', notify)
+        document.removeEventListener('selectionchange', notify)
+      }
+    },
+    [view],
+  )
+  const snapshot = useSyncExternalStore(
+    subscribe,
+    () => view?.state ?? null,
+    () => null,
+  )
+  const active = snapshot ? computeActive(snapshot) : EMPTY_ACTIVE
 
   const btn = (
     label: string,

@@ -32,6 +32,7 @@ import {
   type FaqReleaseGate,
 } from './faqReleaseGate';
 import { createPgFaqRepository } from './faqRepository';
+import { uuidv7 } from '../../../../common/uuidv7';
 import { createEnvFaqVectorIndexer, type FaqVectorIndexer } from './faqVectors';
 
 /**
@@ -119,14 +120,42 @@ export function releaseReady(
   return releaseReadiness(release, publishedVersion) === 'ok';
 }
 
-/** 列表 / 详情里的一个版本（不含快照；counts 来自检查结果）。 */
-export type FaqReleaseSummary = FaqReleaseRow & { publishable: boolean };
+/** 后台检查：心跳这么久没动 → 「检查中断」（可以重新检查）。 */
+export const EVAL_STALE_MS = 3 * 60_000;
+/** 检查跑着时至少这么久写一次心跳（一个问题慢也不会被当成中断）。 */
+export const EVAL_HEARTBEAT_MS = 30_000;
 
-function summary(
+/** evaluating 的版本：running = 检查在跑；interrupted = 心跳停了（进程重启、部署打断）。 */
+export type FaqReleaseEvaluation = {
+  state: 'running' | 'interrupted';
+  startedAt: string | null;
+  progress: { stage: string; done: number; total: number } | null;
+};
+
+/** 列表 / 详情里的一个版本（不含快照；counts 来自检查结果）。 */
+export type FaqReleaseSummary = FaqReleaseRow & {
+  publishable: boolean;
+  /** 只有 status = evaluating 时有。 */
+  evaluation: FaqReleaseEvaluation | null;
+};
+
+export function evaluationOf(
   release: FaqReleaseRow,
-  publishedVersion: number | null,
-): FaqReleaseSummary {
-  return { ...release, publishable: releaseReady(release, publishedVersion) };
+  at: Date,
+  staleMs = EVAL_STALE_MS,
+): FaqReleaseEvaluation | null {
+  if (release.status !== 'evaluating') return null;
+  const beat = release.evalRun?.heartbeatAt
+    ? Date.parse(release.evalRun.heartbeatAt)
+    : null;
+  return {
+    state:
+      beat !== null && at.getTime() - beat < staleMs
+        ? 'running'
+        : 'interrupted',
+    startedAt: release.evalRun?.startedAt ?? null,
+    progress: release.evalRun?.progress ?? null,
+  };
 }
 
 /**
@@ -187,6 +216,17 @@ export type FaqReleaseServiceOptions = {
   graph?: FaqGraphRepository;
   gate?: FaqReleaseGate;
   now?: () => Date;
+  /**
+   * true（生产）：新建与重新检查立刻返回 evaluating，检查在后台跑（真流程抽样要几分钟，HTTP 请求等不了）；
+   * 缺省 false：等检查跑完再返回（单测、导入脚本）。
+   */
+  background?: boolean;
+  /** 真流程抽样检查（faqReleaseModelGate.ts；生产由 backoffice.module 组装）。不给 = 只跑检索检查。 */
+  modelGate?: FaqReleaseGate;
+  /** 后台检查出了没接住的错（缺省记日志）。 */
+  onBackgroundError?: (error: unknown) => void;
+  staleMs?: number;
+  heartbeatMs?: number;
   /** 新版本建好、发布之后给它算向量（不等、不影响结果；没配向量模型 = 什么都不做）。 */
   vectors?: FaqVectorIndexer;
 };
@@ -199,6 +239,35 @@ export function createFaqReleaseService(
   const vectors = options.vectors ?? createEnvFaqVectorIndexer();
   // 幂等，失败只记日志；下一次发布或 npm run helpdesk:faq-vectors 会补上
   const indexVectors = (version: number) => void vectors.index(version);
+  const background = options.background ?? false;
+  const staleMs = options.staleMs ?? EVAL_STALE_MS;
+  const heartbeatMs = options.heartbeatMs ?? EVAL_HEARTBEAT_MS;
+  const onBackgroundError =
+    options.onBackgroundError ??
+    ((error: unknown) =>
+      console.error(
+        '[helpdesk] FAQ release check failed:',
+        error instanceof Error ? error.message : error,
+      ));
+  // 版本列表变了（开始 / 进度 / 结果 / 发布）：通知这个进程里开着的长连接（faqReleaseStream.ts）
+  const listeners = new Set<() => void>();
+  const changed = () => {
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch {
+        // 一个连接出错不影响别的
+      }
+    }
+  };
+  const summary = (
+    release: FaqReleaseRow,
+    publishedVersion: number | null,
+  ): FaqReleaseSummary => ({
+    ...release,
+    publishable: releaseReady(release, publishedVersion),
+    evaluation: evaluationOf(release, now(), staleMs),
+  });
   const gate =
     options.gate ??
     createFaqReleaseGate({
@@ -206,6 +275,7 @@ export function createFaqReleaseService(
       retrieval: createRetrievalGate(createPgFaqRepository(), now, {
         regressionCases: () => createPgCandidateRepository().evalCases(),
       }),
+      model: options.modelGate,
       now,
     });
 
@@ -225,7 +295,11 @@ export function createFaqReleaseService(
     return found;
   }
 
-  /** 检查过了 → evaluating → 评测门 → draft / rejected；检查没过 → rejected（不跑评测）。 */
+  /**
+   * 检查过了 → evaluating（新的 run）→ 评测门 → draft / rejected；检查没过 → rejected（不跑评测）。
+   * background：开始之后立刻返回 evaluating 的那一行，评测门在后台跑；否则等它跑完。
+   * 别的检查正在跑（心跳没停）→ 409，不重复跑、不重复花钱。
+   */
   async function evaluate(
     release: FaqReleaseWithSnapshot,
     checks: FaqGraphCheckResult,
@@ -239,33 +313,80 @@ export function createFaqReleaseService(
         metrics: {},
         misses: [],
       };
-      return (
-        (await graph.setStatus(
-          release.version,
-          ['draft', 'evaluating', 'rejected'],
-          'rejected',
-          report,
-        )) ?? release
+      const rejected = await graph.setStatus(
+        release.version,
+        ['draft', 'evaluating', 'rejected'],
+        'rejected',
+        report,
       );
+      changed();
+      return rejected ?? release;
     }
-    const started = await graph.setStatus(
+    const runId = uuidv7();
+    const at = now();
+    const started = await graph.startEval(
       release.version,
-      ['draft', 'evaluating', 'rejected'],
-      'evaluating',
+      ['draft', 'rejected'],
+      runId,
+      at,
+      new Date(at.getTime() - staleMs),
     );
-    if (!started) return release;
-    const previous = await publishedRelease();
-    const baseline =
-      previous && previous.version !== release.version ? previous : null;
+    if (!started)
+      throw new HelpdeskError(
+        409,
+        'FAQ_RELEASE_EVALUATING',
+        `v${release.version} is being checked right now; wait for the result`,
+      );
+    changed();
+    const work = runEval(release, runId);
+    if (background) {
+      work.catch(onBackgroundError);
+      return started;
+    }
+    return (await work) ?? started;
+  }
+
+  /** 跑评测门（一个 run）：定时心跳；结束时只有这个 run 还在才写结果（被顶替了就丢掉）。 */
+  async function runEval(
+    release: FaqReleaseWithSnapshot,
+    runId: string,
+  ): Promise<FaqReleaseRow | null> {
+    const controller = new AbortController();
+    const beat = () =>
+      graph
+        .evalHeartbeat(release.version, runId, now())
+        .then((alive) => {
+          if (!alive) controller.abort();
+        })
+        .catch(() => undefined);
+    const timer = setInterval(() => void beat(), heartbeatMs);
+    timer.unref?.();
     let report: FaqReleaseEvalReport;
+    let baseline: FaqReleaseWithSnapshot | null = null;
     try {
+      const previous = await publishedRelease();
+      baseline =
+        previous && previous.version !== release.version ? previous : null;
       report = {
         ...(await gate.evaluate({
           version: release.version,
           snapshot: release.snapshot,
           previous: baseline
-            ? { version: baseline.version, evalReport: baseline.evalReport }
+            ? {
+                version: baseline.version,
+                evalReport: baseline.evalReport,
+                snapshot: baseline.snapshot,
+              }
             : null,
+          signal: controller.signal,
+          progress: async (progress) => {
+            const alive = await graph
+              .evalHeartbeat(release.version, runId, now(), progress)
+              .catch(() => true);
+            if (!alive) controller.abort();
+            else changed();
+            return alive;
+          },
         })),
         baselineVersion: baseline?.version ?? null,
       };
@@ -277,16 +398,20 @@ export function createFaqReleaseService(
         ranAt: now().toISOString(),
         metrics: {},
         misses: [],
+        baselineVersion: baseline?.version ?? null,
       };
+    } finally {
+      clearInterval(timer);
     }
-    return (
-      (await graph.setStatus(
-        release.version,
-        ['evaluating'],
-        report.passed ? 'draft' : 'rejected',
-        report,
-      )) ?? started
+    const finished = await graph.finishEval(
+      release.version,
+      runId,
+      report.passed ? 'draft' : 'rejected',
+      report,
+      now(),
     );
+    changed();
+    return finished;
   }
 
   async function publish(
@@ -317,6 +442,7 @@ export function createFaqReleaseService(
       );
     // published / already：这一版就是上线的
     indexVectors(result.release.version);
+    changed();
     return summary(result.release, result.release.version);
   }
 
@@ -325,6 +451,12 @@ export function createFaqReleaseService(
   }
 
   return {
+    /** 订阅版本列表的变化（只在这个进程里；别的实例上的变化由长连接自己定时对数据库补上）。 */
+    onChange(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+
     async list(): Promise<{
       releases: FaqReleaseSummary[];
       published: number | null;
@@ -453,7 +585,7 @@ export function createFaqReleaseService(
       };
     },
 
-    /** 对 draft / rejected / evaluating 的版本重跑检查与评测门（快照不变）。 */
+    /** 对 draft / rejected / 检查中断的版本重跑检查与评测门（快照不变；正在检查的 → 409）。 */
     async check(rawVersion: unknown): Promise<FaqReleaseSummary> {
       const release = await required(versionNumber(rawVersion));
       if (release.status === 'published' || release.status === 'superseded')

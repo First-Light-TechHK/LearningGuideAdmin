@@ -96,6 +96,9 @@ describe('learner script and template variant', () => {
     ['謝謝你', 'zh-CN', { script: 'zh', variant: 'zh-TW' }],
     ['我的payment失败了', 'en-GB', { script: 'zh', variant: 'zh-CN' }],
     ['thanks', 'zh-CN', { script: 'latin', variant: 'en' }],
+    // owner 2026-11-02: not Chinese -> English, Japanese with kanji included
+    ['領収書が届かない', 'zh-CN', { script: 'latin', variant: 'en' }],
+    ['로그인이 안 돼요', 'zh-CN', { script: 'latin', variant: 'en' }],
     ['👍', 'zh-CN', { script: 'zh', variant: 'zh-CN' }],
     ['👍', 'en-GB', { script: 'latin', variant: 'en' }],
     ['???', 'en-GB', { script: 'latin', variant: 'en' }],

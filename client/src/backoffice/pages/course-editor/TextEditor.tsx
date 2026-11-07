@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { Exhibit } from '../../contracts/course';
-import { L, Modal, buttonStyle, exhibitTypeLabel, inputStyle } from './shared';
+import { Modal } from './shared';
+import { L, buttonStyle, exhibitTypeLabel, inputStyle } from './shared-utils';
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => {
@@ -106,7 +107,7 @@ export function TextEditor({
       </div>
       {!value && (
         <div style={{ border: '1px solid #E8EDF5', borderBottom: 0, padding: '8px 12px', fontSize: 12, color: '#5A6577', background: '#fff' }}>
-          {L(locale, '从 Google Docs 整篇粘贴，或点击 Import .docx。每个学习点标题请使用 Heading 1。', 'Paste a lesson from Google Docs, or Import .docx. Use “Heading 1” for each learning point.')}
+          {L(locale, '从 Google Docs 整篇粘贴，或点击导入 .docx。每个学习点标题请使用一级标题。', 'Paste a lesson from Google Docs, or Import .docx. Use “Heading 1” for each learning point.')}
         </div>
       )}
       <div

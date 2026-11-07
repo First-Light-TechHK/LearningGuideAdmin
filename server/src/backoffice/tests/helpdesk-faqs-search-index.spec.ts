@@ -33,13 +33,33 @@ describe('Helpdesk FAQ search index', () => {
     migration,
   );
 
-  it('indexes exactly the to_tsvector expression the candidate query filters and ranks with', () => {
+  it('indexes exactly the to_tsvector expression the candidate query filters with', () => {
     expect(index).not.toBeNull();
     const indexed = vectors(index![0]);
     expect(indexed).toHaveLength(1);
-    const queried = vectors(FAQ_CANDIDATES_SQL);
-    expect(queried.length).toBeGreaterThanOrEqual(2);
-    for (const expression of queried) expect(expression).toBe(indexed[0]);
+    const filters = [
+      ...FAQ_CANDIDATES_SQL.matchAll(
+        /(to_tsvector\(\s*'[a-z]+'\s*,[^)]*\))\s*@@/g,
+      ),
+    ].map((m) => normalise(m[1]));
+    expect(filters).toHaveLength(1);
+    expect(filters[0]).toBe(indexed[0]);
+  });
+
+  it('ranks the matched rows with the question (title) weighted above the answer (owner 2026-11-03)', () => {
+    // Rank runs only on rows the index already matched, so it may use per-field vectors
+    const ranked = vectors(FAQ_CANDIDATES_SQL).filter(
+      (expression) =>
+        expression !==
+        "to_tsvector('english', question_en || ' ' || answer_en)",
+    );
+    expect(ranked).toEqual([
+      "to_tsvector('english', question_en)",
+      "to_tsvector('english', answer_en)",
+    ]);
+    expect(FAQ_CANDIDATES_SQL).toContain(
+      "2 * ts_rank('{0.05,0.1,0.4,1.0}'::float4[]",
+    );
   });
 
   it('uses one text search configuration everywhere (english, as to_tsquery)', () => {

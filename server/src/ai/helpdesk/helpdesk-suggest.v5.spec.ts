@@ -28,7 +28,10 @@ import type {
   AgentStepOutcome,
   AgentStepSpec,
 } from './workflow/engine';
-import { PICK_FAQ_V5_SYSTEM } from './workflow/assist-workflow';
+import {
+  CARD_CONTEXT_RULE,
+  PICK_FAQ_V5_SYSTEM,
+} from './workflow/assist-workflow';
 import { ANSWER_LINES, TEMPLATES } from './workflow/guard';
 import { LEARNER_STATE_RULE } from './workflow/learner-facts';
 import {
@@ -188,10 +191,7 @@ function setup(
     [AgentStepSpec, AgentStepContext]
   >((spec, context) =>
     spec.tool.name === 'explain'
-      ? (options.explain ?? (() => called({}, { flags: { covered: false } })))(
-          spec,
-          context,
-        )
+      ? (options.explain ?? (() => called({ covered: 'no' })))(spec, context)
       : (
           options.pick ??
           (() =>
@@ -221,6 +221,10 @@ function setup(
         OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
         OPENROUTER_BASE_URL: 'http://llm.test/v1',
         HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+        // 精排缺省开（会发 /rerank 请求）；这些用例只看工作流本身，精排见 tiered L2 那组
+        HELPDESK_RERANK_MODEL: 'off',
+        // 缺省不思考（小模型）；这里开着，好把「思考 + 不思考后备」两路一起测到
+        HELPDESK_SUGGEST_THINKING: 'high',
       },
     now: options.now,
   });
@@ -671,8 +675,7 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     const { service, run, findPublished, findCandidates } = setup({
       found: [FAILED, RESET],
       pick: () => pick('clarify', PAID.id),
-      explain: () =>
-        called({}, { texts: { explanation }, flags: { covered: true } }),
+      explain: () => called({ covered: 'yes' }, { texts: { explanation } }),
     });
     const result = await ask(
       service,
@@ -703,14 +706,16 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     const explain = specOf(run, 'explain') as AgentStepSpec;
     expect(explain.tool).toMatchObject({
       name: 'explain',
-      enumArgs: {},
+      enumArgs: { covered: ['yes', 'no'] },
       textArgs: { explanation: expect.any(String) as string },
-      flagArgs: { covered: expect.any(String) as string },
     });
+    // 不用布尔：gemma-4-31b 会把布尔后面的键名写坏（2026-11-02），covered 是 yes / no
+    expect(explain.tool.flagArgs).toBeUndefined();
     expect(JSON.parse(explain.prompt)).toEqual({
       card: { question: PAID.question, answer: PAID.answer },
       followUp: 'So do I just have to wait?',
       recentTurns: shown.recentTurns,
+      writeIn: 'English',
     });
     expect(explain.system).not.toContain('wait');
   });
@@ -718,17 +723,16 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
   it.each([
     [
       'the model says the answer does not cover it',
-      () => called({}, { flags: { covered: false } }),
+      () => called({ covered: 'no' }),
       'not_covered',
     ],
     [
       'the explanation adds a number',
       () =>
         called(
-          {},
+          { covered: 'yes' },
           {
             texts: { explanation: 'It takes 30 minutes.' },
-            flags: { covered: true },
           },
         ),
       'ungrounded',
@@ -737,17 +741,16 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
       'the explanation sounds like an AI',
       () =>
         called(
-          {},
+          { covered: 'yes' },
           {
             texts: { explanation: 'Great question! Just wait a few minutes.' },
-            flags: { covered: true },
           },
         ),
       'ai_filler',
     ],
     [
       'covered without an explanation',
-      () => called({}, { flags: { covered: true } }),
+      () => called({ covered: 'yes' }),
       'missing',
     ],
     [
@@ -782,16 +785,30 @@ describe('v5 clarify: explaining the card on screen (Part D)', () => {
     },
   );
 
+  it("tells explain which language to write in, from the learner's own words (Traditional Chinese here)", async () => {
+    const { service, run } = setup({ pick: () => pick('clarify', PAID.id) });
+    await ask(service, chat('這是什麼意思？', shown));
+    const explain = specOf(run, 'explain') as AgentStepSpec;
+    expect((JSON.parse(explain.prompt) as { writeIn: string }).writeIn).toBe(
+      'Traditional Chinese',
+    );
+    expect(explain.system).toContain('"writeIn"');
+    // no added steps or dropped conditions; a nearby general point is not covered (blind review 2026-11-03)
+    expect(explain.system).toContain(
+      'never say something is enough on its own',
+    );
+    expect(explain.system).toContain('does not say exactly what they ask');
+  });
+
   it('names each step it starts for the thinking panel: pick_faq is pick, and nothing else is said', async () => {
     const { service } = setup({
       found: [FAILED, RESET],
       pick: () => pick('clarify', PAID.id),
       explain: () =>
         called(
-          {},
+          { covered: 'yes' },
           {
             texts: { explanation: 'Only for a few minutes.' },
-            flags: { covered: true },
           },
         ),
     });
@@ -994,9 +1011,8 @@ describe('v5 without a model call', () => {
       const env = {
         OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
         HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
-        ...(options.thinking
-          ? { HELPDESK_SUGGEST_THINKING: options.thinking }
-          : {}),
+        HELPDESK_RERANK_MODEL: 'off',
+        HELPDESK_SUGGEST_THINKING: options.thinking ?? 'high',
       };
       const harness = setup({
         env,
@@ -1022,7 +1038,7 @@ describe('v5 without a model call', () => {
         .map(([, context]) => context.model.thinking)
         .sort();
 
-    it('thinks high by default and asks a thinking-off backup at the same time; a thinking answer in time wins and the backup is stopped', async () => {
+    it('thinks high when set and asks a thinking-off backup at the same time; a thinking answer in time wins and the backup is stopped', async () => {
       const { service, run, quickSignals, events } = hedged({
         thinkingTakes: SUGGEST_THINKING_CUTOFF_MS - 1,
       });
@@ -1238,6 +1254,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
           OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
           HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
           HELPDESK_SUGGEST_THINKING: 'off',
+          HELPDESK_RERANK_MODEL: 'off',
         }),
       }),
     };
@@ -1284,7 +1301,7 @@ describe('v5 through the real pi runner (faux provider)', () => {
         [
           pi.ai.fauxToolCall('explain', {
             explanation: 'Only a few minutes. Then reload My Learning.',
-            covered: true,
+            covered: 'yes',
           }),
         ],
         { stopReason: 'toolUse' },
@@ -1447,4 +1464,153 @@ describe('v7 learner state (Portal → Agent)', () => {
       expect(JSON.parse(spec.prompt)).not.toHaveProperty('user');
     },
   );
+});
+
+describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, on by default)', () => {
+  const ENV = {
+    OPENROUTER_API_KEY: 'test-openrouter-key-local-only',
+    OPENROUTER_BASE_URL: 'http://llm.test/v1',
+    HELPDESK_SUGGEST_MODEL: 'test/cheap-model',
+    HELPDESK_RERANK_MODEL: 'voyageai/rerank-2.5-lite',
+  };
+  /** 精排分数按 [PAID, FAILED, RESET] 的顺序给。 */
+  const rerankWith = (scores: number[] | null) =>
+    jest.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+      expect(url as string).toBe('http://llm.test/v1/rerank');
+      return Promise.resolve(
+        scores
+          ? new Response(
+              JSON.stringify({
+                results: scores.map((s, index) => ({
+                  index,
+                  relevance_score: s,
+                })),
+              }),
+            )
+          : new Response('{}', { status: 502 }),
+      );
+    });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('a sure first message gets the top card without asking the model', async () => {
+    rerankWith([0.2, 0.3, 0.95]);
+    const { service, run } = setup({
+      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.8,0.1' },
+    });
+    const result = await ask(service, chat('forgot my password'));
+    expect(result).toMatchObject({
+      kind: 'answer',
+      suggestion: { faqId: RESET.id },
+      intent: 'question',
+      confidence: 'sure',
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('not sure (small lead): the model sees the reranked order, cut to HELPDESK_RERANK_KEEP', async () => {
+    rerankWith([0.5, 0.9, 0.85]);
+    const { service, run } = setup({
+      env: {
+        ...ENV,
+        HELPDESK_RERANK_DIRECT: '0.8,0.1',
+        HELPDESK_RERANK_KEEP: '2',
+      },
+    });
+    await ask(service, chat('payment problem'));
+    const spec = specOf(run, 'pick_faq');
+    const sent = JSON.parse(spec!.prompt) as { candidates: { id: string }[] };
+    expect(sent.candidates.map((c) => c.id)).toEqual([FAILED.id, RESET.id]);
+  });
+
+  it('never answers directly when a card is on screen (follow-ups need the model)', async () => {
+    rerankWith([0.99, 0.1, 0.1]);
+    const { service, run } = setup({
+      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.5,0' },
+    });
+    await ask(service, chat('and then?', { nodeId: FAILED.id }));
+    expect(run).toHaveBeenCalled();
+  });
+
+  it('HELPDESK_CARD_CONTEXT=on: a follow-up card carries its parent question to the reranker and the model, with the rule', async () => {
+    const fetch = rerankWith([0.5, 0.6, 0.55]);
+    const UNDER = 'Can I see my password?';
+    const found = [PAID, FAILED, { ...RESET, under: UNDER }];
+    const on = setup({
+      found,
+      env: { ...ENV, HELPDESK_CARD_CONTEXT: 'on' },
+    });
+    await ask(on.service, chat('is it on my phone too?'));
+    const body = JSON.parse(
+      (fetch.mock.calls[0][1] as RequestInit).body as string,
+    ) as { documents: string[] };
+    expect(body.documents[2].startsWith(`${UNDER} → ${RESET.question}\n`)).toBe(
+      true,
+    );
+    const spec = specOf(on.run, 'pick_faq') as AgentStepSpec;
+    expect(spec.system).toBe(`${PICK_FAQ_V5_SYSTEM}\n${CARD_CONTEXT_RULE}`);
+    const sent = JSON.parse(spec.prompt) as {
+      candidates: { id: string; under?: string }[];
+    };
+    expect(sent.candidates.find((c) => c.id === RESET.id)?.under).toBe(UNDER);
+
+    // off (the default): documents, rules and prompt exactly as before
+    fetch.mockClear();
+    const off = setup({ found, env: ENV });
+    await ask(off.service, chat('is it on my phone too?'));
+    const plain = JSON.parse(
+      (fetch.mock.calls[0][1] as RequestInit).body as string,
+    ) as { documents: string[] };
+    expect(plain.documents[2].startsWith(`${RESET.question}\n`)).toBe(true);
+    const before = specOf(off.run, 'pick_faq') as AgentStepSpec;
+    expect(before.system).toBe(PICK_FAQ_V5_SYSTEM);
+    expect(
+      (JSON.parse(before.prompt) as { candidates: object[] }).candidates.some(
+        (c) => 'under' in c,
+      ),
+    ).toBe(false);
+  });
+
+  it('HELPDESK_QUERY_CONTEXT (on by default): the reranker is also asked with "previous message → message"; off asks once', async () => {
+    const fetch = rerankWith([0.5, 0.6, 0.55]);
+    const context = { recentTurns: ['older', 'Which ways can I pay?'] };
+    const on = setup({ env: ENV });
+    await ask(on.service, chat('and WeChat Pay?', context));
+    const queries = fetch.mock.calls.map(
+      (call) =>
+        (
+          JSON.parse((call[1] as RequestInit).body as string) as {
+            query: string;
+          }
+        ).query,
+    );
+    expect(queries.sort()).toEqual([
+      'Which ways can I pay? → and WeChat Pay?',
+      'and WeChat Pay?',
+    ]);
+    expect(on.findCandidates.mock.calls[0][0].context).toBe(
+      'Which ways can I pay?',
+    );
+
+    fetch.mockClear();
+    const off = setup({ env: { ...ENV, HELPDESK_QUERY_CONTEXT: 'off' } });
+    await ask(off.service, chat('and WeChat Pay?', context));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(off.findCandidates.mock.calls[0][0].context).toBeUndefined();
+  });
+
+  it('a failed rerank keeps the retrieval order and still asks the model', async () => {
+    rerankWith(null);
+    const { service, run } = setup({
+      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.1,0' },
+    });
+    await ask(service, chat('I paid but my plan is not active'));
+    const sent = JSON.parse(specOf(run, 'pick_faq')!.prompt) as {
+      candidates: { id: string }[];
+    };
+    expect(sent.candidates.map((c) => c.id)).toEqual([
+      PAID.id,
+      FAILED.id,
+      RESET.id,
+    ]);
+  });
 });

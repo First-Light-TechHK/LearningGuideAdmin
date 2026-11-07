@@ -31,7 +31,8 @@ import { toSimplified } from './faqSearchText';
  *
  * 库文件的形状（宽松读，v1 与 v2 都认；不认识的字段忽略）：
  * - 顶层：{ faqs: [...] } 或数组；
- * - 每条：category、popular、questionEn、answerEn、questionZh、answerZh、keywords（同 BackOffice）；
+ * - 每条：category、popular、popularRank（热门里的顺序，1 最前；可选）、questionEn、answerEn、questionZh、
+ *   answerZh、keywords（同 BackOffice）；
  *   可选 key（缺省 = 英文问题的 slug，与迁移回填同一规则）、type / nodeType（answer | choice；
  *   有 options 就是 choice）、entry（缺省：顶层是入口；有 parentKey 或写在别人 followUps / options
  *   里的不是）、signals（不认识的忽略并报告）、phrasings（字符串数组按文字判断语言，
@@ -58,6 +59,8 @@ export type LibraryNode = {
   entry: boolean;
   category: FaqCategory;
   popular: boolean;
+  /** 热门里的顺序（1 最前）；库里没写 = null。 */
+  popularRank: number | null;
   questionEn: string;
   answerEn: string;
   questionZh: string;
@@ -196,6 +199,7 @@ export function parseFaqLibrary(raw: unknown): ParsedLibrary {
           : !inline && parentKeys.length === 0,
       category: item.category,
       popular: item.popular === true,
+      popularRank: rankOf(item.popularRank, warnings, key),
       questionEn,
       answerEn: typeof item.answerEn === 'string' ? item.answerEn : '',
       questionZh: typeof item.questionZh === 'string' ? item.questionZh : '',
@@ -274,12 +278,20 @@ export type SeedReport = {
     created: string[];
     updated: string[];
     unchanged: number;
+    /** keepStaffEdits：员工在 BackOffice 改过（updatedBy 不为空）的卡，文字和设置都不动。 */
+    kept: string[];
     skipped: { key: string; reason: string }[];
   };
   edges: {
     created: number;
     existing: number;
     relabelled: number;
+    /** keepStaffEdits：库文件里已经没有的追问 / 选项（旧版库建的），删掉的条数。 */
+    removed: number;
+    /** keepStaffEdits：按库文件重排了追问顺序的父卡数。 */
+    reordered: number;
+    /** keepStaffEdits：员工在 BackOffice 改过追问的父卡（边修订有员工署名），整组追问不动。 */
+    kept: string[];
     failed: { link: string; reason: string }[];
   };
   phrasings: {
@@ -332,14 +344,50 @@ async function publishedByQuestion(
   }
 }
 
+/** 热门顺序：1–999 的整数；别的（没写、小数、超范围）按没排（null），写了但不对的记 warning。 */
+function rankOf(
+  value: unknown,
+  warnings: string[],
+  key: string,
+): number | null {
+  if (value === undefined || value === null) return null;
+  if (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 999
+  )
+    return value;
+  warnings.push(`${key}: popularRank ${JSON.stringify(value)} ignored (1–999)`);
+  return null;
+}
+
 export async function seedFaqLibrary(
   deps: SeedDeps,
   library: ParsedLibrary,
-  options: { actor: FaqActor; release: boolean },
+  options: {
+    actor: FaqActor;
+    release: boolean;
+    /**
+     * true：已发布、最后一次由员工在 BackOffice 改过的卡（updatedBy 不为空）原样留着，只更新还是库文件那版的卡
+     * （DEV 启动时同步改过的库文件用这个，不盖掉运营的编辑）。追问按库文件对齐：库里没有的删掉（先删，免得
+     * 新的追问撞上每张卡 4 条的上限）、缺的补上、文字照库文件、顺序照库文件；员工改过追问的父卡整组不动。
+     * 相似问照常补。
+     */
+    keepStaffEdits?: boolean;
+  },
 ): Promise<SeedReport> {
   const report: SeedReport = {
-    nodes: { created: [], updated: [], unchanged: 0, skipped: [] },
-    edges: { created: 0, existing: 0, relabelled: 0, failed: [] },
+    nodes: { created: [], updated: [], unchanged: 0, kept: [], skipped: [] },
+    edges: {
+      created: 0,
+      existing: 0,
+      relabelled: 0,
+      removed: 0,
+      reordered: 0,
+      kept: [],
+      failed: [],
+    },
     phrasings: { created: 0, existing: 0, failed: [] },
     release: null,
     warnings: [...library.warnings],
@@ -370,12 +418,18 @@ export async function seedFaqLibrary(
       report.nodes.skipped.push({ key: node.key, reason: 'archived' });
       continue;
     }
+    if (current && options.keepStaffEdits && current.updatedBy !== null) {
+      ids.set(node.key, current.id);
+      report.nodes.kept.push(node.key);
+      continue;
+    }
     const body = {
       key: node.key,
       type: node.type,
       entry: node.entry,
       category: node.category,
       popular: node.popular,
+      popularRank: node.popularRank,
       questionEn: node.questionEn,
       answerEn: node.answerEn,
       questionZh: node.questionZh,
@@ -406,7 +460,25 @@ export async function seedFaqLibrary(
     }
   }
 
+  const childKeysOf = new Map<string, string[]>();
+  for (const edge of library.edges)
+    childKeysOf.set(edge.parentKey, [
+      ...(childKeysOf.get(edge.parentKey) ?? []),
+      edge.childKey,
+    ]);
+  const linksKept = options.keepStaffEdits
+    ? await removeStaleLinks(
+        deps,
+        library,
+        ids,
+        childKeysOf,
+        options.actor,
+        report,
+      )
+    : new Set<string>();
+
   for (const edge of library.edges) {
+    if (linksKept.has(edge.parentKey)) continue;
     const link = `${edge.parentKey} → ${edge.childKey}`;
     const parentId = ids.get(edge.parentKey);
     const childId = ids.get(edge.childKey);
@@ -419,12 +491,25 @@ export async function seedFaqLibrary(
         ? { labelEn: edge.labelEn, labelZh: edge.labelZh }
         : {};
     try {
-      const { created } = await deps.graph.createEdge(options.actor, parentId, {
-        childId,
-        ...labels,
-      });
+      const { edge: row, created } = await deps.graph.createEdge(
+        options.actor,
+        parentId,
+        { childId, ...labels },
+      );
       if (created) report.edges.created += 1;
-      else report.edges.existing += 1;
+      else if (
+        options.keepStaffEdits &&
+        edge.labelEn === null &&
+        edge.labelZh === null &&
+        (row.labelEn !== null || row.labelZh !== null)
+      ) {
+        // 库文件去掉了 chip 文字：回到用子卡的问题
+        await deps.graph.updateEdge(options.actor, row.id, {
+          labelEn: null,
+          labelZh: null,
+        });
+        report.edges.relabelled += 1;
+      } else report.edges.existing += 1;
     } catch (error) {
       if (error instanceof HelpdeskError && error.code === 'FAQ_EDGE_EXISTS') {
         const { children } = await deps.graph.edges(parentId);
@@ -441,6 +526,16 @@ export async function seedFaqLibrary(
       report.edges.failed.push({ link, reason: reason(error) });
     }
   }
+
+  if (options.keepStaffEdits)
+    await reorderLinks(
+      deps,
+      ids,
+      childKeysOf,
+      linksKept,
+      options.actor,
+      report,
+    );
 
   for (const node of library.nodes) {
     const id = ids.get(node.key);
@@ -461,21 +556,178 @@ export async function seedFaqLibrary(
     }
   }
 
-  if (options.release && deps.releases) {
-    const { release, created } = await deps.releases.create(options.actor);
-    let published = release.status === 'published';
-    let final = release;
-    if (!published && release.publishable) {
-      final = await deps.releases.publish(options.actor, release.version);
-      published = true;
+  if (options.release && deps.releases)
+    report.release = await releaseNow(deps.releases, options.actor);
+  return report;
+}
+
+/**
+ * keepStaffEdits 的第一步：每张父卡的追问 / 选项里，库文件已经没有的删掉（旧版库建的）。员工改过这张卡追问的
+ * （边修订里有员工署名）整组不动，返回这些父卡的 key，后面补边、排序都跳过它们。
+ */
+async function removeStaleLinks(
+  deps: SeedDeps,
+  library: ParsedLibrary,
+  ids: ReadonlyMap<string, string>,
+  childKeysOf: ReadonlyMap<string, readonly string[]>,
+  actor: FaqActor,
+  report: SeedReport,
+): Promise<Set<string>> {
+  const kept = new Set<string>();
+  for (const node of library.nodes) {
+    const parentId = ids.get(node.key);
+    if (!parentId) continue;
+    try {
+      const { revisions } = await deps.graph.edgeRevisions(parentId);
+      if (
+        revisions.some(
+          (revision) =>
+            revision.parentId === parentId && revision.employeeId !== null,
+        )
+      ) {
+        kept.add(node.key);
+        report.edges.kept.push(node.key);
+        continue;
+      }
+      const wanted = new Set(
+        (childKeysOf.get(node.key) ?? []).map((key) => ids.get(key)),
+      );
+      const { children } = await deps.graph.edges(parentId);
+      for (const view of children) {
+        if (wanted.has(view.edge.childId)) continue;
+        const { deleted } = await deps.graph.deleteEdge(actor, view.edge.id);
+        if (deleted) report.edges.removed += 1;
+      }
+    } catch (error) {
+      // 没删干净的父卡不再补边、不排序，免得撞上限或排出半截
+      kept.add(node.key);
+      report.edges.failed.push({
+        link: `${node.key} (stale links)`,
+        reason: reason(error),
+      });
     }
-    report.release = {
-      version: final.version,
-      status: final.status,
-      created,
-      published,
-    };
   }
+  return kept;
+}
+
+/** keepStaffEdits 的最后一步：追问 / 选项的顺序照库文件（员工改过追问的父卡不动；没补齐的不排）。 */
+async function reorderLinks(
+  deps: SeedDeps,
+  ids: ReadonlyMap<string, string>,
+  childKeysOf: ReadonlyMap<string, readonly string[]>,
+  linksKept: ReadonlySet<string>,
+  actor: FaqActor,
+  report: SeedReport,
+): Promise<void> {
+  for (const [parentKey, childKeys] of childKeysOf) {
+    if (linksKept.has(parentKey)) continue;
+    const parentId = ids.get(parentKey);
+    const childIds = childKeys.map((key) => ids.get(key));
+    if (!parentId || childIds.some((id) => id === undefined)) continue;
+    try {
+      const { children } = await deps.graph.edges(parentId);
+      const now = children.map((view) => view.edge.childId);
+      if (
+        now.length !== childIds.length ||
+        now.every((id, index) => id === childIds[index])
+      )
+        continue;
+      await deps.graph.reorder(actor, parentId, { childIds });
+      report.edges.reordered += 1;
+    } catch (error) {
+      report.edges.failed.push({
+        link: `${parentKey} (order)`,
+        reason: reason(error),
+      });
+    }
+  }
+}
+
+/** 建发布版本（工作表没变就不新建），检查与评测门过了就发布。流程树换版（helpdeskDemoSeed）也用。 */
+export async function releaseNow(
+  releases: FaqReleaseService,
+  actor: FaqActor,
+): Promise<NonNullable<SeedReport['release']>> {
+  const { release, created } = await releases.create(actor);
+  let published = release.status === 'published';
+  let final = release;
+  if (!published && release.publishable) {
+    final = await releases.publish(actor, release.version);
+    published = true;
+  }
+  return { version: final.version, status: final.status, created, published };
+}
+
+export type PopularSyncReport = {
+  /** popular 改成 true 的 key。 */
+  on: string[];
+  /** popular 改成 false 的 key。 */
+  off: string[];
+  /** 还是热门（或还不是），只改了顺序的 key。 */
+  reordered: string[];
+  /** 库里有、表里没有已发布行的 key（不新建，交给整库导入）。 */
+  missing: string[];
+  failed: { key: string; reason: string }[];
+  release: SeedReport['release'];
+};
+
+/**
+ * 只同步「热门」（产品 2026-11-02 在 Helpdesk-FAQ-Popular.xlsx 里挑的那版）：按 key 找已发布的行，只改 popular
+ * 和 popularRank（热门顺序），其他字段原样带回（BackOffice 里改过的文字、关键词、标签不会被库文件盖掉）。
+ * 经正常的服务层，所以有修订和审计；有改动才建发布版本（发布把热门和顺序一起冻结进快照，Portal 读的是快照）。
+ * 再跑一次什么都不改。
+ */
+export async function syncLibraryPopular(
+  deps: Pick<SeedDeps, 'faqs' | 'repository' | 'releases'>,
+  library: ParsedLibrary,
+  options: { actor: FaqActor; release: boolean },
+): Promise<PopularSyncReport> {
+  const report: PopularSyncReport = {
+    on: [],
+    off: [],
+    reordered: [],
+    missing: [],
+    failed: [],
+    release: null,
+  };
+  for (const node of library.nodes) {
+    const current = await deps.repository.getByKey(node.key);
+    if (!current || current.status !== 'published') {
+      report.missing.push(node.key);
+      continue;
+    }
+    if (
+      current.popular === node.popular &&
+      current.popularRank === node.popularRank
+    )
+      continue;
+    try {
+      await deps.faqs.update(options.actor, current.id, {
+        key: current.key,
+        type: current.type,
+        entry: current.entry,
+        category: current.category,
+        popular: node.popular,
+        popularRank: node.popularRank,
+        questionEn: current.questionEn,
+        answerEn: current.answerEn,
+        questionZh: current.questionZh,
+        answerZh: current.answerZh,
+        keywords: current.keywords,
+        signals: current.signals,
+        version: current.version,
+      });
+      if (current.popular !== node.popular)
+        (node.popular ? report.on : report.off).push(node.key);
+      else report.reordered.push(node.key);
+    } catch (error) {
+      report.failed.push({ key: node.key, reason: reason(error) });
+    }
+  }
+  const changed =
+    report.on.length + report.off.length + report.reordered.length > 0;
+  if (changed && options.release && deps.releases)
+    report.release = await releaseNow(deps.releases, options.actor);
   return report;
 }
 

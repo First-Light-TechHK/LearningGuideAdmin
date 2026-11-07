@@ -16,6 +16,7 @@ import type { Response } from 'express';
 
 import type { FaqGraphService } from '../modules/helpdesk/faqs/faqGraphService';
 import type { FaqReleaseService } from '../modules/helpdesk/faqs/faqReleaseService';
+import { streamReleases } from '../modules/helpdesk/faqs/faqReleaseStream';
 import { runHelpdesk as run, signedInEmployee } from './helpdesk-http';
 import type { BackofficeRequest } from './request-context';
 
@@ -139,6 +140,34 @@ export class BackofficeHelpdeskFaqGraphController {
   @Get('faq-releases')
   releaseList() {
     return run(() => this.releases.list());
+  }
+
+  /**
+   * 版本列表的长连接（SSE，faqReleaseStream.ts）：抽屉开着时一直连着，列表变了服务端就推，
+   * 浏览器不定时重读。权限同 GET faq-releases（VIEW）。要在 faq-releases/:version 之前声明。
+   */
+  @Get('faq-releases/stream')
+  async releaseStream(@Res() response: Response) {
+    const controller = new AbortController();
+    response.on('close', () => controller.abort());
+    response.status(200);
+    response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    response.setHeader('Cache-Control', 'no-store, no-transform');
+    response.setHeader('Connection', 'keep-alive');
+    response.setHeader('X-Accel-Buffering', 'no');
+    response.flushHeaders();
+    response.socket?.setKeepAlive(true);
+    await streamReleases({
+      list: () => this.releases.list(),
+      onChange: (listener) => this.releases.onChange(listener),
+      write: (chunk) => {
+        if (response.destroyed || response.writableEnded) return false;
+        response.write(chunk);
+        return true;
+      },
+      signal: controller.signal,
+    });
+    if (!response.writableEnded) response.end();
   }
 
   /** 「发布新版本」页面：工作表的检查与和当前发布版本的差异（只读）。 */

@@ -222,7 +222,7 @@ export class BackofficeAuthController {
       EMAIL_SEND_MAX_PER_WINDOW,
     );
     const body = asBody(raw);
-    limit(
+    await limit(
       `forgot-password-email:${normaliseEmail(readString(body, 'email'))}`,
       EMAIL_SEND_MAX_PER_WINDOW,
     );

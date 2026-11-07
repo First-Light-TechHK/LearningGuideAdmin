@@ -13,6 +13,8 @@ export const STAGES = [
   'manage',
   'settings',
   'help',
+  // SOP 树 v2（2026-11-02）：全站的事（语言、Cookie、浏览器、页面打不开）单独一个阶段；学员状态不指向它
+  'site',
 ] as const;
 export type StageKey = (typeof STAGES)[number];
 

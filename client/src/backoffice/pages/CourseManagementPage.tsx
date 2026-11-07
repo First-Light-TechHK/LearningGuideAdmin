@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { useEmployee } from '../ShellRoute'
+import { useEmployee } from '../employeeSession';
 import type { CourseList } from '../contracts/course'
 import { useResizableColumns } from '../components/resizableColumns'
-import { Pagination, usePageSize } from '../components/Pagination'
+import { Pagination } from '../components/Pagination';
+import { usePageSize } from '../components/paginationState';
 import { boRequest } from '../lib/api'
 import { categoryLabel } from '../lib/categoryLabel'
 import { uploadFileWithProgress } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
+import type { Locale } from '../lib/i18n/config'
+import { serverText } from '../lib/i18n/serverText'
 import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
 import { MenuGuard } from './ModulePages'
-import { languageLabel, learningModeLabel } from './course-editor/shared'
+import { languageLabel, learningModeLabel } from './course-editor/shared-utils';
 
 type JobView = {
   jobId: string
@@ -35,15 +38,16 @@ type ConfirmOutcome = {
   message?: string
 }
 
-function uploadErrorText(code: string, detail?: string): string {
+function uploadErrorText(locale: string, code: string, detail?: string): string {
+  const zh = locale.startsWith('zh')
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
-    return '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。'
+    return zh ? '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。' : 'The upload was interrupted (unstable network or a service restart). Check them and try again.'
   }
   if (code === 'TIMEOUT') {
-    return '上传超时（网络过慢或服务无响应）。请重试。'
+    return zh ? '上传超时（网络过慢或服务无响应）。请重试。' : 'The upload timed out (slow network or no answer from the service). Try again.'
   }
-  if (detail && detail.trim()) return `导入失败：${detail}`
-  return `导入失败：${code}`
+  const reason = detail && detail.trim() ? serverText(detail, locale as Locale) : code
+  return zh ? `导入失败：${reason}` : `Import failed: ${reason}`
 }
 
 function formatWhen(value: string | null | undefined, locale: string): string {
@@ -72,7 +76,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const L = (zh: string, en: string) => (locale.startsWith('zh') ? zh : en)
   const canPublish = employee.role === 'ADMIN' || employee.role === 'OPERATION_ADMIN'
   const [list, setList] = useState<CourseList | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = usePageSize('course-list')
   const [importJob, setImportJob] = useState<JobView | null>(null)
@@ -91,7 +95,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [catalogCategories, setCatalogCategories] = useState<Array<{ id: string; name: string }>>([])
   const [createCategoryId, setCreateCategoryId] = useState('')
   const [createMode, setCreateMode] = useState('VIDEO_AND_TEXT')
-  const [createLanguage, setCreateLanguage] = useState<string>(locale)
+  const [createLanguages, setCreateLanguages] = useState<string[]>([locale.startsWith('zh') ? 'zh-CN' : 'en-GB'])
   const [exportingId, setExportingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
   const rawFileRef = useRef<HTMLInputElement | null>(null)
@@ -101,27 +105,41 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     defaultWidths: [300, 104, 120, 160, 130, 136, 176],
   })
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const fetchLoad = useCallback(() => {
     const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (categoryId) query.set('categoryId', categoryId)
-    const result = await boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`)
-    setLoading(false)
-    if (!result.success) {
-      setMessage(t(locale, 'common.sessionUnavailable'))
-      return
-    }
-    // 筛选/删除后总页数变少时把越界页码拉回最后一页，避免停在空白页
-    if (result.data.pages > 0 && page > result.data.pages) {
-      setPage(result.data.pages)
-      return
-    }
-    setList(result.data)
+    return boRequest<CourseList>(`/api/backoffice/courses?${query.toString()}`).then((result) => {
+      setLoading(false)
+      if (!result.success) {
+        setMessage(t(locale, 'common.sessionUnavailable'))
+        return
+      }
+      if (result.data.pages > 0 && page > result.data.pages) {
+        setPage(result.data.pages)
+        return
+      }
+      setList(result.data)
+    })
   }, [locale, categoryId, page, pageSize])
 
+  const [loadSource, setLoadSource] = useState(() => ({ locale, categoryId, page, pageSize }))
+  if (
+    loadSource.locale !== locale ||
+    loadSource.categoryId !== categoryId ||
+    loadSource.page !== page ||
+    loadSource.pageSize !== pageSize
+  ) {
+    setLoadSource({ locale, categoryId, page, pageSize })
+    setLoading(true)
+  }
+  const load = useCallback(() => {
+    setLoading(true)
+    return fetchLoad()
+  }, [fetchLoad])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void fetchLoad();
+  }, [fetchLoad]);
 
   useEffect(() => {
     void (async () => {
@@ -141,27 +159,53 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   }, [catalogCategories, list, locale])
 
   async function createCourse(form: FormData) {
+    const titleEn = String(form.get('titleEn') || '').trim()
+    const titleZh = String(form.get('titleZh') || '').trim()
+    if (!titleEn || !titleZh) {
+      setMessage(L('英文和中文课程名称均为必填。', 'English and Chinese course titles are both required.'))
+      return
+    }
+    if (!createCategoryId) {
+      setMessage(L('请选择分类。', 'Category is required.'))
+      return
+    }
+    if (createLanguages.length === 0) {
+      setMessage(L('请至少选择一种学习语言。', 'Select at least one learning language.'))
+      return
+    }
+    const defaultLanguage = createLanguages.includes('en-GB') ? 'en-GB' : createLanguages[0]
+    const defaultTitle = defaultLanguage === 'zh-CN' ? titleZh : titleEn
     setBusy(true)
     const result = await boRequest<{ id: string }>('/api/backoffice/courses', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        code: String(form.get('code')),
-        title: String(form.get('title')),
+        code: String(form.get('code') || '').trim() || undefined,
+        title: defaultTitle,
         slug: String(form.get('slug') || ''),
-        language: createLanguage,
-        defaultContentLanguage: createLanguage,
-        learningLanguages: [createLanguage],
+        language: defaultLanguage,
+        defaultContentLanguage: defaultLanguage,
+        learningLanguages: createLanguages,
         learningMode: createMode,
-        categoryId: createCategoryId || null,
+        categoryId: createCategoryId,
       }),
     })
+    if (!result.success) {
+      setBusy(false)
+      setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+      return
+    }
+    const otherLanguage = defaultLanguage === 'zh-CN' ? 'en-GB' : 'zh-CN'
+    const otherTitle = otherLanguage === 'zh-CN' ? titleZh : titleEn
+    await boRequest(`/api/backoffice/courses/${result.data.id}/localizations/${otherLanguage}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: otherTitle }),
+    })
     setBusy(false)
-    if (result.success) {
-      setShowCreate(false)
-      await load()
-      openCourse(result.data.id)
-    } else setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+    setShowCreate(false)
+    await load()
+    openCourse(result.data.id)
   }
 
   // 轮询后台导入作业，直到校验完成 / 失败 / 取消（异步导入：上传即返回，处理在后台）
@@ -172,7 +216,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       await new Promise((r) => setTimeout(r, 1500))
       const poll = await boRequest<JobView>(`/api/backoffice/courses/import/${job.jobId}`)
       if (!poll.success) {
-        setMessage(uploadErrorText(poll.error, poll.message))
+        setMessage(uploadErrorText(locale, poll.error, poll.message))
         return job
       }
       job = poll.data
@@ -200,7 +244,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     )
     if (!init.success) {
       setBusy(false)
-      setMessage(uploadErrorText(init.error, init.message))
+      setMessage(uploadErrorText(locale, init.error, init.message))
       return
     }
     const { jobId } = init.data
@@ -219,7 +263,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       if (!res.success) {
         setBusy(false)
         setUploadPct(null)
-        setMessage(uploadErrorText(res.error, res.errorMessage))
+        setMessage(uploadErrorText(locale, res.error, res.errorMessage))
         return
       }
       sent += blob.size
@@ -230,13 +274,13 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     const comp = await boRequest<JobView>(`/api/backoffice/courses/import/${jobId}/complete`, { method: 'POST' })
     if (!comp.success) {
       setBusy(false)
-      setMessage(uploadErrorText(comp.error, comp.message))
+      setMessage(uploadErrorText(locale, comp.error, comp.message))
       return
     }
     const job = await pollImportJob(comp.data)
     setBusy(false)
     setImportJob(job)
-    if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
+    if (job.status === 'FAILED') setMessage(job.error ? uploadErrorText(locale, '', job.error) : L('导入校验失败。', 'Import validation failed.'))
     else if (job.status === 'AWAITING_CONFIRM') setMessage(L('原始素材已转换。确认前请先查看校验结果。', 'Raw materials converted. Review validation before confirming.'))
   }
 
@@ -253,14 +297,14 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     })
     if (!result.success) {
       setBusy(false)
-      setMessage(uploadErrorText(result.error, result.message))
+      setMessage(uploadErrorText(locale, result.error, result.message))
       return
     }
     setMessage(L('已提交，正在后台解析素材…', 'Submitted. Parsing materials in the background…'))
     const job = await pollImportJob(result.data)
     setBusy(false)
     setImportJob(job)
-    if (job.status === 'FAILED') setMessage(job.error ? `导入失败：${job.error}` : L('导入校验失败。', 'Import validation failed.'))
+    if (job.status === 'FAILED') setMessage(job.error ? uploadErrorText(locale, '', job.error) : L('导入校验失败。', 'Import validation failed.'))
     else setMessage(L('已从本地目录解析素材，请在校验信息中确认后导入。', 'Parsed materials from the server folder. Review validation before confirming.'))
   }
 
@@ -278,7 +322,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (!start.success && course.liveVersionId) start = await startExport('working')
     if (!start.success) {
       setExportingId(null)
-      setMessage(uploadErrorText(start.error, start.message))
+      setMessage(uploadErrorText(locale, start.error, start.message))
       return
     }
     for (let attempt = 0; attempt < 120; attempt++) {
@@ -337,7 +381,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (result.success) {
       setImportJob(result.data)
       if (result.data.status === 'FAILED') setMessage(result.data.error ?? L('导入校验失败。', 'Import validation failed.'))
-    } else setMessage(uploadErrorText(result.error, result.errorMessage))
+    } else setMessage(uploadErrorText(locale, result.error, result.errorMessage))
   }
 
   async function confirmImport(onConflict: string, overwriteDraft = false) {
@@ -495,13 +539,31 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               <button type="button" aria-label={L('关闭', 'Close')} onClick={() => setShowCreate(false)} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 4 }}>×</button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程标题', 'Course title')} *<input name="title" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID', 'Course ID')} *<input name="code" required pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名（Slug）', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('内容语言', 'Content language')}<select value={createLanguage} onChange={(e) => setCreateLanguage(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="en-GB">English (en-GB)</option><option value="zh-CN">简体中文 (zh-CN)</option></select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（英文）', 'Course title (English)')} *<input name="titleEn" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（中文）', 'Course title (Chinese)')} *<input name="titleZh" required style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID（留空自动生成）', 'Course ID (auto if blank)')}<input name="code" pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')}<select value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('未分类', 'Uncategorized')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')} *<select required value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('请选择分类', 'Select a category')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
             </div>
+            <fieldset style={{ border: '1px solid #D5DCE8', borderRadius: 8, padding: 12, marginTop: 14 }}>
+              <legend style={{ fontSize: 13, fontWeight: 600, padding: '0 4px' }}>{L('学习语言', 'Learning languages')} *</legend>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
+                {[['en-GB', languageLabel(locale, 'en-GB')], ['zh-CN', languageLabel(locale, 'zh-CN')]].map(([code, label]) => (
+                  <label key={code} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={createLanguages.includes(code)}
+                      onChange={(event) => setCreateLanguages((current) => event.target.checked
+                        ? [...new Set([...current, code])]
+                        : current.filter((language) => language !== code))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>{L('学习语言创建后只能增加，不能删除。', 'Learning languages can only be added later, not removed.')}</div>
+            </fieldset>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
               <button type="button" className="button buttonGhost" onClick={() => setShowCreate(false)}>{L('取消', 'Cancel')}</button>
               <button className="button" disabled={busy}>{busy ? L('创建中…', 'Creating…') : L('创建并编辑', 'Create and edit')}</button>
@@ -786,16 +848,16 @@ function ImportPanel({
           </>
         )}
       </p>
-      {job.error && <div style={{ color: '#b42318', fontSize: 13, marginBottom: 8 }}>{job.error}</div>}
+      {job.error && <div style={{ color: '#b42318', fontSize: 13, marginBottom: 8 }}>{serverText(job.error, locale as Locale)}</div>}
       {errors.length > 0 && (
         <div style={{ color: '#b42318', fontSize: 13 }}>
-          {errors.map((e, i) => <div key={i}>ERROR {e.code}: {e.message}</div>)}
+          {errors.map((e, i) => <div key={i}>{e.code}: {serverText(e.message, locale as Locale)}</div>)}
         </div>
       )}
       {warnings.length > 0 && (
         <details style={{ fontSize: 13, marginTop: 8 }}>
           <summary>{warnings.length} {zh ? '条警告' : 'warning(s)'}</summary>
-          {warnings.map((w, i) => <div key={i} style={{ opacity: 0.8 }}>WARN {w.code}: {w.message}</div>)}
+          {warnings.map((w, i) => <div key={i} style={{ opacity: 0.8 }}>{w.code}: {serverText(w.message, locale as Locale)}</div>)}
         </details>
       )}
       {job.status === 'AWAITING_CONFIRM' && (

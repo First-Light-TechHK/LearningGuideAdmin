@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 // CI must actually run the HelpDesk suites: the client node:test files and the server
 // PostgreSQL specs (they skip without HELPDESK_TEST_DATABASE_URL). Job names stay as they
 // are because dev-deploy.yml waits for the "CI" workflow and branch protection names them.
-const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 /** The text of one job: from "  <id>:" up to the next job at the same indent. */
 function job(id) {

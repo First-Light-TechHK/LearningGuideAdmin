@@ -1128,15 +1128,15 @@ describe('model and budget settings', () => {
       kind: 'fake',
       model: FAKE_MODEL_ID,
     });
-    // 和生产一样：聊天默认思考 high，提交工单那条路不思考
+    // 和生产一样（分级方案，owner 2026-11-03）：小模型，聊天缺省不思考，提交工单那条路也不思考
     expect(chooseModel({ OPENROUTER_API_KEY: 'k' })).toEqual({
       kind: 'real',
-      model: 'deepseek/deepseek-v4.1-flash',
-      thinking: 'high',
+      model: 'google/gemma-4-31b-it',
+      thinking: 'off',
     });
     expect(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')).toEqual({
       kind: 'real',
-      model: 'deepseek/deepseek-v4.1-flash',
+      model: 'google/gemma-4-31b-it',
     });
     expect(
       thinkingLabel(chooseModel({ OPENROUTER_API_KEY: 'k' }, 'ticket')),
@@ -1164,7 +1164,7 @@ describe('model and budget settings', () => {
         },
         'ticket',
       ),
-    ).toEqual({ kind: 'real', model: 'deepseek/deepseek-v4.1-flash' });
+    ).toEqual({ kind: 'real', model: 'google/gemma-4-31b-it' });
   });
 
   it('takes a longer deadline from HELPDESK_EVAL_DEADLINE_MS for real models only, and names it in the label', () => {
@@ -1182,7 +1182,7 @@ describe('model and budget settings', () => {
     });
     expect(model).toEqual({
       kind: 'real',
-      model: 'deepseek/deepseek-v4.1-flash',
+      model: 'google/gemma-4-31b-it',
       thinking: 'low',
       deadlineMs: 30_000,
     });
@@ -1204,6 +1204,7 @@ describe('model and budget settings', () => {
       );
     const env = {
       OPENROUTER_API_KEY: 'k',
+      HELPDESK_SUGGEST_THINKING: 'high',
       HELPDESK_EVAL_DEADLINE_MS: '60000',
       HELPDESK_EVAL_CUTOFF_MS: '0',
     };

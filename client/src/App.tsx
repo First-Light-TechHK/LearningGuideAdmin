@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { App as AntApp, ConfigProvider } from 'antd'
 import enGB from 'antd/locale/en_GB'
 import zhCN from 'antd/locale/zh_CN'
@@ -15,6 +15,8 @@ import ForgotPasswordPage from './backoffice/pages/ForgotPasswordPage'
 import ResetPasswordPage from './backoffice/pages/ResetPasswordPage'
 import SignInPage from './backoffice/pages/SignInPage'
 import HelpDeskPage from './backoffice/pages/HelpDeskPage'
+import { StudentManagementPage } from './backoffice/pages/StudentManagementPage'
+import { LearningAccessPage } from './backoffice/pages/LearningAccessPage'
 import {
   EmployeeAccountSettingsPage,
   MenuGuard,
@@ -90,6 +92,10 @@ function AITutorWorkspace() {
 /** antd 内置文案跟随地址栏语言（/en-GB/... 或 /zh-CN/...） */
 function useAntdLocale() {
   const segment = useLocation().pathname.split('/')[1]
+  // <html lang> 跟随语言：读屏、浏览器翻译和拼写检查都看它
+  useEffect(() => {
+    document.documentElement.lang = segment === 'zh-CN' ? 'zh-CN' : 'en-GB'
+  }, [segment])
   return segment === 'zh-CN' ? zhCN : enGB
 }
 
@@ -156,7 +162,7 @@ function App() {
               />
               <Route path="order" element={<PlaceholderPage menu="order" />} />
               <Route path="reporting" element={<PlaceholderPage menu="reporting" />} />
-              <Route path="student" element={<PlaceholderPage menu="student" />} />
+              <Route path="student" element={<StudentManagementPage />} />
               <Route
                 // 一条路由带可选的 :ticketId：切换咨询时页面不重新挂载，左栏列表与滚动位置保持不变
                 path="help-desk/:ticketId?"
@@ -178,6 +184,7 @@ function App() {
                 path="settings/notification-configuration"
                 element={<SettingsEntryPage section="notificationConfiguration" />}
               />
+              <Route path="settings/learning-access" element={<LearningAccessPage />} />
             </Route>
           </Route>
           <Route path="*" element={<LocaleFallback />} />

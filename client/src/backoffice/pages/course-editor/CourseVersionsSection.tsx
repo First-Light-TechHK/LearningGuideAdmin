@@ -1,72 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import type { CourseDetail, CourseVersion, HistoryPage } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
 import { useResizableColumns } from '../../components/resizableColumns';
-import {
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  card,
-  dangerBtn,
-  fmtDate,
-  inputStyle,
-  liveStatusLabel,
-  primaryBtn,
-} from './shared';
+import { Field, Modal } from './shared';
+import { L, buttonStyle, card, dangerBtn, fmtDate, inputStyle, liveStatusLabel, primaryBtn } from './shared-utils';
+import { historyActionLabel, historyDetailText } from './versionHistory';
 
-export function historyActionLabel(action: string, locale: string): string {
-  const zh = locale.startsWith('zh');
-  switch (action) {
-    case 'PUBLISH': return zh ? '发布' : 'Publish';
-    case 'DELETE_DRAFT': return zh ? '删除草稿' : 'Delete draft';
-    case 'RESTORE': return zh ? '恢复版本' : 'Restore';
-    case 'EXPORT_PACKAGE': return zh ? '导出课程包' : 'Export package';
-    case 'IMPORT_PACKAGE': return zh ? '导入课程包' : 'Import package';
-    case 'CHANGE_STATUS': return zh ? '更改状态' : 'Change status';
-    case 'OPERATIONS_PUBLISH': return zh ? '发布运营位' : 'Publish operations';
-    case 'CREATE_COURSE': return zh ? '新建课程' : 'Create course';
-    default: return action;
-  }
-}
 
-export function historyDetailText(item: HistoryPage['items'][number], locale: string): string {
-  const zh = locale.startsWith('zh');
-  const detail = item.detail && typeof item.detail === 'object' ? item.detail as Record<string, unknown> : null;
-  if (!detail) return item.versionNo ? `v${item.versionNo}` : '—';
-  const text = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
-  switch (item.action) {
-    case 'PUBLISH':
-      return [
-        text(detail.versionLabel),
-        detail.sourceEnvironment ? `${zh ? '来源' : 'from'} ${text(detail.sourceEnvironment)} ${text(detail.sourceVersionLabel)}` : null,
-        detail.notifyLearners ? (zh ? '已通知学员' : 'learners notified') : null,
-      ].filter(Boolean).join(' · ');
-    case 'DELETE_DRAFT':
-      return zh ? `保留 ${text(detail.keptVersion)}` : `Kept ${text(detail.keptVersion)}`;
-    case 'RESTORE':
-      return zh ? `从 ${text(detail.restoredFrom)} 恢复` : `Restored from ${text(detail.restoredFrom)}`;
-    case 'CHANGE_STATUS':
-      return `${text(detail.from)} → ${text(detail.to)}${detail.reason ? ` · ${text(detail.reason)}` : ''}`;
-    case 'EXPORT_PACKAGE':
-      return `${zh ? '版本' : 'Version'} ${text(detail.versionLabel)}`;
-    case 'IMPORT_PACKAGE':
-      return [
-        detail.versionLabel ? `${zh ? '版本' : 'Version'} ${text(detail.versionLabel)}` : null,
-        detail.sourceVersionLabel ? `${zh ? '来源' : 'from'} ${text(detail.sourceVersionLabel)}` : null,
-        detail.lessonCount !== undefined ? `${text(detail.lessonCount)} ${zh ? '课时' : 'lessons'}` : null,
-      ].filter(Boolean).join(' · ') || '—';
-    case 'OPERATIONS_PUBLISH':
-      return [
-        detail.section ? `${zh ? '区域' : 'Section'} ${text(detail.section)}` : null,
-        detail.reason ? `${zh ? '原因' : 'Reason'}: ${text(detail.reason)}` : null,
-      ].filter(Boolean).join(' · ') || '—';
-    default:
-      return Object.entries(detail).map(([key, value]) => `${key}: ${text(value)}`).join(' · ') || '—';
-  }
-}
 
 export function CourseVersionsSection({
   locale,
@@ -79,6 +20,7 @@ export function CourseVersionsSection({
   setBusy,
   onReload,
   onNotice,
+  canPublish = true,
 }: {
   locale: string;
   course: CourseDetail;
@@ -90,6 +32,8 @@ export function CourseVersionsSection({
   setBusy: (value: boolean) => void;
   onReload: () => Promise<void>;
   onNotice: (message: string) => void;
+  /** REQ-0236：发布、删草稿、导入导出、上下线、恢复版本只给 Course=Full。 */
+  canPublish?: boolean;
 }) {
   const navigate = useNavigate();
   const [publishOpen, setPublishOpen] = useState(false);
@@ -110,9 +54,6 @@ export function CourseVersionsSection({
   const versionsTable = useResizableColumns({ storageKey: 'course-editor-versions', defaultWidths: [110, 170, 180, 150, 240] });
   const historyTable = useResizableColumns({ storageKey: 'course-editor-history', defaultWidths: [160, 140, 140, 578] });
 
-  useEffect(() => {
-    setStatusTarget(course.liveStatus === 'ONLINE' ? 'HIDDEN' : 'ONLINE');
-  }, [course.liveStatus]);
 
   async function publish() {
     if (!course.completeness.canPublish) {
@@ -271,7 +212,7 @@ export function CourseVersionsSection({
               {course.hasDraft ? L(locale, '未发布', 'Not published') : L(locale, '无草稿', 'No draft')}
               {course.hasDraft ? ` · ${L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}` : ''}
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            {canPublish && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <button type="button" style={primaryBtn} disabled={busy || !course.hasDraft || !course.completeness.canPublish} onClick={() => setPublishOpen(true)}>
                 {L(locale, '发布', 'Publish')}
               </button>
@@ -281,29 +222,29 @@ export function CourseVersionsSection({
               <button type="button" style={buttonStyle} disabled={busy} onClick={() => setImportOpen(true)}>
                 {L(locale, '导入课程包', 'Import package')}
               </button>
-            </div>
+            </div>}
           </div>
           <div style={{ border: '1px solid #E8EDF5', borderRadius: 10, padding: 14 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>{L(locale, '线上', 'LIVE')}</div>
             <div style={{ fontSize: 13 }}>
-              {liveVersion ? `${liveVersion.versionLabel} · ${liveVersion.isLive ? L(locale, '线上', 'Live') : ''} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt)}` : L(locale, '从未发布', 'Not published')}
+              {liveVersion ? `${liveVersion.versionLabel} · ${liveVersion.isLive ? L(locale, '线上', 'Live') : ''} · ${fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt, locale)}` : L(locale, '从未发布', 'Not published')}
             </div>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{liveStatusLabel(locale, course.liveStatus)}</div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button type="button" style={buttonStyle} disabled={busy || !liveVersion} onClick={() => setStatusOpen(true)}>
+            {canPublish && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <button type="button" style={buttonStyle} disabled={busy || !liveVersion} onClick={() => { setStatusTarget(course.liveStatus === 'ONLINE' ? 'HIDDEN' : 'ONLINE'); setStatusOpen(true); }}>
                 {L(locale, '更改状态', 'Change status')}
               </button>
               <button type="button" style={buttonStyle} disabled={busy || !liveVersion || exportBusy} onClick={() => void exportPackage()}>
                 {exportBusy ? L(locale, '导出中…', 'Exporting…') : L(locale, '导出课程包', 'Export package')}
               </button>
-            </div>
-            <div style={{ marginTop: 8 }}>
+            </div>}
+            {canPublish && <div style={{ marginTop: 8 }}>
               <label style={{ fontSize: 12 }}>{L(locale, '导出版本', 'Export version')}</label>
               <select value={exportVersion} onChange={(event) => setExportVersion(event.target.value)} style={{ marginLeft: 8, padding: 4 }}>
                 <option value="live">{L(locale, '线上版本', 'Live')}</option>
                 <option value="working">{L(locale, '草稿', 'Working')}</option>
               </select>
-            </div>
+            </div>}
           </div>
         </div>
       </div>
@@ -324,12 +265,12 @@ export function CourseVersionsSection({
             {sortedVersions.map((version) => (
               <tr key={version.id}>
                 <td>{version.versionLabel}{version.isLive ? ` · ${L(locale, '线上', 'Live')}` : ''}</td>
-                <td>{fmtDate(version.wentLiveAt ?? version.createdAt)}</td>
+                <td>{fmtDate(version.wentLiveAt ?? version.createdAt, locale)}</td>
                 <td>{version.sourceVersionLabel ?? version.sourceEnvironment ?? '—'}</td>
                 <td>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course/${course.id}/preview?versionId=${version.id}`)}>{L(locale, '查看', 'View')}</button>
-                    {!version.isLive && <button type="button" style={buttonStyle} disabled={busy} onClick={() => setRestoreVersion(version)}>{L(locale, '恢复', 'Restore')}</button>}
+                    {canPublish && !version.isLive && <button type="button" style={buttonStyle} disabled={busy} onClick={() => setRestoreVersion(version)}>{L(locale, '恢复', 'Restore')}</button>}
                   </div>
                 </td>
               </tr>
@@ -354,7 +295,7 @@ export function CourseVersionsSection({
           <tbody>
             {(history?.items ?? []).map((item) => (
               <tr key={item.id}>
-                <td>{fmtDate(item.time)}</td>
+                <td>{fmtDate(item.time, locale)}</td>
                 <td>{item.operator}</td>
                 <td>{historyActionLabel(item.action, locale)}{item.versionNo ? <span style={{ opacity: 0.6 }}> · v{item.versionNo}</span> : null}</td>
                 <td className="cellWrap" style={{ fontSize: 12, opacity: 0.8 }}>{historyDetailText(item, locale)}</td>
@@ -439,7 +380,7 @@ export function CourseVersionsSection({
 
       {importOpen && (
         <Modal title={L(locale, '导入课程包', 'Import package')} onClose={() => setImportOpen(false)}>
-          <p style={{ fontSize: 13 }}>{L(locale, '课程包替换当前课程的草稿。线上版本不变，直到 Publish。', 'The package replaces the draft of this course. What is live does not change until you publish.')}</p>
+          <p style={{ fontSize: 13 }}>{L(locale, '课程包替换当前课程的草稿。线上版本不变，直到发布。', 'The package replaces the draft of this course. What is live does not change until you publish.')}</p>
           <Field label={L(locale, '上传 .zip', 'Upload .zip')}>
             <input type="file" accept=".zip,.lgcourse.zip" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} />
           </Field>

@@ -242,7 +242,7 @@ export function parseTable(markdown: string): ParsedTable | null {
 
 /** 把二维结构序列化为 GFM 表格（单元格内 `|` 转义为 `\|`） */
 export function serializeTable(t: ParsedTable): string {
-  const esc = (s: string) => s.replace(/\|/g, '\\|')
+  const esc = (s: string) => s.replace(/\r?\n/g, '<br>').replace(/\|/g, '\\|')
   const sep = t.align.map((a) => {
     switch (a) {
       case 'center':
@@ -289,6 +289,16 @@ export function renderInline(text: string): string {
   let i = 0
   const n = text.length
   while (i < n) {
+    if (text.slice(i, i + 4).toLowerCase() === '<br>') {
+      out += '<br>'
+      i += 4
+      continue
+    }
+    if (text.slice(i, i + 6).toLowerCase() === '<br />') {
+      out += '<br>'
+      i += 6
+      continue
+    }
     // 行内代码 `...`
     if (text[i] === '`') {
       const end = text.indexOf('`', i + 1)
@@ -464,6 +474,8 @@ export class TableWidget extends WidgetType {
   eq(other: TableWidget) {
     return (
       other.markdown === this.markdown &&
+      other.from === this.from &&
+      other.to === this.to &&
       other.editing === this.editing &&
       other.readOnly === this.readOnly &&
       other.locale === this.locale
@@ -510,6 +522,11 @@ export class TableWidget extends WidgetType {
     const commit = (keepEditing = false) => {
       if (this.readOnly) return
       const md = serializeTable(table)
+      if (!keepEditing && md === this.markdown) {
+        this.setEditing(null)
+        editingFocusHint = null
+        return
+      }
       this.applyChange({ from: this.from, to: this.to, md, keepEditing })
       if (!keepEditing) editingFocusHint = null
     }

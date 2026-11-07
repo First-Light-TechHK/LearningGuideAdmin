@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { UploadDocumentModal } from './UploadDocumentModal'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccess'
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { PageFileIcon } from '../icons'
 import { useKText } from './i18n'
@@ -104,13 +104,29 @@ export function CourseTree({ keyword }: { keyword: string }) {
     [visibleCourseIds],
   )
 
+  const [expansionSource, setExpansionSource] = useState<{
+    showAll: boolean
+    courseKeys: string[]
+    visibleCourseId: string | null
+  } | null>(null)
+  if (
+    expansionSource?.showAll !== showAll ||
+    expansionSource?.courseKeys !== courseKeys ||
+    expansionSource?.visibleCourseId !== visibleCourseId
+  ) {
+    setExpansionSource({ showAll, courseKeys, visibleCourseId })
+    setExpandedKeys((previous) =>
+      showAll
+        ? [...courseKeys, ...previous.filter((key) => !String(key).startsWith('course:'))]
+        : visibleCourseId
+          ? [`course:${visibleCourseId}`]
+          : [],
+    )
+  }
+
   // 全部课件视图：课程节点全部展开，并补拉尚未加载的课程详情
   useEffect(() => {
     if (!showAll) return
-    setExpandedKeys((prev) => [
-      ...courseKeys,
-      ...prev.filter((k) => !String(k).startsWith('course:')),
-    ])
     const st = useKnowledgeStore.getState()
     for (const id of visibleCourseIds) {
       if (!st.details[id]) void st.refreshDetail(id)
@@ -120,11 +136,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
   // 目标课程变化：自动展开 + 加载详情 + 恢复上次编辑页
   useEffect(() => {
     if (showAll) return
-    if (!visibleCourseId) {
-      setExpandedKeys([])
-      return
-    }
-    setExpandedKeys([`course:${visibleCourseId}`])
+    if (!visibleCourseId) return
     void (async () => {
       const st = useKnowledgeStore.getState()
       if (!st.details[visibleCourseId]) {
@@ -201,17 +213,20 @@ export function CourseTree({ keyword }: { keyword: string }) {
   }, [courses, details, kw, visibleCourseIds])
 
   // 搜索时自动展开命中分支
-  useEffect(() => {
-    if (!kw) return
-    const keys: React.Key[] = []
-    for (const node of treeData) {
-      keys.push(node.key)
-      for (const page of node.children ?? []) {
-        keys.push(page.key)
+  const [searchSource, setSearchSource] = useState({ kw, treeData })
+  if (searchSource.kw !== kw || searchSource.treeData !== treeData) {
+    setSearchSource({ kw, treeData })
+    if (kw) {
+      const keys: React.Key[] = []
+      for (const node of treeData) {
+        keys.push(node.key)
+        for (const page of node.children ?? []) {
+          keys.push(page.key)
+        }
       }
+      setExpandedKeys(keys)
     }
-    setExpandedKeys(keys)
-  }, [kw, treeData])
+  }
 
   const handleSelect = (keys: React.Key[]) => {
     const key = keys[0]

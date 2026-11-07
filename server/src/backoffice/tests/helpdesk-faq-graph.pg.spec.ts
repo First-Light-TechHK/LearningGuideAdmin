@@ -12,7 +12,10 @@ import {
   type FaqGraphService,
 } from '../modules/helpdesk/faqs/faqGraphService';
 import { faqKeySlug } from '../modules/helpdesk/faqs/faqKeys';
-import { createHelpdeskQaSource } from '../modules/helpdesk/faqs/faqQaSource';
+import {
+  createHelpdeskQaSource,
+  searchScope,
+} from '../modules/helpdesk/faqs/faqQaSource';
 import { currentRelease } from '../modules/helpdesk/faqs/faqRelease';
 import {
   createRetrievalGate,
@@ -1163,6 +1166,9 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
       });
       expect(onFailed[0].score).toBeGreaterThan(0);
       expect(onFailed[1].score).toBe(0);
+      // a follow-up carries the question of the card it follows, in the same language (HELPDESK_CARD_CONTEXT)
+      expect(onFailed[0].under).toBe('What if my payment failed?');
+      expect(onFailed[2].under).toBeUndefined();
 
       const onRetry = await qa.findCandidates({
         locale: 'en-GB',
@@ -1194,6 +1200,59 @@ describeDb('Helpdesk FAQ question trees and releases (PostgreSQL)', () => {
         types: ['answer', 'choice'],
       });
       expect(withChoices.map((c) => c.id)).toContain(pay.id);
+    });
+
+    it('HELPDESK_SEARCH_SCOPE=all (flat): every published answer is searched, the card on screen adds no children; edges stay for display', async () => {
+      const { source } = wire();
+      const qa = createHelpdeskQaSource({
+        repository: repo,
+        releases: source,
+        liveEdges: () => graph.allEdges(),
+        searchScope: () => 'all',
+      });
+      const failed = await create({ questionEn: 'What if my payment failed?' });
+      const retry = await create({
+        entry: false,
+        questionEn: 'After a failed payment, can I try another card?',
+        answerEn: 'Yes, any card works.',
+      });
+      const twice = await create({
+        entry: false,
+        questionEn: 'After a failed payment, will I be charged twice?',
+      });
+      await link(failed, retry);
+      await link(failed, twice);
+      await releases.create(staff);
+      await releases.publish(staff, 1);
+
+      // a fresh question finds a follow-up card directly (not an entry)
+      const fresh = await qa.findCandidates({
+        locale: 'en-GB',
+        category: null,
+        text: 'another card',
+        limit: 8,
+      });
+      expect(fresh.map((c) => [c.id, c.relation])).toEqual([
+        [retry.id, 'search'],
+      ]);
+      // with a card on screen: only what the words match, no unmatched children, no 'child' relation
+      const onFailed = await qa.findCandidates({
+        locale: 'en-GB',
+        category: null,
+        text: 'charged twice',
+        limit: 8,
+        nodeId: failed.id,
+      });
+      expect(onFailed.map((c) => [c.id, c.relation])).toEqual([
+        [twice.id, 'search'],
+      ]);
+      // the edge itself is kept: the follow-up still knows the card it follows
+      expect(onFailed[0].under).toBe('What if my payment failed?');
+      expect(searchScope({ HELPDESK_SEARCH_SCOPE: ' ALL ' })).toBe('all');
+      // owner 2026-11-03：平铺是缺省（分级方案），tree 要显式设
+      expect(searchScope({})).toBe('all');
+      expect(searchScope({ HELPDESK_SEARCH_SCOPE: ' tree ' })).toBe('tree');
+      expect(searchScope({ HELPDESK_SEARCH_SCOPE: 'x' })).toBe('all');
     });
 
     it('with a card on screen, children without a hit take at most the 4 shown slots and the search keeps 4', async () => {

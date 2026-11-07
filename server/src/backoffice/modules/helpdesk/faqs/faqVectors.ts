@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { Logger } from '@nestjs/common';
 
+import {
+  HELPDESK_DEFAULTS,
+  helpdeskSetting,
+} from '../../../../contracts/helpdesk-defaults';
 import type { FaqNodeType } from '../../../../contracts/helpdesk-qa';
 import { query, withTransaction } from '../../../lib/db';
 import { FAQ_LIMITS, type HelpdeskFaq } from './faqContracts';
@@ -10,8 +14,9 @@ import type { FaqRepository, FaqSearch, SqlDb } from './faqRepository';
 /**
  * FAQ 检索的向量层（RAG 基建，owner 2026-10-30 22:07Z：先把基建打好，人工过一遍卡片后再决定上不上）。
  *
- * 默认什么都不做：HELPDESK_RETRIEVAL 缺省 / 不认识 = lexical（只用现有的字词检索）；没有 HELPDESK_EMBED_MODEL
- * 或 OPENROUTER_API_KEY 就没有向量模型，发布时不算向量、检索时不调模型。两个都是每次现读（不用重新部署）。
+ * HELPDESK_RETRIEVAL 缺省 / 不认识 = lexical（候选检索只用字词；向量走精排的召回池，见 ai/helpdesk/rerank.ts）。
+ * 向量模型缺省 bge-m3（contracts/helpdesk-defaults.ts，owner 2026-11-03）；HELPDESK_EMBED_MODEL=off 或没有
+ * OPENROUTER_API_KEY 就没有向量模型，发布时不算向量、检索时不调模型。两个都是每次现读（不用重新部署）。
  * - 发布版本的每个节点：英文问题、中文问题、每条学员问法（原文）各算一个向量；向量按 (模型, 文本哈希) 存一份，
  *   文本没变就不再算，所以以后新增或改了卡片，发布时只算改动的那几条（helpdesk_faq_embeddings）；
  *   某一版用到哪些文本记在 helpdesk_faq_release_vectors（迁移 20261031110000）。
@@ -121,15 +126,18 @@ type FetchLike = (
 
 /**
  * OpenRouter 的 embeddings 接口（OpenAI 兼容：POST {base}/embeddings，{ model, input }）。
- * 没有 HELPDESK_EMBED_MODEL 或 OPENROUTER_API_KEY → null（不算向量，也不检索向量）。
+ * HELPDESK_EMBED_MODEL=off 或没有 OPENROUTER_API_KEY → null（不算向量，也不检索向量）；没设 = 缺省模型。
  */
 export function openRouterFaqEmbedder(
   env: NodeJS.ProcessEnv,
   fetchImpl: FetchLike = fetch,
 ): FaqEmbedder | null {
-  const model = env.HELPDESK_EMBED_MODEL?.trim() ?? '';
+  const model = helpdeskSetting(
+    env.HELPDESK_EMBED_MODEL,
+    HELPDESK_DEFAULTS.embedModel,
+  );
   const apiKey = env.OPENROUTER_API_KEY?.trim() ?? '';
-  if (model === '' || apiKey === '') return null;
+  if (model === null || apiKey === '') return null;
   const baseUrl = (env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(
     /\/+$/,
     '',
@@ -568,7 +576,17 @@ export function createFaqVectorSearch(deps: {
     },
     async warm(release) {
       const embedder = deps.embedder();
-      if (embedder) await index(release, embedder.model);
+      if (!embedder) return;
+      // 线上版本发布时还没开向量（或换了向量模型）：启动时把缺的补算上（按文本哈希，算过的不再算；
+      // 写入都是 ON CONFLICT DO NOTHING，几台同时启动也没事），部署不用手动跑 helpdesk:faq-vectors
+      await indexFaqRelease({
+        store: deps.store,
+        embedder,
+        release,
+        signal: AbortSignal.timeout(FAQ_VECTOR_LIMITS.indexTimeoutMs),
+      });
+      indexes.delete(`${release}\n${embedder.model}`);
+      await index(release, embedder.model);
     },
   };
 }

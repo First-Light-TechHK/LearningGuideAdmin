@@ -1,7 +1,9 @@
 import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
+import type { FaqMapNode } from '../modules/helpdesk/faqs/faqMap';
 import {
   mapSeedNodes,
   parseMapSeed,
+  pruneFaqMap,
   seedFaqMap,
 } from '../modules/helpdesk/faqs/faqMapSeed';
 import { HelpdeskError } from '../modules/helpdesk/portalHelpdeskClient';
@@ -160,6 +162,180 @@ describe('seedFaqMap', () => {
     expect(report).toEqual({
       nodes: { created: upserted.slice(1), changed: [], unchanged: 1 },
       placements: { cards: 2, changed: 3, missingCards: ['gone-card'] },
+    });
+  });
+});
+
+/** v2（2026-11-02）：岔子写在 skeleton 的步骤里，没有卡也建；挂载只写岔子的 key。 */
+const SKELETON_V2 = {
+  ...SKELETON,
+  stages: [
+    {
+      ...SKELETON.stages[0],
+      steps: [
+        {
+          key: 'account.verify',
+          label: '激活邮箱',
+          labelEn: 'Verify email',
+          deviations: [
+            {
+              key: 'account.verify.not-received',
+              en: 'The email does not arrive',
+              zh: '收不到激活邮件',
+            },
+            {
+              key: 'account.verify.link-expired',
+              labelEn: 'The link has expired',
+              labelZh: '链接已过期',
+            },
+          ],
+        },
+      ],
+    },
+    SKELETON.stages[1],
+  ],
+};
+
+describe('SOP tree v2 seeds (deviations in the skeleton)', () => {
+  it('builds every skeleton deviation in order, with or without a card, and resolves a deviation placed by key', () => {
+    const seed = parseMapSeed(SKELETON_V2, [
+      {
+        key: 'no-activation-email',
+        primary: {
+          node: 'deviation',
+          deviation: 'account.verify.not-received',
+        },
+      },
+    ]);
+    expect(seed.placements[0].primary).toEqual({
+      node: 'deviation',
+      step: 'account.verify',
+      deviation: {
+        key: 'account.verify.not-received',
+        en: 'The email does not arrive',
+        zh: '收不到激活邮件',
+      },
+    });
+    const deviations = mapSeedNodes(seed).filter((n) => n.kind === 'deviation');
+    expect(
+      deviations.map((n) => [n.key, n.parentKey, n.position, n.labelZh]),
+    ).toEqual([
+      ['account.verify.not-received', 'account.verify', 0, '收不到激活邮件'],
+      ['account.verify.link-expired', 'account.verify', 1, '链接已过期'],
+    ]);
+  });
+
+  it('refuses places that are not in the skeleton and keys that appear twice', () => {
+    const bad = (skeleton: unknown, primary: unknown) =>
+      expect(() => parseMapSeed(skeleton, [{ key: 'a', primary }])).toThrow(
+        HelpdeskError,
+      );
+    bad(SKELETON_V2, { node: 'deviation', deviation: 'account.verify.gone' });
+    bad(SKELETON_V2, { node: 'step', step: 'account.nowhere' });
+    bad(SKELETON_V2, { node: 'cell', object: 'plan', attribute: 'price' });
+    bad(SKELETON_V2, {
+      node: 'deviation',
+      step: 'account.nowhere',
+      deviation: { key: 'account.nowhere.x', en: 'x', zh: 'x' },
+    });
+    type DeviationRow = { key: string; en: string; zh: string };
+    const firstStepDeviations = (skeleton: typeof SKELETON_V2) =>
+      (skeleton.stages[0].steps[0] as { deviations: DeviationRow[] })
+        .deviations;
+    const twice = structuredClone(SKELETON_V2);
+    firstStepDeviations(twice).push({
+      key: 'account.verify.not-received',
+      en: 'again',
+      zh: '又一次',
+    });
+    bad(twice, { node: 'step', step: 'account.verify' });
+    const stepAsDeviation = structuredClone(SKELETON_V2);
+    firstStepDeviations(stepAsDeviation).push({
+      key: 'purchase.pay',
+      en: 'x',
+      zh: 'x',
+    });
+    bad(stepAsDeviation, { node: 'step', step: 'account.verify' });
+  });
+});
+
+describe('pruneFaqMap', () => {
+  const node = (
+    id: string,
+    key: string,
+    kind: FaqMapNode['kind'],
+    parentId: string | null = null,
+    stageId: string | null = null,
+    attribute: FaqMapNode['attribute'] = null,
+  ) => ({ id, key, kind, parentId, stageId, attribute }) as FaqMapNode;
+
+  it('deletes nodes the seed does not have or has elsewhere (with their children), leaves first, after taking cards off them', async () => {
+    const nodes = [
+      node('1', 'account', 'stage'),
+      node('2', 'account.verify', 'step', '1'),
+      node('3', 'account.verify.no-email', 'deviation', '2'),
+      node('4', 'old', 'stage'),
+      node('5', 'old.step', 'step', '4'),
+      node('6', 'purchase', 'stage'),
+      // purchase.pay 在种子里属于 purchase，这里挂错了阶段：要重建
+      node('7', 'purchase.pay', 'step', '4'),
+      node('8', 'rules.account', 'object', null, '4'),
+      node('9', 'rules.account.price', 'cell', '8', null, 'price'),
+    ];
+    const calls: string[] = [];
+    const report = await pruneFaqMap(
+      {
+        map: {
+          nodes: () => Promise.resolve(nodes),
+          placements: () =>
+            Promise.resolve(
+              [
+                ['card-a', '3', true],
+                ['card-a', '2', false],
+                ['card-b', '2', true],
+                ['card-c', '9', true],
+              ].map(([faqId, nodeId, primary]) => ({
+                id: `${faqId}-${nodeId}`,
+                faqId: faqId as string,
+                nodeId: nodeId as string,
+                primary: primary as boolean,
+                createdBy: null,
+                createdAt: '',
+              })),
+            ),
+          setPlacements: (faqId, wanted) => {
+            calls.push(`place ${faqId} ${JSON.stringify(wanted)}`);
+            return Promise.resolve({ placements: [], changed: 1 });
+          },
+          deleteNode: (id) => {
+            calls.push(`delete ${id}`);
+            return Promise.resolve(null);
+          },
+        },
+      },
+      parseMapSeed(SKELETON_V2, []),
+      { employeeId: null },
+    );
+    expect(calls).toEqual([
+      'place card-a [{"nodeKey":"account.verify","primary":false}]',
+      'place card-c []',
+      'delete 3',
+      'delete 9',
+      'delete 5',
+      'delete 7',
+      'delete 8',
+      'delete 4',
+    ]);
+    expect(report).toEqual({
+      deleted: [
+        'account.verify.no-email',
+        'rules.account.price',
+        'old.step',
+        'purchase.pay',
+        'rules.account',
+        'old',
+      ],
+      detached: 2,
     });
   });
 });

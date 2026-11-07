@@ -59,7 +59,6 @@ export default function SignInPage() {
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     if (email.trim() === "") {
-      setEmailState("idle");
       return;
     }
     timer.current = setTimeout(() => void runEmailCheck(email), EMAIL_CHECK_DELAY_MS);
@@ -142,7 +141,7 @@ export default function SignInPage() {
               placeholder={t(locale, "signIn.emailPlaceholder")}
               value={email}
               onChange={(event) => {
-                setEmail(event.target.value);
+                setEmail(event.target.value); setEmailState("idle");
                 setErrorCode(null);
               }}
               required

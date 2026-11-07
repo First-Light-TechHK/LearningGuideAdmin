@@ -12,7 +12,8 @@ import type {
 import { boRequest } from '../lib/api';
 import { categoryLabel } from '../lib/categoryLabel';
 import { useResizableColumns } from '../components/resizableColumns';
-import { liveStatusLabel } from './course-editor/shared';
+import { liveStatusLabel } from './course-editor/shared-utils';
+import { formatDateTime } from '../lib/i18n/format';
 
 const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
 
@@ -35,29 +36,34 @@ export function OperationsPage() {
   const [courses, setCourses] = useState<CourseSummary[]>([]);
   const [addCourseId, setAddCourseId] = useState('');
   const [bannerLanguage, setBannerLanguage] = useState<'en-GB' | 'zh-CN'>('en-GB');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState('');
   const popularTable = useResizableColumns({
     storageKey: 'operations-popular-courses',
     defaultWidths: [50, 320, 150, 120, 240],
   });
 
-  const load = useCallback(async () => {
-    setBusy(true);
-    const [popularResult, bannerResult, coursesResult] = await Promise.all([
+  const fetchLoad = useCallback(() => {
+    return Promise.all([
       boRequest<PopularCourses>('/api/backoffice/operations/popular-courses'),
       boRequest<DiscoveryBanner>('/api/backoffice/operations/discovery-banner'),
       boRequest<CourseList>('/api/backoffice/courses?page=1&pageSize=100'),
-    ]);
-    setBusy(false);
-    if (popularResult.success) setPopular(popularResult.data);
-    if (bannerResult.success) setBanner(bannerResult.data);
-    if (coursesResult.success) setCourses(coursesResult.data.courses);
+    ]).then(([popularResult, bannerResult, coursesResult]) => {
+      setBusy(false);
+      if (popularResult.success) setPopular(popularResult.data);
+      if (bannerResult.success) setBanner(bannerResult.data);
+      if (coursesResult.success) setCourses(coursesResult.data.courses);
+    });
   }, []);
 
+  const load = useCallback(() => {
+    setBusy(true);
+    return fetchLoad();
+  }, [fetchLoad]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void fetchLoad();
+  }, [fetchLoad]);
 
   const onlineCourses = useMemo(() => courses.filter((course) => course.liveStatus === 'ONLINE'), [courses]);
   const unusedCourses = useMemo(
@@ -109,7 +115,7 @@ export function OperationsPage() {
     setBusy(false);
     if (result.success) {
       setPopular(result.data);
-      setNotice(L(locale, 'Popular Courses 已保存。Publish 后立即生效。', 'Popular Courses saved. Publish to make it live.'));
+      setNotice(L(locale, '热门课程已保存，发布后立即生效。', 'Popular Courses saved. Publish to make it live.'));
     } else {
       setNotice(`Save failed: ${result.error}`);
     }
@@ -142,7 +148,7 @@ export function OperationsPage() {
     setBusy(false);
     if (result.success) {
       setBanner(result.data);
-      setNotice(L(locale, 'Banner 已保存。Publish 后立即生效。', 'Banner saved. Publish to make it live.'));
+      setNotice(L(locale, '横幅已保存，发布后立即生效。', 'Banner saved. Publish to make it live.'));
     } else {
       setNotice(`Save failed: ${result.error}`);
     }
@@ -167,7 +173,7 @@ export function OperationsPage() {
           <button type="button" style={buttonStyle} onClick={() => navigate(`/${locale}/course`)}>← {L(locale, '课程列表', 'Course Overview')}</button>
           <h1 style={{ margin: '10px 0 0', fontSize: 24 }}>{L(locale, '运营位', 'Operations')}</h1>
           <p style={{ margin: '6px 0 0', opacity: 0.7, fontSize: 13 }}>
-            {L(locale, '运营位不设草稿；Publish 后立即生效，不生成课程版本。两套环境各自配置。', 'Operations has no draft; Publish takes effect immediately and creates no course version. Each environment is configured separately.')}
+            {L(locale, '运营位不设草稿；发布后立即生效，不生成课程版本。两套环境各自配置。', 'Operations has no draft; Publish takes effect immediately and creates no course version. Each environment is configured separately.')}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -182,14 +188,14 @@ export function OperationsPage() {
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, 'Popular Courses（1–6 门）', 'Popular Courses (1–6)')}</h2>
+              <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '热门课程（1–6 门）', 'Popular Courses (1–6)')}</h2>
               <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
-                {L(locale, '只列出 Online 课程；卡片内容读取 Course Information。课程失效后保留并标红，Publish 前需替换。', 'Only Online courses can be added. Card content comes from Course Information. Offline courses stay marked red until replaced.')}
+                {L(locale, '只列出已上线课程；卡片内容读取课程信息。课程失效后保留并标红，发布前需替换。', 'Only Online courses can be added. Card content comes from Course Information. Offline courses stay marked red until replaced.')}
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <select value={addCourseId} onChange={(event) => setAddCourseId(event.target.value)} style={{ padding: 8, borderRadius: 8, minWidth: 220 }}>
-                <option value="">{L(locale, '选择 Online 课程', 'Select an Online course')}</option>
+                <option value="">{L(locale, '选择已上线课程', 'Select an Online course')}</option>
                 {unusedCourses.map((course) => <option key={course.id} value={course.id}>{course.code} · {course.title}</option>)}
               </select>
               <button type="button" style={buttonStyle} disabled={!addCourseId || popular.items.length >= 6 || busy} onClick={addCourse}>{L(locale, '+ 添加', '+ Add course')}</button>
@@ -232,7 +238,7 @@ export function OperationsPage() {
             </table>
           </div>
           <p style={{ fontSize: 12, opacity: 0.65, marginTop: 12 }}>
-            {L(locale, '最近发布', 'Last published')}: {popular.publishedAt ? new Date(popular.publishedAt).toLocaleString() : '—'}
+            {L(locale, '最近发布', 'Last published')}: {formatDateTime(locale, popular.publishedAt)}
           </p>
         </div>
       )}
@@ -243,23 +249,23 @@ export function OperationsPage() {
             <div>
               <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '发现横幅', 'Discovery Banner')}</h2>
               <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
-                {L(locale, '单例、不轮播；featured course 必须 Online 且 Trial 开启；中英文文案均必填。', 'Single instance, no carousel; the featured course must be Online with Trial enabled; EN and ZH copy are required.')}
+                {L(locale, '单例、不轮播；推荐课程必须已上线且已开启试看；中英文文案均必填。', 'Single instance, no carousel; the featured course must be Online with Trial enabled; EN and ZH copy are required.')}
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <label style={{ fontSize: 14 }}><input type="checkbox" checked={banner.enabled} onChange={(event) => setBanner({ ...banner, enabled: event.target.checked })} /> {L(locale, '显示横幅', 'Show banner')}</label>
               <button type="button" style={buttonStyle} disabled={busy} onClick={() => void saveBanner()}>{L(locale, '保存', 'Save')}</button>
-              <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish('banner')}>{L(locale, 'Publish', 'Publish')}</button>
+              <button type="button" style={primaryBtn} disabled={busy} onClick={() => void publish('banner')}>{L(locale, '发布', 'Publish')}</button>
             </div>
           </div>
           {banner.invalid && (
             <p style={{ color: '#b42318', background: '#FDECEC', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>
-              {L(locale, '当前 Banner 已停止展示：课程不是 Online 或 Trial 已关闭。请更换课程并重新 Publish。', 'The banner is currently hidden: the course is not Online or Trial is disabled. Replace the course and publish again.')}
+              {L(locale, '当前横幅已停止展示：课程未上线或试看已关闭。请更换课程并重新发布。', 'The banner is currently hidden: the course is not Online or Trial is disabled. Replace the course and publish again.')}
             </p>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
-              <label style={labelStyle}>{L(locale, 'Featured course（Online + Trial）', 'Featured course (Online + Trial)')}
+              <label style={labelStyle}>{L(locale, '推荐课程（已上线且开启试看）', 'Featured course (Online + Trial)')}
                 <select
                   value={banner.courseId ?? ''}
                   onChange={(event) => setBanner({ ...banner, courseId: event.target.value || null })}
@@ -271,14 +277,14 @@ export function OperationsPage() {
               </label>
               <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
                 <button type="button" style={{ ...buttonStyle, fontWeight: bannerLanguage === 'en-GB' ? 700 : 400 }} onClick={() => setBannerLanguage('en-GB')}>EN</button>
-                <button type="button" style={{ ...buttonStyle, fontWeight: bannerLanguage === 'zh-CN' ? 700 : 400 }} onClick={() => setBannerLanguage('zh-CN')}>中文</button>
+                <button type="button" style={{ ...buttonStyle, fontWeight: bannerLanguage === 'zh-CN' ? 700 : 400 }} onClick={() => setBannerLanguage('zh-CN')}>{L(locale, '中文', 'Chinese')}</button>
               </div>
               <label style={labelStyle}>{L(locale, '主标题', 'Headline')}<input value={localizedEntry.headline ?? ''} onChange={(event) => updateLocalized('headline', event.target.value)} style={inputStyle} /></label>
               <label style={labelStyle}>{L(locale, '副标题', 'Subheading')}<input value={localizedEntry.subheading ?? ''} onChange={(event) => updateLocalized('subheading', event.target.value)} style={inputStyle} /></label>
               <label style={labelStyle}>{L(locale, '按钮文案', 'Button label')}<input value={localizedEntry.buttonLabel ?? ''} onChange={(event) => updateLocalized('buttonLabel', event.target.value)} style={inputStyle} /></label>
             </div>
             <div>
-              <h3 style={{ marginTop: 0, fontSize: 15 }}>{L(locale, 'Banner 预览', 'Banner preview')}</h3>
+              <h3 style={{ marginTop: 0, fontSize: 15 }}>{L(locale, '横幅预览', 'Banner preview')}</h3>
               <div
                 style={{
                   borderRadius: 16,
@@ -302,7 +308,7 @@ export function OperationsPage() {
             </div>
           </div>
           <p style={{ fontSize: 12, opacity: 0.65, marginTop: 12 }}>
-            {L(locale, '最近发布', 'Last published')}: {banner.publishedAt ? new Date(banner.publishedAt).toLocaleString() : '—'}
+            {L(locale, '最近发布', 'Last published')}: {formatDateTime(locale, banner.publishedAt)}
           </p>
         </div>
       )}

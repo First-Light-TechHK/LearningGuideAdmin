@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CourseStorageService } from './storage.service';
 import {
   captureVersionSnapshot,
   type VersionSnapshot,
@@ -17,10 +16,7 @@ type SnapshotLocalization = VersionSnapshot['course']['localizations'][number];
  */
 @Injectable()
 export class PortalProjectionService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly storage: CourseStorageService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async listCourses(limit = 50) {
     const rows = await this.prisma.commerceCourse.findMany({
@@ -130,7 +126,7 @@ export class PortalProjectionService {
       select: {
         liveStatus: true,
         archivedAt: true,
-        cover: { select: { storageKey: true, extension: true } },
+        cover: { select: { storageKey: true, extension: true, size: true } },
       },
     });
     if (
@@ -140,14 +136,11 @@ export class PortalProjectionService {
       !course.cover
     )
       return null;
-    try {
-      return {
-        bytes: await this.storage.getMedia(course.cover.storageKey),
-        extension: course.cover.extension,
-      };
-    } catch {
-      return null;
-    }
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
   }
 
   async getMediaBytes(courseId: string, assetId: string) {
@@ -159,17 +152,49 @@ export class PortalProjectionService {
       return null;
     const asset = await this.prisma.courseMediaAsset.findFirst({
       where: { id: assetId, courseId },
-      select: { storageKey: true, extension: true },
+      select: { storageKey: true, extension: true, size: true },
     });
     if (!asset) return null;
-    try {
-      return {
-        bytes: await this.storage.getMedia(asset.storageKey),
-        extension: asset.extension,
-      };
-    } catch {
-      return null;
-    }
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
+  }
+
+  /** 预览媒体（草稿/指定版本）：只要课程未归档即可，不要求已 ONLINE。 */
+  async getPreviewCoverBytes(courseId: string) {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: {
+        archivedAt: true,
+        cover: { select: { storageKey: true, extension: true, size: true } },
+      },
+    });
+    if (!course || course.archivedAt || !course.cover) return null;
+    return {
+      storageKey: course.cover.storageKey,
+      extension: course.cover.extension,
+      size: course.cover.size,
+    };
+  }
+
+  async getPreviewMediaBytes(courseId: string, assetId: string) {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { archivedAt: true },
+    });
+    if (!course || course.archivedAt) return null;
+    const asset = await this.prisma.courseMediaAsset.findFirst({
+      where: { id: assetId, courseId },
+      select: { storageKey: true, extension: true, size: true },
+    });
+    if (!asset) return null;
+    return {
+      storageKey: asset.storageKey,
+      extension: asset.extension,
+      size: asset.size,
+    };
   }
 
   private toSummary(
@@ -232,7 +257,15 @@ export class PortalProjectionService {
       cover: { storageKey: string } | null;
       localizations: SnapshotLocalization[];
       trialEnabled: boolean;
-      trialRows: Array<{ lessonId: string; status: string }>;
+      trialRows: Array<{
+        lessonId: string;
+        status: string;
+        videoCutoffSeconds?: number | null;
+        textCutoffLearningPointId?: string | null;
+        confirmedTextCutoffCode?: string | null;
+        videoCutoffByLanguage?: unknown;
+        textCutoffByLanguage?: unknown;
+      }>;
       plans: Array<{
         id: string;
         name: string;
@@ -244,7 +277,9 @@ export class PortalProjectionService {
       }>;
     },
     snapshot: VersionSnapshot,
+    media?: { coverUrl: string | null; assetUrl: (assetId: string) => string },
   ) {
+    void media;
     const loc =
       this.pickLocalization(
         snapshot.course.localizations,
@@ -254,6 +289,9 @@ export class PortalProjectionService {
       row.trialRows
         .filter((trial) => trial.status === 'READY')
         .map((trial) => trial.lessonId),
+    );
+    const trialRowByLesson = new Map(
+      row.trialRows.map((trial) => [trial.lessonId, trial]),
     );
     const lessons = [...snapshot.course.lessons].sort(
       (a, b) => a.sortOrder - b.sortOrder,
@@ -304,12 +342,28 @@ export class PortalProjectionService {
               lesson.localizations,
               snapshot.course.defaultContentLanguage,
             );
+            const trialRow = trialRowByLesson.get(lesson.id);
+            const isPublic = publicLessonIds.has(lesson.id);
             return {
               id: lesson.id,
               title: lessonLoc?.title ?? lesson.code,
               summary: lessonLoc?.description ?? null,
               durationSeconds: lessonLoc?.videoDurationSeconds ?? null,
-              isPublic: publicLessonIds.has(lesson.id),
+              isPublic,
+              // 试看截止点：正式 Portal 与 Admin 预览、学员视角预览共用同一份规则
+              // （视频按秒、文本按截止 LP），避免三处各写一套。
+              trial: isPublic
+                ? {
+                    videoCutoffSeconds: this.cutoffForLanguage(
+                      trialRow?.videoCutoffByLanguage,
+                      trialRow?.videoCutoffSeconds ?? null,
+                      lessonLoc?.language,
+                    ),
+                    textCutoffLearningPointId:
+                      trialRow?.textCutoffLearningPointId ?? null,
+                    textCutoffCode: trialRow?.confirmedTextCutoffCode ?? null,
+                  }
+                : null,
               contents: this.rebuildContents(lesson, snapshot, row.id),
             };
           }),
@@ -370,14 +424,27 @@ export class PortalProjectionService {
     return `/api/portal/v1/media/${courseId}/assets/${assetId}`;
   }
 
+  /** 按语言取视频截止秒数，缺省回退到单语言字段。 */
+  private cutoffForLanguage(
+    byLanguage: unknown,
+    fallback: number | null,
+    language: string | undefined,
+  ): number | null {
+    if (byLanguage && typeof byLanguage === 'object') {
+      const map = byLanguage as Record<string, unknown>;
+      const value = language ? map[language] : undefined;
+      if (typeof value === 'number') return value;
+      if (value === null) return null;
+    }
+    return fallback;
+  }
+
   private pickLocalization<T extends { language: string }>(
     entries: T[] | undefined,
     language: string | undefined,
   ): T | undefined {
     if (!entries?.length) return undefined;
-    return (
-      entries.find((entry) => entry.language === language) ?? entries[0]
-    );
+    return entries.find((entry) => entry.language === language) ?? entries[0];
   }
 
   private totalDuration(

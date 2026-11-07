@@ -5,6 +5,7 @@ import { ChevronDownIcon } from "./icons";
 import { localeHref, otherLocale } from "../lib/i18n/config";
 import { useLocale } from "../lib/navigation";
 import { boFetch } from "../lib/api";
+import { t } from "../lib/i18n/messages";
 
 /** 设计稿顶栏语言控件：当前语言短名 + 下拉箭头，点击切到另一种语言。 */
 const SHORT_LABEL = { "en-GB": "EN", "zh-CN": "中文" } as const;
@@ -52,8 +53,8 @@ export function LocaleSwitch({
       className={className}
       onClick={() => void change()}
       disabled={busy}
-      aria-label={`Switch language to ${target}`}
-      title={`Switch language to ${target}`}
+      aria-label={t(locale, "shell.switchLanguage")}
+      title={t(locale, "shell.switchLanguage")}
     >
       {SHORT_LABEL[locale]}
       <ChevronDownIcon size={14} />

@@ -58,19 +58,23 @@ export type TemplateVariant = 'zh-CN' | 'zh-TW' | 'en';
 export type Learner = { script: LearnerScript; variant: TemplateVariant };
 
 const HAN = /\p{Script=Han}/u;
-const LATIN = /\p{Script=Latin}/u;
+/** 日文假名、韩文：有这些就不是中文（哪怕夹着汉字）。 */
+const NOT_CHINESE =
+  /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const LETTER = /\p{L}/u;
 
 /**
- * 学员的文字与模板语言：写了汉字 → zh（有繁体字 → zh-TW 模板）；只写拉丁字母 → latin；
- * 两样都没有（只有表情、标点）→ 看界面语言（zh-CN → 简体，其余英文）。
+ * 用户的文字与模板语言（owner 2026-11-02：跟着提问的语言走，不是中文的一律英文）：
+ * 中文（有汉字、没有假名和韩文）→ zh（有繁体字 → zh-TW 模板）；有别的文字（英文、日文、韩文等）→ latin（英文）；
+ * 一个字母都没有（只有表情、标点）→ 看传进来的语言（Portal 的聊天传的是卡片语言，非中文时已是 en-GB）。
  */
 export function learnerOf(text: string, locale: string): Learner {
-  if (HAN.test(text))
+  if (HAN.test(text) && !NOT_CHINESE.test(text))
     return {
       script: 'zh',
       variant: simplify(text) !== text ? 'zh-TW' : 'zh-CN',
     };
-  if (LATIN.test(text)) return { script: 'latin', variant: 'en' };
+  if (LETTER.test(text)) return { script: 'latin', variant: 'en' };
   return locale === 'zh-CN'
     ? { script: 'zh', variant: 'zh-CN' }
     : { script: 'latin', variant: 'en' };

@@ -46,6 +46,7 @@ const seed: HelpdeskFaq = {
   entry: true,
   category: 'account_technical',
   popular: true,
+  popularRank: null,
   questionEn: 'How do I reset my password?',
   answerEn: 'Use **Forgot password**.',
   questionZh: '如何重置密码？',

@@ -31,7 +31,8 @@ import { toFaq, type SqlClient, type SqlDb } from './faqRepository';
  * - 边的每次写入都先拿同一把事务级 advisory 锁（helpdesk_faq_graph），所以「成环检查（递归 CTE）+ 插入」
  *   与另一个并发的建边不会交错：两条互相指向的边不可能同时通过；
  * - 每次建 / 改 / 删边，同一事务里追加一行 helpdesk_faq_edge_revisions（改前 / 改后）；
- * - 问法按 (faq_id, locale, lower(text)) 唯一：同一个再加一次返回已有的那条；
+ * - 问法按 (faq_id, locale, lower(text)) 唯一：同一个再加一次返回已有的那条；加上 / 删掉的同一事务里
+ *   追加一行 helpdesk_faq_phrasing_revisions（Change Log）；
  * - 发布版本：新建时版本号 = 最大 + 1（另一把锁 helpdesk_faq_releases），快照与它的检索行
  *   （helpdesk_faq_release_nodes）同一事务写入；发布 = 同一事务里旧的 published → superseded、
  *   新的 → published（部分唯一索引保证至多一行 published）。
@@ -50,7 +51,7 @@ const RELEASE_LOCK = `SELECT pg_advisory_xact_lock(hashtext('helpdesk_faq_releas
 const EDGE_COLUMNS = `id, parent_id, child_id, kind, position, label_en, label_zh,
   created_by, created_at, updated_at`;
 
-const FAQ_COLUMNS = `id, key, node_type, entry, category, popular, question_en, answer_en,
+const FAQ_COLUMNS = `id, key, node_type, entry, category, popular, popular_rank, question_en, answer_en,
   question_zh, answer_zh, keywords, signals, status, version, created_by, updated_by,
   created_at, updated_at`;
 
@@ -129,6 +130,30 @@ async function writeEdgeRevision(
   );
 }
 
+/** 问法的修订（迁移 20261103000000）：问法表是硬删的，靠它留下谁加了 / 删了哪一条。 */
+async function writePhrasingRevision(
+  client: SqlClient,
+  action: 'create' | 'delete',
+  phrasing: FaqPhrasing,
+  employeeId: string | null,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO helpdesk_faq_phrasing_revisions
+       (id, phrasing_id, faq_id, action, locale, text, source, employee_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      uuidv7(),
+      phrasing.id,
+      phrasing.faqId,
+      action,
+      phrasing.locale,
+      phrasing.text,
+      phrasing.source,
+      employeeId,
+    ],
+  );
+}
+
 /** 节点的一个摘要（列表、树、父节点清单用）。 */
 export type FaqNodeSummary = Pick<
   HelpdeskFaq,
@@ -176,6 +201,16 @@ export type FaqReleaseRow = {
   createdAt: string;
   publishedBy: string | null;
   publishedAt: string | null;
+  /** 最近一次检查的 run（还没有后台检查过的版本 → null）。 */
+  evalRun: FaqReleaseEvalRun | null;
+};
+
+/** 一次检查（后台）：进度与心跳；status = evaluating 且心跳停了 = 中断。 */
+export type FaqReleaseEvalRun = {
+  id: string;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+  progress: { stage: string; done: number; total: number } | null;
 };
 
 export type FaqReleaseWithSnapshot = FaqReleaseRow & {
@@ -209,7 +244,8 @@ export type PublishResult =
 export type PublishReadiness = 'ok' | 'not_ready' | 'stale';
 
 const RELEASE_COLUMNS = `id, version, status, snapshot_hash, checks, eval_report, source_version,
-  created_by, created_at, published_by, published_at`;
+  created_by, created_at, published_by, published_at, eval_run_id, eval_started_at, eval_heartbeat_at,
+  eval_progress`;
 
 function toRelease(row: Row): FaqReleaseRow {
   return {
@@ -227,12 +263,23 @@ function toRelease(row: Row): FaqReleaseRow {
     createdAt: iso(row.created_at),
     publishedBy: (row.published_by as string | null) ?? null,
     publishedAt: isoOrNull(row.published_at),
+    evalRun:
+      typeof row.eval_run_id === 'string' && row.eval_run_id
+        ? {
+            id: row.eval_run_id,
+            startedAt: isoOrNull(row.eval_started_at),
+            heartbeatAt: isoOrNull(row.eval_heartbeat_at),
+            progress:
+              (row.eval_progress as FaqReleaseEvalRun['progress'] | null) ??
+              null,
+          }
+        : null,
   };
 }
 
 /** 发布版本检索行的列（与 helpdesk_faqs 同名），由快照派生。 */
 const RELEASE_NODE_RECORD = `id uuid, key text, type text, entry boolean, category text,
-  popular boolean, "questionEn" text, "answerEn" text, "questionZh" text, "answerZh" text,
+  popular boolean, "popularRank" int, "questionEn" text, "answerEn" text, "questionZh" text, "answerZh" text,
   keywords text[], signals text[], version int, "updatedAt" timestamptz, "phrasingText" text`;
 
 export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
@@ -305,7 +352,7 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
     /** 还在用这个节点的已发布父节点（归档前检查）。 */
     async liveParents(childId: string): Promise<FaqNodeSummary[]> {
       const rows = await db.query(
-        `SELECT f.id, f.key, f.node_type, f.entry, f.category, f.popular, f.question_en,
+        `SELECT f.id, f.key, f.node_type, f.entry, f.category, f.popular, f.popular_rank, f.question_en,
                 f.answer_en, f.question_zh, f.answer_zh, f.keywords, f.signals, f.status,
                 f.version, f.created_by, f.updated_by, f.created_at, f.updated_at
            FROM helpdesk_faq_edges e
@@ -537,7 +584,10 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       return rows.map(toPhrasing);
     },
 
-    /** 加一种问法；同一条 FAQ、同一语言、不分大小写一样的已经有了 → 返回那条（created=false）。 */
+    /**
+     * 加一种问法；同一条 FAQ、同一语言、不分大小写一样的已经有了 → 返回那条（created=false，不留修订）。
+     * 新加的同一事务里追加一行 helpdesk_faq_phrasing_revisions（Change Log）。
+     */
     async insertPhrasing(phrasing: {
       faqId: string;
       locale: PhrasingLocale;
@@ -545,30 +595,40 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       source: PhrasingSource;
       employeeId: string | null;
     }): Promise<{ phrasing: FaqPhrasing; created: boolean }> {
-      const rows = await db.query(
-        `INSERT INTO helpdesk_faq_phrasings (id, faq_id, locale, text, search_text, source, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (faq_id, locale, lower(text)) DO NOTHING
-         RETURNING id, faq_id, locale, text, source, created_by, created_at`,
-        [
-          uuidv7(),
-          phrasing.faqId,
-          phrasing.locale,
-          phrasing.text,
-          phrasingSearchText(phrasing.text),
-          phrasing.source,
-          phrasing.employeeId,
-        ],
-      );
-      if (rows.length > 0)
-        return { phrasing: toPhrasing(rows[0]), created: true };
-      const existing = await db.query(
-        `SELECT id, faq_id, locale, text, source, created_by, created_at
-           FROM helpdesk_faq_phrasings
-          WHERE faq_id = $1 AND locale = $2 AND lower(text) = lower($3)`,
-        [phrasing.faqId, phrasing.locale, phrasing.text],
-      );
-      return { phrasing: toPhrasing(existing[0]), created: false };
+      return db.withTransaction(async (client) => {
+        const inserted = await client.query(
+          `INSERT INTO helpdesk_faq_phrasings (id, faq_id, locale, text, search_text, source, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (faq_id, locale, lower(text)) DO NOTHING
+           RETURNING id, faq_id, locale, text, source, created_by, created_at`,
+          [
+            uuidv7(),
+            phrasing.faqId,
+            phrasing.locale,
+            phrasing.text,
+            phrasingSearchText(phrasing.text),
+            phrasing.source,
+            phrasing.employeeId,
+          ],
+        );
+        if (inserted.rows.length > 0) {
+          const created = toPhrasing(inserted.rows[0]);
+          await writePhrasingRevision(
+            client,
+            'create',
+            created,
+            phrasing.employeeId,
+          );
+          return { phrasing: created, created: true };
+        }
+        const existing = await client.query(
+          `SELECT id, faq_id, locale, text, source, created_by, created_at
+             FROM helpdesk_faq_phrasings
+            WHERE faq_id = $1 AND locale = $2 AND lower(text) = lower($3)`,
+          [phrasing.faqId, phrasing.locale, phrasing.text],
+        );
+        return { phrasing: toPhrasing(existing.rows[0]), created: false };
+      });
     },
 
     async getPhrasing(id: string): Promise<FaqPhrasing | null> {
@@ -580,14 +640,22 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
       return rows.length > 0 ? toPhrasing(rows[0]) : null;
     },
 
-    /** 删一种问法；已经没有了 → null（幂等）。 */
-    async deletePhrasing(id: string): Promise<FaqPhrasing | null> {
-      const rows = await db.query(
-        `DELETE FROM helpdesk_faq_phrasings WHERE id = $1
-         RETURNING id, faq_id, locale, text, source, created_by, created_at`,
-        [id],
-      );
-      return rows.length > 0 ? toPhrasing(rows[0]) : null;
+    /** 删一种问法；已经没有了 → null（幂等，不留修订）。删掉的同一事务里追加一行修订（谁删的）。 */
+    async deletePhrasing(
+      id: string,
+      employeeId: string | null,
+    ): Promise<FaqPhrasing | null> {
+      return db.withTransaction(async (client) => {
+        const { rows } = await client.query(
+          `DELETE FROM helpdesk_faq_phrasings WHERE id = $1
+           RETURNING id, faq_id, locale, text, source, created_by, created_at`,
+          [id],
+        );
+        if (rows.length === 0) return null;
+        const deleted = toPhrasing(rows[0]);
+        await writePhrasingRevision(client, 'delete', deleted, employeeId);
+        return deleted;
+      });
     },
 
     // ----------------------------------------------------------------- 发布版本
@@ -689,10 +757,11 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
         }));
         await client.query(
           `INSERT INTO helpdesk_faq_release_nodes
-             (release_version, id, key, node_type, entry, category, popular, question_en,
-              answer_en, question_zh, answer_zh, keywords, signals, version, created_at,
-              updated_at, phrasing_text)
-           SELECT $1, n.id, n.key, n.type, n.entry, n.category, n.popular, n."questionEn",
+             (release_version, id, key, node_type, entry, category, popular, popular_rank,
+              question_en, answer_en, question_zh, answer_zh, keywords, signals, version,
+              created_at, updated_at, phrasing_text)
+           SELECT $1, n.id, n.key, n.type, n.entry, n.category, n.popular, n."popularRank",
+                  n."questionEn",
                   n."answerEn", n."questionZh", n."answerZh", COALESCE(n.keywords, '{}'),
                   COALESCE(n.signals, '{}'), COALESCE(n.version, 1),
                   COALESCE(n."updatedAt", now()), COALESCE(n."updatedAt", now()),
@@ -702,6 +771,73 @@ export function createPgFaqGraphRepository(db: SqlDb = defaultDb) {
         );
         return { release: toRelease(rows[0]), created: true };
       });
+    },
+
+    /**
+     * 开始一次检查：from 之一，或 evaluating 但心跳早于 staleBefore（中断了；没有心跳的旧行也算）→
+     * evaluating、新的 run id、心跳 = at、清空进度；别的检查还在跑 → null（不抢）。
+     */
+    async startEval(
+      version: number,
+      from: readonly FaqReleaseStatus[],
+      runId: string,
+      at: Date,
+      staleBefore: Date,
+    ): Promise<FaqReleaseRow | null> {
+      const rows = await db.query(
+        `UPDATE helpdesk_faq_releases
+            SET status = 'evaluating', eval_run_id = $3, eval_started_at = $4,
+                eval_heartbeat_at = $4, eval_progress = NULL
+          WHERE version = $1
+            AND (status = ANY ($2::text[])
+                 OR (status = 'evaluating'
+                     AND (eval_heartbeat_at IS NULL OR eval_heartbeat_at < $5)))
+          RETURNING ${RELEASE_COLUMNS}`,
+        [version, [...from], runId, at, staleBefore],
+      );
+      return rows.length > 0 ? toRelease(rows[0]) : null;
+    },
+
+    /** 心跳与进度：只有这个 run 还在 evaluating 时写得进；被顶替了 → false。 */
+    async evalHeartbeat(
+      version: number,
+      runId: string,
+      at: Date,
+      progress?: FaqReleaseEvalRun['progress'],
+    ): Promise<boolean> {
+      const rows = await db.query(
+        `UPDATE helpdesk_faq_releases
+            SET eval_heartbeat_at = $3,
+                eval_progress = CASE WHEN $4::boolean THEN $5::jsonb ELSE eval_progress END
+          WHERE version = $1 AND eval_run_id = $2 AND status = 'evaluating'
+          RETURNING version`,
+        [
+          version,
+          runId,
+          at,
+          progress !== undefined,
+          progress === undefined ? null : JSON.stringify(progress),
+        ],
+      );
+      return rows.length > 0;
+    },
+
+    /** 检查结束：只有这个 run 还在 evaluating 时写得进（被顶替的旧 run 写不进）→ 新状态与报告。 */
+    async finishEval(
+      version: number,
+      runId: string,
+      to: FaqReleaseStatus,
+      evalReport: unknown,
+      at: Date,
+    ): Promise<FaqReleaseRow | null> {
+      const rows = await db.query(
+        `UPDATE helpdesk_faq_releases
+            SET status = $3, eval_report = $4::jsonb, eval_heartbeat_at = $5
+          WHERE version = $1 AND eval_run_id = $2 AND status = 'evaluating'
+          RETURNING ${RELEASE_COLUMNS}`,
+        [version, runId, to, JSON.stringify(evalReport), at],
+      );
+      return rows.length > 0 ? toRelease(rows[0]) : null;
     },
 
     /** 只在当前状态是 from 之一时改状态（与评测报告）；不是 → null。 */

@@ -1,5 +1,6 @@
 import { http } from './client'
 import { notifySessionChanged } from '../backoffice/lib/navigation'
+import { serverText } from '../backoffice/lib/i18n/serverText'
 
 // ============ 类型（与后端 Prisma 模型字段对齐，§2） ============
 
@@ -159,7 +160,7 @@ export const knowledgeApi = {
       .then((r) => r.data),
 
   /**
-   * 导出 Release 快照为 ZIP（方案 B，2026-10-30 新增）。
+   * 导出 Release 快照为 ZIP；有图片的页面为 DOCX，其余为 MD。
    * 后端返回 application/zip，客户端触发浏览器下载。
    * 错误处理对齐 axios http 拦截器：401/403 通知会话变更，解析后端统一错误信封。
    */
@@ -174,10 +175,10 @@ export const knowledgeApi = {
       // 会话过期 / 被停用（401）或角色刚被改（403）
       if (res.status === 401 || res.status === 403) notifySessionChanged()
       // 尝试解析后端统一错误信封 { success:false, error:{ code, message } }
-      let msg = `导出失败 (${res.status})`
+      let msg = serverText(null)
       try {
         const j = (await res.json()) as { error?: { message?: string } }
-        if (j?.error?.message) msg = j.error.message
+        if (j?.error?.message) msg = serverText(j.error.message)
       } catch {
         /* 非 JSON 响应体，用默认消息 */
       }
@@ -204,12 +205,17 @@ export const knowledgeApi = {
 
   // 文档转换（§5.1.5 / §3.2.3 / §10）：仅本地转换返回预览，不建页；
   // Import 经上方 createPage（§5.1.2）建页
-  convertFile: (file: File) => {
+  convertFile: (file: File, courseId: string) => {
     const form = new FormData()
     form.append('file', file)
     return http
-      .post<ConvertedDocument>('/files/convert', form, { timeout: 60000 })
+      .post<ConvertedDocument>(`/files/convert?courseId=${encodeURIComponent(courseId)}`, form, { timeout: 60000 })
       .then((r) => r.data)
+  },
+  uploadImage: (file: File, courseId: string) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post<{ url: string }>(`/files/images/${encodeURIComponent(courseId)}`, form).then((r) => r.data)
   },
 }
 
@@ -223,6 +229,7 @@ export interface ConvertedDocument {
 export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.txt',
   '.md',
+  '.tex',
   '.csv',
   '.pdf',
   '.docx',

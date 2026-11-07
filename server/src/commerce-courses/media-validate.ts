@@ -162,8 +162,8 @@ function matchesSignature(bytes: Buffer, ext: string): boolean {
     case 'obj':
       return (
         bytes.length > 0 &&
-        !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(
-          bytes.toString('utf8', 0, Math.min(4096, bytes.length)),
+        !Array.from(bytes.subarray(0, 4096)).some(
+          (code) => code < 32 && ![9, 10, 13].includes(code),
         )
       );
     default:
@@ -197,7 +197,13 @@ export function describeMediaUpload(
   if (
     typeof input.name !== 'string' ||
     input.name.length > 255 ||
-    /[\u0000-\u001f\u007f/\\]/.test(input.name)
+    Array.from(input.name).some(
+      (char) =>
+        char.charCodeAt(0) < 32 ||
+        char.charCodeAt(0) === 127 ||
+        char === '/' ||
+        char === '\\',
+    )
   ) {
     throw new MediaValidationError('filename', 'Invalid filename.');
   }
@@ -234,7 +240,13 @@ export function validateMediaFile(
   if (
     typeof input.name !== 'string' ||
     input.name.length > 255 ||
-    /[\u0000-\u001f\u007f/\\]/.test(input.name)
+    Array.from(input.name).some(
+      (char) =>
+        char.charCodeAt(0) < 32 ||
+        char.charCodeAt(0) === 127 ||
+        char === '/' ||
+        char === '\\',
+    )
   ) {
     throw new MediaValidationError('filename', 'Invalid filename.');
   }

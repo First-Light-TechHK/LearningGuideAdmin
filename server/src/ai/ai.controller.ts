@@ -13,7 +13,7 @@ import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
-import { pipeSse } from './sse-stream';
+import { pipeSseWithAbort } from './sse-stream';
 import { SaveAiConfigDto } from './dto/save-config.dto';
 import { ResetAiConfigDto } from './dto/reset-config.dto';
 import { SetOnlineDto } from './dto/set-online.dto';
@@ -92,7 +92,7 @@ export class AiController {
    */
   @Post('chat-stream')
   async chatStream(@Body() dto: ChatStreamDto, @Res() res: Response) {
-    await pipeSse(this.chat.streamChat(dto), res);
+    await pipeSseWithAbort((signal) => this.chat.streamChat(dto, signal), res);
   }
 }
 
@@ -131,6 +131,9 @@ export class UserAiController {
     @Body() dto: LearnerChatStreamDto,
     @Res() res: Response,
   ) {
-    await pipeSse(this.chat.streamLearnerChat(dto), res);
+    await pipeSseWithAbort(
+      (signal) => this.chat.streamLearnerChat(dto, signal),
+      res,
+    );
   }
 }

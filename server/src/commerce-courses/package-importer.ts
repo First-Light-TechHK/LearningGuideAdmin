@@ -58,7 +58,7 @@ export class PackageImporter {
     // - Course ID 已存在 → 按冲突策略处理（拒绝 / NEW_VERSION 未实现）；
     // - 仅 slug 撞车（Course ID 唯一）→ 自动追加序号生成唯一 slug，
     //   绝不能把「标题 slug 相同」误报成「Course ID 已存在」而拒绝导入。
-    let targetCode = course.code;
+    const targetCode = course.code;
     let targetSlug = course.slug;
     const existingByCode = await this.prisma.commerceCourse.findFirst({
       where: { code: course.code },
@@ -205,7 +205,10 @@ export class PackageImporter {
         const lpIds = new Set(learningPoints.map((lp) => lp.id));
         const resolveCutoff = (lessonCode: string, ref?: string | null) => {
           if (!ref) return null;
-          return lpIdByKey.get(`${lessonCode}|${ref}`) ?? (lpIds.has(ref) ? ref : null);
+          return (
+            lpIdByKey.get(`${lessonCode}|${ref}`) ??
+            (lpIds.has(ref) ? ref : null)
+          );
         };
 
         await tx.trialSetting.deleteMany({ where: { courseId } });

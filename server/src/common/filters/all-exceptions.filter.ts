@@ -48,7 +48,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       // HttpException 按状态码映射业务错误码
       status = exception.getStatus();
-      if (status === HttpStatus.PAYLOAD_TOO_LARGE) {
+      if (status === Number(HttpStatus.PAYLOAD_TOO_LARGE)) {
         // Nest 将 multer 文件超限（§10.1：15MB）统一转为 413，
         // 对外按 §3.2.3 约定映射为 400 校验错误
         status = HttpStatus.BAD_REQUEST;
@@ -86,7 +86,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const logMsg = `请求处理异常 [${status}] ${
       exception instanceof Error ? exception.message : String(exception)
     }`;
-    if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+    if (status >= Number(HttpStatus.INTERNAL_SERVER_ERROR)) {
       this.logger.error(
         logMsg,
         exception instanceof Error ? exception.stack : undefined,
@@ -117,7 +117,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     };
     return (
       e.type === 'entity.too.large' ||
-      e.status === HttpStatus.PAYLOAD_TOO_LARGE ||
+      e.status === Number(HttpStatus.PAYLOAD_TOO_LARGE) ||
       e.statusCode === HttpStatus.PAYLOAD_TOO_LARGE
     );
   }
@@ -125,18 +125,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
   /** HTTP 状态码 → 业务错误码（§5.3：400→VALIDATION_ERROR、404→NOT_FOUND，其余按语义） */
   private mapHttpStatusToCode(status: number): string {
     switch (status) {
-      case HttpStatus.BAD_REQUEST:
-      case HttpStatus.UNPROCESSABLE_ENTITY:
+      case Number(HttpStatus.BAD_REQUEST):
+      case Number(HttpStatus.UNPROCESSABLE_ENTITY):
         return 'VALIDATION_ERROR';
-      case HttpStatus.UNAUTHORIZED:
+      case Number(HttpStatus.UNAUTHORIZED):
         return 'UNAUTHORIZED';
-      case HttpStatus.FORBIDDEN:
+      case Number(HttpStatus.FORBIDDEN):
         return 'FORBIDDEN';
-      case HttpStatus.NOT_FOUND:
+      case Number(HttpStatus.NOT_FOUND):
         return 'NOT_FOUND';
-      case HttpStatus.CONFLICT:
+      case Number(HttpStatus.CONFLICT):
         return 'CONFLICT';
-      case HttpStatus.TOO_MANY_REQUESTS:
+      case Number(HttpStatus.TOO_MANY_REQUESTS):
         return 'TOO_MANY_REQUESTS';
       default:
         return status >= 400 && status < 500

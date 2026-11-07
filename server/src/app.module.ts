@@ -15,6 +15,7 @@ import { CommerceCoursesModule } from './commerce-courses/commerce-courses.modul
 import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
 import { ALL_ROLES, type AppRole } from './app-roles';
 import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
+import { FilesModule } from './files/files.module';
 import { KsModule } from './ks/ks.module';
 import { PrismaKnowledgeClient } from './ks/prisma-knowledge.client';
 import { HELPDESK_QA_SOURCE } from './contracts/helpdesk-qa';
@@ -35,6 +36,9 @@ import { PrismaAgentEventLog } from './ai/helpdesk/trace/agent-event.store';
 import { createTraceSource } from './ai/helpdesk/trace/trace-query';
 import { PrismaService } from './prisma/prisma.service';
 import { createPgHelpdeskQaSource } from './backoffice/modules/helpdesk/faqs/faqQaSource';
+import type { FaqReleaseSnapshot } from './backoffice/modules/helpdesk/faqs/faqRelease';
+import { HELPDESK_RELEASE_ANSWERER } from './contracts/helpdesk-release-eval';
+import { createReleaseAnswerer } from './ai/helpdesk/release-answerer';
 
 /**
  * Agent 读 KS 的方式：同进程起了 ks 角色、或没配 KS_BASE_URL 时直接读库；
@@ -84,6 +88,7 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
               adminApi: admin,
               learnerApi: agent,
               knowledge: knowledgeProvider(roles),
+              files: FilesModule.register({ authoring: false }),
               // Helpdesk 推荐的候选：读 BackOffice 的已发布 FAQ（同库直读，契约见 src/contracts）；
               // 有发布版本后只读那一版快照（faqQaSource.ts）
               helpdeskQa: {
@@ -110,7 +115,7 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
                         model: suggestModel,
                       }),
               },
-              // 「AI 按指令改卡」：员工说怎么改，DeepSeek 改好给员工看（不保存）；没有 key 或测试里 = 不问模型
+              // 「AI 按指令改卡」：员工说怎么改，Helpdesk 的缺省模型改好给员工看（不保存）；没有 key 或测试里 = 不问模型
               cardRewriter: {
                 provide: HELPDESK_CARD_REWRITER,
                 useFactory: () =>
@@ -121,6 +126,29 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
                         model: suggestModel,
                       }),
               },
+              // 发布前的真流程抽样检查（owner 2026-11-03）：线上聊天同一个 HelpdeskSuggestService，钉在候选版本上；
+              // 测试里不组装（只跑检索检查、同步返回）
+              ...(process.env.NODE_ENV === 'test'
+                ? {}
+                : {
+                    releaseAnswerer: {
+                      provide: HELPDESK_RELEASE_ANSWERER,
+                      useFactory: () =>
+                        createReleaseAnswerer({
+                          runner: new PiStepRunner(),
+                          qaFor: (version, snapshot) =>
+                            createPgHelpdeskQaSource(
+                              undefined,
+                              undefined,
+                              undefined,
+                              {
+                                version,
+                                snapshot: snapshot as FaqReleaseSnapshot,
+                              },
+                            ),
+                        }),
+                    },
+                  }),
               helpdeskTrace: {
                 provide: HELPDESK_TRACE_SOURCE,
                 useFactory: (prisma: PrismaService) =>

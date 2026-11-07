@@ -6,7 +6,8 @@
     "deleteOutDir": true,
     "assets": [
       "ai/prompts/*",
-      "backoffice/modules/helpdesk/demo/library/*.json"
+      "backoffice/modules/helpdesk/demo/library/*.json",
+      "backoffice/modules/helpdesk/faqs/release-eval/*.jsonl"
     ],
     "watchAssets": true
   }

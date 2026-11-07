@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import type { AiRateLimitChannel } from './rate-limit.service';
 
 /** 日志目录（相对后端启动目录；已在 .gitignore 中排除） */
 const LOG_DIR = resolve(process.cwd(), 'app-logs');
@@ -16,6 +17,7 @@ export type AiChatStatus = 'ok' | 'error' | 'aborted';
 
 /** 单次对话日志条目（§4.4.2 第 7 步，2026-10-22 用户拍板） */
 export interface AiChatLogEntry {
+  requestId?: string;
   courseId: string;
   releaseId: string | null;
   mode: 'LECTURE' | 'SOCRATIC';
@@ -28,7 +30,27 @@ export interface AiChatLogEntry {
   historyCount: number;
   latencyMs: number;
   status: AiChatStatus;
+  promptHash?: string;
   error?: string;
+  finishReason?: string | null;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    reasoningTokens?: number;
+  };
+  attempts?: Array<{
+    attempt: number;
+    finishReason?: string | null;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      reasoningTokens?: number;
+    };
+    answerChars: number;
+    latencyMs: number;
+    maxOutputTokens: number;
+    reasoningEffort?: 'low' | 'none';
+  }>;
   question: string;
   answer: string;
 }
@@ -61,6 +83,7 @@ export class AiChatLogger {
       await mkdir(LOG_DIR, { recursive: true });
       const line = JSON.stringify({
         ts: new Date().toISOString(),
+        ...(entry.requestId ? { requestId: entry.requestId } : {}),
         courseId: entry.courseId,
         releaseId: entry.releaseId,
         mode: entry.mode,
@@ -71,7 +94,13 @@ export class AiChatLogger {
         historyCount: entry.historyCount,
         latencyMs: entry.latencyMs,
         status: entry.status,
+        ...(entry.promptHash ? { promptHash: entry.promptHash } : {}),
         ...(entry.error ? { error: preview(entry.error, ERROR_LIMIT) } : {}),
+        ...(entry.finishReason === undefined
+          ? {}
+          : { finishReason: entry.finishReason }),
+        ...(entry.usage ? { usage: entry.usage } : {}),
+        ...(entry.attempts ? { attempts: entry.attempts } : {}),
         questionChars: entry.question.length,
         answerChars: entry.answer.length,
         question: preview(entry.question, PREVIEW_LIMIT),
@@ -84,6 +113,28 @@ export class AiChatLogger {
       );
     } catch (err) {
       this.logger.warn(`AI 对话日志写入失败：${(err as Error).message}`);
+    }
+  }
+
+  async writeProgress(entry: {
+    requestId: string;
+    stage: string;
+    elapsedMs: number;
+    courseId: string;
+    releaseId: string | null;
+    mode: 'LECTURE' | 'SOCRATIC';
+    channel: AiRateLimitChannel;
+    attempt?: number;
+  }): Promise<void> {
+    try {
+      await mkdir(LOG_DIR, { recursive: true });
+      await appendFile(
+        join(LOG_DIR, `ai-chat-progress-${today()}.log`),
+        `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`,
+        'utf8',
+      );
+    } catch (err) {
+      this.logger.warn(`AI 对话阶段日志写入失败：${(err as Error).message}`);
     }
   }
 }

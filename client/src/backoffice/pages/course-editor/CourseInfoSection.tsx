@@ -1,24 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import type { CourseDetail, CourseLocalization } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
-import {
-  Chip,
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  card,
-  dangerBtn,
-  inputStyle,
-  labelStyle,
-  languageLabel,
-  learningModeLabel,
-  primaryBtn,
-} from './shared';
+import { Chip, Field, Modal } from './shared';
+import { L, buttonStyle, card, dangerBtn, inputStyle, labelStyle, languageLabel, learningModeLabel, primaryBtn } from './shared-utils';
 
 type Category = { id: string; name: string };
 
@@ -31,7 +19,7 @@ const PRESETS = [
   { key: 'AI_ASSISTANT', en: 'AI-powered learning assistant', zh: 'AI 学习助手' },
   { key: 'AI_GUIDED', en: 'AI-guided deep comprehension', zh: 'AI 引导深度理解' },
   { key: 'READINGS', en: 'Extended readings for context', zh: '延伸阅读' },
-  { key: 'BILINGUAL', en: 'Bilingual: 中文 / English', zh: '中英双语' },
+  { key: 'BILINGUAL', en: 'Bilingual: Chinese / English', zh: '中英双语' },
 ];
 
 function loc(course: CourseDetail, language: string): CourseLocalization | undefined {
@@ -113,7 +101,10 @@ export function CourseInfoSection({
   const mediaLimits = useMediaLimits();
   const learnFocus = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
+  const [previousCourse, setPreviousCourse] = useState<typeof course | null>(null);
+  if (previousCourse !== course) {
+    setPreviousCourse(course);
+
     const enLoc = loc(course, 'en-GB') ?? loc(course, 'en');
     const zhLoc = loc(course, 'zh-CN') ?? loc(course, 'zh');
     setSlug(course.slug);
@@ -148,7 +139,8 @@ export function CourseInfoSection({
         };
       }),
     );
-  }, [course]);
+
+  }
 
   const incompleteLearn = learnRows.filter((row) => !row.en.trim() || !row.zh.trim()).length;
   const incompleteProvides = providesRows.filter((row) => !row.en.trim() || !row.zh.trim()).length;
@@ -282,8 +274,14 @@ export function CourseInfoSection({
       icon: row.icon,
       title: row.zh.trim(),
     }));
-    const saveLoc = (language: string, title: string, description: string, overview: string, learn: string[], provides: unknown[]) =>
-      boRequest(`/api/backoffice/courses/${course.id}/localizations/${encodeURIComponent(language)}`, {
+    const existingLanguages = new Set(course.localizations.map((item) => item.language));
+    // 课程只教一种语言时，另一种语言的标题往往为空。若照旧无条件 PUT，
+    // 会新建一条 title 为空的本地化记录，列表接口取到它时课程名就会变空。
+    const saveLoc = (language: string, title: string, description: string, overview: string, learn: string[], provides: unknown[]) => {
+      if (!title && !existingLanguages.has(language)) {
+        return Promise.resolve({ success: true as const });
+      }
+      return boRequest(`/api/backoffice/courses/${course.id}/localizations/${encodeURIComponent(language)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -294,6 +292,7 @@ export function CourseInfoSection({
           provides,
         }),
       });
+    };
     const [enResult, zhResult] = await Promise.all([
       saveLoc('en-GB', titleEn.trim(), descEn, overviewEn, learnEn, provideEn),
       saveLoc('zh-CN', titleZh.trim(), descZh, overviewZh, learnZh, provideZh),
@@ -319,20 +318,15 @@ export function CourseInfoSection({
       body: JSON.stringify({ learningLanguages: nextLanguages }),
     });
     if (updated.success) {
-      await boRequest(`/api/backoffice/courses/${course.id}/localizations/${encodeURIComponent(newLanguage)}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: '', whatYouLearn: [], provides: [] }),
-      });
-    }
-    setBusy(false);
-    if (updated.success) {
+      // 只登记学习语言，不预建空标题的本地化记录：空标题会让课程列表取到
+      // 空白课程名，等用户在「课程信息」里填好该语言的标题后再自动创建。
       setLanguageOpen(false);
       onNotice(L(locale, `已添加学习语言 ${newLanguage}。`, `Learning language ${newLanguage} added.`));
       await onReload();
     } else {
       onNotice(`${L(locale, '添加语言失败', 'Add language failed')}: ${updated.message ?? updated.error}`);
     }
+    setBusy(false);
   }
 
   return (
@@ -342,7 +336,7 @@ export function CourseInfoSection({
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '基础信息', 'Basics')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
-              {L(locale, 'Course Information 是学生端课程卡片和详情页的唯一数据源。所有中英文字段均为必填。', 'Course Information is the single source for learner cards and the course page. All EN and ZH fields are required.')}
+              {L(locale, '课程信息是学生端课程卡片和详情页的唯一数据源。所有中英文字段均为必填。', 'Course Information is the single source for learner cards and the course page. All EN and ZH fields are required.')}
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -417,7 +411,7 @@ export function CourseInfoSection({
           )}
         </div>
 
-        <Field label={L(locale, 'Slug', 'Slug')}>
+        <Field label={L(locale, '短名', 'Slug')}>
           <input value={slug} onChange={(event) => setSlug(event.target.value)} style={inputStyle} />
         </Field>
       </div>
@@ -426,7 +420,7 @@ export function CourseInfoSection({
         <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '标题与简介', 'Title and descriptions')}</h2>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 12 }}>
           <div>
-            <label style={labelStyle}>English</label>
+            <label style={labelStyle}>{L(locale, '英文', 'English')}</label>
             <Field label={L(locale, '课程名称 *', 'Course title *')} hint={`${titleEn.length} / 30`}>
               <input value={titleEn} onChange={(event) => setTitleEn(event.target.value)} style={inputStyle} />
             </Field>
@@ -438,7 +432,7 @@ export function CourseInfoSection({
             </Field>
           </div>
           <div>
-            <label style={labelStyle}>中文</label>
+            <label style={labelStyle}>{L(locale, '中文', 'Chinese')}</label>
             <Field label={L(locale, '课程名称 *', 'Course title *')} hint={`${titleZh.length} / 14`}>
               <input value={titleZh} onChange={(event) => setTitleZh(event.target.value)} style={inputStyle} />
             </Field>
@@ -463,7 +457,7 @@ export function CourseInfoSection({
           </Chip>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '46px 1fr 1fr 92px', gap: 8, marginTop: 12, fontSize: 12, fontWeight: 600, color: '#5A6577' }}>
-          <span>#</span><span>English</span><span>中文</span><span />
+          <span>#</span><span>{L(locale, '英文', 'English')}</span><span>{L(locale, '中文', 'Chinese')}</span><span />
         </div>
         {learnRows.map((row, index) => (
           <div key={index} style={{ display: 'grid', gridTemplateColumns: '46px 1fr 1fr 92px', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -491,7 +485,7 @@ export function CourseInfoSection({
           </Chip>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '46px 1fr 1fr 92px', gap: 8, marginTop: 12, fontSize: 12, fontWeight: 600, color: '#5A6577' }}>
-          <span>#</span><span>English</span><span>中文</span><span />
+          <span>#</span><span>{L(locale, '英文', 'English')}</span><span>{L(locale, '中文', 'Chinese')}</span><span />
         </div>
         {providesRows.map((row, index) => {
           const preset = row.key ? PRESETS.find((item) => item.key === row.key) : undefined;
@@ -550,8 +544,8 @@ export function CourseInfoSection({
               ))}
             </div>
           </Field>
-          <Field label="English *"><input value={customEn} onChange={(event) => setCustomEn(event.target.value)} style={inputStyle} /></Field>
-          <Field label="中文 *"><input value={customZh} onChange={(event) => setCustomZh(event.target.value)} style={inputStyle} /></Field>
+          <Field label={L(locale, '英文 *', 'English *')}><input value={customEn} onChange={(event) => setCustomEn(event.target.value)} style={inputStyle} /></Field>
+          <Field label={L(locale, '中文 *', 'Chinese *')}><input value={customZh} onChange={(event) => setCustomZh(event.target.value)} style={inputStyle} /></Field>
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
             <button type="button" style={primaryBtn} disabled={!customEn.trim() || !customZh.trim()} onClick={addCustom}>{L(locale, '添加', 'Add')}</button>
             <button type="button" style={buttonStyle} onClick={() => setCustomOpen(false)}>{L(locale, '取消', 'Cancel')}</button>
@@ -562,7 +556,7 @@ export function CourseInfoSection({
       {languageOpen && (
         <Modal title={L(locale, '添加学习语言', 'Add learning language')} onClose={() => setLanguageOpen(false)}>
           <p style={{ fontSize: 13, color: '#5A6577' }}>
-            {L(locale, '添加后不能删除。所有 Lesson 需要补齐该语言的全套学习材料。', 'A language cannot be removed after it is added. Every lesson must then be completed in that language.')}
+            {L(locale, '添加后不能删除。所有课时需要补齐该语言的全套学习材料。', 'A language cannot be removed after it is added. Every lesson must then be completed in that language.')}
           </p>
           <Field label={L(locale, '要添加的语言', 'Language to add')}>
             <select value={newLanguage} onChange={(event) => setNewLanguage(event.target.value)} style={inputStyle}>

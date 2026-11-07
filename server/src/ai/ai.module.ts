@@ -1,5 +1,6 @@
 import { DynamicModule, Module, Provider } from '@nestjs/common';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { LearnerImageController } from './learner-image.controller';
 import { AiChatLogger } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
@@ -38,6 +39,7 @@ export class AiModule {
     learnerApi: boolean;
     /** KNOWLEDGE_CLIENT 的提供方 */
     knowledge: Provider;
+    files?: DynamicModule;
     /**
      * Helpdesk 推荐（Figma addendum §C，agent 角色）：已发布问答的候选来源
      * （HELPDESK_QA_SOURCE，实现归 BackOffice，由 AppModule 组装）。不给则不挂推荐接口。
@@ -48,10 +50,12 @@ export class AiModule {
     return {
       module: AiModule,
       // 提供 EmbeddingService（PrismaKnowledgeClient 的构造依赖）
-      imports: [KnowledgeModule],
+      imports: [KnowledgeModule, ...(options.files ? [options.files] : [])],
       controllers: [
         ...(options.adminApi ? [AiController] : []),
-        ...(options.learnerApi ? [UserAiController] : []),
+        ...(options.learnerApi
+          ? [UserAiController, LearnerImageController]
+          : []),
         ...(helpdesk ? [HelpdeskSuggestController] : []),
       ],
       providers: [

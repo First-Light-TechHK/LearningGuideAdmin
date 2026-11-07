@@ -161,6 +161,20 @@ function nodeType(value: unknown): FaqNodeType | undefined {
   return value as FaqNodeType;
 }
 
+/** 热门顺序：1–999 的整数，null = 不排；没给（旧的 BackOffice）= undefined，编辑时保留原值。 */
+function popularRank(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > 999
+  )
+    throw invalid('popularRank must be a whole number from 1 to 999, or null');
+  return value;
+}
+
 function entry(value: unknown): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'boolean') throw invalid('entry must be true or false');
@@ -180,6 +194,8 @@ type Editable = Required<
   >
 > & {
   signals: FaqSignal[] | undefined;
+  /** 没给 → undefined：新建为 null，编辑保留原值。 */
+  popularRank: number | null | undefined;
   /** v5 问题树的节点字段：没给（旧的 BackOffice）→ undefined，新建用缺省、编辑保留原值。 */
   key: string | undefined;
   type: FaqNodeType | undefined;
@@ -203,6 +219,7 @@ function editable(body: Record<string, unknown>): Editable {
     answerZh: answer(body.answerZh, 'answerZh'),
     keywords: keywords(body.keywords),
     signals: signals(body.signals),
+    popularRank: popularRank(body.popularRank),
   };
 }
 
@@ -215,6 +232,8 @@ function sameFields(a: Editable, b: HelpdeskFaq): boolean {
     (a.entry ?? b.entry) === b.entry &&
     a.category === b.category &&
     a.popular === b.popular &&
+    (a.popularRank === undefined ? b.popularRank : a.popularRank) ===
+      b.popularRank &&
     a.questionEn === b.questionEn &&
     a.answerEn === b.answerEn &&
     a.questionZh === b.questionZh &&
@@ -451,6 +470,7 @@ export function createFaqService(options: FaqServiceOptions = {}) {
             id: uuidv7(),
             ...fields,
             signals: fields.signals ?? [],
+            popularRank: fields.popularRank ?? null,
             // 空 key：仓库 / 数据库按英文问题取第一个空闲的 slug
             key: fields.key ?? '',
             type: fields.type ?? 'answer',
@@ -502,6 +522,8 @@ export function createFaqService(options: FaqServiceOptions = {}) {
       };
       // 没给的（旧的 BackOffice）保留原值
       if (fields.signals !== undefined) patch.signals = fields.signals;
+      if (fields.popularRank !== undefined)
+        patch.popularRank = fields.popularRank;
       if (fields.key !== undefined) patch.key = fields.key;
       if (fields.type !== undefined) patch.type = fields.type;
       if (fields.entry !== undefined) patch.entry = fields.entry;

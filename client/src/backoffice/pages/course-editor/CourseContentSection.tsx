@@ -8,25 +8,10 @@ import { UploadProgress } from '../../components/UploadProgress';
 import { UnderstandingPanel } from './UnderstandingPanel';
 import { ExhibitDrawer } from './ExhibitDrawer';
 import { TextEditor } from './TextEditor';
-import {
-  Chip,
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  card,
-  dangerBtn,
-  exhibitTypeLabel,
-  inputStyle,
-  labelStyle,
-  languageLabel,
-  fmtDuration,
-  fmtDate,
-  parseTime,
-  primaryBtn,
-  readingTypeLabel,
-} from './shared';
-
+import { Chip, Field, Modal, TimeInput } from './shared';
+import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel } from './shared-utils';
+import type { Locale } from '../../lib/i18n/config';
+import { serverText } from '../../lib/i18n/serverText';
 
 type UploadResult = { id: string; kind?: string; originalName?: string };
 
@@ -120,56 +105,78 @@ export function CourseContentSection({
   const hasText = course.learningMode !== 'VIDEO_ONLY';
   const lessonCompleteness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === activeLesson?.id);
 
-  useEffect(() => {
-    if (!activeLesson) return;
-    if (activeLesson.id !== activeLessonId) setActiveLessonId(activeLesson.id);
-    const en = loc(activeLesson, 'en-GB');
-    const zh = loc(activeLesson, 'zh-CN');
-    setLessonCode(activeLesson.code);
-    setLessonTitleEn(en?.title ?? activeLesson.code);
-    setLessonTitleZh(zh?.title ?? '');
-    setLessonDescEn(en?.description ?? '');
-    setLessonDescZh(zh?.description ?? '');
-    const currentLoc = loc(activeLesson, contentLanguage);
-    setVideoLps(
-      activeLesson.learningPoints
-        .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
-        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-        .map((point) => ({ code: point.code, title: point.title, timeSeconds: point.timeSeconds ?? 0 })),
-    );
-    setTriggerRows(
-      (activeLesson.triggers ?? [])
-        .filter((trigger) => trigger.language === contentLanguage)
-        .map((trigger) => ({ exhibitId: trigger.exhibitId, timeSeconds: trigger.timeSeconds })),
-    );
-    setReadingRows(
-      activeLesson.readings
-        .filter((reading) => reading.language === 'en-GB' || reading.language === contentLanguage)
-        .map((reading) => ({
-          type: reading.type,
-          title: reading.title,
-          author: reading.author ?? '',
-          whyRecommended: reading.whyRecommended ?? '',
-        })),
-    );
-    setTextHtml(currentLoc?.textHtml ?? '');
-  }, [activeLesson?.id, contentLanguage, course]);
+  const [draftSource, setDraftSource] = useState<{
+    lesson: Lesson | undefined;
+    course: CourseDetail;
+    language: string;
+  } | null>(null);
+  if (
+    draftSource?.lesson !== activeLesson ||
+    draftSource?.course !== course ||
+    draftSource?.language !== contentLanguage
+  ) {
+    setDraftSource({ lesson: activeLesson, course, language: contentLanguage });
+    if (activeLesson) {
+      const en = loc(activeLesson, 'en-GB');
+      const zh = loc(activeLesson, 'zh-CN');
+      setLessonCode(activeLesson.code);
+      setLessonTitleEn(en?.title ?? activeLesson.code);
+      setLessonTitleZh(zh?.title ?? '');
+      setLessonDescEn(en?.description ?? '');
+      setLessonDescZh(zh?.description ?? '');
+      const currentLoc = loc(activeLesson, contentLanguage);
+      setVideoLps(
+        activeLesson.learningPoints
+          .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
+          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+          .map((point) => ({
+            code: point.code,
+            title: point.title,
+            timeSeconds: point.timeSeconds ?? 0,
+          })),
+      );
+      setTriggerRows(
+        (activeLesson.triggers ?? [])
+          .filter((trigger) => trigger.language === contentLanguage)
+          .map((trigger) => ({ exhibitId: trigger.exhibitId, timeSeconds: trigger.timeSeconds })),
+      );
+      setReadingRows(
+        activeLesson.readings
+          .filter((reading) => reading.language === 'en-GB' || reading.language === contentLanguage)
+          .map((reading) => ({
+            type: reading.type,
+            title: reading.title,
+            author: reading.author ?? '',
+            whyRecommended: reading.whyRecommended ?? '',
+          })),
+      );
+      setTextHtml(currentLoc?.textHtml ?? '');
+    }
+  }
 
-  useEffect(() => {
-    if (!hasVideo && hasText) setStudyTab('text');
-    else if (hasVideo) setStudyTab('video');
-  }, [hasVideo, hasText]);
+  const [studyMode, setStudyMode] = useState<boolean | null>(null);
+  if (studyMode !== hasVideo) {
+    setStudyMode(hasVideo);
+    setStudyTab(hasVideo ? 'video' : 'text');
+  }
 
-  useEffect(() => {
+  const [importLanguage, setImportLanguage] = useState(contentLanguage);
+  if (importLanguage !== contentLanguage) {
+    setImportLanguage(contentLanguage);
     setAllImportLanguage(contentLanguage);
-  }, [contentLanguage]);
+  }
 
-  useEffect(() => {
-    videoAbortRef.current?.abort();
+  const selectedLessonId = activeLesson?.id;
+  const [uploadLessonId, setUploadLessonId] = useState(selectedLessonId);
+  if (uploadLessonId !== selectedLessonId) {
+    setUploadLessonId(selectedLessonId);
     setVideoUpload(null);
     setExhibitUpload(null);
     setVideoPreviewOpen(false);
-  }, [activeLessonId]);
+  }
+  useEffect(() => () => {
+    videoAbortRef.current?.abort();
+  }, [selectedLessonId]);
 
   const textLps = useMemo(() => parseTextLearningPoints(textHtml), [textHtml]);
   const videoDuration = loc(activeLesson, contentLanguage)?.videoDurationSeconds ?? null;
@@ -280,7 +287,7 @@ export function CourseContentSection({
     return L(locale, `上传失败：${code}`, `Upload failed: ${code}`);
   }
 
-  async function uploadVideo(file: File) {
+  async function uploadVideo(file: File, startedAt: number) {
     if (!activeLesson) return;
     if (mediaLimits && file.size > mediaLimits.videoBytes) {
       const message = L(
@@ -295,7 +302,7 @@ export function CourseContentSection({
         size: file.size,
         pct: 0,
         loaded: 0,
-        startedAt: Date.now(),
+        startedAt,
         elapsedMs: 0,
         error: message,
       });
@@ -306,7 +313,6 @@ export function CourseContentSection({
     lastVideoFileRef.current = file;
     const controller = new AbortController();
     videoAbortRef.current = controller;
-    const startedAt = Date.now();
     setVideoUpload({ phase: 'uploading', fileName: file.name, size: file.size, pct: 0, loaded: 0, startedAt, elapsedMs: 0 });
 
     const result = await uploadMediaInChunks<UploadResult>({
@@ -314,16 +320,18 @@ export function CourseContentSection({
       file,
       callbacks: {
         signal: controller.signal,
-        onProgress: (progress) =>
+        onProgress: (progress) => {
+          const elapsedMs = Date.now() - startedAt;
           setVideoUpload((prev) =>
             prev && {
               ...prev,
               phase: 'uploading',
               pct: progress.pct,
               loaded: progress.loaded,
-              elapsedMs: Date.now() - startedAt,
+              elapsedMs,
             },
-          ),
+          );
+        },
         onProcessing: () =>
           setVideoUpload((prev) => prev && { ...prev, phase: 'processing', pct: 100, loaded: prev.size }),
       },
@@ -438,7 +446,7 @@ export function CourseContentSection({
 
   async function deleteLesson() {
     if (!activeLesson) return;
-    if (!window.confirm(L(locale, '确认移除该课时？下次 Publish 后才会从网站消失。', 'Remove this lesson? It disappears from the website after the next Publish.'))) return;
+    if (!window.confirm(L(locale, '确认移除该课时？下次发布后才会从网站消失。', 'Remove this lesson? It disappears from the website after the next Publish.'))) return;
     setBusy(true);
     const result = await boRequest<CourseDetail>(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, { method: 'DELETE' });
     setBusy(false);
@@ -525,8 +533,8 @@ export function CourseContentSection({
         </div>
         {importMenuOpen && (
           <div style={{ marginBottom: 10, border: '1px solid #E8EDF5', borderRadius: 8, overflow: 'hidden' }}>
-            <button type="button" style={{ width: '100%', border: 0, background: '#fff', padding: '8px 10px', textAlign: 'left', cursor: 'pointer' }} onClick={() => { setAllUnderstandingOpen(true); setImportMenuOpen(false); }}>{L(locale, 'Understanding（全部 Lesson）', 'Understanding (all lessons)')}</button>
-            <button type="button" style={{ width: '100%', border: 0, borderTop: '1px solid #EEF1F6', background: '#fff', padding: '8px 10px', textAlign: 'left', cursor: 'pointer' }} onClick={() => { setAllReadingsOpen(true); setImportMenuOpen(false); }}>{L(locale, 'Recommended reading（全部 Lesson）', 'Recommended reading (all lessons)')}</button>
+            <button type="button" style={{ width: '100%', border: 0, background: '#fff', padding: '8px 10px', textAlign: 'left', cursor: 'pointer' }} onClick={() => { setAllUnderstandingOpen(true); setImportMenuOpen(false); }}>{L(locale, '理解测试（全部课时）', 'Understanding (all lessons)')}</button>
+            <button type="button" style={{ width: '100%', border: 0, borderTop: '1px solid #EEF1F6', background: '#fff', padding: '8px 10px', textAlign: 'left', cursor: 'pointer' }} onClick={() => { setAllReadingsOpen(true); setImportMenuOpen(false); }}>{L(locale, '推荐阅读（全部课时）', 'Recommended reading (all lessons)')}</button>
           </div>
         )}
         {sortedLessons.map((lesson) => {
@@ -536,7 +544,7 @@ export function CourseContentSection({
             ? `${loc(lesson, contentLanguage)?.videoDurationSeconds ? `${Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} ${L(locale, '学习点', 'LPs')} · ${lesson.exhibits.length} ${L(locale, '个展品', 'exhibits')}`
             : `${lesson.questions.length} ${L(locale, '题', 'questions')} · ${lesson.applicationTest ? L(locale, '有应用测试', 'App test') : L(locale, '无应用测试', 'no App test')}`;
           return (
-            <button key={lesson.id} type="button" onClick={() => setActiveLessonId(lesson.id)} style={{ ...buttonStyle, display: 'block', width: '100%', textAlign: 'left', marginBottom: 6, borderColor: activeLessonId === lesson.id ? '#2B58C8' : '#E8EDF5', background: activeLessonId === lesson.id ? '#F5F8FF' : '#fff' }}>
+            <button key={lesson.id} type="button" title={completeness && completeness.missing.length > 0 ? completeness.missing.map((item) => localizeMissing(locale, item)).join(locale.startsWith('zh') ? '；' : '; ') : undefined} onClick={() => setActiveLessonId(lesson.id)} style={{ ...buttonStyle, display: 'block', width: '100%', textAlign: 'left', marginBottom: 6, borderColor: activeLessonId === lesson.id ? '#2B58C8' : '#E8EDF5', background: activeLessonId === lesson.id ? '#F5F8FF' : '#fff' }}>
               <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ fontWeight: 600 }}>{lesson.sortOrder}. {title}</span>
                 <span>{completeness?.studyComplete ? '✓' : '!'}{completeness?.understandingComplete ? '✓' : '!'}</span>
@@ -557,7 +565,7 @@ export function CourseContentSection({
                 <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{activeLesson.code} · {activeLesson.id}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button type="button" style={{ ...buttonStyle, borderColor: part === 'study' ? '#2B58C8' : '#d9e0ea', color: part === 'study' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('study')}>{L(locale, '学习与探索', 'Study & Exploration')} {lessonCompleteness?.studyComplete ? '✓' : '!'}</button>
+                <button type="button" title={lessonCompleteness && lessonCompleteness.missing.length > 0 ? lessonCompleteness.missing.map((item) => localizeMissing(locale, item)).join(locale.startsWith('zh') ? '；' : '; ') : undefined} style={{ ...buttonStyle, borderColor: part === 'study' ? '#2B58C8' : '#d9e0ea', color: part === 'study' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('study')}>{L(locale, '学习与探索', 'Study & Exploration')} {lessonCompleteness?.studyComplete ? '✓' : '!'}</button>
                 <button type="button" style={{ ...buttonStyle, borderColor: part === 'understanding' ? '#2B58C8' : '#d9e0ea', color: part === 'understanding' ? '#2B58C8' : '#25314C', fontWeight: 600 }} onClick={() => setPart('understanding')}>{L(locale, '理解', 'Understanding')} {lessonCompleteness?.understandingComplete ? '✓' : '!'}</button>
               </div>
             </div>
@@ -584,13 +592,13 @@ export function CourseContentSection({
             <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, '课时信息', 'Lesson info')}</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 10 }}>
               <div>
-                <label style={labelStyle}>English</label>
+                <label style={labelStyle}>{L(locale, '英文', 'English')}</label>
                 <Field label={L(locale, '课时 ID', 'Lesson ID')}><input value={lessonCode} onChange={(event) => setLessonCode(event.target.value)} style={inputStyle} /></Field>
                 <Field label={L(locale, '课时标题 *', 'Lesson title *')}><input value={lessonTitleEn} onChange={(event) => setLessonTitleEn(event.target.value)} style={inputStyle} /></Field>
                 <Field label={L(locale, '课时简介 *', 'Lesson description *')}><textarea rows={2} value={lessonDescEn} onChange={(event) => setLessonDescEn(event.target.value)} style={inputStyle} /></Field>
               </div>
               <div>
-                <label style={labelStyle}>中文</label>
+                <label style={labelStyle}>{L(locale, '中文', 'Chinese')}</label>
                 <Field label={L(locale, '课时标题 *', 'Lesson title *')}><input value={lessonTitleZh} onChange={(event) => setLessonTitleZh(event.target.value)} style={inputStyle} /></Field>
                 <Field label={L(locale, '课时简介 *', 'Lesson description *')}><textarea rows={2} value={lessonDescZh} onChange={(event) => setLessonDescZh(event.target.value)} style={inputStyle} /></Field>
               </div>
@@ -603,7 +611,7 @@ export function CourseContentSection({
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, '展品', 'Exhibits')}</h3>
-                    <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '列表顺序就是学生端 Exploration 中该课时的展品顺序。', "The list order is the exhibit order in the learner's Exploration.")}</p>
+                    <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '列表顺序就是学生端探索页中该课时的展品顺序。', "The list order is the exhibit order in the learner's Exploration.")}</p>
                     {mediaLimits && (
                       <p style={{ margin: '2px 0 0', fontSize: 12, opacity: 0.65 }}>
                         {L(
@@ -686,7 +694,7 @@ export function CourseContentSection({
                             </button>
                             <label style={{ ...buttonStyle, padding: '4px 10px', cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
                               {videoBusy ? L(locale, '上传中…', 'Uploading…') : L(locale, '替换视频', 'Replace video')}
-                              <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (!file) return; if (currentVideoLoc?.video && !window.confirm(L(locale, '替换后该课时学员的播放进度会清零（课程完成状态不变）。确认替换？', 'Replacing resets learners’ playback position for this lesson (course completion is kept). Continue?'))) return; void uploadVideo(file); }} />
+                              <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (!file) return; if (currentVideoLoc?.video && !window.confirm(L(locale, '替换后该课时学员的播放进度会清零（课程完成状态不变）。确认替换？', 'Replacing resets learners’ playback position for this lesson (course completion is kept). Continue?'))) return; void uploadVideo(file, Date.now()); }} />
                             </label>
                           </div>
                         </div>
@@ -704,7 +712,7 @@ export function CourseContentSection({
                             <strong>{(currentVideoLoc.video.extension ?? 'video').toUpperCase()}</strong>
                           </span>
                           <span>
-                            <span style={{ color: '#5A6577' }}>{L(locale, '上传时间', 'Uploaded')}</span> {fmtDate(currentVideoLoc.video.createdAt)}
+                            <span style={{ color: '#5A6577' }}>{L(locale, '上传时间', 'Uploaded')}</span> {fmtDate(currentVideoLoc.video.createdAt, locale)}
                           </span>
                         </div>
                         <div style={{ marginTop: 6, fontSize: 12, color: '#5A6577' }}>
@@ -740,7 +748,7 @@ export function CourseContentSection({
                         </div>
                         <label style={{ ...buttonStyle, cursor: busy || videoBusy ? 'not-allowed' : 'pointer', opacity: busy || videoBusy ? 0.6 : 1 }}>
                           {videoBusy ? L(locale, '上传中…', 'Uploading…') : L(locale, '上传视频', 'Upload video')}
-                          <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file); event.currentTarget.value = ''; }} />
+                          <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={busy || videoBusy} style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(file, Date.now()); event.currentTarget.value = ''; }} />
                         </label>
                       </div>
                     )}
@@ -814,7 +822,7 @@ export function CourseContentSection({
                           disabled={busy || videoBusy}
                           onClick={() => {
                             const file = lastVideoFileRef.current;
-                            if (file) void uploadVideo(file);
+                            if (file) void uploadVideo(file, Date.now());
                           }}
                         >
                           {L(locale, '重试上传', 'Retry upload')}
@@ -832,8 +840,8 @@ export function CourseContentSection({
                         return (
                           <div key={index} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                             <span style={{ fontSize: 12, color: '#5A6577' }}>{activeLesson.sortOrder}.{index + 1}</span>
-                            <input value={point.title} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, 'LP 标题', 'Learning point title')} style={inputStyle} />
-                            <input value={`${Math.floor(point.timeSeconds / 60)}:${String(point.timeSeconds % 60).padStart(2, '0')}`} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: parseTime(event.target.value) } : item))} placeholder="mm:ss" style={{ ...inputStyle, borderColor: beyond ? '#b42318' : '#d9e0ea' }} />
+                            <input value={point.title} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '学习点标题', 'Learning point title')} style={inputStyle} />
+                            <TimeInput seconds={point.timeSeconds} onChange={(seconds) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: seconds ?? 0 } : item))} placeholder="mm:ss" style={{ ...inputStyle, borderColor: beyond ? '#b42318' : '#d9e0ea' }} />
                             <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setVideoLps((rows) => rows.filter((_, i) => i !== index))}>×</button>
                             {beyond && <div style={{ gridColumn: '1 / -1', fontSize: 11, color: '#b42318' }}>{L(locale, '超出视频时长', 'Beyond video length')} ({fmtDuration(videoDuration)})</div>}
                           </div>
@@ -852,7 +860,7 @@ export function CourseContentSection({
                             <option value="">{L(locale, '选择展品', 'Choose an exhibit')}</option>
                             {exhibits.map((exhibit) => <option key={exhibit.id} value={exhibit.id}>{exhibit.localized?.[contentLanguage]?.title ?? exhibit.code}</option>)}
                           </select>
-                          <input value={`${Math.floor(trigger.timeSeconds / 60)}:${String(trigger.timeSeconds % 60).padStart(2, '0')}`} onChange={(event) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: parseTime(event.target.value) } : item))} placeholder="mm:ss" style={inputStyle} />
+                          <TimeInput seconds={trigger.timeSeconds} onChange={(seconds) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: seconds ?? 0 } : item))} placeholder="mm:ss" style={inputStyle} />
                           <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setTriggerRows((rows) => rows.filter((_, i) => i !== index))}>×</button>
                         </div>
                       ))}
@@ -873,7 +881,7 @@ export function CourseContentSection({
                     />
                     <div style={{ marginTop: 12, fontSize: 13 }}>
                       <strong>{L(locale, '学习点识别区', 'Learning points')}</strong>
-                      <p style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{L(locale, '仅 Heading 1 识别为 LP；H1 文本即 LP 标题。', 'Only Heading 1 becomes a learning point; its text is the title.')}</p>
+                      <p style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{L(locale, '仅一级标题识别为学习点；一级标题文本即学习点标题。', 'Only Heading 1 becomes a learning point; its text is the title.')}</p>
                       {textLps.length === 0 ? (
                         <p style={{ color: '#b42318', marginTop: 6 }}>{L(locale, '未识别到学习点。请把每个学习点标题设置为一级标题（H1）。', 'No learning points found. Set each learning point title as Heading 1 (H1).')}</p>
                       ) : (
@@ -973,7 +981,7 @@ export function CourseContentSection({
                 <p key={lessonCode}>{lessonCode} · Knowledge Test +{count}</p>
               ))}
               {allImportResult.errors.map((error, index) => (
-                <p key={index} style={{ color: '#b42318' }}>{L(locale, '第', 'Row')} {error.row} · {error.message}</p>
+                <p key={index} style={{ color: '#b42318' }}>{L(locale, '第', 'Row')} {error.row} · {serverText(error.message, locale as Locale)}</p>
               ))}
               <button type="button" style={primaryBtn} onClick={() => { setAllUnderstandingOpen(false); setAllImportFile(null); setAllImportResult(null); }} disabled={allImportResult.added === 0}>
                 {L(locale, `导入 ${allImportResult.added} 题`, `Import ${allImportResult.added} questions`)}
@@ -995,7 +1003,7 @@ export function CourseContentSection({
             <div style={{ marginTop: 12, fontSize: 13 }}>
               <p style={{ fontWeight: 600 }}>{L(locale, '已导入', 'Imported')} {readingImportResult.added} {L(locale, '条', 'readings')}</p>
               {readingImportResult.errors.map((error, index) => (
-                <p key={index} style={{ color: '#b42318' }}>Row {error.row} · {error.message}</p>
+                <p key={index} style={{ color: '#b42318' }}>{L(locale, '第', 'Row')} {error.row} · {serverText(error.message, locale as Locale)}</p>
               ))}
             </div>
           )}

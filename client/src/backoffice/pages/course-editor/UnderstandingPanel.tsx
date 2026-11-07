@@ -1,17 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
-import {
-  Field,
-  L,
-  Modal,
-  buttonStyle,
-  card,
-  inputStyle,
-  languageLabel,
-  primaryBtn,
-} from './shared';
+import { Field, Modal } from './shared';
+import { L, buttonStyle, card, inputStyle, languageLabel, primaryBtn } from './shared-utils';
+import type { Locale } from '../../lib/i18n/config';
+import { serverText } from '../../lib/i18n/serverText';
 
 type Question = { code: string; question: string; referenceAnswer: string };
 
@@ -44,7 +38,9 @@ export function UnderstandingPanel({
   const [singleResult, setSingleResult] = useState<{ added: number; errors: Array<{ row: number; message: string }> } | null>(null);
   const [singleBusy, setSingleBusy] = useState(false);
 
-  useEffect(() => {
+  const [source, setSource] = useState<{ lesson: Lesson; language: string } | null>(null);
+  if (source?.lesson !== lesson || source?.language !== language) {
+    setSource({ lesson, language });
     setKnowledgeEnabled(true);
     setQuestions(
       lesson.questions.map((question, index) => ({
@@ -56,7 +52,7 @@ export function UnderstandingPanel({
     setApplicationEnabled(Boolean(lesson.applicationTest));
     setApplicationScenario(lesson.applicationTest?.scenario ?? '');
     setApplicationAnswer(lesson.applicationTest?.referenceAnswer ?? '');
-  }, [lesson, language]);
+  }
 
   async function saveKnowledge() {
     setBusy(true);
@@ -219,7 +215,7 @@ export function UnderstandingPanel({
             <div style={{ marginTop: 12, fontSize: 13 }}>
               <p style={{ fontWeight: 600 }}>{L(locale, '已导入', 'Imported')} {singleResult.added} {L(locale, '题', 'questions')}</p>
               {singleResult.errors.map((error, index) => (
-                <p key={index} style={{ color: '#b42318' }}>{error.row ? `${L(locale, '第', 'Row')} ${error.row} · ` : ''}{error.message}</p>
+                <p key={index} style={{ color: '#b42318' }}>{error.row ? `${L(locale, '第', 'Row')} ${error.row} · ` : ''}{serverText(error.message, locale as Locale)}</p>
               ))}
             </div>
           )}
