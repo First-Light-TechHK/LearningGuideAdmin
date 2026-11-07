@@ -20,6 +20,7 @@ import { AiConfigService } from './ai-config.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmTimeoutError } from './providers/llm-provider.interface';
+import { OpenRouterHttpError } from './providers/openrouter.provider';
 import { ProviderRegistry } from './providers/provider.registry';
 import {
   compileTutorDialogue,
@@ -44,6 +45,28 @@ import {
 /** Field 2 carries only the most recent complete dialogue turns. */
 const MAX_HISTORY_TURNS = 6;
 const MAX_SOCRATIC_HISTORY_TURNS = 10;
+
+function isTutorConversationOpener(question: string): boolean {
+  const text = question
+    .replace(/^(?:(?:你好|您好|嗨|哈喽|hi|hello)[，,！!。.?？\s]*)+/iu, '')
+    .trim();
+  if (!text || text.length > 80) return false;
+  if (
+    /收费|价格|账号|账户|订阅|退款|订单|支付|price|account|subscription|refund|payment/iu.test(
+      text,
+    )
+  )
+    return false;
+  if (
+    /解释|计算|推导|证明|怎么求|什么是|explain|calculate|derive|prove/iu.test(
+      text,
+    )
+  )
+    return false;
+  return /你.{0,12}(?:是谁|叫什么|什么身份|能做什么|能干什么|可以做什么|有什么功能|提供什么帮助)|(?:介绍|说说).{0,8}你自己|\b(?:who are you|what can you do|what is your role|tell me about yourself|how can you help)\b|(?:知道|了解|认识).{0,12}Learning Guide|Learning Guide.{0,12}(?:是什么|吗)|\b(?:what is|do you know) Learning Guide\b/iu.test(
+    text,
+  );
+}
 
 /**
  * AI 对话编排（§4.4.2）：限流 → 加载配置 → 聚合知识库上下文 →
@@ -327,7 +350,7 @@ export class AiChatService {
         context = await buildContext(`${recentTopics} ${question}`);
         if (context === null) progress('retrieval_context_empty');
       }
-      if (context === null) {
+      if (context === null && !isTutorConversationOpener(question)) {
         answer = broadCourseHelp
           ? english
             ? 'I can help you work through the lesson. Which concept or example is most confusing? We can start there.'
@@ -358,19 +381,34 @@ export class AiChatService {
         mode: input.mode,
         message: input.message,
         systemPrompt: prompts.systemPrompt,
-        context,
+        context: context ?? '',
         history,
       });
       const messages = compiled.messages;
       promptHash = compiled.promptHash;
-      const images =
-        input.channel === 'admin'
-          ? selectKnowledgeImages(context, courseId, question)
-          : [];
+      const images = selectKnowledgeImages(
+        context ?? '',
+        courseId,
+        question,
+      ).map((image) =>
+        input.channel === 'learner'
+          ? {
+              ...image,
+              url: image.url.replace(
+                `/api/files/images/${courseId}/`,
+                `/api/user/courses/${encodeURIComponent(input.courseIdHint)}/images/`,
+              ),
+            }
+          : image,
+      );
 
       const provider = this.registry.get(runtime.provider);
       const MAX_RETRIES = 2;
-      const maxOutputTokens = 2048;
+      const maxOutputTokens =
+        runtime.model === 'qwen/qwen3.6-flash' ||
+        runtime.model === 'google/gemini-3.5-flash'
+          ? 4096
+          : 2048;
       let attempt = 0;
       while (true) {
         attempt += 1;
@@ -386,7 +424,10 @@ export class AiChatService {
             ? attempt === 1
               ? 'low'
               : 'none'
-            : undefined;
+            : runtime.model === 'qwen/qwen3.6-flash' ||
+                runtime.model === 'google/gemini-3.5-flash'
+              ? 'low'
+              : undefined;
         finishReason = undefined;
         usage = undefined;
         const recordAttempt = () => {
@@ -468,13 +509,13 @@ export class AiChatService {
             progress('length_retry', attempt);
             continue;
           }
+          if (finishReason === 'length') {
+            throw new ConflictException('AI 回答达到输出上限，内容未完成');
+          }
           if (!attemptAnswer.trim()) {
             throw new ConflictException(
               'AI 服务返回空回答，请重试或检查模型配置',
             );
-          }
-          if (finishReason === 'length') {
-            throw new ConflictException('AI 回答达到输出上限，内容未完成');
           }
           const finalAnswer = visibleTutorAnswer(
             attemptAnswer,
@@ -506,6 +547,9 @@ export class AiChatService {
             started ||
             input.signal?.aborted ||
             err instanceof LlmTimeoutError ||
+            (err instanceof OpenRouterHttpError &&
+              err.upstreamStatus >= 400 &&
+              err.upstreamStatus < 500) ||
             err instanceof ConflictException ||
             attempt > MAX_RETRIES
           ) {
@@ -520,7 +564,12 @@ export class AiChatService {
         status = 'aborted';
       } else {
         status = 'error';
-        errorText = err instanceof Error ? err.message : String(err);
+        errorText =
+          err instanceof OpenRouterHttpError && err.diagnostic
+            ? `${err.message} (${err.diagnostic})`
+            : err instanceof Error
+              ? err.message
+              : String(err);
       }
       throw err;
     } finally {

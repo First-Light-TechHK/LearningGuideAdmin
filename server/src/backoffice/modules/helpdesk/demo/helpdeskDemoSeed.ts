@@ -54,13 +54,13 @@ export const DEMO_POPULAR_MARKER_KEY = 'helpdesk_demo_popular';
  * 卡片内容那一版（库文件里的问题、答案、追问；2026-11-02 起按代码核对过的修正）。库文件的卡片内容再改就换这个值：
  * 已经灌过的 DEV 下次启动按库文件更新卡片，员工在 BackOffice 改过的卡不动（keepStaffEdits），再出一版发布。
  */
-export const DEMO_CONTENT_TAG = 'content-2026-11-03a';
+export const DEMO_CONTENT_TAG = 'content-2026-11-05a';
 export const DEMO_CONTENT_MARKER_KEY = 'helpdesk_demo_content';
 /**
  * 流程树那一版（库文件 faq-map-v2.json）。树或卡的位置再改就换这个值：已经灌过的 DEV 下次启动先删掉种子里
  * 没有的节点（pruneFaqMap），再按种子建节点、挂卡，有改动就出一版发布（结构随发布冻结进快照）。
  */
-export const DEMO_MAP_TAG = 'map-v2-2026-11-02b';
+export const DEMO_MAP_TAG = 'map-v2-2026-11-05a';
 export const DEMO_MAP_MARKER_KEY = 'helpdesk_demo_map';
 // 与夜间任务的锁（FLYWHEEL_LOCK = [719320, 1]）同一命名空间，第二个数不同
 const DEMO_LOCK: readonly [number, number] = [719320, 2];

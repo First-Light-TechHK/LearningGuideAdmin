@@ -4,10 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import JSZip from 'jszip';
+import sharp from 'sharp';
 import type { Prisma } from '@prisma/client';
 import { lockCourseRow } from '../prisma/course-lock';
 import { PrismaService } from '../prisma/prisma.service';
 import { IndexingService } from '../knowledge/indexing.service';
+import { FilesService } from '../files/files.service';
+import { renderMarkdownDocx } from './markdown-docx';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
 
@@ -67,6 +70,7 @@ export class ReleasesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly indexing: IndexingService,
+    private readonly files: FilesService,
   ) {}
 
   /**
@@ -358,7 +362,7 @@ export class ReleasesService {
 
   /**
    * 将 Release 快照打包成 ZIP 下载。
-   * - ZIP 根目录直接平铺每页一个 Markdown 文件：{NNN}_{title}.md
+   * - ZIP 根目录每页一个文件：有图片为 DOCX，无图片为原始 Markdown。
    * - 不包含 manifest.json、不包含 pages/ 子目录
    * - 丢弃 sectionTags
    * - 纯读，不改动 Release / Course 任何状态
@@ -377,15 +381,60 @@ export class ReleasesService {
     const pages = snapshot.pages ?? [];
 
     const zip = new JSZip();
+    const usedNames = new Set<string>();
 
     for (const [i, page] of pages.entries()) {
       const safe = ReleasesService.sanitizeFilename(
         page.title || `page_${i + 1}`,
       );
-      const padded = String(i + 1).padStart(3, '0');
-      // 直接平铺到 ZIP 根目录，序号前缀保证唯一性
-      const path = `${padded}_${safe}.md`;
-      zip.file(path, page.contentMd ?? '');
+      let name = safe;
+      for (let suffix = 2; usedNames.has(name.toLowerCase()); suffix++) {
+        name = `${safe}_${suffix}`;
+      }
+      usedNames.add(name.toLowerCase());
+      const markdown = page.contentMd ?? '';
+      const images: RegExpMatchArray[] = [];
+      let fence = '';
+      for (const line of markdown.split(/\r?\n/)) {
+        const marker = /^\s*(```|~~~)/.exec(line)?.[1];
+        if (marker) {
+          fence = fence ? '' : marker;
+          continue;
+        }
+        if (!fence)
+          images.push(...line.matchAll(/!\[[^\]\n]*\]\(([^\s)]+)\)/g));
+      }
+      if (!images.length) {
+        zip.file(`${name}.md`, markdown);
+        continue;
+      }
+      const assets = new Map<
+        string,
+        { bytes: Buffer; type: 'png' | 'jpg' | 'gif' }
+      >();
+      for (const match of images) {
+        const url = match[1];
+        if (assets.has(url)) continue;
+        const own =
+          /^\/api\/files\/images\/([^/]+)\/([0-9a-f-]{36}\.(png|jpg|gif|webp))$/i.exec(
+            url,
+          );
+        if (!own || own[1] !== release.courseId)
+          throw new ConflictException(
+            `页面「${page.title}」的图片无法导出：${url}`,
+          );
+        const image = await this.files.getImage(own[1], own[2]);
+        if (!image)
+          throw new ConflictException(
+            `页面「${page.title}」的图片不存在：${url}`,
+          );
+        const webp = own[3].toLowerCase() === 'webp';
+        assets.set(url, {
+          bytes: webp ? await sharp(image.bytes).png().toBuffer() : image.bytes,
+          type: webp ? 'png' : (own[3].toLowerCase() as 'png' | 'jpg' | 'gif'),
+        });
+      }
+      zip.file(`${name}.docx`, await renderMarkdownDocx(markdown, assets));
     }
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });

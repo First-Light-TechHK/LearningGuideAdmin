@@ -1,4 +1,4 @@
-import { OpenRouterProvider } from './openrouter.provider';
+import { OpenRouterHttpError, OpenRouterProvider } from './openrouter.provider';
 import { LlmTimeoutError } from './llm-provider.interface';
 
 function responseWith(data: string[]): Response {
@@ -46,6 +46,45 @@ describe('OpenRouterProvider', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     jest.restoreAllMocks();
+  });
+
+  it('上游拒绝只保留安全机器字段，不泄露错误正文', async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 403,
+            message: 'private prompt and key',
+            metadata: {
+              limit_source: 'openrouter_workspace_budget',
+              provider_name: 'Google',
+              raw: 'private provider detail',
+            },
+          },
+        }),
+        { status: 403 },
+      ),
+    );
+    let failure: unknown;
+    try {
+      await new OpenRouterProvider()
+        .stream({
+          model: 'google/gemini-3.5-flash',
+          messages: [],
+          apiKey: 'test-key',
+          baseUrl: 'https://example.invalid',
+        })
+        .next();
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(OpenRouterHttpError);
+    expect(failure).toMatchObject({
+      upstreamStatus: 403,
+      diagnostic:
+        'code=403 limitSource=openrouter_workspace_budget provider=Google',
+    });
+    expect(String(failure)).not.toContain('private');
   });
 
   it('兼容旧 stream，并从 SSE 读取 usage 与 finish reason 事件', async () => {

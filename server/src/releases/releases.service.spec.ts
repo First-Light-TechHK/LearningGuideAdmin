@@ -2,6 +2,8 @@ import type { Prisma } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ReleasesService } from './releases.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { FilesService } from '../files/files.service';
+import sharp from 'sharp';
 
 /**
  * ReleasesService 单元测试（2026-10-16 扁平化：lessons → pages）。
@@ -32,15 +34,18 @@ describe('ReleasesService', () => {
 
   let service: ReleasesService;
   let mockIndexing: { indexRelease: jest.Mock };
+  const mockFiles = { getImage: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockIndexing = {
       indexRelease: jest.fn().mockResolvedValue(undefined),
     };
+    mockFiles.getImage.mockReset();
     service = new ReleasesService(
       mockPrisma as unknown as PrismaService,
       mockIndexing as never,
+      mockFiles as never,
     );
   });
 
@@ -374,12 +379,12 @@ describe('ReleasesService', () => {
     // 只有两个 .md 文件（平铺在 ZIP 根目录，无 pages/ 子目录）
     const mdFiles = Object.keys(zip.files).filter((k) => k.endsWith('.md'));
     expect(mdFiles).toHaveLength(2);
-    expect(mdFiles).toContain('001_第一章 入门.md');
-    expect(mdFiles).toContain('002_第二章 进阶.md');
+    expect(mdFiles).toContain('第一章 入门.md');
+    expect(mdFiles).toContain('第二章 进阶.md');
 
-    const md1 = await zip.file('001_第一章 入门.md')!.async('string');
+    const md1 = await zip.file('第一章 入门.md')!.async('string');
     expect(md1).toBe('# Intro\nhello');
-    const md2 = await zip.file('002_第二章 进阶.md')!.async('string');
+    const md2 = await zip.file('第二章 进阶.md')!.async('string');
     expect(md2).toBe('# Advanced\nworld');
   });
 
@@ -400,6 +405,179 @@ describe('ReleasesService', () => {
     const mdFiles = Object.keys(zip.files).filter((k) => k.endsWith('.md'));
     expect(mdFiles).toHaveLength(0);
     expect(zip.file('manifest.json')).toBeNull();
+  });
+
+  it('exportZip：清洗后同名的页面添加后缀，保留所有内容', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      versionTag: 'v1',
+      snapshotData: {
+        pages: [
+          { title: 'A/B', contentMd: 'first' },
+          { title: 'a\\b', contentMd: 'second' },
+          { title: 'A_B_2', contentMd: 'third' },
+          { title: 'A:B', contentMd: 'fourth' },
+        ],
+      },
+    });
+    const { buffer } = await service.exportZip('r1');
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+    expect(await zip.file('A_B.md')!.async('string')).toBe('first');
+    expect(await zip.file('a_b_2.md')!.async('string')).toBe('second');
+    expect(await zip.file('A_B_2_2.md')!.async('string')).toBe('third');
+    expect(await zip.file('A_B_3.md')!.async('string')).toBe('fourth');
+  });
+
+  it('exportZip：含图片页导出内嵌图片的 DOCX，无图页保持原始 MD', async () => {
+    const asset = '11111111-1111-4111-8111-111111111111.png';
+    const asset2 = '22222222-2222-4222-8222-222222222222.png';
+    const png = await sharp({
+      create: { width: 1, height: 1, channels: 4, background: '#ff0000' },
+    })
+      .png()
+      .toBuffer();
+    mockFiles.getImage.mockResolvedValue({
+      bytes: png,
+      contentType: 'image/png',
+    });
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+      versionTag: 'v1',
+      snapshotData: {
+        pages: [
+          {
+            title: '图文',
+            contentMd: `# 向量\n\n| 名称 | 说明 |\n| --- | --- |\n| 向量 | 有方向 |\n\n**重点**，见图：![图](/api/files/images/c1/${asset})\n\n_Exhibit 1.2 A cup of coffee, 20 mg/oz_\n\n_展品 1.2 一杯咖啡，20 mg/oz_\n\n![第二图](/api/files/images/c1/${asset2})`,
+          },
+          { title: '纯文本', contentMd: '# 原样保留\n\n$x=1$' },
+        ],
+      },
+    });
+
+    const { buffer } = await service.exportZip('r1');
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+    expect(zip.file('图文.docx')).not.toBeNull();
+    expect(await zip.file('纯文本.md')!.async('string')).toBe(
+      '# 原样保留\n\n$x=1$',
+    );
+    const docx = await JSZip.loadAsync(
+      await zip.file('图文.docx')!.async('nodebuffer'),
+    );
+    expect(
+      Object.keys(docx.files).some((name) => name.startsWith('word/media/')),
+    ).toBe(true);
+    expect(await docx.file('word/document.xml')!.async('string')).toContain(
+      '向量',
+    );
+    expect(await docx.file('word/document.xml')!.async('string')).toContain(
+      '<w:tbl>',
+    );
+    expect(mockFiles.getImage).toHaveBeenCalledWith('c1', asset);
+    expect(mockFiles.getImage).toHaveBeenCalledWith('c1', asset2);
+
+    const storage = {
+      putMedia: jest.fn().mockResolvedValue(undefined),
+      removeMedia: jest.fn(),
+    };
+    const prisma = {
+      course: { findUnique: jest.fn().mockResolvedValue({ id: 'c1' }) },
+      knowledgeImageAsset: { create: jest.fn().mockResolvedValue(undefined) },
+    };
+    const converter = new FilesService(storage as never, prisma as never);
+    const word = await zip.file('图文.docx')!.async('nodebuffer');
+    const imported = await converter.convertFile(
+      {
+        originalname: '图文.docx',
+        buffer: word,
+        size: word.length,
+      } as Express.Multer.File,
+      'c1',
+    );
+    expect(imported.markdown).toContain('# 向量');
+    expect(imported.markdown).toContain('**重点**');
+    expect(imported.markdown).toMatch(
+      /[_*]Exhibit 1\.2 A cup of coffee, 20 mg\/oz[_*]/,
+    );
+    expect(imported.markdown).toMatch(/[_*]展品 1\.2 一杯咖啡，20 mg\/oz[_*]/);
+    expect(imported.markdown).not.toContain('\\_');
+    expect(imported.markdown).toMatch(
+      /!\[[^\]]*\]\(\/api\/files\/images\/c1\/[0-9a-f-]+\.png\)/,
+    );
+    expect(
+      imported.markdown.match(/\/api\/files\/images\/c1\/[0-9a-f-]+\.png/g),
+    ).toHaveLength(2);
+  });
+
+  it('exportZip：页面引用的图片已丢失时不生成缺图 DOCX', async () => {
+    mockFiles.getImage.mockResolvedValue(null);
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+      versionTag: 'v1',
+      snapshotData: {
+        pages: [
+          {
+            title: '图文',
+            contentMd:
+              '![图](/api/files/images/c1/11111111-1111-4111-8111-111111111111.png)',
+          },
+        ],
+      },
+    });
+    await expect(service.exportZip('r1')).rejects.toThrow('图片');
+  });
+
+  it('exportZip：WebP 图片转成 Word 可嵌入的 PNG', async () => {
+    const png = await sharp({
+      create: { width: 1, height: 1, channels: 4, background: '#ff0000' },
+    })
+      .png()
+      .toBuffer();
+    mockFiles.getImage.mockResolvedValue({
+      bytes: await sharp(png).webp().toBuffer(),
+      contentType: 'image/webp',
+    });
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+      versionTag: 'v1',
+      snapshotData: {
+        pages: [
+          {
+            title: '图文',
+            contentMd:
+              '![图](/api/files/images/c1/11111111-1111-4111-8111-111111111111.webp)',
+          },
+        ],
+      },
+    });
+    const { buffer } = await service.exportZip('r1');
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+    const docx = await JSZip.loadAsync(
+      await zip.file('图文.docx')!.async('nodebuffer'),
+    );
+    expect(Object.keys(docx.files).some((name) => name.endsWith('.png'))).toBe(
+      true,
+    );
+  });
+
+  it('exportZip：代码块里的图片语法仍按无图 MD 原样导出', async () => {
+    const markdown = '```md\n![示例](images/not-an-image.png)\n```';
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+      versionTag: 'v1',
+      snapshotData: { pages: [{ title: '代码', contentMd: markdown }] },
+    });
+    const { buffer } = await service.exportZip('r1');
+    const JSZip = (await import('jszip')).default;
+    const zip = await JSZip.loadAsync(buffer);
+    expect(await zip.file('代码.md')!.async('string')).toBe(markdown);
+    expect(mockFiles.getImage).not.toHaveBeenCalled();
   });
 
   it('exportZip：不存在的 release 抛 404', async () => {
@@ -440,6 +618,6 @@ describe('ReleasesService', () => {
     );
     expect(pageFiles).toHaveLength(1);
     expect(pageFiles[0]).not.toMatch(/[\\:*?"<>|]/);
-    expect(pageFiles[0]).toBe('001_page_with_slash.md');
+    expect(pageFiles[0]).toBe('page_with_slash.md');
   });
 });

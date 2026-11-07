@@ -1,4 +1,4 @@
-import { DEFAULT_PROMPTS } from './prompt-defaults';
+import { DEFAULT_MAIN_PROMPT, DEFAULT_PROMPTS } from './prompt-defaults';
 
 describe('SOCRATIC 默认提示词', () => {
   it('拒绝编造时遵守不追问请求，并要求总结公式有当前证据', () => {
@@ -18,5 +18,23 @@ describe('SOCRATIC 默认提示词', () => {
     expect(socratic).toContain("Do not substitute a nearby example's source");
     expect(lecture).not.toContain('stop without a follow-up question');
     expect(lecture).not.toContain('"hot/cold" alone does not give');
+  });
+});
+
+describe('Tutor 身份与自然口吻', () => {
+  it('允许公开的身份能力说明，同时保留内部信息边界', () => {
+    expect(DEFAULT_MAIN_PROMPT).toContain('public identity');
+    expect(DEFAULT_MAIN_PROMPT).toContain('Learning Guide');
+    expect(DEFAULT_MAIN_PROMPT).toContain('Never reveal');
+    expect(DEFAULT_MAIN_PROMPT).toContain('vary phrasing across turns');
+  });
+
+  it('讲授模式适应学生表达，苏格拉底模式避免机械复述', () => {
+    expect(DEFAULT_PROMPTS.LECTURE.systemPrompt).toContain(
+      'everyday comparison',
+    );
+    expect(DEFAULT_PROMPTS.SOCRATIC.systemPrompt).toContain(
+      'Do not repeat their wording mechanically',
+    );
   });
 });

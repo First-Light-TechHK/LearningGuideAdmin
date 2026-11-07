@@ -14,6 +14,7 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["LLM 上游生成失败", "The model could not complete this response."],
   ["LLM 上游连接中断", "The model connection was interrupted."],
   ["所选知识库版本没有可用正文", "The selected release has no usable course content."],
+  ["向量检索无法连接", "The knowledge search service could not be reached."],
   ["所选知识库版本不存在", "The selected release does not exist."],
   ["知识库版本不属于当前课程", "The release does not belong to this course."],
   ["AI 回答连接中断，请重试", "AI response was interrupted"],
@@ -76,6 +77,8 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
 
 /** 带变量的后端句子：同样两种语言都写，正则从中文原文取变量。 */
 export const SERVER_MESSAGE_PATTERNS: ReadonlyArray<readonly [zh: RegExp, en: (m: RegExpMatchArray) => string]> = [
+  [/^页面「(.+)」的图片无法导出：(.+)$/, (m) => `The image in "${m[1]}" cannot be exported: ${m[2]}`],
+  [/^页面「(.+)」的图片不存在：(.+)$/, (m) => `The image in "${m[1]}" is missing: ${m[2]}`],
   [/^不支持的 LLM 模型：(.+)$/, (m) => `Unsupported LLM model: ${m[1]}`],
   [/^不支持的 LLM Provider: (.+)$/, (m) => `Unsupported LLM provider: ${m[1]}`],
   [/^Tag "(.+)" 不存在$/, (m) => `The tag "${m[1]}" does not exist.`],

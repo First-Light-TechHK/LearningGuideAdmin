@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { FilesModule } from '../files/files.module';
 import { ReleasesController } from './releases.controller';
 import { ReleasesService } from './releases.service';
 
 @Module({
-  imports: [KnowledgeModule],
+  imports: [KnowledgeModule, FilesModule],
   controllers: [ReleasesController],
   providers: [ReleasesService],
 })

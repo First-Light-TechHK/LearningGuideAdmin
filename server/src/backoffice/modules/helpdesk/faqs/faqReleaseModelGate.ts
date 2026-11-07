@@ -44,7 +44,7 @@ export const MODEL_GATE = {
   wrongRateMax: 0.02,
   wrongRiseMax: 0.01,
   errorRateMax: 0.05,
-  /** 约 ¥3.6；一次正常的检查约 ¥1。 */
+  /** 一次检查的花费上限（美元）。 */
   budgetUsd: 0.5,
   concurrency: 4,
   missesMax: 50,

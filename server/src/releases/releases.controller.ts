@@ -50,7 +50,7 @@ export class ReleasesController {
   /**
    * 导出 Release 快照为 ZIP（方案 B，2026-10-30 新增）。
    * VIEW 权限即可；纯读，不改动任何 Release / Course 状态。
-   * ZIP 内含 manifest.json + pages/{NNN}_{title}.md（每页一个文件）。
+   * ZIP 根目录每页一个文件；有图片的页面为 DOCX，其余为 MD。
    */
   @Get('releases/:releaseId/export')
   @Header('Content-Type', 'application/zip')

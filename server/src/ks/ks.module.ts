@@ -30,7 +30,7 @@ export class KsModule {
               PagesModule,
               ReleasesModule,
               SyncModule,
-              FilesModule,
+              FilesModule.register({ authoring: true }),
               TagsModule,
             ]
           : []),

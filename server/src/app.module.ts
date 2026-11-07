@@ -15,6 +15,7 @@ import { CommerceCoursesModule } from './commerce-courses/commerce-courses.modul
 import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
 import { ALL_ROLES, type AppRole } from './app-roles';
 import { KNOWLEDGE_CLIENT } from './ks/contract/knowledge-client';
+import { FilesModule } from './files/files.module';
 import { KsModule } from './ks/ks.module';
 import { PrismaKnowledgeClient } from './ks/prisma-knowledge.client';
 import { HELPDESK_QA_SOURCE } from './contracts/helpdesk-qa';
@@ -87,6 +88,7 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
               adminApi: admin,
               learnerApi: agent,
               knowledge: knowledgeProvider(roles),
+              files: FilesModule.register({ authoring: false }),
               // Helpdesk 推荐的候选：读 BackOffice 的已发布 FAQ（同库直读，契约见 src/contracts）；
               // 有发布版本后只读那一版快照（faqQaSource.ts）
               helpdeskQa: {
