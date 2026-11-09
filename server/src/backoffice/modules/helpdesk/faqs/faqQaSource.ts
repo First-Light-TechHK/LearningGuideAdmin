@@ -386,6 +386,8 @@ export function createHelpdeskQaSource(
       const locale = search.locale;
       const v = await view(true);
       if (v.release === null || search.text.trim() === '') return [];
+      // 没配向量模型：这一层本来就关着，不算降级
+      if (deps.vectors.available && !deps.vectors.available()) return [];
       const controller = new AbortController();
       let timer: NodeJS.Timeout | undefined;
       const timedOut = new Promise<null>((resolve) => {
@@ -406,7 +408,7 @@ export function createHelpdeskQaSource(
       } finally {
         clearTimeout(timer);
       }
-      if (!ranked) return [];
+      if (!ranked) return null;
       const release = v.release;
       const hits = ranked
         .filter((hit) => hit.type === 'answer' || hit.type === 'choice')

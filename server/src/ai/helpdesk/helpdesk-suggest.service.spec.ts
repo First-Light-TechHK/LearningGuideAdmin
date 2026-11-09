@@ -15,7 +15,9 @@ import {
   suggestLimits,
   suggestModel,
   suggestThinking,
+  SUGGEST_CHAT_DEADLINE_MS,
   SUGGEST_DEADLINE_MS,
+  SUGGEST_LOG_WAIT_MS,
   SUGGEST_THINKING_CUTOFF_MS,
   SUGGEST_THINKING_DEADLINE_MS,
   SUGGEST_RATE_LIMIT,
@@ -520,19 +522,37 @@ describe('Helpdesk suggest: every failure is a quiet null', () => {
     expect(findCandidates).not.toHaveBeenCalled();
   });
 
-  it('returns null when candidates cannot be read or the log cannot be written', async () => {
+  it('returns null when candidates cannot be read', async () => {
     const broken = setup();
     broken.findCandidates.mockRejectedValue(new Error('db down'));
     // nothing was retrieved: the popular FAQs
     await expect(broken.service.suggest(input)).resolves.toEqual(
       NO_ANSWER.POPULAR,
     );
+  });
+
+  it('keeps the answer when the suggestion log fails or is slow (2026-11-09)', async () => {
+    // 答案已经定下来了：日志写失败只告警，不把选对的卡变成「出错、没有答案」
     const noLog = setup();
     noLog.log.record.mockRejectedValue(new Error('db down'));
-    // the candidates were retrieved before the log failed
-    await expect(noLog.service.suggest(input)).resolves.toEqual(
-      NO_ANSWER.RANKED,
+    const failed = await noLog.service.suggest(input);
+    expect(failed.suggestion).toMatchObject({ faqId: candidates[0].id });
+    await noLog.service.flushTraces();
+    // 写得慢：最多等 SUGGEST_LOG_WAIT_MS，然后留在后台写完
+    expect(SUGGEST_LOG_WAIT_MS).toBe(250);
+    const slow = setup();
+    let finish = (): void => undefined;
+    slow.log.record.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
     );
+    const startedAt = Date.now();
+    const answered = await slow.service.suggest(input);
+    expect(answered.suggestion).toMatchObject({ faqId: candidates[0].id });
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    finish();
+    await slow.service.flushTraces();
   });
 
   it('allows 10 suggestions per learner per hour, then returns null', async () => {
@@ -932,14 +952,16 @@ describe('Helpdesk suggest: model choice', () => {
       expect(context.model).not.toHaveProperty('thinking');
   });
 
-  it('does not think by default; cuts the thinking off at 6.3 s, gives a thinking chat 8 s in all for its thinking-off backup, and 3.5 s with thinking off', () => {
+  it('does not think by default; cuts the thinking off at 6.3 s; a v5 chat gets 8 s in all, thinking or not; a ticket submit keeps 3.5 s', () => {
     // 用户 2026-10-30：思考截在 6.3 秒（盲评 high 档 p95 6.3 秒、p99 12.6 秒），同时发不思考的后备
     expect(SUGGEST_THINKING_CUTOFF_MS).toBe(6_300);
     expect(SUGGEST_THINKING_DEADLINE_MS).toBe(8_000);
+    // 2026-11-09：3.5 秒是给提交工单定的（Portal 等 4 秒）；Portal 聊天等 16 秒，聊天 8 秒
+    expect(SUGGEST_CHAT_DEADLINE_MS).toBe(8_000);
     expect(suggestLimits(true, {})).toEqual({
       thinking: 'off',
-      deadlineMs: 3_500,
-      stepMs: 3_000,
+      deadlineMs: 8_000,
+      stepMs: 8_000,
     });
     expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'high' })).toEqual({
       thinking: 'high',
@@ -955,8 +977,8 @@ describe('Helpdesk suggest: model choice', () => {
     });
     expect(suggestLimits(true, { HELPDESK_SUGGEST_THINKING: 'off' })).toEqual({
       thinking: 'off',
-      deadlineMs: 3_500,
-      stepMs: 3_000,
+      deadlineMs: 8_000,
+      stepMs: 8_000,
     });
     expect(suggestLimits(false, {})).toEqual({
       deadlineMs: 3_500,

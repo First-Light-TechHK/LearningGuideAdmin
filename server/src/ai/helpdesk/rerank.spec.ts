@@ -169,9 +169,49 @@ describe('rerankedSource (only findCandidates changes)', () => {
     ]);
   });
 
-  it('returns the retrieval result unchanged when the reranker fails', async () => {
-    const ranked = rerankedSource(qa, () => Promise.resolve(null), 1);
-    await expect(ranked.findCandidates(search)).resolves.toBe(found);
+  it('returns the retrieval result unchanged when the reranker fails, and says the rerank layer was skipped', async () => {
+    const degraded = jest.fn();
+    const ranked = rerankedSource(qa, () => Promise.resolve(null), 1, {
+      degraded,
+    });
+    await expect(ranked.findCandidates(search)).resolves.toEqual(found);
+    expect(degraded.mock.calls).toEqual([['rerank']]);
+  });
+
+  it('keeps the vector hits when the reranker fails: lexical and vector cards take turns, within the lexical limit (2026-11-09)', async () => {
+    const degraded = jest.fn();
+    const ranked = rerankedSource(
+      {
+        ...qa,
+        findVectorCandidates: () =>
+          Promise.resolve([card(2), card(8), card(9)]),
+      },
+      () => Promise.resolve(null),
+      2,
+      { degraded },
+    );
+    const out = await ranked.findCandidates({ ...search, limit: 4 });
+    // 字词 1、2、3；向量里新的 8、9：一边一张，至多 limit 张，不带 rerankScore
+    expect(out.map((c) => c.id)).toEqual([
+      card(1).id,
+      card(8).id,
+      card(2).id,
+      card(9).id,
+    ]);
+    expect(out.every((c) => c.rerankScore === undefined)).toBe(true);
+    expect(degraded.mock.calls).toEqual([['rerank']]);
+  });
+
+  it('says nothing was skipped when both layers worked', async () => {
+    const degraded = jest.fn();
+    const ranked = rerankedSource(
+      { ...qa, findVectorCandidates: () => Promise.resolve([]) },
+      (_, docs) => Promise.resolve(docs.map(() => 0.5)),
+      null,
+      { degraded },
+    );
+    await ranked.findCandidates(search);
+    expect(degraded).not.toHaveBeenCalled();
   });
 
   it('reranks the pool of retrieval candidates plus the vector top cards (deduplicated), asking for RERANK_LIMITS.vectorPool', async () => {
@@ -194,15 +234,24 @@ describe('rerankedSource (only findCandidates changes)', () => {
     expect(out.map((c) => c.id)).toEqual([card(7).id, card(1).id]);
   });
 
-  it('a failing vector side leaves the retrieval candidates', async () => {
-    const ranked = rerankedSource(
-      { ...qa, findVectorCandidates: () => Promise.reject(new Error('x')) },
-      (_, docs) => Promise.resolve(docs.map(() => 0.5)),
-      null,
-    );
-    expect((await ranked.findCandidates(search)).map((c) => c.id)).toEqual(
-      found.map((c) => c.id),
-    );
+  it('a failing vector side leaves the retrieval candidates and says the vector layer was skipped', async () => {
+    // 抛错，或来源自己说这一路没生效（null：超时、还没算好）
+    for (const findVectorCandidates of [
+      () => Promise.reject(new Error('x')),
+      () => Promise.resolve(null),
+    ]) {
+      const degraded = jest.fn();
+      const ranked = rerankedSource(
+        { ...qa, findVectorCandidates },
+        (_, docs) => Promise.resolve(docs.map(() => 0.5)),
+        null,
+        { degraded },
+      );
+      expect((await ranked.findCandidates(search)).map((c) => c.id)).toEqual(
+        found.map((c) => c.id),
+      );
+      expect(degraded.mock.calls).toEqual([['vector']]);
+    }
   });
 
   it('with search.context, also asks vectors and the reranker with "previous → message" and keeps the higher score per card', async () => {

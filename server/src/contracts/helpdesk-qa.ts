@@ -143,14 +143,15 @@ export interface HelpdeskQaSource {
   releaseVersion?(): Promise<number | null>;
   /**
    * 分级 L1 的向量那一路（精排开着时才用）：发布版本里和问题最像的至多 limit 个 answer / choice 节点
-   * （含非入口），按相似度从高到低，score 为相似度。没有向量模型、还没算好、失败或超时 → []。
+   * （含非入口），按相似度从高到低，score 为相似度。没有向量模型、没有发布版本、问题为空 → []；
+   * 这一路本该有结果却没生效（还没算好、失败或超时）→ null，调用方记一次降级（2026-11-09）。
    * 可选：没有向量检索的来源不必提供。
    */
   findVectorCandidates?(search: {
     locale: string;
     text: string;
     limit: number;
-  }): Promise<HelpdeskQaCandidate[]>;
+  }): Promise<HelpdeskQaCandidate[] | null>;
 }
 
 // ---------------------------------------------------------------------------

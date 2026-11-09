@@ -943,8 +943,11 @@ Common Questions（BackOffice 自己判定）：400 `INVALID_INPUT`、404 `QUEST
 | L3 小模型 | 挑卡、解释、寒暄（只分类 / 抽取，参数枚举锁定；守卫不过 → 退回固定流程） | gemma-4-31b，不开思考 | `HELPDESK_SUGGEST_MODEL`、`HELPDESK_SUGGEST_THINKING` |
 
 - 所有调用经 OpenRouter，按价格选最便宜的提供方（`provider.sort = price`）；BackOffice 的「AI 按指令改卡」与缺口挖掘用同一个 L3 模型。
-- 向量：发布新版本时自动算；服务启动时把线上版本缺的向量补上（按文本哈希，算过的不再算，写入 `ON CONFLICT DO NOTHING`），部署不用手动跑 `helpdesk:faq-vectors`。向量或精排失败、超时 → 退回字词检索 / 原顺序，学员照样拿到候选。
-- 模型输出健康：近 60 分钟任一步非法调用、被守卫退回或出错超过 5%（至少 20 次）→ 日志 WARN `model_output_degraded`；`GET /api/helpdesk/agent-runs/health?hours=24` 可查。不做页面（PRD 没有设计）。
+- 向量：发布新版本时自动算；服务启动时把线上版本缺的向量补上（按文本哈希，算过的不再算，写入 `ON CONFLICT DO NOTHING`），部署不用手动跑 `helpdesk:faq-vectors`。向量或精排失败、超时 → 退回字词检索 / 原顺序，用户照样拿到候选。
+- 降级留痕（2026-11-09）：向量那一路没生效（超时、出错、这一版向量还没算好）或精排失败时，检索步的 `step/end.output.degraded` 记下没生效的层（`vector` / `rerank`），并计入模型输出健康的 failures（没配向量模型不算）；精排失败时已取回的向量命中不丢，和字词候选一边一张轮着排，条数不超过字词那一路的 limit。
+- 期限（2026-11-09，owner：「三点五秒可以宽限」）：v5 聊天整次 8 秒（`SUGGEST_CHAT_DEADLINE_MS`，思考与否都一样；Portal 聊天等 16 秒），模型那一步拿剩下的全部时间；提交工单仍是 3.5 秒（Portal 提交只等 4 秒）。依据：11-09 评测逐轮记录里超过 3.5 秒的 199 轮有 179 轮是对的，超过 8 秒的只有 0%–3.3%。发布检查按聊天口径问，超时即 8 秒。
+- 建议日志（`helpdesk_suggestions`）不再挡答案（2026-11-09）：返回前最多等 250 ms（`SUGGEST_LOG_WAIT_MS`），写得慢留在后台写完，写失败只告警；答案照常返回。
+- 模型输出健康：近 60 分钟任一步非法调用、被守卫退回或出错（含上面的检索降级）超过 5%（至少 20 次）→ 日志 WARN `model_output_degraded`；`GET /api/helpdesk/agent-runs/health?hours=24` 可查。不做页面（PRD 没有设计）。
 - 依据（v3.3 卡库 685 张，2026-11-03 终测，Claude 盲评，是 AI 评不是人工）：错卡 S650 test 0.19% / 多轮 0.91% / 闲聊 1.20%；每答 ¥0.0010 / 0.0023 / 0.0019；p50 / p95 1.2 / 3.6 秒、2.4 / 5.6 秒、2.2 / 4.7 秒。多轮集用于诊断过，数字偏乐观。
 
 ### 4A.18 其它 Helpdesk 文档（2026-11-05）

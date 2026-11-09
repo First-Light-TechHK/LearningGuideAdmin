@@ -12,7 +12,7 @@ import { MemoryRateLimitStore } from '../rate-limit.service';
 import {
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
-  SUGGEST_DEADLINE_MS,
+  SUGGEST_CHAT_DEADLINE_MS,
   SUGGEST_THINKING_CUTOFF_MS,
   SUGGEST_THINKING_DEADLINE_MS,
 } from './helpdesk-suggest.service';
@@ -1108,7 +1108,7 @@ describe('v5 without a model call', () => {
       }
       const { service } = hedged({
         thinking: 'off',
-        quickTakes: SUGGEST_DEADLINE_MS + 1,
+        quickTakes: SUGGEST_CHAT_DEADLINE_MS + 1,
       });
       expect(await ask(service, chat('paid'))).toMatchObject({
         kind: 'no_match',
@@ -1520,6 +1520,39 @@ describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, on by default)', 
     const spec = specOf(run, 'pick_faq');
     const sent = JSON.parse(spec!.prompt) as { candidates: { id: string }[] };
     expect(sent.candidates.map((c) => c.id)).toEqual([FAILED.id, RESET.id]);
+  });
+
+  it('a failed rerank is written on the retrieve step (output.degraded) and counts as a step failure in model health (2026-11-09)', async () => {
+    rerankWith(null);
+    const { service, events } = setup({ env: ENV });
+    const runId = id(710);
+    await service.suggest({ ...chat('payment problem'), runId });
+    await service.flushTraces();
+    const steps = (await events.read(runId)).filter(
+      (e) => e.type === 'step/end' && e.data.name === 'retrieve',
+    );
+    expect(steps).toHaveLength(1);
+    expect((steps[0].data.output as JsonObject).degraded).toEqual(['rerank']);
+    const health = await events.stepHealth(new Date(0));
+    expect(health.find((row) => row.step === 'retrieve')).toMatchObject({
+      total: 1,
+      failures: 1,
+    });
+    // 精排正常时不记
+    jest.restoreAllMocks();
+    rerankWith([0.5, 0.9, 0.85]);
+    const fine = setup({ env: ENV });
+    await fine.service.suggest({ ...chat('payment problem'), runId: id(711) });
+    await fine.service.flushTraces();
+    const output = (await fine.events.read(id(711))).find(
+      (e) => e.type === 'step/end' && e.data.name === 'retrieve',
+    )?.data.output as JsonObject;
+    expect(output).not.toHaveProperty('degraded');
+    expect(
+      (await fine.events.stepHealth(new Date(0))).find(
+        (row) => row.step === 'retrieve',
+      ),
+    ).toMatchObject({ failures: 0 });
   });
 
   it('never answers directly when a card is on screen (follow-ups need the model)', async () => {

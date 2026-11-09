@@ -512,6 +512,8 @@ export type FaqVectorSearch = {
     text: string,
     signal?: AbortSignal,
   ): Promise<FaqVectorHit[] | null>;
+  /** 配了向量模型没有（没配不算降级：rank 的 null 这时是「这一层本来就关着」）。不给 = 配了。 */
+  available?(): boolean;
   /** 先把这一版的向量读进内存（启动时调；不算问题向量）。没有模型 → 什么都不做。 */
   warm?(release: number): Promise<void>;
   /** 内存占用：留着几版、共几条不同的向量、约多少字节（报告和监控用）。 */
@@ -830,10 +832,13 @@ export function createFaqVectorSearch(deps: {
     return out;
   }
 
+  const available = () => deps.embedder() !== null;
   return {
     rank: (release, raw, signal) => rank(release, raw, signal),
+    available,
     withEmbedder: (wrap) => ({
       rank: (release, raw, signal) => rank(release, raw, signal, wrap),
+      available,
       texts,
     }),
     texts,

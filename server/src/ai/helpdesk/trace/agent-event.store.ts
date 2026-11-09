@@ -79,10 +79,12 @@ function healthOf(data: JsonObject) {
     guardFallback:
       guard?.result === 'fallback' &&
       !(NOT_GUARD_REJECTIONS as readonly string[]).includes(reason),
+    // output.degraded：检索步里没生效的层（向量超时、精排失败），已退回别的路但算一次 failure
     failure:
       data.outcome === 'error' ||
       data.outcome === 'aborted' ||
-      data.error !== undefined,
+      data.error !== undefined ||
+      (Array.isArray(output?.degraded) && output.degraded.length > 0),
   };
 }
 
@@ -287,7 +289,9 @@ export class PrismaAgentEventLog implements AgentEventLog {
              count(*) FILTER (WHERE data->'output'->'guard'->>'result' = 'fallback'
                AND NOT (COALESCE(data->'output'->'guard'->>'reason', '') = ANY(${excluded}::text[])))::int
                AS "guardFallbacks",
-             count(*) FILTER (WHERE data->>'outcome' IN ('error', 'aborted') OR data ? 'error')::int
+             count(*) FILTER (WHERE data->>'outcome' IN ('error', 'aborted') OR data ? 'error'
+               OR (jsonb_typeof(data->'output'->'degraded') = 'array'
+                   AND jsonb_array_length(data->'output'->'degraded') > 0))::int
                AS failures
         FROM helpdesk_agent_events
        WHERE type = 'step/end' AND time >= ${since}

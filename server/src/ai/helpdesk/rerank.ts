@@ -190,15 +190,36 @@ export function cachedReranker(inner: Reranker, model: string): Reranker {
 const rerankDocument = (c: HelpdeskQaCandidate, withContext: boolean) =>
   `${withContext && c.under ? `${c.under} → ` : ''}${c.question}\n${c.answer.slice(0, RERANK_LIMITS.answerChars)}`;
 
+/** 这一次检索里没生效的层（超时或出错，已退回别的路）。 */
+export type RetrievalLayer = 'vector' | 'rerank';
+
+/** 精排失败时：字词候选与向量命中一边一张轮着排（字词在前），不带 rerankScore。 */
+function interleave(
+  lexical: HelpdeskQaCandidate[],
+  vector: HelpdeskQaCandidate[],
+): HelpdeskQaCandidate[] {
+  const out: HelpdeskQaCandidate[] = [];
+  for (let i = 0; i < Math.max(lexical.length, vector.length); i += 1) {
+    if (lexical[i]) out.push(lexical[i]);
+    if (vector[i]) out.push(vector[i]);
+  }
+  return out;
+}
+
 /**
  * 候选按精排分数从高到低重排（同分保持原顺序），每张带上 rerankScore，至多留 keep 张。
- * 只改 findCandidates；精排失败就原样返回。
+ * 只改 findCandidates。降级不再是静默的（2026-11-09）：向量那一路失败或超时、精排失败，都经
+ * options.degraded 报出来（检索步记进 output.degraded，计入模型健康的 failures）；精排失败时
+ * 已经取回的向量命中不丢，和字词候选轮着排，条数不超过字词那一路要的 limit。
  */
 export function rerankedSource(
   qa: HelpdeskQaSource,
   reranker: Reranker,
   keep: number | null,
-  options: { withContext?: boolean } = {},
+  options: {
+    withContext?: boolean;
+    degraded?: (layer: RetrievalLayer) => void;
+  } = {},
 ): HelpdeskQaSource {
   return {
     ...qa,
@@ -217,20 +238,28 @@ export function rerankedSource(
                 text,
                 limit: RERANK_LIMITS.vectorPool,
               })
-              .catch(() => [])
-          : Promise.resolve([]);
+              .then(
+                (hits) => {
+                  // null = 这一路没生效（超时、出错或向量还没算好）
+                  if (hits === null) options.degraded?.('vector');
+                  return hits ?? [];
+                },
+                () => {
+                  options.degraded?.('vector');
+                  return [] as HelpdeskQaCandidate[];
+                },
+              )
+          : Promise.resolve([] as HelpdeskQaCandidate[]);
       const [retrieved, vector, vectorWithPrevious] = await Promise.all([
         qa.findCandidates(search),
         vectorOf(search.text),
         withPrevious ? vectorOf(withPrevious) : Promise.resolve([]),
       ]);
       const seen = new Set(retrieved.map((c) => c.id));
-      const found = [
-        ...retrieved,
-        ...[...vector, ...vectorWithPrevious].filter(
-          (c) => !seen.has(c.id) && seen.add(c.id),
-        ),
-      ];
+      const vectorOnly = [...vector, ...vectorWithPrevious].filter(
+        (c) => !seen.has(c.id) && seen.add(c.id),
+      );
+      const found = [...retrieved, ...vectorOnly];
       if (found.length === 0) return found;
       const documents = found.map((c) =>
         rerankDocument(c, options.withContext ?? false),
@@ -243,7 +272,13 @@ export function rerankedSource(
         own && previous
           ? own.map((score, index) => Math.max(score, previous[index]))
           : (own ?? previous);
-      if (!scores) return retrieved;
+      if (!scores) {
+        options.degraded?.('rerank');
+        return interleave(retrieved, vectorOnly).slice(
+          0,
+          Math.max(search.limit, retrieved.length),
+        );
+      }
       const ranked = found
         .map((c, index) => ({ c, index, score: scores[index] }))
         .sort((a, b) => b.score - a.score || a.index - b.index)

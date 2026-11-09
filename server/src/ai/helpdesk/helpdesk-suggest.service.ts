@@ -56,6 +56,7 @@ import {
   openRouterReranker,
   rerankConfig,
   rerankedSource,
+  type RetrievalLayer,
   type Reranker,
 } from './rerank';
 import { HELPDESK_DEFAULTS } from '../../contracts/helpdesk-defaults';
@@ -80,8 +81,8 @@ import {
  * 2. retrieve：从已发布 FAQ 里取候选（全文 + 关键词 + 同类加权，前 8 个），没有候选不调模型；
  * 3. pick_faq：一个 pi Agent 步（pi-agent-core 原样），唯一的工具 pick_faq 的 faqId 只能是候选 id
  *    或 none；模型写在代码里（DEFAULT_MODEL），HELPDESK_SUGGEST_MODEL 只在要换模型时才设，
- *    key / 模型 / base URL 每次现读；3 秒 AbortSignal、不重试，且整次推荐不超过 3.5 秒
- *    （Portal 等 4 秒），过期的答案不返回、不记 faq_id；没有 API key、任何错误都返回 null
+ *    key / 模型 / base URL 每次现读；提交工单 3 秒 AbortSignal、不重试，且整次推荐不超过 3.5 秒
+ *    （Portal 等 4 秒）；v5 聊天整次 8 秒（Portal 聊天等 16 秒）；过期的答案不返回、不记 faq_id；没有 API key、任何错误都返回 null
  *    （绝不阻塞学员提交工单）；v5 聊天缺省开思考（high），思考最多 6.3 秒，同时发一个不思考的后备，
  *    整次最多 8 秒（suggestLimits）；
  * 4. validate → answer：再核一遍是候选之一，返回库里的原答案，模型从不写给学员看的文字；
@@ -119,6 +120,15 @@ export const SUGGEST_THINKING_CUTOFF_MS = 6_300;
  * （Portal 显示「思考中」）；提交工单不思考，仍是 3.5 秒。
  */
 export const SUGGEST_THINKING_DEADLINE_MS = 8_000;
+/**
+ * v5 聊天不开思考时的总期限（2026-11-09）：3.5 秒是给提交工单定的（Portal 那边等 4 秒），而 Portal 聊天
+ * 等 16 秒（ADMIN_CHAT_SUGGEST_TIMEOUT_MS）。11-09 评测的逐轮记录里，超过 3.5 秒的 199 轮有 179 轮是对的，
+ * 超过 8 秒的只有 0%–3.3%：聊天沿用 3.5 秒等于把对的答案作废成「没找到」。模型那一步拿剩下的全部时间。
+ * 一句多问再多给 MULTI_ASK.extraMs，仍在 Portal 的 16 秒内。
+ */
+export const SUGGEST_CHAT_DEADLINE_MS = 8_000;
+/** 返回答案前最多等建议日志这么久（见 recordWithin）。 */
+export const SUGGEST_LOG_WAIT_MS = 250;
 /**
  * 聊天的缺省思考档位：分级方案的小模型不开思考（HELPDESK_DEFAULTS；2026-10-30 DeepSeek 时是 high）。
  */
@@ -258,8 +268,9 @@ export function suggestThinking(env: NodeJS.ProcessEnv): ThinkingSetting {
 
 /**
  * 这一次的思考档位、总期限、模型那一步的时限，以及思考那一路的截断（有它就同时发不思考的后备）。
- * 只有 v5 聊天思考：提交工单（Portal 最多等 5 秒、绝不挡提交）与没有 context 的旧聊天不思考
- * （不带 thinking，runner 发 effort none）。
+ * 只有 v5 聊天思考：提交工单（Portal 最多等 4 秒、绝不挡提交）与没有 context 的旧聊天不思考
+ * （不带 thinking，runner 发 effort none），期限 3.5 秒。v5 聊天不管思考不思考，总期限都是 8 秒
+ * （SUGGEST_CHAT_DEADLINE_MS）。
  */
 export function suggestLimits(
   v5: boolean,
@@ -270,11 +281,15 @@ export function suggestLimits(
   stepMs: number;
   cutoffMs?: number;
 } {
-  const quick = { deadlineMs: SUGGEST_DEADLINE_MS, stepMs: SUGGEST_TIMEOUT_MS };
-  if (!v5) return quick;
+  if (!v5)
+    return { deadlineMs: SUGGEST_DEADLINE_MS, stepMs: SUGGEST_TIMEOUT_MS };
   const thinking = suggestThinking(env);
   return thinking === 'off'
-    ? { thinking, ...quick }
+    ? {
+        thinking,
+        deadlineMs: SUGGEST_CHAT_DEADLINE_MS,
+        stepMs: SUGGEST_CHAT_DEADLINE_MS,
+      }
     : {
         thinking,
         deadlineMs: SUGGEST_THINKING_DEADLINE_MS,
@@ -463,6 +478,26 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
     );
     this.writing.add(done);
     void done.finally(() => this.writing.delete(done));
+  }
+
+  /**
+   * 写这一次的建议日志：最多等 SUGGEST_LOG_WAIT_MS，写得慢就留在后台写完，写失败只告警。
+   * 答案已经定下来了：数据库抖一下不该把选对的卡变成「出错、没有答案」（2026-11-09）。
+   * 行没写成时，之后给这次回答报结果（recordOutcome）是 404，Portal 那边本来就不拦用户。
+   */
+  private async recordWithin(
+    row: Parameters<HelpdeskSuggestionLog['record']>[0],
+  ): Promise<void> {
+    const write = (async () => this.deps.log.record(row))();
+    this.background('Suggestion log write failed', write);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      write.catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, SUGGEST_LOG_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
   }
 
   /** 等后台的事件写完（测试、评测与停机用）。 */
@@ -804,6 +839,8 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
           apiKey,
           baseUrl: env.OPENROUTER_BASE_URL?.trim() || DEFAULT_BASE_URL,
         });
+      // 这一轮没生效的检索层（向量超时、精排失败）：检索步记进 output.degraded
+      const degradedLayers = new Set<RetrievalLayer>();
       const ranked =
         rerank && reranker
           ? rerankedSource(
@@ -812,7 +849,10 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
                 ? this.deps.wrapReranker(reranker, rerank.model)
                 : reranker,
               rerank.keep,
-              { withContext: cardContext },
+              {
+                withContext: cardContext,
+                degraded: (layer) => degradedLayers.add(layer),
+              },
             )
           : this.deps.qa;
       const qa = hedged ? sharedLookups(ranked) : ranked;
@@ -831,6 +871,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
             queryContext,
             multiAsk,
             extendDeadline,
+            degraded: () => [...degradedLayers].sort(),
           }),
           initialAssistState({
             locale: input.locale,
@@ -973,7 +1014,8 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
       if (assisted) assisted = { ...assisted, turn: NO_MATCH_TURN };
     }
     const turn = assisted?.turn;
-    await this.deps.log.record({
+    const releaseVersion = assisted && turn ? await result.release : null;
+    await this.recordWithin({
       id: runId,
       learnerId: input.learnerId,
       locale: input.locale,
@@ -996,7 +1038,7 @@ export class HelpdeskSuggestService implements OnModuleDestroy {
               guard: turn.guard,
               covered: turn.covered,
               sessionId: input.context?.sessionId ?? null,
-              releaseVersion: (await result.release) ?? null,
+              releaseVersion: releaseVersion ?? null,
             },
           }
         : {}),

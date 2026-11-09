@@ -362,6 +362,11 @@ export function assistWorkflow(deps: {
   multiAsk?: boolean;
   /** 真拆出了几件事时，这一轮的总期限多给 MULTI_ASK.extraMs（服务的 left 跟着变）。 */
   extendDeadline?: (ms: number) => void;
+  /**
+   * 这一轮检索里没生效的层（rerankedSource 报的 vector / rerank）：记进检索步的 output.degraded，
+   * 模型健康把带它的一步算作 failure（降级不再是静默的，2026-11-09）。
+   */
+  degraded?: () => readonly string[];
 }): WorkflowTemplate<AssistState> {
   const findNode = async (state: AssistState, id: string) =>
     state.candidates.find((c) => c.id === id) ??
@@ -407,6 +412,9 @@ export function assistWorkflow(deps: {
           ]);
           // 条数由来源定：缺省至多 limit；HELPDESK_LOCATOR=hybrid 时结构排序的前 3 张另加在最前面
           const candidates = found.filter((c) => c.id !== shown?.id);
+          const layers = deps.degraded?.() ?? [];
+          const degraded: JsonObject =
+            layers.length > 0 ? { degraded: [...layers] } : {};
           state = { ...state, split };
           // 分级 L2：第一句（屏幕上没有卡片）且精排有把握 → 直接给第一名，不问模型（固定开头结尾照旧）
           const direct = nodeId
@@ -423,6 +431,7 @@ export function assistWorkflow(deps: {
               })),
               shown: null,
               direct: direct.id,
+              ...degraded,
             };
             return {
               state: {
@@ -451,6 +460,7 @@ export function assistWorkflow(deps: {
                   : {}),
               })),
               shown: shown?.id ?? null,
+              ...degraded,
             },
           };
         },
