@@ -11,6 +11,7 @@ import type {
   ReleaseEvalSession,
 } from '../../../../../contracts/helpdesk-release-eval';
 import {
+  markRelabel,
   scoreModelAnswer,
   type EvalQuestion,
   type ModelEvalScore,
@@ -19,8 +20,10 @@ import {
 /**
  * 发布前检查的跑题器（release check v2）：每题同时问候选版本与上线版本（逐题对比；上线版本的答案几乎
  * 全在缓存里，不再花钱），然后：
- * - 复问：候选版本出了错卡、上线版本这题没错（新出的错）→ 不用缓存再问 reaskTimes 次，
- *   至少 reaskConfirm 次（含第一次）都错才算真的变差（模型偶尔抖一下不冤枉卡片）；
+ * - 复问：比线上差的题——候选版本出了错卡而上线版本这题没错（新出的错），或上线版本答对而候选版本没答对
+ *  （没出卡、追问、超时；2026-11-09 加：以前只数错卡，答对变成没答上不拦）→ 不用缓存再问 reaskTimes 次，
+ *   至少 reaskConfirm 次（含第一次）仍然如此才算真的变差（模型偶尔抖一下不冤枉卡片）；
+ * - 待重标：按标注是错卡、但出的是这一版新加的卡（fresh）→ 不算错、不复问，单独数（questions.ts markRelabel）；
  * - 漂移抽查：从命中缓存的题里按 (题号, 版本) 的哈希挑 driftSample 道，不读缓存重问一遍（写回新结果），
  *   结果和缓存给的不一样的超过 driftMax 道 → 缓存可能过期，这次检查不算数。
  * 花费到 budgetUsd 就停；被顶替（progress 返回 false / signal）就停。
@@ -46,8 +49,11 @@ export type QuestionResult = {
   q: EvalQuestion;
   candidate: AskRecord;
   live: AskRecord | null;
-  /** 新出的错：复问几次里错了几次（含第一次）；不是新出的错 = null。 */
-  reasked: { wrong: number; of: number } | null;
+  /**
+   * 比线上差的题复问的结果（含第一次）：几次出了错卡（wrong）、几次没答对（notRight）；没复问 = null。
+   * 哪一种变差由 policy.ts 按两个版本第一次的判分分（newlyWrong / lostRight）。
+   */
+  reasked: { wrong: number; notRight: number; of: number } | null;
 };
 
 export type RunResult = {
@@ -102,6 +108,8 @@ export async function runReleaseQuestions(input: {
   questions: readonly EvalQuestion[];
   candidate: ReleaseEvalSession;
   live: ReleaseEvalSession | null;
+  /** 这一版有、上线版本没有的卡（节点 id）：出了它们而被判错的题记成待重标；不给 = 不适用。 */
+  fresh?: ReadonlySet<string>;
   version: number;
   limits: RunLimits;
   signal?: AbortSignal;
@@ -153,7 +161,15 @@ export async function runReleaseQuestions(input: {
     spend.embed += got.spend?.embed ?? 0;
     unpricedCalls += got.unpricedCalls;
     if (got.cache) addAskStats(cache, got.cache);
-    return { q, got, score: scoreModelAnswer(q, got) };
+    const score = scoreModelAnswer(q, got);
+    return {
+      q,
+      got,
+      score:
+        bucket === 'live' || !input.fresh
+          ? score
+          : markRelabel(score, got, input.fresh),
+    };
   };
 
   let total = input.questions.length;
@@ -178,25 +194,35 @@ export async function runReleaseQuestions(input: {
     await tick();
   });
 
-  // 2. 新出的错：不用缓存再问几次
-  const newlyWrong = results
-    .filter(
-      (r) =>
-        r.candidate.score.wrongCard &&
-        r.live !== null &&
-        !r.live.score.wrongCard &&
-        !r.live.score.error,
-    )
-    .slice(0, limits.reaskMax);
-  total += newlyWrong.length * limits.reaskTimes;
-  await pool(newlyWrong, limits.concurrency, shouldStop, async (r) => {
-    let wrong = 1;
+  // 2. 比线上差的题：不用缓存再问几次（新出的错在前：它一道就拦；至多 reaskMax 道）
+  const comparable = (r: QuestionResult) =>
+    r.live !== null && !r.live.score.error && !r.candidate.score.error;
+  const newlyWrong = results.filter(
+    (r) =>
+      comparable(r) && r.candidate.score.wrongCard && !r.live!.score.wrongCard,
+  );
+  const lostRight = results.filter(
+    (r) =>
+      comparable(r) &&
+      r.q.expect === 'answer' &&
+      r.live!.score.right &&
+      !r.candidate.score.right &&
+      !r.candidate.score.relabel &&
+      !newlyWrong.includes(r),
+  );
+  const worse = [...newlyWrong, ...lostRight].slice(0, limits.reaskMax);
+  total += worse.length * limits.reaskTimes;
+  await pool(worse, limits.concurrency, shouldStop, async (r) => {
+    let wrong = r.candidate.score.wrongCard ? 1 : 0;
+    let notRight = 1;
     for (let i = 0; i < limits.reaskTimes && !shouldStop(); i += 1) {
       const again = await ask(input.candidate, r.q, 'bypass', 'checks');
       if (again.score.wrongCard) wrong += 1;
+      // 复问时检查自己出了错（限流等）不算学员没答上；超时算
+      if (!again.score.right && !again.score.error) notRight += 1;
       await tick();
     }
-    r.reasked = { wrong, of: 1 + limits.reaskTimes };
+    r.reasked = { wrong, notRight, of: 1 + limits.reaskTimes };
   });
 
   // 3. 漂移抽查：命中缓存的题里挑几道，不读缓存重问

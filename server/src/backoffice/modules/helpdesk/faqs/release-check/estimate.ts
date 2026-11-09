@@ -7,11 +7,14 @@ import type { EvalQuestion } from './questions';
  *   缓存不中，要真问；2026-11-05 实测一张卡中位数在 37 道题的候选里（p90 65）。
  * - paidQuestionUsd：上次真问的题平均每道花多少（模型 + 精排 + 问句向量）。
  * 估计 = 候选里有改动卡的题（按卡相加，可能重复数，所以封顶为单问题数）+ 标的卡改了的题 + 追问（只问动过的父卡，
- * 都要真问）+ 漂移抽查。上线版本的答案在缓存里，不算。上次没有记录（v2 之前的检查、第一次检查）→ 只给题数和上限。
+ * 都要真问）+「旧卡在屏」的题（每版都问同一批，按单问里要真问的比例估）+ 漂移抽查。上线版本的答案在缓存里，不算。
+ * 上次没有记录（v2 之前的检查、第一次检查）→ 只给题数和上限。
  */
 export type FaqCheckEstimate = {
   questions: number;
+  /** 屏幕上没有卡的题。 */
   single: number;
+  /** 屏幕上有卡的题：追问（父卡在屏）与「旧卡在屏问新问题」。 */
   followups: number;
   /** 这一版相对上线版本动过的卡（字段、问法，或删了）。 */
   touchedCards: number;
@@ -60,7 +63,8 @@ export function estimateCheck(input: {
   driftSample: number;
   budgetUsd: number;
 }): FaqCheckEstimate {
-  const single = input.questions.filter((q) => q.set !== 'followup');
+  const single = input.questions.filter((q) => q.screen === null);
+  const screens = input.questions.filter((q) => q.set === 'screen').length;
   const followups = input.questions.length - single.length;
   const part = modelPartOf(input.liveReport);
   const pool = part?.candidatePool;
@@ -83,10 +87,14 @@ export function estimateCheck(input: {
   for (const id of input.touched) inPool += count(pool[id]);
   const changed = single.filter((q) => q.changed).length;
   const paidSingle = Math.min(single.length, inPool + changed);
+  const paidScreens =
+    single.length > 0
+      ? Math.ceil((screens * paidSingle) / single.length)
+      : screens;
   // 漂移抽查每次都不读缓存重问 driftSample 道（什么都没改也问）
   const paid = Math.min(
     input.questions.length,
-    paidSingle + followups + input.driftSample,
+    paidSingle + (followups - screens) + paidScreens + input.driftSample,
   );
   return {
     ...base,

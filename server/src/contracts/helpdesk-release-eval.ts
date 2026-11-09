@@ -45,6 +45,11 @@ export type ReleaseEvalAnswer = {
    * 下次检查前据此估计改一张卡要重问几道（答题器报了才有）。
    */
   candidates?: string[];
+  /**
+   * 这一问检索时该生效却没生效的层（vector、rerank；见 ai/helpdesk/rerank.ts 的降级留痕）；都生效了不写。
+   * 降级的题太多 = 这次检查问的不是线上那条流程，不算数（release-check/policy.ts degradedRateMax）。
+   */
+  degraded?: string[];
 };
 
 /** 绑定在一个候选版本上的答题器（快照由发布门给；这一版的向量要先算好）。 */

@@ -27,12 +27,15 @@ function suiteName(locale: Locale, suite: FaqEvalSuite): string {
   return text === key ? suite.label : text
 }
 
-type Limits = { wrongRateMax: number; sliceMin: number } | null
+type Limits = { wrongRateMax: number; sliceMin: number; rightDropMax: number | null; cardWhenNoneMax: number | null } | null
 
 /** 这次检查用的门槛（报告的 receipt）；旧报告没有 → null，界面直接显示服务端的原因。 */
 function limitsOf(report: FaqReleaseEvalReport): Limits {
-  const { wrongRateMax, sliceMin } = report.receipt ?? {}
-  return typeof wrongRateMax === 'number' && typeof sliceMin === 'number' ? { wrongRateMax, sliceMin } : null
+  const { wrongRateMax, sliceMin, rightDropMax, cardWhenNoneMax } = report.receipt ?? {}
+  const optional = (value: unknown) => (typeof value === 'number' ? value : null)
+  return typeof wrongRateMax === 'number' && typeof sliceMin === 'number'
+    ? { wrongRateMax, sliceMin, rightDropMax: optional(rightDropMax), cardWhenNoneMax: optional(cardWhenNoneMax) }
+    : null
 }
 
 /** 套件为什么没过（或为什么只看），按界面语言写；和服务端 policy.ts 判的是同一件事。 */
@@ -46,6 +49,20 @@ function reasonsOf(locale: Locale, suite: FaqEvalSuite, limits: Limits): string[
   if (suite.rule === 'interval' && (m.wrongRateHigh ?? 0) > limits.wrongRateMax) out.push(r('interval', { high: pct(m.wrongRateHigh), max }))
   if (suite.rule === 'point' && !small && (m.wrongRate ?? 0) > limits.wrongRateMax)
     out.push(r('point', { rate: pct(m.wrongRate), max, scored: m.scored ?? 0 }))
+  // 库里没卡的题出卡太多（只有 S650 有这条线；服务端判的，cardWhenNoneOver = 1）
+  if (m.cardWhenNoneOver === 1 && limits.cardWhenNoneMax !== null)
+    out.push(r('cardWhenNone', { rate: pct(m.cardWhenNoneRate), max: pct(limits.cardWhenNoneMax) }))
+  // 答对率比线上掉了（服务端判的，rightDropped = 1；2026-11-09 之前的报告没有）
+  if (m.rightDropped === 1 && limits.rightDropMax !== null)
+    out.push(
+      r('rightDrop', {
+        live: pct(m.liveRightRate),
+        now: pct(m.pairedRightRate),
+        lost: m.lostRight ?? 0,
+        gained: m.gainedRight ?? 0,
+        max: pct(limits.rightDropMax),
+      }),
+    )
   if ((m.confirmedWorse ?? 0) > 0) out.push(r('worse', { count: m.confirmedWorse }))
   if (small) out.push(r('small', { min: limits.sliceMin }))
   return out
@@ -65,6 +82,17 @@ function askLine(locale: Locale, suite: FaqEvalSuite): ReactNode {
         inOrder: m.inOrder ?? 0,
         ordered: m.ordered ?? 0,
       })}
+    </span>
+  )
+}
+
+/** 「旧卡在屏问新问题」套件另报的数：和同样的题不带卡时逐题对照（只看不拦）。别的套件没有 → null。 */
+function screenLine(locale: Locale, suite: FaqEvalSuite): ReactNode {
+  const m = suite.metrics
+  if (typeof m.screenPairs !== 'number') return null
+  return (
+    <span className="hdGraphHint hdReleaseHint">
+      {t(locale, 'helpDesk.releases.report.screen', { pairs: m.screenPairs, changed: m.screenChanged ?? 0, lost: m.screenLost ?? 0 })}
     </span>
   )
 }
@@ -101,6 +129,7 @@ function SuiteTable({ locale, suites, limits }: { locale: Locale; suites: FaqEva
                 </span>
                 {reasons.length > 0 ? <span className="hdGraphHint hdReleaseHint">{reasons.join(sep)}</span> : null}
                 {askLine(locale, suite)}
+                {screenLine(locale, suite)}
               </td>
             </tr>
           )
@@ -131,7 +160,7 @@ function MissTable({ locale, misses }: { locale: Locale; misses: FaqModelMiss[] 
             const label = t(locale, why)
             return (
               <tr key={miss.id}>
-                <td className={miss.why === 'newly_wrong' || miss.why === 'wrong_card' ? 'hdFieldError' : undefined}>
+                <td className={miss.why === 'newly_wrong' || miss.why === 'lost_right' || miss.why === 'wrong_card' ? 'hdFieldError' : undefined}>
                   {label === why ? miss.why : label}
                 </td>
                 <td>

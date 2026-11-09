@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { EVAL_CACHE } from '../../../../../contracts/helpdesk-eval-cache';
 import type { ReleaseEvalAnswer } from '../../../../../contracts/helpdesk-release-eval';
-import { confirmedWorse, type Judgement } from './policy';
+import { confirmedWorse, lostRight, type Judgement } from './policy';
 import type { EvalQuestion } from './questions';
 import type { QuestionResult, RunResult } from './runner';
 import { rate } from './stats';
@@ -10,7 +10,7 @@ import { rate } from './stats';
 /**
  * 发布前检查的报告（release check v2）：界面读的 metrics 键不变（cases、wrongRate、costUsd），
  * 另加套件与切片（suites）、收据（receipt：这次用了什么）与按轻重排好的问题清单（misses）：
- * 新出的错（复问后仍错）→ 其余错卡 → 超时 → 检查出错。
+ * 新出的错（复问后仍错）→ 线上答对这一版没答上（复问后仍然）→ 其余错卡 → 待重标 → 超时 → 检查出错。
  */
 export type ModelEvalMiss = {
   id: string;
@@ -23,7 +23,13 @@ export type ModelEvalMiss = {
   live?: string;
   /** 追问：屏幕上开着的父卡（key）。 */
   onScreen?: string;
-  why: 'newly_wrong' | 'wrong_card' | 'timeout' | 'error';
+  why:
+    | 'newly_wrong'
+    | 'lost_right'
+    | 'wrong_card'
+    | 'relabel'
+    | 'timeout'
+    | 'error';
 };
 
 const label = (q: EvalQuestion, keyOf: Map<string, string>) =>
@@ -50,19 +56,26 @@ export function missesOf(
   confirm: number,
   max: number,
 ): ModelEvalMiss[] {
+  // 超时的题若上线版本答对了，归在「线上答对这一版没答上」里（更重）
   const why = (r: QuestionResult): ModelEvalMiss['why'] | null =>
     confirmedWorse(r, confirm)
       ? 'newly_wrong'
       : r.candidate.score.wrongCard
         ? 'wrong_card'
-        : r.candidate.score.timeout
-          ? 'timeout'
-          : r.candidate.score.error
-            ? 'error'
-            : null;
+        : lostRight(r, confirm)
+          ? 'lost_right'
+          : r.candidate.score.relabel
+            ? 'relabel'
+            : r.candidate.score.timeout
+              ? 'timeout'
+              : r.candidate.score.error
+                ? 'error'
+                : null;
   const order: ModelEvalMiss['why'][] = [
     'newly_wrong',
+    'lost_right',
     'wrong_card',
+    'relabel',
     'timeout',
     'error',
   ];
@@ -120,6 +133,7 @@ export function releaseCheckMetrics(input: {
   judgement: Judgement;
   skipped: number;
   leaked: number;
+  leakedDev: number;
   previousWrongRate: number | null;
 }): Record<string, number> {
   const { run, judgement } = input;
@@ -141,6 +155,7 @@ export function releaseCheckMetrics(input: {
     planned: run.planned,
     skippedCases: input.skipped,
     regressionLeaked: input.leaked,
+    devLeaked: input.leakedDev,
     blindCases: run.results.filter((r) => r.q.set === 'blind').length,
     s650Cases: run.results.filter((r) => r.q.set === 's650').length,
     regressionCases: run.results.filter((r) => r.q.set === 'regression').length,
@@ -148,6 +163,7 @@ export function releaseCheckMetrics(input: {
     followupCases: followups.length,
     followupWrong,
     followupWrongRate: rate(followupWrong, followupScored.length),
+    screenCases: run.results.filter((r) => r.q.set === 'screen').length,
     wrongCards: c.wrong,
     wrongRate: c.wrongRate,
     wrongRateHigh: c.wrongHigh,
@@ -161,7 +177,18 @@ export function releaseCheckMetrics(input: {
     newlyWrong: all.newlyWrong,
     confirmedWorse: all.confirmedWorse,
     fixed: all.fixed,
+    relabel: all.relabel,
+    degraded: all.degraded,
+    lostRight: all.lostRight,
+    gainedRight: all.gainedRight,
     ...(c.liveWrongRate === null ? {} : { liveWrongRate: c.liveWrongRate }),
+    ...(c.liveRightRate === null || c.pairedRightRate === null
+      ? {}
+      : {
+          liveRightRate: c.liveRightRate,
+          pairedRightRate: c.pairedRightRate,
+          rightDrop: c.rightDrop,
+        }),
     ...(input.previousWrongRate === null
       ? {}
       : { previousWrongRate: input.previousWrongRate }),
@@ -200,12 +227,19 @@ export function releaseCheckReceipt(input: {
   questions: readonly EvalQuestion[];
   liveVersion: number | null;
   /** 这次用的门槛（界面按它写原因，不在前端另写一份）。 */
-  limits: { wrongRateMax: number; sliceMin: number };
+  limits: {
+    wrongRateMax: number;
+    sliceMin: number;
+    rightDropMax: number;
+    cardWhenNoneMax: number;
+  };
 }): Record<string, string | number> {
   return {
     model: input.model,
     wrongRateMax: input.limits.wrongRateMax,
     sliceMin: input.limits.sliceMin,
+    rightDropMax: input.limits.rightDropMax,
+    cardWhenNoneMax: input.limits.cardWhenNoneMax,
     questions: input.questions.length,
     questionsHash: questionsHash(input.questions),
     devSet: 'eval-v6-dev',

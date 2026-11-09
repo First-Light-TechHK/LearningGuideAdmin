@@ -264,6 +264,52 @@ describe('release answerer (live pipeline on a candidate release)', () => {
     expect('more' in missed).toBe(false);
   });
 
+  it('says which retrieval layer did not work for a question (the release check does not count a run without them)', async () => {
+    const rerankOn = {
+      ...ENV,
+      HELPDESK_RERANK_MODEL: 'voyageai/rerank-2.5-lite',
+    };
+    const pick = (spec: AgentStepSpec) =>
+      spec.tool.name === 'explain'
+        ? called({ covered: 'no' })
+        : called({ intent: 'question', faqId: RESET.id, confidence: 'sure' });
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    try {
+      // the reranker answers 502: the question is still answered, from the unranked candidates
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(new Response('{}', { status: 502 })),
+      );
+      const failed = await setup(pick, rerankOn, undefined, [RESET, FAILED])
+        .answerer.forRelease({ version: 7, snapshot: {} })
+        .ask({ message: 'forgot my password', locale: 'en-GB' });
+      expect(failed).toMatchObject({
+        kind: 'answer',
+        nodeId: RESET.id,
+        degraded: ['rerank'],
+      });
+      // every layer worked: nothing to say
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              results: [
+                { index: 0, relevance_score: 0.7 },
+                { index: 1, relevance_score: 0.6 },
+              ],
+            }),
+          ),
+        ),
+      );
+      const fine = await setup(pick, rerankOn, undefined, [RESET, FAILED])
+        .answerer.forRelease({ version: 7, snapshot: {} })
+        .ask({ message: 'forgot my password', locale: 'en-GB' });
+      expect(fine.kind).toBe('answer');
+      expect(fine).not.toHaveProperty('degraded');
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it('is not available without an API key, and then answers nothing', async () => {
     const { answerer, run } = setup(() => called({}), {
       HELPDESK_RERANK_MODEL: 'off',

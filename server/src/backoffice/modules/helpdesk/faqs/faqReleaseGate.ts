@@ -67,12 +67,12 @@ export type FaqReleaseEvalReport = {
   candidatePool?: Record<string, number>;
 };
 
-/** 一个套件或切片：gate = 不过就不能发布；track = 只看（「不比线上差」仍由全部题那一项拦）。 */
+/** 一个套件或切片：gate = 不过就不能发布；track = 只看（新出的错在任何套件都拦）。规则见 release-check/policy.ts。 */
 export type FaqEvalSuiteResult = {
   id: string;
   label: string;
   status: 'gate' | 'track';
-  /** interval = 95% 上界；point = 点估计（切片，题够多才算）；paired = 只看比线上新错。界面按它写原因。 */
+  /** interval = 95% 上界；point = 点估计（切片，题够多才算）；paired = 和线上逐题比（新错、答对率）。界面按它写原因。 */
   rule: 'interval' | 'point' | 'paired';
   passed: boolean;
   n: number;

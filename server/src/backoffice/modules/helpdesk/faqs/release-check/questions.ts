@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -17,7 +18,9 @@ import { regressionLeakCheck, type FaqRegressionCase } from '../faqReleaseGate';
  *
  * 每一版都问全部的题（不再抽样）：开发集 eval-v6-dev.jsonl 的 blind（盲出题）与 s650（按卡生成），
  * 加上员工从数据飞轮接受过的回归题。标的卡这一版里没有的跳过（skipped）；回归题就是它那张卡自己的
- * 问题或问法的不问（泄漏，leaked）。同一句话只问一次。测试集（test）从不进来，只留给最终报告。
+ * 问题或问法的不问（泄漏，leaked）；开发集的题也一样（leakedDev，2026-11-09：把错题原句加成金卡的问法，
+ * 下次必过，门就被「教会」了）。跳过与泄漏的题合起来有上限（policy.ts skippedRateMax），覆盖不会悄悄缩小。
+ * 同一句话只问一次。测试集（test）从不进来，只留给最终报告。
  * 花钱的部分由分层缓存兜住（contracts/helpdesk-eval-cache.ts）：输入没变的题不再付钱。
  *
  * 判分只有一份规则（contracts/helpdesk-eval-scoring.ts）；没得到回答的单独数：超时 = 学员没拿到答案
@@ -47,8 +50,17 @@ export type EvalAsk = {
   entryIds: string[];
 };
 
-/** followup = B5 追问：屏幕上开着父卡时问子卡的题（开发集的原句，见 planFollowups）。 */
-export const EVAL_SETS = ['blind', 's650', 'regression', 'followup'] as const;
+/**
+ * followup = B5 追问：屏幕上开着父卡时问子卡的题（开发集的原句，见 planFollowups）。
+ * screen = 屏幕上开着一张不相干的旧卡时问新问题（开发集的单问抽样，见 planScreens）。
+ */
+export const EVAL_SETS = [
+  'blind',
+  's650',
+  'regression',
+  'followup',
+  'screen',
+] as const;
 export type EvalSet = (typeof EVAL_SETS)[number];
 
 export type EvalQuestion = {
@@ -70,7 +82,7 @@ export type EvalQuestion = {
   entryIds: string[];
   /** 标的卡这一版相对上线版本新增或改过（追问：子卡、父卡或它们之间的边改过）。 */
   changed: boolean;
-  /** 追问：屏幕上开着的父卡（节点 id 与 key）与之前的学员原文；单问 = null。 */
+  /** 追问 / 旧卡在屏：屏幕上开着的卡（节点 id 与 key）与之前的学员原文；单问 = null。 */
   screen: { nodeId: string; key: string; recentTurns: string[] } | null;
   /** 一句问了几件事（两件以上才有，按问的顺序）；其余 = null。 */
   asks: EvalAsk[] | null;
@@ -138,7 +150,13 @@ export function planQuestions(input: {
   regression: readonly FaqRegressionCase[];
   /** 安全上限：题再多也只问这么多（缺省不限）。 */
   questionsMax?: number;
-}): { questions: EvalQuestion[]; skipped: number; leaked: number } {
+}): {
+  questions: EvalQuestion[];
+  skipped: number;
+  leaked: number;
+  /** 开发集里就是金卡自己的问题或问法的题（不问，单独数）。 */
+  leakedDev: number;
+} {
   const idOfKey = new Map(input.snapshot.nodes.map((n) => [n.key, n.id]));
   const nodeIds = new Set(input.snapshot.nodes.map((n) => n.id));
   const changedIds = new Set(
@@ -156,6 +174,7 @@ export function planQuestions(input: {
   const questions: EvalQuestion[] = [];
   let skipped = 0;
   let leaked = 0;
+  let leakedDev = 0;
   const add = (one: EvalQuestion) => {
     const text = one.message.trim();
     if (text === '' || seen.has(text)) return;
@@ -176,6 +195,11 @@ export function planQuestions(input: {
         .map((key) => idOfKey.get(key))
         .filter((id): id is string => id !== undefined && id !== main);
       gold = [main, ...new Set(also)];
+      // 原句就是金卡（或也算对的卡）自己的问题或问法：必然命中，不问，单独数
+      if (gold.some((faqId) => leaks({ faqId, text: item.message }))) {
+        leakedDev += 1;
+        continue;
+      }
     }
     // 一句多问：每件事的卡换成这一版的节点 id；这一版没有那张卡 = 库里没卡（该说没找到）
     const asks =
@@ -250,6 +274,7 @@ export function planQuestions(input: {
     questions: questions.slice(0, max),
     skipped: skipped + Math.max(0, questions.length - max),
     leaked,
+    leakedDev,
   };
 }
 
@@ -381,6 +406,75 @@ export function planFollowups(input: {
   return out;
 }
 
+const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
+/**
+ * 「旧卡在屏问新问题」（Fable 5.2 评审 A6，2026-11-09）：Portal 出过一张卡之后，后面每一问都带着它
+ *（context.nodeId，从不清空），这时不直出、那张卡不进候选，模型要自己分清是追问还是新问题——多轮里最常见
+ * 的状态，以前没有任何题在测。这里从开发集的单问里按题号的哈希抽 sample 道（期望出卡或不出卡的；一句多问
+ * 与寒暄不抽），屏幕上配一张不相干的卡再问一遍，期望不变。零标注成本。
+ * 屏幕上的卡：答案卡里，不是这道题的金卡、也算对的卡、入口卡，也不是它们的父卡或子卡的；按
+ * sha256(题号 + 卡 key) 最小的那张（rendezvous hashing：库里加卡、删卡只动受影响的题，缓存不整批失效）。
+ */
+export function planScreens(input: {
+  questions: readonly EvalQuestion[];
+  snapshot: FaqReleaseSnapshot;
+  sample: number;
+}): EvalQuestion[] {
+  if (input.sample <= 0) return [];
+  const near = new Map<string, Set<string>>();
+  const link = (a: string, b: string) =>
+    near.set(a, (near.get(a) ?? new Set()).add(b));
+  for (const e of input.snapshot.edges) {
+    link(e.parentId, e.childId);
+    link(e.childId, e.parentId);
+  }
+  const cards = input.snapshot.nodes.filter((n) => n.type === 'answer');
+  const picked = input.questions
+    .filter(
+      (q) =>
+        (q.set === 'blind' || q.set === 's650') &&
+        q.expect !== 'smalltalk' &&
+        q.asks === null &&
+        q.screen === null,
+    )
+    .map((q) => ({ q, order: sha(q.id) }))
+    .sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0))
+    .slice(0, input.sample);
+  const out: EvalQuestion[] = [];
+  for (const { q } of picked) {
+    const own = [q.faqId, ...q.acceptable, ...q.entryIds].filter(
+      (id): id is string => id !== null,
+    );
+    const related = new Set(own);
+    for (const id of own)
+      for (const other of near.get(id) ?? []) related.add(other);
+    let card: (typeof cards)[number] | null = null;
+    let best = '';
+    for (const one of cards) {
+      if (related.has(one.id)) continue;
+      const rank = sha(`${q.id}\n${one.key}`);
+      if (card === null || rank < best) {
+        card = one;
+        best = rank;
+      }
+    }
+    if (!card) continue;
+    const said = q.locale === 'en-GB' ? card.questionEn : card.questionZh;
+    out.push({
+      ...q,
+      id: `screen:${q.id}`,
+      set: 'screen',
+      screen: {
+        nodeId: card.id,
+        key: card.key,
+        recentTurns: said.trim() === '' ? [] : [said],
+      },
+    });
+  }
+  return out;
+}
+
 /** 一题的期望（评测脚本的 TurnExpectation）。 */
 export function caseExpectation(one: EvalQuestion): TurnExpectation {
   switch (one.expect) {
@@ -410,6 +504,11 @@ export type ModelEvalScore = {
   timeout: boolean;
   /** 检查本身出了问题（没有 key、限流、出错）：不计分。 */
   error: boolean;
+  /**
+   * 待重标：按标注是错卡，但出的是这一版新加的卡（上线版本里没有）——多半是员工给库外问题补了卡、或从
+   * 一张卡里拆出了更具体的卡，题的标注还没跟上。重标之前不计分、不算新出的错，单独数（runner.ts 标）。
+   */
+  relabel: boolean;
 };
 
 /** 一题的判分（规则见文件头）。 */
@@ -426,8 +525,8 @@ export function scoreModelAnswer(
   };
   if (got.kind === 'error')
     return got.failure === 'timeout'
-      ? { ...none, timeout: true, error: false }
-      : { ...none, timeout: false, error: true };
+      ? { ...none, timeout: true, error: false, relabel: false }
+      : { ...none, timeout: false, error: true, relabel: false };
   const scored = scoreTurn(caseExpectation(one), {
     kind: got.kind,
     intent: got.intent ?? null,
@@ -443,6 +542,28 @@ export function scoreModelAnswer(
     cardWhenNone: one.expect === 'no_match' && scored.wrongFaq,
     timeout: false,
     error: false,
+    relabel: false,
+  };
+}
+
+/**
+ * 待重标（见 ModelEvalScore.relabel）：判成错卡、而出的卡里有这一版新加的 → 不计错卡，记成待重标。
+ * fresh = 这一版有、上线版本没有的卡（节点 id）；没有上线版本 = 空（不适用）。
+ */
+export function markRelabel(
+  score: ModelEvalScore,
+  got: ReleaseEvalAnswer,
+  fresh: ReadonlySet<string>,
+): ModelEvalScore {
+  if (!score.wrongCard || fresh.size === 0) return score;
+  const shown = [got.nodeId, ...(got.more ?? [])];
+  if (!shown.some((id) => id !== null && fresh.has(id))) return score;
+  return {
+    ...score,
+    wrongCard: false,
+    cardWhenNone: false,
+    extraCard: false,
+    relabel: true,
   };
 }
 

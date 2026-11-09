@@ -1195,8 +1195,8 @@
       "interruptedHint": "检查没跑完（服务重启或部署打断了它）。点「重新检查」再跑一次。",
       "model": "真流程检查{result}：错卡 {wrong}%，{cases} 题，约 ¥{cny}",
       "modelNotRun": "真流程检查：未运行",
-      "estimate": "预计问 {questions} 道题（单问 {single}、追问 {followups}）；约 {paid} 道要真问，约 ¥{cny}（上限 ¥{cap}）。",
-      "estimateFirst": "预计问 {questions} 道题（单问 {single}、追问 {followups}）；上线版本没有可参考的检查记录，可能都要真问，最多 ¥{cap}。",
+      "estimate": "预计问 {questions} 道题（单问 {single}、屏幕上有卡的 {followups}）；约 {paid} 道要真问，约 ¥{cny}（上限 ¥{cap}）。",
+      "estimateFirst": "预计问 {questions} 道题（单问 {single}、屏幕上有卡的 {followups}）；上线版本没有可参考的检查记录，可能都要真问，最多 ¥{cap}。",
       "details": "检查详情",
       "hideDetails": "收起详情",
       "report": {
@@ -1229,9 +1229,12 @@
           "changed": "改过的卡上的题",
           "language": "语言 {value}",
           "style": "写法 {value}",
-          "multi": "一句问了几件事"
+          "multi": "一句问了几件事",
+          "blindNone": "盲测里库里没卡的题",
+          "screen": "屏幕上开着别的卡时问新问题"
         },
         "asks": "每件事给到卡 {rate}（{covered}/{asks}）；多给错卡 {stray} 张；按问的顺序 {inOrder}/{ordered}",
+        "screen": "同样的题不带卡时对照 {pairs} 道：带上旧卡后回答变了 {changed} 道，原本答对的丢了 {lost} 道",
         "noSuites": "这次检查没有套件结果。",
         "missColumns": {
           "why": "原因",
@@ -1242,7 +1245,9 @@
         },
         "why": {
           "newly_wrong": "比线上新错",
+          "lost_right": "线上答对，这一版没答上",
           "wrong_card": "错卡",
+          "relabel": "待重标（出的是这一版新加的卡）",
           "timeout": "超时",
           "error": "没得到回答"
         },
@@ -1275,7 +1280,9 @@
           "interval": "错卡率 95% 上界 {high}，超过 {max}",
           "point": "错卡率 {rate}，超过 {max}（{scored} 题）",
           "worse": "比线上新错 {count} 道",
-          "small": "不到 {min} 题，只看不拦"
+          "small": "不到 {min} 题，只看不拦",
+          "rightDrop": "答对率比线上从 {live} 掉到 {now}（丢 {lost} 道、新答对 {gained} 道），超过 {max}",
+          "cardWhenNone": "库里没卡的题有 {rate} 出了卡，超过 {max}"
         }
       }
     },

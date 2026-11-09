@@ -1195,8 +1195,8 @@
       "interruptedHint": "The check did not finish (a restart or deploy stopped it). Use Check again to run it again.",
       "model": "Live-pipeline check {result}: wrong card {wrong}%, {cases} questions, about ¥{cny}",
       "modelNotRun": "Live-pipeline check: not run",
-      "estimate": "About {questions} questions ({single} single, {followups} follow-ups); about {paid} need asking again, about ¥{cny} (cap ¥{cap}).",
-      "estimateFirst": "About {questions} questions ({single} single, {followups} follow-ups); the live version has no check to go by, so all may need asking, at most ¥{cap}.",
+      "estimate": "About {questions} questions ({single} single, {followups} with a card on screen); about {paid} need asking again, about ¥{cny} (cap ¥{cap}).",
+      "estimateFirst": "About {questions} questions ({single} single, {followups} with a card on screen); the live version has no check to go by, so all may need asking, at most ¥{cap}.",
       "details": "Check details",
       "hideDetails": "Hide details",
       "report": {
@@ -1229,9 +1229,12 @@
           "changed": "Questions on changed cards",
           "language": "Language {value}",
           "style": "Style {value}",
-          "multi": "Several asks in one message"
+          "multi": "Several asks in one message",
+          "blindNone": "Blind questions the library has no card for",
+          "screen": "New question with another card on screen"
         },
         "asks": "Card per ask {rate} ({covered} of {asks}); {stray} card(s) for no ask; in the order asked {inOrder} of {ordered}",
+        "screen": "Against the same {pairs} questions with no card on screen: {changed} answer(s) changed, {lost} right answer(s) lost",
         "noSuites": "This check has no suite results.",
         "missColumns": {
           "why": "Why",
@@ -1242,7 +1245,9 @@
         },
         "why": {
           "newly_wrong": "Newly wrong",
+          "lost_right": "Right on live, not answered now",
           "wrong_card": "Wrong card",
+          "relabel": "To relabel (answered by a card new in this release)",
           "timeout": "Timed out",
           "error": "No answer"
         },
@@ -1275,7 +1280,9 @@
           "interval": "Wrong-card 95% upper bound {high} is above {max}",
           "point": "Wrong card {rate} is above {max} over {scored} questions",
           "worse": "{count} newly wrong against the live version",
-          "small": "Under {min} questions, so tracked only"
+          "small": "Under {min} questions, so tracked only",
+          "rightDrop": "Right answers fell from {live} to {now} against the live version ({lost} lost, {gained} gained), more than {max}",
+          "cardWhenNone": "A card was shown for {rate} of the questions the library has no card for, more than {max}"
         }
       }
     },

@@ -429,12 +429,12 @@ export type FaqReleaseEvalReport = {
   collisions?: FaqTextCollision[];
 };
 
-/** 真流程检查的一个套件或切片：gate = 不过就不能发布；track = 只看（比线上新错仍然拦）。 */
+/** 真流程检查的一个套件或切片：gate = 不过就不能发布；track = 只看（比线上新错仍然拦）。规则见服务端 release-check/policy.ts。 */
 export type FaqEvalSuite = {
   id: string;
   label: string;
   status: 'gate' | 'track';
-  /** interval = 95% 上界；point = 点估计（题够多才算）；paired = 只看比线上新错。旧报告没有。 */
+  /** interval = 95% 上界；point = 点估计（题够多才算）；paired = 和线上逐题比（新错、答对率）。旧报告没有。 */
   rule?: 'interval' | 'point' | 'paired';
   passed: boolean;
   n: number;
@@ -453,7 +453,7 @@ export type FaqModelMiss = {
   got: string;
   live?: string;
   onScreen?: string;
-  why: 'newly_wrong' | 'wrong_card' | 'timeout' | 'error' | string;
+  why: 'newly_wrong' | 'lost_right' | 'wrong_card' | 'relabel' | 'timeout' | 'error' | string;
 };
 
 export type FaqTextCollision = {

@@ -18,6 +18,7 @@ import {
   loadReleaseEvalItems,
   planFollowups,
   planQuestions,
+  planScreens,
   touchedNodes,
   type ReleaseEvalItem,
 } from './release-check/questions';
@@ -36,11 +37,13 @@ import { runReleaseQuestions } from './release-check/runner';
  * 免费的检索检查只看检索的前 8 名，不看用户真正看到什么；这里把开发集的全部题与回归题按线上聊天的整条流程
  *（关键词 + 向量召回、精排、小模型选卡作答，契约 helpdesk-release-eval.ts）在候选版本与上线版本上各问一遍；
  * 另加追问题（B5）：屏幕上开着父卡时问子卡的题，只问这一版动过的父卡（父卡、子卡或边改了）；
+ * 再加「旧卡在屏问新问题」（2026-11-09）：开发集单问抽 screenSample 道，屏幕上配一张不相干的卡再问；
  * 再顺手查一遍重复问法（collisions.ts：新加的文字和别的卡几乎一样，免费，只提醒）。
  * 四块各管一件事（release-check/）：
  * - questions.ts：问哪些题、每题怎么判（判分规则只有一份：contracts/helpdesk-eval-scoring.ts）；
  * - runner.ts：并发问两个版本、新出的错复问确认、漂移抽查、花费与预算；
- * - policy.ts：按套件与切片判定（错卡率 95% 区间上界 ≤ 2%、逐题不比线上差、库里没卡别给卡……）；
+ * - policy.ts：按套件与切片判定（S650 错卡率 95% 区间上界 ≤ 2%、逐题不比线上差——新出的错与答对率两个
+ *   方向、超时与库里没卡给卡的上限、题集过时的上限……；规则的全文在 policy.ts 文件头）；
  * - report.ts：界面与对账读的报告。
  * 不改就不花钱：分层缓存（contracts/helpdesk-eval-cache.ts）记住每层的结果，只有输入变了的题才真问。
  */
@@ -48,7 +51,15 @@ export const MODEL_GATE = {
   wrongRateMax: 0.02,
   cardWhenNoneMax: 0.03,
   errorRateMax: 0.05,
-  /** 语言 / 写法切片至少这么多道才拦。 */
+  /** 超时的题（学员没拿到答案）至多占这么多；线上聊天期限 8 秒下实测 0–0.6%。 */
+  timeoutRateMax: 0.02,
+  /** 答对率比上线版本低超过这么多（逐题配对、复问确认之后）→ 不通过。 */
+  rightDropMax: 0.01,
+  /** 跳过（标的卡没了）+ 泄漏 + 待重标的题至多占这么多；超过 = 题集该重标了。 */
+  staleRateMax: 0.05,
+  /** 检索降级（向量 / 精排没生效）的题至多占这么多；超过 = 问的不是线上流程，不算数。 */
+  degradedRateMax: 0.05,
+  /** 语言 / 写法切片至少这么多道才拦；答对率比线上也要配对题至少这么多才判。 */
   sliceMin: 200,
   /** 新出的错：不用缓存再问几次，几次（含第一次）都错才算真的变差；至多复问几道。 */
   reaskTimes: 2,
@@ -65,6 +76,8 @@ export const MODEL_GATE = {
   progressEvery: 10,
   /** 题的安全上限。 */
   questionsMax: 5000,
+  /** 「旧卡在屏问新问题」抽几道开发集单问（0 = 不问）。 */
+  screenSample: 200,
   /** 重复问法：新加的文字和别的卡上的文字余弦至少这么高就列出来（只提醒）；至多列几对。 */
   collisionMin: 0.95,
   collisionsMax: 30,
@@ -128,10 +141,22 @@ export function createModelReleaseGate(
       parents: followupParents(input.previous?.snapshot, input.snapshot),
       changed,
     }).slice(0, Math.max(0, limits.questionsMax - single.questions.length));
+    const screens = planScreens({
+      questions: single.questions,
+      snapshot: input.snapshot,
+      sample: limits.screenSample,
+    }).slice(
+      0,
+      Math.max(
+        0,
+        limits.questionsMax - single.questions.length - followups.length,
+      ),
+    );
     return {
-      questions: [...single.questions, ...followups],
+      questions: [...single.questions, ...followups, ...screens],
       skipped: single.skipped,
       leaked: single.leaked,
+      leakedDev: single.leakedDev,
     };
   }
   return {
@@ -173,12 +198,17 @@ export function createModelReleaseGate(
           false,
           'The live-pipeline check could not run: no model API key (OPENROUTER_API_KEY) on this server',
         );
-      const { questions, skipped, leaked } = await plan(input);
+      const { questions, skipped, leaked, leakedDev } = await plan(input);
       if (questions.length === 0)
         return report(
           false,
           'The live-pipeline check has no questions for this library (no labelled card is in this release)',
-          { cases: 0, skippedCases: skipped, regressionLeaked: leaked },
+          {
+            cases: 0,
+            skippedCases: skipped,
+            regressionLeaked: leaked,
+            devLeaked: leakedDev,
+          },
         );
       // 上线版本：逐题对比（没有上线版本、或旧版本行没有快照 = 不比）
       const live =
@@ -213,8 +243,18 @@ export function createModelReleaseGate(
               )
               .catch(() => null)
           : null;
+      // 这一版新加的卡（上线版本里没有）：出了它们而被判错的题是「待重标」，不是新出的错
+      const liveIds = new Set(liveSnapshot?.nodes.map((n) => n.id) ?? []);
+      const fresh = liveSnapshot
+        ? new Set(
+            input.snapshot.nodes
+              .filter((n) => !liveIds.has(n.id))
+              .map((n) => n.id),
+          )
+        : undefined;
       const run = await runReleaseQuestions({
         questions,
+        ...(fresh ? { fresh } : {}),
         candidate: deps.answerer.forRelease({
           version: input.version,
           snapshot: input.snapshot,
@@ -232,7 +272,7 @@ export function createModelReleaseGate(
           input.progress?.({ stage: 'model', done, total }) ??
           Promise.resolve(true),
       });
-      const judgement = judgeRelease(run, limits);
+      const judgement = judgeRelease(run, limits, { skipped, leakedDev });
       const keyOf = new Map(input.snapshot.nodes.map((n) => [n.id, n.key]));
       const metrics = {
         ...releaseCheckMetrics({
@@ -240,6 +280,7 @@ export function createModelReleaseGate(
           judgement,
           skipped,
           leaked,
+          leakedDev,
           previousWrongRate: previousModelWrongRate(input.previous?.evalReport),
         }),
         ...(collisions

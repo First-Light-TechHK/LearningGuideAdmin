@@ -171,10 +171,26 @@ export function createReleaseAnswerer(
             0,
           );
           const costUsd = modelUsd + spent.rerank + spent.embed;
+          // 检索这一步记下的降级（向量 / 精排该生效却没生效，rerank.ts）：发布门据此判这次检查算不算数
+          const degraded = [
+            ...new Set(
+              trail.flatMap((e) => {
+                const layers =
+                  e.type === 'step/end'
+                    ? (e.data.output as { degraded?: unknown } | undefined)
+                        ?.degraded
+                    : undefined;
+                return Array.isArray(layers)
+                  ? layers.filter((l): l is string => typeof l === 'string')
+                  : [];
+              }),
+            ),
+          ].sort();
           const extra = {
             spend: { model: modelUsd, ...spent },
             ...(deps.cache ? { cache: stats } : {}),
             ...(seen ? { candidates: seen } : {}),
+            ...(degraded.length > 0 ? { degraded } : {}),
           };
           const unpricedCalls = Math.max(0, requests - priced);
           const reason = trail.find((e) => e.type === 'turn/end')?.data.reason;

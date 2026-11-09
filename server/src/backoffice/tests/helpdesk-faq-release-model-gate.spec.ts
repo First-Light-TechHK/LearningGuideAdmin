@@ -23,6 +23,7 @@ import {
 import {
   followupParents,
   planFollowups,
+  planScreens,
   scoreAsks,
 } from '../modules/helpdesk/faqs/release-check/questions';
 import { textHash } from '../modules/helpdesk/faqs/faqVectors';
@@ -31,6 +32,8 @@ import { wilson } from '../modules/helpdesk/faqs/release-check/stats';
 /**
  * 发布前的真流程检查（release check v2，owner 2026-11-06 批准）：问哪些题、怎么判分、什么时候不通过：
  * 全部题、逐题和上线版本比、新出的错复问确认、漂移抽查、Wilson 区间上界、切片、库里没卡别给卡。
+ * 2026-11-09（Fable 5.2 评审，owner 批准）：全部题只报不拦、盲测和线上两个方向比、答对率不比线上低、超时上限、
+ * 待重标、题集过时上限、检索降级不算数、盲测库外题单列、「旧卡在屏问新问题」。
  * 答题器是假的（真的那个在 src/ai/helpdesk/release-answerer.ts，跑整条线上流程）。
  */
 const id = (n: number) =>
@@ -173,6 +176,13 @@ const input = (
 });
 
 const live = { version: 1, evalReport: null, snapshot };
+
+/** 这些用例各看一件事：缺省不加「旧卡在屏」的题（它们有自己的一组用例，直接用 createModelReleaseGate）。 */
+const gate = (deps: Parameters<typeof createModelReleaseGate>[0]) =>
+  createModelReleaseGate({
+    ...deps,
+    limits: { screenSample: 0, ...deps.limits },
+  });
 
 const fixed = () => new Date('2026-11-06T10:00:00.000Z');
 
@@ -341,6 +351,352 @@ describe('the live-pipeline check: which questions', () => {
   });
 });
 
+describe('the live-pipeline check: a question set that goes stale (2026-11-09)', () => {
+  it("does not ask a dev question that is its own card's question or phrasing: adding a missed question as a phrasing must not teach the check", () => {
+    const taught: FaqReleaseSnapshot = {
+      ...snapshot,
+      phrasings: [
+        // a1's own words, now a phrasing of its labelled card
+        { faqId: id(1), locale: 'zh-CN', text: '怎么退款' },
+        // a3 (忘記密碼, labelled password, refund also acceptable): a phrasing of the acceptable card, in simplified script
+        { faqId: id(1), locale: 'zh-CN', text: '忘记密码' },
+        // a2's words as a phrasing of another card: still a fair question for refund-late
+        { faqId: id(3), locale: 'en-GB', text: 'late refund?' },
+      ],
+    };
+    const { questions, leakedDev, leaked } = planQuestions({
+      items,
+      snapshot: taught,
+      changed: new Set(),
+      regression: [],
+    });
+    expect(leakedDev).toBe(2);
+    expect(leaked).toBe(0);
+    expect(questions.map((q) => q.id)).toEqual(['a2', 'n1', 's1']);
+    expect(
+      planQuestions({
+        items,
+        snapshot,
+        changed: new Set(),
+        regression: [],
+      }).leakedDev,
+    ).toBe(0);
+  });
+
+  it('fails when too many labelled questions can no longer be scored (card gone, own wording, or awaiting a relabel)', async () => {
+    const gone: ReleaseEvalItem[] = Array.from({ length: 14 }, (_, i) => ({
+      id: `gone-${i}`,
+      locale: 'en-GB',
+      message: `archived ${i}`,
+      expect: 'answer',
+      faq: 'archived-card',
+    }));
+    // 13 of 263 skipped (4.9%): reported, still a pass
+    const some = await gate({
+      answerer: fakeAnswerer(right).answerer,
+      items: () => [...refunds(250), ...gone.slice(0, 13)],
+      now: fixed,
+    }).evaluate(input());
+    expect(some.passed).toBe(true);
+    expect(some.metrics).toMatchObject({ skippedCases: 13, devLeaked: 0 });
+    // 14 of 264 (5.3%): the check is running on a shrinking set
+    const many = await gate({
+      answerer: fakeAnswerer(right).answerer,
+      items: () => [...refunds(250), ...gone],
+      now: fixed,
+    }).evaluate(input());
+    expect(many.passed).toBe(false);
+    expect(many.summary).toContain(
+      "14 of 264 labelled questions could not be scored (14 whose card is gone, 0 that are their own card's wording, 0 answered by a card new in this release) > 5.0%: the question set needs relabelling",
+    );
+  });
+
+  it('a card added in this release that answers a question labelled otherwise is "to relabel", not newly wrong: writing a card for an out-of-library question must not block the release', async () => {
+    // the live version has no homework card; this release adds one (and splits "late refund" out of refund)
+    const added: FaqReleaseSnapshot = {
+      ...snapshot,
+      nodes: [...snapshot.nodes, node(4, 'homework'), node(5, 'refund-fee')],
+    };
+    const more: ReleaseEvalItem[] = [
+      {
+        id: 'n1',
+        locale: 'en-GB',
+        message: 'do my homework',
+        expect: 'no_match',
+      },
+      {
+        id: 'f1',
+        locale: 'en-GB',
+        message: 'is there a refund fee',
+        expect: 'answer',
+        faq: 'refund',
+      },
+    ];
+    const reply = (message: string, a: Asked) =>
+      a.version === 2 && message === 'do my homework'
+        ? answer('answer', id(4))
+        : message === 'is there a refund fee'
+          ? answer('answer', a.version === 2 ? id(5) : id(1))
+          : right(message);
+    const { answerer, asked } = fakeAnswerer(reply);
+    const report = await gate({
+      answerer,
+      items: () => [...refunds(400), ...more],
+      now: fixed,
+    }).evaluate(input({ snapshot: added, previous: live }));
+    expect(report.passed).toBe(true);
+    expect(report.metrics).toMatchObject({
+      relabel: 2,
+      wrongCards: 0,
+      newlyWrong: 0,
+      cardWhenNone: 0,
+      // "is there a refund fee" was right on live and is unlabelled now: not a lost right answer either
+      lostRight: 0,
+    });
+    // nothing to confirm: not asked again
+    expect(asked.filter((a) => a.cache === 'bypass')).toEqual([]);
+    expect(report.misses).toEqual([
+      expect.objectContaining({
+        id: 'f1',
+        why: 'relabel',
+        expected: 'refund',
+        got: 'answer:refund-fee',
+      }),
+      expect.objectContaining({
+        id: 'n1',
+        why: 'relabel',
+        expected: 'no_match',
+        got: 'answer:homework',
+      }),
+    ]);
+    // a card the live version already had gets no such pass: that is a new wrong card
+    const old = await gate({
+      answerer: fakeAnswerer((message, a) =>
+        a.version === 2 && message === 'do my homework'
+          ? answer('answer', id(3))
+          : reply(message, a),
+      ).answerer,
+      items: () => [...refunds(400), ...more],
+      now: fixed,
+    }).evaluate(input({ snapshot: added, previous: live }));
+    expect(old.passed).toBe(false);
+    expect(old.metrics).toMatchObject({ relabel: 1, confirmedWorse: 1 });
+    // with no live version every card is "new": the rule does not apply, a wrong card is a wrong card
+    const first = await gate({
+      answerer: fakeAnswerer((message) =>
+        message === 'do my homework' ? answer('answer', id(4)) : right(message),
+      ).answerer,
+      items: () => [...refunds(400), ...more],
+      now: fixed,
+    }).evaluate(input({ snapshot: added }));
+    expect(first.metrics).toMatchObject({ relabel: 0, cardWhenNone: 1 });
+  });
+});
+
+describe('the live-pipeline check: a new question with another card on screen (2026-11-09)', () => {
+  // refund → refund-late; password; billing; trial
+  const wide: FaqReleaseSnapshot = {
+    ...snapshot,
+    nodes: [...snapshot.nodes, node(4, 'billing'), node(5, 'trial')],
+  };
+  const singles = () =>
+    planQuestions({
+      items: [
+        ...items,
+        {
+          id: 'm1',
+          locale: 'en-GB',
+          message: 'refund and password',
+          expect: 'answer',
+          faq: 'refund',
+          asks: [{ faq: 'refund' }, { faq: 'password' }],
+        },
+      ],
+      snapshot: wide,
+      changed: new Set(),
+      regression: [{ faqId: id(3), locale: 'zh-CN', text: '登录不上了' }],
+    }).questions;
+
+  it('asks a sample of the dev questions again with an unrelated card on screen, the expected answer unchanged', () => {
+    const screens = planScreens({
+      questions: singles(),
+      snapshot: wide,
+      sample: 10,
+    });
+    // small talk, several asks in one message and regression cases are not sampled
+    expect(screens.map((q) => q.id).sort()).toEqual([
+      'screen:a1',
+      'screen:a2',
+      'screen:a3',
+      'screen:n1',
+    ]);
+    const byId = new Map(screens.map((q) => [q.id, q]));
+    const bare = new Map(singles().map((q) => [q.id, q]));
+    for (const q of screens) {
+      const from = bare.get(q.id.replace('screen:', ''));
+      expect(q).toMatchObject({
+        set: 'screen',
+        message: from?.message,
+        expect: from?.expect,
+        faqId: from?.faqId,
+        acceptable: from?.acceptable,
+        entryIds: from?.entryIds,
+      });
+      // never the labelled card, an acceptable one, its entry card, or their parent / child
+      const own = [q.faqId, ...q.acceptable, ...q.entryIds];
+      expect(own).not.toContain(q.screen?.nodeId);
+    }
+    // a2 is labelled refund-late (child of refund): neither of them goes on screen
+    expect(['password', 'billing', 'trial']).toContain(
+      byId.get('screen:a2')?.screen?.key,
+    );
+    // a1 is labelled refund: its child refund-late does not go on screen either
+    expect(byId.get('screen:a1')?.screen?.key).not.toBe('refund-late');
+    // the earlier turn is the question of the card on screen, in the learner's language
+    const a2 = byId.get('screen:a2');
+    expect(a2?.screen?.recentTurns).toEqual([`Q ${a2?.screen?.key}`]);
+    const n1 = byId.get('screen:n1');
+    expect(wide.nodes.map((n) => n.key)).toContain(n1?.screen?.key);
+  });
+
+  it('picks the same questions and the same card every time, and a new card moves only the questions it wins', () => {
+    const many = planQuestions({
+      items: refunds(60),
+      snapshot: wide,
+      changed: new Set(),
+      regression: [],
+    }).questions;
+    const first = planScreens({ questions: many, snapshot: wide, sample: 20 });
+    expect(first).toHaveLength(20);
+    expect(
+      planScreens({ questions: many, snapshot: wide, sample: 20 }),
+    ).toEqual(first);
+    expect(planScreens({ questions: many, snapshot: wide, sample: 0 })).toEqual(
+      [],
+    );
+    const grown: FaqReleaseSnapshot = {
+      ...wide,
+      nodes: [...wide.nodes, node(6, 'certificate')],
+    };
+    const second = planScreens({
+      questions: many,
+      snapshot: grown,
+      sample: 20,
+    });
+    expect(second.map((q) => q.id)).toEqual(first.map((q) => q.id));
+    const moved = second.filter(
+      (q, i) => q.screen?.key !== first[i].screen?.key,
+    );
+    // every question that changed its card changed to the new one; the rest keep theirs (and their cache)
+    expect(moved.every((q) => q.screen?.key === 'certificate')).toBe(true);
+    expect(moved.length).toBeLessThan(second.length);
+  });
+
+  it('tracks them as their own suite against the same questions with no card on screen, out of the single-question numbers', async () => {
+    const { answerer, asked } = fakeAnswerer((message, a) =>
+      // with an old card on screen the model treats 3 new questions as follow-ups of it (on both versions)
+      a.screen !== null && /^refund question s650 [0-2]$/.test(message)
+        ? answer('answer', a.screen)
+        : right(message),
+    );
+    const report = await createModelReleaseGate({
+      answerer,
+      items: () => refunds(250),
+      now: fixed,
+      limits: { screenSample: 250 },
+    }).evaluate(
+      input({ snapshot: wide, previous: { ...live, snapshot: wide } }),
+    );
+    const onScreen = asked.filter((a) => a.screen !== null && a.version === 2);
+    expect(onScreen).toHaveLength(250);
+    expect(onScreen.every((a) => a.recentTurns.length === 1)).toBe(true);
+    expect(report.metrics).toMatchObject({
+      cases: 250,
+      screenCases: 250,
+      wrongCards: 0,
+    });
+    const suites = new Map(report.suites?.map((s) => [s.id, s]));
+    expect(suites.get('screen')).toMatchObject({
+      status: 'track',
+      rule: 'paired',
+      n: 250,
+      passed: true,
+      metrics: {
+        wrongCards: 3,
+        rightRate: 0.988,
+        screenPairs: 250,
+        screenChanged: 3,
+        screenLost: 3,
+        bareRight: 250,
+      },
+    });
+    expect(suites.get('combined')?.n).toBe(250);
+    expect(suites.get('s650')?.n).toBe(250);
+    // the same on both versions: tracked, not a fail
+    expect(report.passed).toBe(true);
+    expect(report.misses[0]).toMatchObject({
+      set: 'screen',
+      why: 'wrong_card',
+      onScreen: expect.any(String) as unknown,
+    });
+  });
+
+  it('a question with a card on screen that is newly wrong against the live version fails the check', async () => {
+    const { answerer } = fakeAnswerer((message, a) =>
+      a.screen !== null && a.version === 2 && message.endsWith(' 0')
+        ? answer('answer', a.screen)
+        : right(message),
+    );
+    const report = await createModelReleaseGate({
+      answerer,
+      items: () => refunds(250),
+      now: fixed,
+      limits: { screenSample: 250 },
+    }).evaluate(
+      input({ snapshot: wide, previous: { ...live, snapshot: wide } }),
+    );
+    expect(report.passed).toBe(false);
+    expect(report.summary).toContain('newly wrong against the live version');
+    expect(report.misses[0]).toMatchObject({
+      set: 'screen',
+      why: 'newly_wrong',
+    });
+  });
+
+  it('samples 200 by default, and the estimate counts them with the questions that have a card on screen', async () => {
+    expect(MODEL_GATE.screenSample).toBe(200);
+    const check = createModelReleaseGate({
+      answerer: fakeAnswerer(right).answerer,
+      items: () => refunds(250),
+      now: fixed,
+    });
+    const estimate = await check.estimate?.({
+      snapshot: wide,
+      previous: {
+        version: 1,
+        evalReport: {
+          kind: 'model',
+          metrics: { paidQuestionUsd: 0.0005 },
+          candidatePool: { [id(3)]: 25 },
+        },
+        snapshot: {
+          ...wide,
+          nodes: wide.nodes.map((n) =>
+            n.id === id(3) ? { ...n, answerZh: '旧的答案' } : n,
+          ),
+        },
+      },
+    });
+    // 25 of 250 single questions had password among their candidates: a tenth of the 200 on-screen ones too
+    expect(estimate).toMatchObject({
+      questions: 450,
+      single: 250,
+      followups: 200,
+      paid: 25 + 20 + MODEL_GATE.driftSample,
+    });
+  });
+});
+
 describe('the live-pipeline check: scoring', () => {
   const byId = new Map(
     planQuestions({
@@ -476,7 +832,7 @@ describe('the live-pipeline check: pass or fail', () => {
     const { answerer, asked } = fakeAnswerer((message) => right(message));
     const progress: FaqReleaseEvalProgress[] = [];
     const prepared: number[] = [];
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => [...items, ...refunds(250)],
       prepare: (version) => Promise.resolve(prepared.push(version)),
@@ -512,11 +868,12 @@ describe('the live-pipeline check: pass or fail', () => {
     expect(progress[0]).toEqual({ stage: 'vectors', done: 0, total: 1 });
     expect(progress.at(-1)).toEqual({ stage: 'model', done: 255, total: 255 });
     const suites = new Map(report.suites?.map((s) => [s.id, s]));
+    // "all questions" is the headline number, never a gate of its own (2026-11-09); S650 is the absolute gate
     expect(suites.get('combined')).toMatchObject({
-      status: 'gate',
+      status: 'track',
       passed: true,
     });
-    expect(suites.get('s650')?.n).toBe(255);
+    expect(suites.get('s650')).toMatchObject({ status: 'gate', n: 255 });
     // a language slice below 200 questions is only tracked
     expect(suites.get('language:zh-TW')).toMatchObject({
       status: 'track',
@@ -531,6 +888,7 @@ describe('the live-pipeline check: pass or fail', () => {
       devSet: 'eval-v6-dev',
       wrongRateMax: 0.02,
       sliceMin: 200,
+      rightDropMax: 0.01,
     });
   });
 
@@ -541,7 +899,7 @@ describe('the live-pipeline check: pass or fail', () => {
         : right(message),
     );
     // 1 wrong of 250: 0.4%, upper bound 2.2%
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => refunds(250),
       now: fixed,
@@ -572,7 +930,7 @@ describe('the live-pipeline check: pass or fail', () => {
       );
     const real = wrongOnce(true);
     // 1 wrong of 400 is within 2% (upper 1.4%), but it is new: the card change broke it
-    const failed = await createModelReleaseGate({
+    const failed = await gate({
       answerer: real.answerer,
       items: () => refunds(400),
       now: fixed,
@@ -593,7 +951,7 @@ describe('the live-pipeline check: pass or fail', () => {
       MODEL_GATE.reaskTimes,
     );
     // the same question right on both re-asks: the model wobbled once, the cards are fine
-    const noise = await createModelReleaseGate({
+    const noise = await gate({
       answerer: wrongOnce(false).answerer,
       items: () => refunds(400),
       now: fixed,
@@ -602,7 +960,7 @@ describe('the live-pipeline check: pass or fail', () => {
     expect(noise.metrics).toMatchObject({ newlyWrong: 1, confirmedWorse: 0 });
   });
 
-  it('the blind set is only tracked for its rate, but a newly wrong blind question still fails', async () => {
+  it('the blind set is compared with the live version: its own rate never fails it, a newly wrong blind question does', async () => {
     const blindWrong = (alsoLive: boolean) =>
       fakeAnswerer((message, asked) =>
         message === 'refund question blind 0' &&
@@ -611,23 +969,109 @@ describe('the live-pipeline check: pass or fail', () => {
           : right(message),
       ).answerer;
     const all = () => [...refunds(400), ...refunds(10, 'blind')];
-    // 1 of 10 blind wrong (10%) on both versions: tracked, not a fail
-    const same = await createModelReleaseGate({
+    // 1 of 10 blind wrong (10%) on both versions: not a fail, though the suite is a gate (paired with live)
+    const same = await gate({
       answerer: blindWrong(true),
       items: all,
       now: fixed,
     }).evaluate(input({ previous: live }));
     expect(same.passed).toBe(true);
     expect(same.suites?.find((s) => s.id === 'blind')).toMatchObject({
-      status: 'track',
+      status: 'gate',
+      rule: 'paired',
+      passed: true,
       metrics: { wrongRate: 0.1 },
     });
-    const worse = await createModelReleaseGate({
+    const worse = await gate({
       answerer: blindWrong(false),
       items: all,
       now: fixed,
     }).evaluate(input({ previous: live }));
     expect(worse.passed).toBe(false);
+  });
+
+  it('"all questions" is reported, not a gate: blind labels are too noisy for a 2% line, S650 keeps the absolute one', async () => {
+    // 5 of 30 blind wrong on both versions: all questions 5/430 = 1.2%, upper 2.7% > 2%; S650 0/400
+    const { answerer } = fakeAnswerer((message) =>
+      /^refund question blind [0-4]$/.test(message)
+        ? answer('answer', id(3))
+        : right(message),
+    );
+    const report = await gate({
+      answerer,
+      items: () => [...refunds(400), ...refunds(30, 'blind')],
+      now: fixed,
+    }).evaluate(input({ previous: live }));
+    expect(report.passed).toBe(true);
+    const suites = new Map(report.suites?.map((s) => [s.id, s]));
+    expect(suites.get('combined')).toMatchObject({
+      status: 'track',
+      passed: false,
+      metrics: { wrongCards: 5, wrongRateHigh: 0.0269 },
+    });
+    expect(suites.get('s650')).toMatchObject({ status: 'gate', passed: true });
+    // the headline numbers are still the ones over all questions
+    expect(report.metrics).toMatchObject({ cases: 430, wrongCards: 5 });
+  });
+
+  it('right answers must not fall against the live version: a card that stops being shown fails even with no wrong card (re-asked first)', async () => {
+    // live answers everything; the candidate says "no card" for 5 of 400 (1.25 points down)
+    const quiet = (stays: boolean, gained = 0) =>
+      fakeAnswerer((message, asked) => {
+        const n = Number(message.split(' ').at(-1));
+        if (asked.version === 2 && n < 5 && (asked.cache === 'use' || stays))
+          return answer('no_match');
+        // questions the live version missed and the candidate now answers
+        if (asked.version === 1 && n >= 400 - gained) return answer('no_match');
+        return right(message);
+      });
+    const lost = quiet(true);
+    const failed = await gate({
+      answerer: lost.answerer,
+      items: () => refunds(400),
+      now: fixed,
+    }).evaluate(input({ previous: live }));
+    expect(failed.passed).toBe(false);
+    expect(failed.metrics).toMatchObject({
+      wrongCards: 0,
+      newlyWrong: 0,
+      lostRight: 5,
+      liveRightRate: 1,
+      pairedRightRate: 0.9875,
+      rightDrop: 0.0125,
+    });
+    expect(failed.summary).toContain(
+      'right answers fell from 100.0% to 98.8% against the live version (5 lost, 0 gained) > 1.0%',
+    );
+    expect(
+      failed.suites?.find((s) => s.id === 's650')?.metrics.rightDropped,
+    ).toBe(1);
+    expect(failed.misses.slice(0, 5)).toEqual(
+      Array.from(
+        { length: 5 },
+        () => expect.objectContaining({ why: 'lost_right' }) as unknown,
+      ),
+    );
+    // each lost answer was asked again without the cache before it counted
+    expect(lost.asked.filter((a) => a.cache === 'bypass')).toHaveLength(
+      5 * MODEL_GATE.reaskTimes,
+    );
+    // right again when asked again: the model wobbled, nothing was lost
+    const noise = await gate({
+      answerer: quiet(false).answerer,
+      items: () => refunds(400),
+      now: fixed,
+    }).evaluate(input({ previous: live }));
+    expect(noise.passed).toBe(true);
+    expect(noise.metrics).toMatchObject({ lostRight: 0, rightDrop: 0 });
+    // 5 lost, 2 the live version missed now answered: 0.75 points net, within 1 point
+    const net = await gate({
+      answerer: quiet(true, 2).answerer,
+      items: () => refunds(400),
+      now: fixed,
+    }).evaluate(input({ previous: live }));
+    expect(net.passed).toBe(true);
+    expect(net.metrics).toMatchObject({ lostRight: 5, gainedRight: 2 });
   });
 
   it('tracks one message with several asks as its own suite with the per-ask numbers, and never fails on them alone', async () => {
@@ -646,7 +1090,7 @@ describe('the live-pipeline check: pass or fail', () => {
           ? answer('answer', id(1), 0.0001, { missed: 1 })
           : right(message),
     );
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => [...refunds(400), ...several],
       now: fixed,
@@ -687,7 +1131,7 @@ describe('the live-pipeline check: pass or fail', () => {
     const { answerer } = fakeAnswerer((message) =>
       message === 'homework 0' ? answer('answer', id(1)) : right(message),
     );
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => [...refunds(400), ...none],
       now: fixed,
@@ -697,11 +1141,81 @@ describe('the live-pipeline check: pass or fail', () => {
       cardWhenNoneRate: 0.0333,
     });
     expect(report.passed).toBe(false);
-    expect(report.summary).toContain('no card for');
+    expect(report.summary).toContain(
+      'S650 (written per card): a card was shown for 3.3% of questions the library has no card for > 3.0%',
+    );
+    expect(
+      report.suites?.find((s) => s.id === 's650')?.metrics.cardWhenNoneOver,
+    ).toBe(1);
   });
 
-  it('counts a timeout as a miss, and does not count a run where many questions got no answer at all', async () => {
-    const timeouts = await createModelReleaseGate({
+  it('draws the absolute lines on S650 only: its slices and its out-of-library questions; blind questions are in none of them', async () => {
+    // 3% of 250 blind en-GB questions wrong on both versions, S650 clean
+    const { answerer } = fakeAnswerer((message) =>
+      /^refund question blind [0-9]$/.test(message)
+        ? answer('answer', id(3))
+        : right(message),
+    );
+    const report = await gate({
+      answerer,
+      items: () => [
+        ...refunds(500),
+        ...refunds(250, 'blind').map((item) => ({ ...item, locale: 'en-GB' })),
+      ],
+      now: fixed,
+    }).evaluate(input({ previous: live }));
+    const suites = new Map(report.suites?.map((s) => [s.id, s]));
+    // the en-GB slice is the 250 S650 questions, not 500 with the blind ones (which would be 2% wrong)
+    expect(suites.get('language:en-GB')).toMatchObject({
+      status: 'gate',
+      n: 250,
+      passed: true,
+      metrics: { wrongCards: 0 },
+    });
+    expect(suites.get('blind')?.metrics.wrongRate).toBe(0.04);
+    expect(report.passed).toBe(true);
+  });
+
+  it('lists the blind questions the library has no card for as their own suite, apart from the easy S650 ones', async () => {
+    const none = (set: 'blind' | 's650', n: number): ReleaseEvalItem[] =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `none-${set}-${i}`,
+        set,
+        locale: 'en-GB',
+        message: `homework ${set} ${i}`,
+        expect: 'no_match',
+      }));
+    // 2 of 5 blind out-of-library questions get the nearest card; none of the 75 S650 ones: 2.5% together
+    const { answerer } = fakeAnswerer((message) =>
+      message === 'homework blind 0' || message === 'homework blind 1'
+        ? answer('answer', id(1))
+        : right(message),
+    );
+    const report = await gate({
+      answerer,
+      items: () => [...refunds(400), ...none('s650', 75), ...none('blind', 5)],
+      now: fixed,
+    }).evaluate(input());
+    expect(report.metrics).toMatchObject({
+      cardWhenNone: 2,
+      cardWhenNoneRate: 0.025,
+    });
+    expect(report.suites?.find((s) => s.id === 'blindNone')).toMatchObject({
+      status: 'track',
+      n: 5,
+      metrics: { cardWhenNone: 2, cardWhenNoneRate: 0.4 },
+    });
+    // the 3% line is on the S650 ones (0 of 75 here)
+    expect(report.suites?.find((s) => s.id === 's650')).toMatchObject({
+      passed: true,
+      metrics: { noneExpected: 75, cardWhenNone: 0 },
+    });
+    expect(report.passed).toBe(true);
+    expect(report.receipt).toMatchObject({ cardWhenNoneMax: 0.03 });
+  });
+
+  it('counts a timeout as a miss, caps how many may time out, and does not count a run where many questions got no answer at all', async () => {
+    const timeouts = await gate({
       answerer: fakeAnswerer((message) =>
         message === 'refund question s650 1'
           ? answer('error', null, 0, { failure: 'timeout' })
@@ -713,7 +1227,22 @@ describe('the live-pipeline check: pass or fail', () => {
     expect(timeouts.metrics).toMatchObject({ timeouts: 1, errors: 0 });
     expect(timeouts.metrics.rightRate).toBeCloseTo(249 / 250, 4);
     expect(timeouts.passed).toBe(true);
-    const broken = await createModelReleaseGate({
+    // 6 of 250 (2.4%) timed out: those learners got nothing, and a wrong answer that times out
+    // must not slip out of the wrong-card rate unnoticed
+    const slow = await gate({
+      answerer: fakeAnswerer((message) =>
+        /^refund question s650 [0-5]$/.test(message)
+          ? answer('error', null, 0, { failure: 'timeout' })
+          : right(message),
+      ).answerer,
+      items: () => refunds(250),
+      now: fixed,
+    }).evaluate(input());
+    expect(slow.passed).toBe(false);
+    expect(slow.summary).toContain(
+      '6 of 250 questions timed out (2.4% > 2.0%)',
+    );
+    const broken = await gate({
       answerer: fakeAnswerer(() =>
         answer('error', null, 0, { failure: 'rate_limited' }),
       ).answerer,
@@ -726,6 +1255,61 @@ describe('the live-pipeline check: pass or fail', () => {
     expect(broken.summary).toContain('got no answer');
   });
 
+  it('a timeout on a question the live version answered is a lost right answer: asked again, then counted', async () => {
+    const { answerer, asked } = fakeAnswerer((message, a) =>
+      a.version === 2 && /^refund question s650 [0-2]$/.test(message)
+        ? answer('error', null, 0, { failure: 'timeout' })
+        : right(message),
+    );
+    // 3 of 250 time out on the candidate only: under the 2% cap, but 1.2 points of right answers gone
+    const report = await gate({
+      answerer,
+      items: () => refunds(250),
+      now: fixed,
+    }).evaluate(input({ previous: live }));
+    expect(asked.filter((a) => a.cache === 'bypass')).toHaveLength(
+      3 * MODEL_GATE.reaskTimes,
+    );
+    expect(report.metrics).toMatchObject({ timeouts: 3, lostRight: 3 });
+    expect(report.passed).toBe(false);
+    expect(report.summary).toContain('right answers fell');
+    expect(report.misses[0]).toMatchObject({
+      why: 'lost_right',
+      got: 'error:timeout',
+      live: 'answer:refund',
+    });
+  });
+
+  it('does not count a check whose questions were answered without the vector search or the reranker', async () => {
+    // the release vectors were never built (indexing failed quietly): every ask falls back to word search
+    const { answerer } = fakeAnswerer((message) => ({
+      ...right(message),
+      degraded: ['vector'],
+    }));
+    const report = await gate({
+      answerer,
+      items: () => refunds(250),
+      now: fixed,
+    }).evaluate(input());
+    expect(report.passed).toBe(false);
+    expect(report.metrics.degraded).toBe(250);
+    expect(report.summary).toContain(
+      '250 of 250 questions were answered without the vector search or the reranker (it failed), so the check does not count',
+    );
+    // a reranker hiccup on a few questions is not the whole check
+    const few = await gate({
+      answerer: fakeAnswerer((message) =>
+        message.endsWith(' 7')
+          ? { ...right(message), degraded: ['rerank'] }
+          : right(message),
+      ).answerer,
+      items: () => refunds(250),
+      now: fixed,
+    }).evaluate(input());
+    expect(few.passed).toBe(true);
+    expect(few.metrics.degraded).toBe(1);
+  });
+
   it('asks some cached answers again without the cache, and does not count the check when more than 2 changed', async () => {
     const hit = {
       ...emptyAskStats(),
@@ -736,7 +1320,7 @@ describe('the live-pipeline check: pass or fail', () => {
         ? answer('no_match')
         : { ...right(message), cache: hit },
     );
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => refunds(250),
       now: fixed,
@@ -753,7 +1337,7 @@ describe('the live-pipeline check: pass or fail', () => {
 
   it('says plainly that it could not run without an API key, and asks nothing', async () => {
     const { answerer, asked } = fakeAnswerer(right, false);
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => items,
       now: fixed,
@@ -765,7 +1349,7 @@ describe('the live-pipeline check: pass or fail', () => {
 
   it('stops at the budget, and stops when a newer check replaced this one', async () => {
     const { answerer, asked } = fakeAnswerer(() => answer('answer', id(1), 2));
-    const budget = await createModelReleaseGate({
+    const budget = await gate({
       answerer,
       items: () => items,
       now: fixed,
@@ -774,7 +1358,7 @@ describe('the live-pipeline check: pass or fail', () => {
     expect(budget.passed).toBe(false);
     expect(budget.summary).toContain(`budget ($${MODEL_GATE.budgetUsd})`);
     expect(asked).toHaveLength(2);
-    const replaced = await createModelReleaseGate({
+    const replaced = await gate({
       answerer: fakeAnswerer(right).answerer,
       items: () => items,
       now: fixed,
@@ -927,7 +1511,7 @@ describe('the live-pipeline check: follow-ups (B5, parent card on screen)', () =
         n.id === id(2) ? { ...n, answerEn: 'new words' } : n,
       ),
     };
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => [...singles, ...lateItems],
       now: fixed,
@@ -987,7 +1571,7 @@ describe('the live-pipeline check: follow-ups (B5, parent card on screen)', () =
         n.id === id(4) ? { ...n, answerEn: 'new words' } : n,
       ),
     };
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       // l1 is asked under refund (not touched); l2 and r1 under password, whose child reset changed
       items: () => [...refunds(250), ...lateItems],
@@ -1016,7 +1600,7 @@ describe('the live-pipeline check: duplicate texts (a note, never a fail)', () =
       phrasings: [{ faqId: id(3), locale: 'zh-CN', text: '问 refund' }],
     };
     const same = Float32Array.from([1, 0]);
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer: fakeAnswerer(right).answerer,
       items: () => refunds(250),
       now: fixed,
@@ -1060,7 +1644,7 @@ describe('the live-pipeline check: the estimate before it starts', () => {
       candidates: [id(1), id(3)],
       costUsd: 0.0004,
     }));
-    const report = await createModelReleaseGate({
+    const report = await gate({
       answerer,
       items: () => refunds(250),
       now: fixed,
@@ -1073,7 +1657,7 @@ describe('the live-pipeline check: the estimate before it starts', () => {
   });
 
   it('estimates the questions whose candidates had a touched card, plus follow-ups and the drift re-asks, from the live check', async () => {
-    const gate = createModelReleaseGate({
+    const check = gate({
       answerer: fakeAnswerer(right).answerer,
       items: () => [...refunds(250), ...items],
       now: fixed,
@@ -1095,7 +1679,7 @@ describe('the live-pipeline check: the estimate before it starts', () => {
         n.id === id(3) ? { ...n, answerZh: '新的答案' } : n,
       ),
     };
-    const estimate = await gate.estimate?.({
+    const estimate = await check.estimate?.({
       snapshot: edited,
       previous: { version: 1, evalReport: liveReport, snapshot },
     });
@@ -1113,7 +1697,7 @@ describe('the live-pipeline check: the estimate before it starts', () => {
     // nothing changed: only the drift re-asks are paid
     expect(
       (
-        await gate.estimate?.({
+        await check.estimate?.({
           snapshot,
           previous: { version: 1, evalReport: liveReport, snapshot },
         })
@@ -1121,7 +1705,7 @@ describe('the live-pipeline check: the estimate before it starts', () => {
     ).toBe(MODEL_GATE.driftSample);
     // no check of v2 on the live version: only the count and the cap
     expect(
-      await gate.estimate?.({
+      await check.estimate?.({
         snapshot: edited,
         previous: { version: 1, evalReport: null, snapshot },
       }),
@@ -1129,10 +1713,10 @@ describe('the live-pipeline check: the estimate before it starts', () => {
   });
 
   it('gives no estimate without an API key (the check would not run)', async () => {
-    const gate = createModelReleaseGate({
+    const check = gate({
       answerer: fakeAnswerer(right, false).answerer,
       items: () => items,
     });
-    expect(await gate.estimate?.(input())).toBeNull();
+    expect(await check.estimate?.(input())).toBeNull();
   });
 });
