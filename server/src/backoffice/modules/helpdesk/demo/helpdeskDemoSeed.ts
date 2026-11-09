@@ -341,9 +341,8 @@ export function shouldAutoSeedDemo(env: NodeJS.ProcessEnv): boolean {
  */
 export function shouldAutoSeedLibrary(env: NodeJS.ProcessEnv): boolean {
   if (env.NODE_ENV !== 'production') return false;
-  const flag = (env.HELPDESK_FAQ_LIBRARY_SEED ?? '').trim().toLowerCase();
-  if (flag === 'off') return false;
-  if (flag === 'on') return true;
+  const flag = readHelpdeskSetting(HELPDESK_SETTINGS.faqLibrarySeed, env);
+  if (flag !== null) return flag;
   const appEnv = (env.APP_ENV ?? '').trim().toUpperCase();
   return appEnv === 'SIT' || appEnv === 'UAT';
 }

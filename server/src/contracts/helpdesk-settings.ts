@@ -277,6 +277,13 @@ export const HELPDESK_SETTINGS = {
     fallback: true,
     purpose: 'deployed DEV seeds the demo library once',
   }),
+  faqLibrarySeed: setting<boolean | null>({
+    name: 'HELPDESK_FAQ_LIBRARY_SEED',
+    parser: p.onOff(),
+    fallback: null,
+    purpose:
+      'deployed boot imports the FAQ library once; unset = on for SIT and UAT only',
+  }),
   modelHealthAlert: setting({
     name: 'HELPDESK_MODEL_HEALTH_ALERT',
     parser: p.decimal({
