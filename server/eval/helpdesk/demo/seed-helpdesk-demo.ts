@@ -23,7 +23,7 @@ import {
  *   DATABASE_URL=… npm run seed:helpdesk-demo -- --content    按库文件更新卡片内容（员工在 BackOffice 改过的卡不动），再出一版发布
  *   DATABASE_URL=… npm run seed:helpdesk-demo -- --map        按库文件换流程树（删掉种子里没有的节点，重挂卡），再出一版发布
  *
- * 部署的 DEV 启动时会自动灌一次（HelpdeskDemoBoot），不用手动跑。FAQ 卡片是正式内容，--remove 不删卡；
+ * 部署的 DEV 启动时会自动灌一次（HelpdeskDemoBoot），不用手动跑；SIT / UAT 启动时只导卡库（不灌演示行，见 HELPDESK_FAQ_LIBRARY_SEED）。FAQ 卡片是正式内容，--remove 不删卡；
  * 删过之后重启也不会再灌回来。命令行默认只连本机数据库，远端库要加 --allow-remote。
  */
 const USAGE =

@@ -71,7 +71,8 @@ import { createPortalStudentsClient } from '../modules/students/portalStudentsCl
 import { createStudentsService } from '../modules/students/studentsService';
 import {
   autoSeedDemoOnce,
-  shouldAutoSeedDemo,
+  autoSeedLibraryOnce,
+  helpdeskBootSeed,
 } from '../modules/helpdesk/demo/helpdeskDemoSeed';
 import { tryRecordAuditEvent } from '../repositories/auditRepository';
 import {
@@ -175,14 +176,17 @@ export class HelpdeskFlywheelScheduler
 
 /**
  * 部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后在后台灌一次 Helpdesk 演示数据和 FAQ 卡片库 v3.1，
- * 方便测试和产品演示；灌过就不再灌（删除用 npm run seed:helpdesk-demo -- --remove）。其它环境什么都不做。
+ * 方便测试和产品演示；灌过就不再灌（删除用 npm run seed:helpdesk-demo -- --remove）。
+ * SIT / UAT（或设了 HELPDESK_FAQ_LIBRARY_SEED=on 的环境）只导卡库：卡片、流程树、发布，不灌演示行。
+ * 其它环境什么都不做。
  */
 @Injectable()
 export class HelpdeskDemoBoot implements OnApplicationBootstrap {
   onApplicationBootstrap(): void {
-    if (!shouldAutoSeedDemo(process.env)) return;
+    const seed = helpdeskBootSeed(process.env);
     // 不 await：不阻塞启动和健康检查
-    void autoSeedDemoOnce();
+    if (seed === 'demo') void autoSeedDemoOnce();
+    else if (seed === 'library') void autoSeedLibraryOnce();
   }
 }
 

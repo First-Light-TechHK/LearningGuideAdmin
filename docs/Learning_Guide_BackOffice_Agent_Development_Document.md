@@ -1365,6 +1365,8 @@ ADMIN_HELPDESK_TOKEN=
 # HELPDESK_CARD_CONTEXT=on
 # 演示数据：只有部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后自动灌一次；off 关掉；SIT / UAT / PROD 永远不灌
 # HELPDESK_DEMO_DATA=off
+# FAQ 卡库：SIT / UAT 部署启动时自动导一次卡片、流程树并发布（不灌演示数据，员工改过的卡不动，换版只同步差异）；off 关掉；on = 任何部署环境都导（PROD / PPE 要明确设 on）
+# HELPDESK_FAQ_LIBRARY_SEED=off
 # 只给评测脚本 npm run eval:helpdesk 用（§4A.11），服务不读：真模型评测的花费上限（美元，缺省 5）
 # HELPDESK_EVAL_BUDGET_USD=5
 # FAQ 问题树发布时也跑真模型评测（§4A.13）：on 才跑，缺省关；开着却没组装 model 评测门 → 版本不通过
