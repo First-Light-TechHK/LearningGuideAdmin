@@ -198,9 +198,16 @@ async function ask(service: HelpdeskSuggestService, body: unknown) {
   return result as unknown as Record<string, unknown>;
 }
 
-describe('multi-ask is off unless HELPDESK_MULTI_ASK=on', () => {
-  it('by default a two-question message goes through pick_faq alone, with no more / missed keys', async () => {
+describe('multi-ask is on unless HELPDESK_MULTI_ASK=off', () => {
+  it('by default a two-question message is split and answered with more', async () => {
     const { service, tools } = setup();
+    const result = await ask(service, chat(MESSAGE));
+    expect(tools()).toEqual(['split_asks', 'pick_faq', 'pick_asks']);
+    expect('more' in result).toBe(true);
+  });
+
+  it('with HELPDESK_MULTI_ASK=off a two-question message goes through pick_faq alone, with no more / missed keys', async () => {
+    const { service, tools } = setup({ multiAsk: 'off' });
     const result = await ask(service, chat(MESSAGE));
     expect(tools()).toEqual(['pick_faq']);
     expect(result).toMatchObject({ kind: 'answer', nodeId: RESET.id });

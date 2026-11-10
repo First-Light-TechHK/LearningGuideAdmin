@@ -27,9 +27,9 @@ export const HELPDESK_DEFAULTS = {
   searchScope: 'all',
   queryContext: true,
   /**
-   * 一句话问了几件事时拆开、各给一张卡（HELPDESK_MULTI_ASK；multi-ask.ts）。真模型评测与 owner 点头之前缺省关。
+   * 一句话问了几件事时拆开、各给一张卡（HELPDESK_MULTI_ASK；multi-ask.ts）。owner 2026-11-10 定缺省开；off 关掉。
    */
-  multiAsk: false,
+  multiAsk: true,
   /** 模型健康报警阈值：一步里校验失败 / 后备 / 出错的比例超过它就报警（ai/helpdesk/trace/model-health.ts）。 */
   modelHealthAlert: 0.05,
 } as const;

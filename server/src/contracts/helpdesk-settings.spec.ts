@@ -155,9 +155,9 @@ describe('every declared setting follows the same reading rules', () => {
 
   it('reads the environment on every call (hot reload)', () => {
     const env: NodeJS.ProcessEnv = {};
-    expect(readHelpdeskSetting(HELPDESK_SETTINGS.multiAsk, env)).toBe(false);
-    env.HELPDESK_MULTI_ASK = 'on';
     expect(readHelpdeskSetting(HELPDESK_SETTINGS.multiAsk, env)).toBe(true);
+    env.HELPDESK_MULTI_ASK = 'off';
+    expect(readHelpdeskSetting(HELPDESK_SETTINGS.multiAsk, env)).toBe(false);
   });
 
   it('the old case-sensitive switch is gone: OFF switches the release model eval off', () => {
