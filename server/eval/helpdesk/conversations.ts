@@ -17,6 +17,14 @@ import { createMemoryAgentEventLog } from '../../src/ai/helpdesk/trace/agent-eve
 import { ASSIST_SEARCH } from '../../src/ai/helpdesk/workflow/assist-workflow';
 import type { AgentStepRunner } from '../../src/ai/helpdesk/workflow/engine';
 import {
+  SMALLTALK_INTENTS,
+  UNSOLVED_HANDOVER_STREAK,
+  sameSmalltalk,
+  scoreTurn,
+  type TurnExpectation,
+  type TurnScore,
+} from '../../src/contracts/helpdesk-eval-scoring';
+import {
   guardExplanation,
   guardShortText,
   learnerOf,
@@ -84,29 +92,9 @@ export const EXPECTED_KINDS = [
 ] as const;
 export type ExpectedKind = (typeof EXPECTED_KINDS)[number];
 
-const SMALLTALK_INTENTS = [
-  'greeting',
-  'farewell',
-  'vague',
-  'off_topic',
-] as const;
-type SmalltalkIntent = (typeof SMALLTALK_INTENTS)[number];
-
-export type TurnExpectation =
-  | {
-      kind: 'answer';
-      faqId: string;
-      acceptableFaqIds?: string[];
-      /**
-       * faqId 是追问（不是入口）时，通向它的入口卡片：新打的问题只在入口里检索（graph design §4），
-       * 出这张入口卡片、学员再点一下追问也算对；报告里单独数（answeredViaEntry）。
-       */
-      entryIds?: string[];
-    }
-  | { kind: 'clarify'; faqId: string; covered: boolean }
-  | { kind: 'smalltalk'; intent?: SmalltalkIntent }
-  | { kind: 'no_match' }
-  | { kind: 'handover' };
+/** Portal v4：连续两轮没解决 → 给转人工卡。寒暄不计（Part B §3）。 */
+export { UNSOLVED_HANDOVER_STREAK };
+export type { TurnExpectation };
 
 export type ConversationTurn =
   { message: string; expect?: TurnExpectation } | { click: string };
@@ -268,9 +256,6 @@ export function isHandoverRequest(message: string): boolean {
   return PORTAL_HANDOVER_KEYWORDS.some((word) => text.includes(word));
 }
 
-/** Portal v4：连续两轮没解决 → 给转人工卡。寒暄不计（Part B §3）。 */
-export const UNSOLVED_HANDOVER_STREAK = 2;
-
 export type GotTurn = {
   /**
    * Admin 的 kind；handover = 只给转人工卡（关键词那一轮 Admin 没给答案卡）；click = 点追问 / 选项。
@@ -283,6 +268,8 @@ export type GotTurn = {
   handover?: boolean;
   intent: SuggestIntent | null;
   nodeId: string | null;
+  /** 一句多问时第一张以外的卡（HELPDESK_MULTI_ASK）。 */
+  more?: string[];
   covered: boolean | null;
   guard: SuggestGuard | null;
   blocks: string[];
@@ -290,6 +277,10 @@ export type GotTurn = {
   reason?: string | null;
   /** 复核用（agent 事件里取）：检索给模型的候选 id（按顺序）与 pick_faq 的 confidence。 */
   candidateIds?: string[];
+  /** 复核与阈值标定用：同序候选的检索分与精排分（没有精排时 rerankScore 不写）。 */
+  candidateScores?: CandidateScore[];
+  /** 精排直出的卡（rerank.ts directPick）；没有直出为 null。 */
+  direct?: string | null;
   confidence?: string | null;
   /** 开思考时回答出自哪一路（thinking 或不思考的后备 quick）；没有后备为 null。 */
   branch?: 'thinking' | 'quick' | null;
@@ -297,6 +288,13 @@ export type GotTurn = {
   said?: Partial<
     Record<'opening' | 'closing' | 'reply' | 'explanation', string>
   >;
+};
+
+/** 一个候选在这一轮的分数：score 是召回分（RRF 等），rerankScore 是精排分。 */
+export type CandidateScore = {
+  id: string;
+  score: number | null;
+  rerankScore?: number;
 };
 
 export type TurnResult = {
@@ -366,6 +364,7 @@ type V5Reply = {
   kind?: SuggestKind;
   intent?: SuggestIntent | null;
   nodeId?: string | null;
+  more?: { faqId: string }[];
   covered?: boolean | null;
   guard?: SuggestGuard | null;
   blocks?: string[];
@@ -375,86 +374,13 @@ type V5Reply = {
   explanation?: string | null;
 };
 
-/**
- * 学员看到的结果一样的寒暄意图算同一个：greeting 与 vague 都是一句问候、问要帮什么，再接情境 chips
- *（Part B §3；vague 只有在对上 choice 卡片时才不同，那时出的是卡片，kind 不是 smalltalk）。
- */
-function sameSmalltalk(
-  got: SuggestIntent | null,
-  expected: SmalltalkIntent | undefined,
-): boolean {
-  if (got === expected) return true;
-  const opener = ['greeting', 'vague'];
-  return (
-    got !== null &&
-    expected !== undefined &&
-    opener.includes(got) &&
-    opener.includes(expected)
-  );
-}
-
+/** 判分规则只有一份（发布前的检查也用它）：src/contracts/helpdesk-eval-scoring.ts。 */
 export function score(
   expect: TurnExpectation,
   got: GotTurn,
   streak: number,
-): {
-  right: boolean;
-  wrongFaq: boolean;
-  viaEntry?: boolean;
-  extraCard?: boolean;
-} {
-  const shownCard = got.kind === 'answer' ? got.nodeId : null;
-  const wrong = (allowed: string[]) =>
-    shownCard !== null && !allowed.includes(shownCard);
-  switch (expect.kind) {
-    case 'answer': {
-      const exact = [expect.faqId, ...(expect.acceptableFaqIds ?? [])];
-      const allowed = [...exact, ...(expect.entryIds ?? [])];
-      return {
-        right: shownCard !== null && allowed.includes(shownCard),
-        wrongFaq: wrong(allowed),
-        viaEntry:
-          shownCard !== null &&
-          !exact.includes(shownCard) &&
-          allowed.includes(shownCard),
-      };
-    }
-    case 'clarify':
-      return {
-        right:
-          got.kind === 'clarify' &&
-          got.nodeId === expect.faqId &&
-          got.covered === expect.covered,
-        wrongFaq: shownCard !== null,
-      };
-    case 'smalltalk':
-      return {
-        right:
-          got.kind === 'smalltalk' &&
-          (expect.intent === undefined ||
-            sameSmalltalk(got.intent, expect.intent)),
-        wrongFaq: false,
-        extraCard: shownCard !== null,
-      };
-    case 'no_match':
-      return {
-        right:
-          got.kind === 'no_match' ||
-          (got.kind === 'clarify' && got.covered === false),
-        wrongFaq: shownCard !== null,
-      };
-    case 'handover':
-      return {
-        right:
-          got.kind === 'handover' ||
-          got.handover === true ||
-          (got.kind === 'clarify' && got.covered === false) ||
-          (got.kind === 'no_match' && streak >= UNSOLVED_HANDOVER_STREAK),
-        wrongFaq: false,
-        // 关键词那一轮先给答案卡、末尾再给转人工卡：用户 2026-10-30「转人工也先尽量用卡片解决」，不算多给
-        extraCard: shownCard !== null && got.handover !== true,
-      };
-  }
+): TurnScore {
+  return scoreTurn(expect, got, streak);
 }
 
 /** 展示出去的短句再过一遍守卫（同一套规则）：不过的就是逃逸。 */
@@ -489,6 +415,8 @@ export function stepDetails(
   log: { type: string; data: Record<string, unknown> }[],
 ): {
   candidateIds: string[];
+  candidateScores: CandidateScore[];
+  direct: string | null;
   confidence: string | null;
   branch: 'thinking' | 'quick' | null;
 } {
@@ -500,13 +428,27 @@ export function stepDetails(
       (e.data.branch === 'quick') === (branch === 'quick'),
   );
   const retrieve = ends.find((e) => e.data.name === 'retrieve')?.data.output as
-    { candidates?: { id?: unknown }[] } | undefined;
+    | {
+        candidates?: { id?: unknown; score?: unknown; rerankScore?: unknown }[];
+        direct?: unknown;
+      }
+    | undefined;
+  const candidates = (retrieve?.candidates ?? []).filter(
+    (c): c is { id: string; score?: unknown; rerankScore?: unknown } =>
+      typeof c?.id === 'string',
+  );
   const pick = ends.find((e) => e.data.name === 'pick_faq')?.data.args as
     { confidence?: unknown } | undefined;
   return {
-    candidateIds: (retrieve?.candidates ?? [])
-      .map((c) => c.id)
-      .filter((id): id is string => typeof id === 'string'),
+    candidateIds: candidates.map((c) => c.id),
+    candidateScores: candidates.map((c) => ({
+      id: c.id,
+      score: typeof c.score === 'number' ? c.score : null,
+      ...(typeof c.rerankScore === 'number'
+        ? { rerankScore: c.rerankScore }
+        : {}),
+    })),
+    direct: typeof retrieve?.direct === 'string' ? retrieve.direct : null,
     confidence: typeof pick?.confidence === 'string' ? pick.confidence : null,
     branch,
   };
@@ -620,6 +562,9 @@ export async function runConversations(
         kind: reply.kind ?? (reply.suggestion ? 'answer' : 'no_match'),
         intent: reply.intent ?? null,
         nodeId: reply.nodeId ?? reply.suggestion?.faqId ?? null,
+        ...(reply.more?.length
+          ? { more: reply.more.map((card) => card.faqId) }
+          : {}),
         covered: reply.covered ?? null,
         guard: reply.guard ?? null,
         blocks: reply.blocks ?? [],

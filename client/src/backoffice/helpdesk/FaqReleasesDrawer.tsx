@@ -31,6 +31,7 @@ import {
   USD_TO_CNY,
 } from '../lib/helpdeskGraph'
 import { cardTime, longDate } from '../lib/helpdeskView'
+import { FaqCheckReport } from './FaqCheckReport'
 import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { useModal } from './useModal'
@@ -41,7 +42,7 @@ import { useModal } from './useModal'
  * -「发布新版本」冻结工作副本 → 图检查 → 评测门（服务端），结果写进版本历史；工作副本没变 → 不新建；
  * - 版本历史：状态、检查、评测（recall@8）、每个版本的改动；能发布的「发布 vN」，曾经上线过的「回滚到此版本」
  *  （发布与回滚都先确认）；draft / rejected 可「重新检查」。
- * 检查在后台跑（owner 2026-11-03：检索检查 + 真流程抽样，约 3–5 分钟）：抽屉开着时一直连着版本列表的
+ * 检查在后台跑（owner 2026-11-03：检索检查 + 真流程检查；2026-11-06 起全部开发题、逐题和线上比，约 5–10 分钟）：抽屉开着时一直连着版本列表的
  * 长连接（SSE，watchReleases），进度和结果由服务端推，不定时重读；心跳停了显示「检查中断」，可以重新检查。
  * 写操作只给 helpDesk = FULL（服务端同样拒绝）；VIEW 只看。没有 Figma 画板：沿用 FAQ 抽屉、表格与确认框的
  * 样式（待视觉验收）。模态层同 FAQ 抽屉（useModal）。
@@ -69,6 +70,8 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
   const [notice, setNotice] = useState<Notice>(null)
   const [confirm, setConfirm] = useState<Confirm>(null)
   const [diffs, setDiffs] = useState<Record<number, FaqSnapshotDiff | 'loading'>>({})
+  // 展开了「检查详情」的版本
+  const [details, setDetails] = useState<ReadonlySet<number>>(new Set())
   const drawerRef = useRef<HTMLElement>(null)
   const confirmRef = useRef<HTMLDivElement>(null)
   const confirmFocus = useRef<HTMLButtonElement>(null)
@@ -283,7 +286,7 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
     return text === key ? t(locale, 'helpDesk.releases.progress.starting') : text
   }
 
-  /** 真流程抽样的一行（错卡率、题数、花费）；没有这一份 → null。 */
+  /** 真流程检查的一行（错卡率、题数、花费）；没有这一份 → null。 */
   function modelText(release: FaqRelease): { text: string; hint: string | null } | null {
     const model = modelReport(release.evalReport)
     if (!model) return null
@@ -299,6 +302,30 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
       }),
       hint: model.passed ? null : model.summary,
     }
+  }
+
+  /** 「发布新版本」之前的估计（服务端按上线版本那次检查估）；没有 → null。 */
+  function estimateText(): string | null {
+    const estimate = working?.estimate
+    if (!estimate) return null
+    const vars = {
+      questions: estimate.questions,
+      single: estimate.single,
+      followups: estimate.followups,
+      paid: estimate.paid,
+      cny: ((estimate.usd ?? 0) * USD_TO_CNY).toFixed(2),
+      cap: (estimate.budgetUsd * USD_TO_CNY).toFixed(0),
+    }
+    return t(locale, estimate.basis === 'last_check' && estimate.usd !== null ? 'helpDesk.releases.estimate' : 'helpDesk.releases.estimateFirst', vars)
+  }
+
+  function toggleDetails(version: number) {
+    setDetails((current) => {
+      const next = new Set(current)
+      if (next.has(version)) next.delete(version)
+      else next.add(version)
+      return next
+    })
   }
 
   function evalText(release: FaqRelease): string {
@@ -374,6 +401,7 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
                   <span className="hdGraphHint" id={`${uid}-create-hint`}>
                     {t(locale, 'helpDesk.releases.createHint')}
                     {diffTotal(working.diff) === 0 && list?.published !== null ? ` ${t(locale, 'helpDesk.releases.noChanges')}` : ''}
+                    {estimateText() ? <span className="hdReleaseHint hdReleaseEstimate">{estimateText()}</span> : null}
                   </span>
                 </div>
               ) : null}
@@ -404,6 +432,9 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
                         .map((release) => {
                           const actions = releaseActions(release, list.published, live)
                           const diff = diffs[release.version]
+                          const model = modelReport(release.evalReport)
+                          const hasDetails = Boolean(model?.suites) && release.status !== 'evaluating'
+                          const open = hasDetails && details.has(release.version)
                           return [
                             <tr key={release.version}>
                               <th scope="row">v{release.version}</th>
@@ -464,6 +495,16 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
                                   >
                                     {diff ? t(locale, 'helpDesk.releases.hideChanges') : t(locale, 'helpDesk.releases.showChanges', { version: release.version })}
                                   </button>
+                                  {hasDetails ? (
+                                    <button
+                                      type="button"
+                                      className="hdLinkButton"
+                                      aria-expanded={open}
+                                      onClick={() => toggleDetails(release.version)}
+                                    >
+                                      {t(locale, open ? 'helpDesk.releases.hideDetails' : 'helpDesk.releases.details')}
+                                    </button>
+                                  ) : null}
                                   {canWrite && actions.publish ? (
                                     <button
                                       type="button"
@@ -511,6 +552,13 @@ export function FaqReleasesDrawer({ locale, canWrite, onClose }: Props) {
                                 <td colSpan={5}>
                                   {diff === 'loading' ? <p className="hdGraphHint">{t(locale, 'helpDesk.releases.loading')}</p> : diffView(diff)}
                                   {release.checks && !release.checks.passed ? checksView(release.checks) : null}
+                                </td>
+                              </tr>
+                            ) : null,
+                            open && model ? (
+                              <tr key={`${release.version}-details`} className="hdReleaseDiffRow">
+                                <td colSpan={5}>
+                                  <FaqCheckReport locale={locale} report={model} />
                                 </td>
                               </tr>
                             ) : null,

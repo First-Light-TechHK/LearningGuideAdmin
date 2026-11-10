@@ -12,7 +12,7 @@ import { MemoryRateLimitStore } from '../rate-limit.service';
 import {
   ASSIST_RATE_LIMIT,
   HelpdeskSuggestService,
-  SUGGEST_DEADLINE_MS,
+  SUGGEST_CHAT_DEADLINE_MS,
   SUGGEST_THINKING_CUTOFF_MS,
   SUGGEST_THINKING_DEADLINE_MS,
 } from './helpdesk-suggest.service';
@@ -1108,7 +1108,7 @@ describe('v5 without a model call', () => {
       }
       const { service } = hedged({
         thinking: 'off',
-        quickTakes: SUGGEST_DEADLINE_MS + 1,
+        quickTakes: SUGGEST_CHAT_DEADLINE_MS + 1,
       });
       expect(await ask(service, chat('paid'))).toMatchObject({
         kind: 'no_match',
@@ -1522,13 +1522,116 @@ describe('tiered L2: OpenRouter rerank (HELPDESK_RERANK_MODEL, on by default)', 
     expect(sent.candidates.map((c) => c.id)).toEqual([FAILED.id, RESET.id]);
   });
 
-  it('never answers directly when a card is on screen (follow-ups need the model)', async () => {
-    rerankWith([0.99, 0.1, 0.1]);
-    const { service, run } = setup({
-      env: { ...ENV, HELPDESK_RERANK_DIRECT: '0.5,0' },
+  it('a failed rerank is written on the retrieve step (output.degraded) and counts as a step failure in model health (2026-11-09)', async () => {
+    rerankWith(null);
+    const { service, events } = setup({ env: ENV });
+    const runId = id(710);
+    await service.suggest({ ...chat('payment problem'), runId });
+    await service.flushTraces();
+    const steps = (await events.read(runId)).filter(
+      (e) => e.type === 'step/end' && e.data.name === 'retrieve',
+    );
+    expect(steps).toHaveLength(1);
+    expect((steps[0].data.output as JsonObject).degraded).toEqual(['rerank']);
+    const health = await events.stepHealth(new Date(0));
+    expect(health.find((row) => row.step === 'retrieve')).toMatchObject({
+      total: 1,
+      failures: 1,
     });
-    await ask(service, chat('and then?', { nodeId: FAILED.id }));
-    expect(run).toHaveBeenCalled();
+    // 精排正常时不记
+    jest.restoreAllMocks();
+    rerankWith([0.5, 0.9, 0.85]);
+    const fine = setup({ env: ENV });
+    await fine.service.suggest({ ...chat('payment problem'), runId: id(711) });
+    await fine.service.flushTraces();
+    const output = (await fine.events.read(id(711))).find(
+      (e) => e.type === 'step/end' && e.data.name === 'retrieve',
+    )?.data.output as JsonObject;
+    expect(output).not.toHaveProperty('degraded');
+    expect(
+      (await fine.events.stepHealth(new Date(0))).find(
+        (row) => row.step === 'retrieve',
+      ),
+    ).toMatchObject({ failures: 0 });
+  });
+
+  describe('a card on screen: only a clearly new question is answered directly (2026-11-10)', () => {
+    const DIRECT = { ...ENV, HELPDESK_RERANK_DIRECT: '0.8,0.1' };
+    const onScreen = { nodeId: FAILED.id };
+
+    it('sure about another card on its own words: that card, the model is not asked, the trace keeps the card that was on screen', async () => {
+      rerankWith([0.2, 0.3, 0.95]);
+      const { service, run, events } = setup({ env: DIRECT });
+      const runId = id(720);
+      const result = await ask(service, {
+        ...chat('forgot my password', onScreen),
+        runId,
+      });
+      expect(result).toMatchObject({
+        kind: 'answer',
+        suggestion: { faqId: RESET.id },
+        intent: 'question',
+        confidence: 'sure',
+      });
+      expect(run).not.toHaveBeenCalled();
+      await service.flushTraces();
+      const output = (await events.read(runId)).find(
+        (e) => e.type === 'step/end' && e.data.name === 'retrieve',
+      )?.data.output as JsonObject;
+      expect(output).toMatchObject({ shown: FAILED.id, direct: RESET.id });
+    });
+
+    it.each([
+      ['the card on screen is the best match', [0.1, 0.99, 0.1], undefined],
+      ['the card on screen is a close second', [0.2, 0.9, 0.95], undefined],
+      [
+        'the best match is a follow-up of the card on screen',
+        [0.2, 0.3, 0.95],
+        [PAID, FAILED, { ...RESET, relation: 'child' as const }],
+      ],
+      ['nothing is sure', [0.2, 0.3, 0.7], undefined],
+    ])('%s: the model is asked', async (_name, scores, found) => {
+      rerankWith(scores);
+      const { service, run } = setup({ env: DIRECT, found });
+      await ask(service, chat('and then?', onScreen));
+      expect(run).toHaveBeenCalled();
+    });
+
+    it('sure only together with the previous message is the old topic, not a new question; sure on its own words is', async () => {
+      /** 精排按问句给分：带「前文 → 」的那一次和只有本句的那一次分开给。 */
+      const rerankBy = (own: number[], withPrevious: number[]) =>
+        jest.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
+          const { query } = JSON.parse(
+            (init as RequestInit).body as string,
+          ) as { query: string };
+          const scores = query.includes(' → ') ? withPrevious : own;
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                results: scores.map((s, index) => ({
+                  index,
+                  relevance_score: s,
+                })),
+              }),
+            ),
+          );
+        });
+      const context = { ...onScreen, recentTurns: ['My payment failed'] };
+      rerankBy([0.2, 0.3, 0.5], [0.95, 0.3, 0.2]);
+      const old = setup({ env: DIRECT });
+      await ask(old.service, chat('and the other way?', context));
+      expect(old.run).toHaveBeenCalled();
+
+      jest.restoreAllMocks();
+      rerankBy([0.2, 0.3, 0.95], [0.9, 0.3, 0.2]);
+      const fresh = setup({ env: DIRECT });
+      const result = await ask(
+        fresh.service,
+        chat('forgot my password', context),
+      );
+      expect(result).toMatchObject({ suggestion: { faqId: RESET.id } });
+      expect(fresh.run).not.toHaveBeenCalled();
+    });
   });
 
   it('HELPDESK_CARD_CONTEXT=on: a follow-up card carries its parent question to the reranker and the model, with the rule', async () => {

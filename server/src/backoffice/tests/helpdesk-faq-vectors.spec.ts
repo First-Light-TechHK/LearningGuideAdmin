@@ -1,3 +1,10 @@
+import {
+  createMemoryEvalCacheStore,
+  emptyAskStats,
+  measureSpend,
+  runInEvalAsk,
+  type EvalCacheMode,
+} from '../../contracts/helpdesk-eval-cache';
 import type { HelpdeskFaq } from '../modules/helpdesk/faqs/faqContracts';
 import type {
   FaqRepository,
@@ -6,6 +13,7 @@ import type {
 } from '../modules/helpdesk/faqs/faqRepository';
 import {
   FAQ_VECTOR_LIMITS,
+  cachedFaqEmbedder,
   createFaqVectorSearch,
   faqVectorTexts,
   hedgedCall,
@@ -163,13 +171,16 @@ function memoryStore(
       links.set(key, list);
       return Promise.resolve();
     },
-    load(release, model) {
+    load(release, model, known) {
       return Promise.resolve(
         (links.get(`${release}|${model}`) ?? []).map((row) => {
           const node = nodes.find((n) => n.id === row.nodeId);
           return {
             nodeId: row.nodeId,
-            vector: embeddings.get(`${model}|${row.hash}`)?.vector ?? [],
+            hash: row.hash,
+            vector: known?.has(row.hash)
+              ? []
+              : (embeddings.get(`${model}|${row.hash}`)?.vector ?? []),
             type: node?.type ?? 'answer',
             entry: node?.entry ?? true,
             category: node?.category ?? 'other',
@@ -308,6 +319,18 @@ describe('openRouterFaqEmbedder', () => {
       model: 'baai/bge-m3',
       input: ['a', 'b'],
     });
+  });
+
+  it('reports what the call cost (usage.cost) to a release check that measures it', async () => {
+    const { impl } = fetchReturning(200, {
+      data: [{ index: 0, embedding: [1, 0] }],
+      usage: { cost: 4e-8 },
+    });
+    const embedder = openRouterFaqEmbedder(env, impl);
+    const { spent } = await measureSpend(
+      () => embedder?.embed(['a']) ?? Promise.resolve([]),
+    );
+    expect(spent).toEqual({ embed: 4e-8, rerank: 0 });
   });
 
   it('does not call the model for no texts', async () => {
@@ -490,6 +513,34 @@ describe('createFaqVectorSearch', () => {
     expect(ranked?.[0].entry).toBe(false);
   });
 
+  it('hands out the text vectors of a release from the same memory index (for the duplicate-text check), and null without a model', async () => {
+    const { store, embedder } = await indexed();
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    const rows = await vectors.texts?.(RELEASE);
+    expect(
+      rows?.map((r) => [r.nodeId, r.hash]).sort((a, b) => (a < b ? -1 : 1)),
+    ).toEqual(
+      [
+        ['password', textHash('Password?')],
+        ['password', textHash('密码？')],
+        ['password', textHash('忘记密码')],
+        ['refund', textHash('Refund?')],
+        ['refund', textHash('退款？')],
+        ['refund', textHash('钱扣了两次')],
+      ].sort((a, b) => (a < b ? -1 : 1)),
+    );
+    // unit vectors, no second copy: the memory counts each text once
+    const one = rows?.find((r) => r.hash === textHash('忘记密码'))?.vector;
+    expect(one && Math.hypot(...one)).toBeCloseTo(1, 5);
+    expect(vectors.memory?.().vectors).toBe(6);
+    expect(
+      await createFaqVectorSearch({ store, embedder: () => null }).texts?.(
+        RELEASE,
+      ),
+    ).toBeNull();
+    expect(await vectors.texts?.(RELEASE + 9)).toBeNull();
+  });
+
   it('embeds a repeated question once', async () => {
     const { store, embedder } = await indexed();
     const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
@@ -537,6 +588,77 @@ describe('createFaqVectorSearch', () => {
     expect(await vectors.rank(RELEASE, '退款')).toBeNull();
     clock = FAQ_VECTOR_LIMITS.emptyRecheckMs + 1;
     expect(await vectors.rank(RELEASE, '退款')).not.toBeNull();
+  });
+});
+
+describe('the release check: question vectors from the eval cache (cachedFaqEmbedder, withEmbedder)', () => {
+  const table = { 'Refund?': [1, 0, 0], 'Password?': [0, 1, 0] };
+  const nodes = [
+    {
+      id: 'refund',
+      questionEn: 'Refund?',
+      questionZh: 'Refund?',
+      phrasings: [],
+    },
+    {
+      id: 'password',
+      questionEn: 'Password?',
+      questionZh: 'Password?',
+      phrasings: [],
+    },
+  ];
+  const ask = <T>(
+    store: ReturnType<typeof createMemoryEvalCacheStore>,
+    mode: EvalCacheMode,
+    fn: () => Promise<T>,
+  ) => {
+    const stats = emptyAskStats();
+    return runInEvalAsk({ store, mode, stats }, fn).then((value) => ({
+      value,
+      stats,
+    }));
+  };
+
+  it('embeds a question once across checks, at float32 precision, sharing the release index with live search', async () => {
+    const store = memoryStore(nodes);
+    // a question vector with more precision than float32 holds
+    const embedder = fakeEmbedder({ ...table, 'my refund': [0.3, 0.1, 0] });
+    await indexFaqRelease({ store, embedder, release: RELEASE });
+    const live = createFaqVectorSearch({ store, embedder: () => embedder });
+    const check = live.withEmbedder?.(cachedFaqEmbedder);
+    const cache = createMemoryEvalCacheStore();
+    const before = embedder.calls.length;
+    const first = await ask(cache, 'use', () =>
+      check!.rank(RELEASE, 'my refund'),
+    );
+    const second = await ask(cache, 'use', () =>
+      check!.rank(RELEASE, 'my refund'),
+    );
+    expect(embedder.calls.length - before).toBe(1);
+    expect(first.stats.embed.misses).toBe(1);
+    expect(second.stats.embed.hits).toBe(1);
+    expect(second.value).toEqual(first.value);
+    expect(first.value?.[0].id).toBe('refund');
+    // the stored vector is float32: what a hit gives back is what the miss used
+    const [row] = [...cache.rows.values()];
+    expect(typeof row.value).toBe('string');
+    // the live search keeps its own question vectors, outside the check
+    await live.rank(RELEASE, 'my refund');
+    expect(embedder.calls.length - before).toBe(2);
+    expect(live.memory?.().releases).toBe(1);
+  });
+
+  it('refresh asks the model again; outside a check the wrapper only passes through', async () => {
+    const embedder = fakeEmbedder(table);
+    const cached = cachedFaqEmbedder(embedder);
+    const cache = createMemoryEvalCacheStore();
+    await ask(cache, 'use', () => cached.embed(['Refund?']));
+    await ask(cache, 'refresh', () => cached.embed(['Refund?']));
+    await ask(cache, 'use', () => cached.embed(['Refund?', 'Password?']));
+    expect(embedder.calls).toEqual([['Refund?'], ['Refund?'], ['Password?']]);
+    await cached.embed(['Refund?']);
+    expect(embedder.calls).toHaveLength(4);
+    expect(cache.rows.size).toBe(2);
   });
 });
 
@@ -607,6 +729,75 @@ describe('createFaqVectorSearch: speed', () => {
       warmFaqVectors(vectors, () => Promise.reject(new Error('db down'))),
     ).resolves.toBeUndefined();
     expect(warmed).toEqual([RELEASE]);
+  });
+
+  it('keeps at most loadedReleasesMax releases in memory and frees the rest', async () => {
+    const store = memoryStore(nodes);
+    const embedder = fakeEmbedder(table);
+    for (let release = 1; release <= 5; release++)
+      await indexFaqRelease({ store, embedder, release });
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    for (let release = 1; release <= 5; release++)
+      expect((await vectors.rank(release, '退钱'))?.[0].id).toBe('refund');
+    const memory = vectors.memory?.();
+    expect(memory?.releases).toBe(FAQ_VECTOR_LIMITS.loadedReleasesMax);
+    // 5 版用的是同样两段文本：池里只有两条向量
+    expect(memory?.vectors).toBe(2);
+    expect(memory?.bytes).toBe(2 * 2 * 4);
+  });
+
+  it('shares unchanged texts between releases: a new release reads only the vectors it does not have yet', async () => {
+    const store = memoryStore(nodes);
+    const embedder = fakeEmbedder(table);
+    await indexFaqRelease({ store, embedder, release: 1 });
+    await indexFaqRelease({ store, embedder, release: 2 });
+    const calls: { release: number; known: string[] }[] = [];
+    const load = store.load.bind(store);
+    store.load = (release, model, known) => {
+      calls.push({ release, known: [...(known ?? [])].sort() });
+      return load(release, model, known);
+    };
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    await vectors.rank(1, '退钱');
+    await vectors.rank(2, '退钱');
+    const hashes = ['Refund?', '退款？'].map((text) => textHash(text)).sort();
+    expect(calls).toEqual([
+      { release: 1, known: [] },
+      { release: 2, known: hashes },
+    ]);
+    expect(vectors.memory?.()).toMatchObject({ releases: 2, vectors: 2 });
+  });
+
+  it('reads an evicted release again when it is asked for, with the same answer', async () => {
+    const { store, loads } = await counted();
+    const embedder = fakeEmbedder(table);
+    for (let release = 1; release <= 4; release++)
+      await indexFaqRelease({ store, embedder, release });
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    const first = await vectors.rank(1, '退钱');
+    for (let release = 2; release <= 4; release++)
+      await vectors.rank(release, '退钱');
+    const before = loads();
+    expect(await vectors.rank(1, '退钱')).toEqual(first);
+    expect(loads()).toBe(before + 1);
+  });
+
+  it('reads a release in full when the store left out a vector the pool no longer has', async () => {
+    const store = memoryStore(nodes);
+    const embedder = fakeEmbedder(table);
+    await indexFaqRelease({ store, embedder, release: RELEASE });
+    const seen: (string[] | undefined)[] = [];
+    const load = store.load.bind(store);
+    // 坏的一面：说「你都有」，其实池里一条都没有（读的时候被别的版释放了）
+    store.load = async (release, model, known) => {
+      seen.push(known && [...known]);
+      const rows = await load(release, model);
+      return known ? rows.map((row) => ({ ...row, vector: [] })) : rows;
+    };
+    const vectors = createFaqVectorSearch({ store, embedder: () => embedder });
+    expect((await vectors.rank(RELEASE, '退钱'))?.[0].id).toBe('refund');
+    expect(seen).toEqual([[], undefined]);
+    expect(vectors.memory?.()).toMatchObject({ releases: 1, vectors: 2 });
   });
 
   it('asks for the question vector while the release is still loading', async () => {

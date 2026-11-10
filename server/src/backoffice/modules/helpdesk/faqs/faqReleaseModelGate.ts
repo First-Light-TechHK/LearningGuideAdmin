@@ -1,274 +1,102 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-import type {
-  ReleaseAnswerer,
-  ReleaseEvalAnswer,
-  ReleaseEvalLocale,
-} from '../../../../contracts/helpdesk-release-eval';
-import { diffSnapshots, type FaqReleaseSnapshot } from './faqRelease';
+import type { ReleaseAnswerer } from '../../../../contracts/helpdesk-release-eval';
 import type {
   FaqRegressionCase,
   FaqReleaseEvalReport,
   FaqReleaseGate,
   FaqReleaseGateInput,
 } from './faqReleaseGate';
+import type { FaqVectorTextRow } from './faqVectors';
+import {
+  newTextCollisions,
+  type CollisionReport,
+} from './release-check/collisions';
+import { judgeRelease } from './release-check/policy';
+import { estimateCheck } from './release-check/estimate';
+import {
+  changedKeys,
+  followupParents,
+  loadReleaseEvalItems,
+  planFollowups,
+  planQuestions,
+  planScreens,
+  touchedNodes,
+  type ReleaseEvalItem,
+} from './release-check/questions';
+import {
+  candidatePool,
+  missesOf,
+  releaseCheckMetrics,
+  releaseCheckReceipt,
+  releaseCheckSummary,
+  type ModelEvalMiss,
+} from './release-check/report';
+import { runReleaseQuestions } from './release-check/runner';
 
 /**
- * 发布前的真流程抽样检查（owner 2026-11-03 选「抽样跑测试集」）：免费的检索检查只看检索的前 8 名，
- * 不看用户真正看到什么；这里把一批问题按线上聊天的整条流程（关键词 + 向量召回、精排、小模型选卡作答，
- * 契约 helpdesk-release-eval.ts）在候选版本上问一遍，按标注的卡自动判分：
- *
- * 问题从哪来（每个问题只问一次，按原文去重）：
- * 1. 固定抽样：S650 开发集（release-eval/s650-dev.jsonl，1,367 条，按卡生成并复核过的单句问题，含不该出卡的）里
- *    按 id 的 SHA-256 排序取前 sampleSize 条（缺省 300）。每一版抽到的是同一批（标的卡这一版里没有的跳过），
- *    所以和上一版的错卡率可以直接比。测试集（test）不进来，只留给报告；
- * 2. 这一版改了的卡：和上线版本比，新增或改过的卡在开发集里的全部问题（至多 changedMax 条）；
- * 3. 回归用例：员工从数据飞轮接受过的、脱敏过的用户原话（标着选定的卡，至多 regressionMax 条）。
- *
- * 判分（和评测脚本 conversations.ts 的 score 同一规则）：
- * - 期望出卡：出了标注的卡、也算对的卡（acceptable），或通向它的入口卡 → 对；出了别的卡 → 错卡；没出卡 → 没答上（不算错卡）；
- * - 期望不出卡（no_match）：出了任何卡 → 错卡；
- * - 期望寒暄：出了卡只记「多给卡片」，不算错卡（R3）；
- * - 没得到回答（没有 key、超时、出错）→ 单独数（error），不算错卡也不算对。
- *
- * 通过：错卡率 ≤ 2%（owner 的标准），比上一版的错卡率高不超过 1 个百分点，且没得到回答的不超过 5%
- *（否则是模型或余额出了问题，检查不算数）。花费超过 budgetUsd 就停下并判不通过。
+ * 发布前的真流程检查（release check v2，owner 2026-11-06 批准；v1 是 2026-11-03 的 300 道抽样）：
+ * 免费的检索检查只看检索的前 8 名，不看用户真正看到什么；这里把开发集的全部题与回归题按线上聊天的整条流程
+ *（关键词 + 向量召回、精排、小模型选卡作答，契约 helpdesk-release-eval.ts）在候选版本与上线版本上各问一遍；
+ * 另加追问题（B5）：屏幕上开着父卡时问子卡的题，只问这一版动过的父卡（父卡、子卡或边改了）；
+ * 再加「旧卡在屏问新问题」（2026-11-09）：开发集单问抽 screenSample 道，屏幕上配一张不相干的卡再问；
+ * 再顺手查一遍重复问法（collisions.ts：新加的文字和别的卡几乎一样，免费，只提醒）。
+ * 四块各管一件事（release-check/）：
+ * - questions.ts：问哪些题、每题怎么判（判分规则只有一份：contracts/helpdesk-eval-scoring.ts）；
+ * - runner.ts：并发问两个版本、新出的错复问确认、漂移抽查、花费与预算；
+ * - policy.ts：按套件与切片判定（S650 错卡率 95% 区间上界 ≤ 2%、逐题不比线上差——新出的错与答对率两个
+ *   方向、超时与库里没卡给卡的上限、题集过时的上限……；规则的全文在 policy.ts 文件头）；
+ * - report.ts：界面与对账读的报告。
+ * 不改就不花钱：分层缓存（contracts/helpdesk-eval-cache.ts）记住每层的结果，只有输入变了的题才真问。
  */
-
 export const MODEL_GATE = {
-  sampleSize: 300,
-  changedMax: 200,
-  regressionMax: 100,
   wrongRateMax: 0.02,
-  wrongRiseMax: 0.01,
+  cardWhenNoneMax: 0.03,
   errorRateMax: 0.05,
-  /** 一次检查的花费上限（美元）。 */
-  budgetUsd: 0.5,
-  concurrency: 4,
+  /** 超时的题（学员没拿到答案）至多占这么多；线上聊天期限 8 秒下实测 0–0.6%。 */
+  timeoutRateMax: 0.02,
+  /** 答对率比上线版本低超过这么多（逐题配对、复问确认之后）→ 不通过。 */
+  rightDropMax: 0.01,
+  /** 跳过（标的卡没了）+ 泄漏 + 待重标的题至多占这么多；超过 = 题集该重标了。 */
+  staleRateMax: 0.05,
+  /** 检索降级（向量 / 精排没生效）的题至多占这么多；超过 = 问的不是线上流程，不算数。 */
+  degradedRateMax: 0.05,
+  /** 语言 / 写法切片至少这么多道才拦；答对率比线上也要配对题至少这么多才判。 */
+  sliceMin: 200,
+  /** 新出的错：不用缓存再问几次，几次（含第一次）都错才算真的变差；至多复问几道。 */
+  reaskTimes: 2,
+  reaskConfirm: 2,
+  reaskMax: 60,
+  /** 漂移抽查：每次不读缓存重问几道，变了超过几道就不算数。 */
+  driftSample: 40,
+  driftMax: 2,
+  /** 一次检查的花费上限（美元；缓存是空的那一次最贵，之后只付改过的题）。 */
+  budgetUsd: 3,
+  concurrency: 8,
   missesMax: 50,
   /** 每答完这么多个就报一次进度（也是心跳）。 */
   progressEvery: 10,
+  /** 题的安全上限。 */
+  questionsMax: 5000,
+  /** 「旧卡在屏问新问题」抽几道开发集单问（0 = 不问）。 */
+  screenSample: 200,
+  /** 重复问法：新加的文字和别的卡上的文字余弦至少这么高就列出来（只提醒）；至多列几对。 */
+  collisionMin: 0.95,
+  collisionsMax: 30,
 } as const;
 
 /** 可以按次改的限额（测试、以后的环境变量）。 */
 export type ModelGateLimits = { [K in keyof typeof MODEL_GATE]: number };
 
-export type ReleaseEvalItem = {
-  id: string;
-  locale: string;
-  style?: string | null;
-  message: string;
-  expect: 'answer' | 'no_match' | 'smalltalk';
-  faq?: string;
-  acceptable?: string[];
+export type ModelReleaseGateDeps = {
+  answerer: ReleaseAnswerer;
+  items?: () => ReleaseEvalItem[];
+  regressionCases?: () => Promise<FaqRegressionCase[]>;
+  /** 先把这一版的向量算好（线上检索的向量那一路要用；幂等）。上线版本也会调一次。 */
+  prepare?: (version: number) => Promise<unknown>;
+  /** 这一版每条文字的向量（重复问法检查用，release-check/collisions.ts）；不给或 null = 不查。 */
+  vectors?: (version: number) => Promise<FaqVectorTextRow[] | null>;
+  now?: () => Date;
+  limits?: Partial<ModelGateLimits>;
 };
-
-export type ModelEvalCase = {
-  id: string;
-  source: 'sample' | 'changed' | 'regression';
-  locale: ReleaseEvalLocale;
-  message: string;
-  expect: 'answer' | 'no_match' | 'smalltalk';
-  /** 期望出卡：标注的卡（节点 id）。 */
-  faqId: string | null;
-  /** 也算对的卡：acceptable 与入口卡（节点 id）。 */
-  allowed: string[];
-};
-
-export type ModelEvalMiss = {
-  id: string;
-  source: ModelEvalCase['source'];
-  locale: ReleaseEvalLocale;
-  text: string;
-  expected: string;
-  got: string;
-};
-
-const DEFAULT_SET = join(__dirname, 'release-eval', 's650-dev.jsonl');
-
-/** 读开发集（一行一个 JSON）。 */
-export function loadReleaseEvalItems(path = DEFAULT_SET): ReleaseEvalItem[] {
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line) => JSON.parse(line) as ReleaseEvalItem);
-}
-
-const serviceLocale = (locale: string): ReleaseEvalLocale =>
-  locale === 'en-GB' ? 'en-GB' : 'zh-CN';
-
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
-
-/** 每个非入口节点沿边往上，每条路上第一个入口节点（与评测脚本 entryAncestorsOf 相同）。 */
-export function entryAncestors(
-  snapshot: FaqReleaseSnapshot,
-): Map<string, string[]> {
-  const entry = new Map(snapshot.nodes.map((n) => [n.id, n.entry]));
-  const parents = new Map<string, string[]>();
-  for (const e of snapshot.edges)
-    parents.set(e.childId, [...(parents.get(e.childId) ?? []), e.parentId]);
-  const out = new Map<string, string[]>();
-  for (const node of snapshot.nodes) {
-    if (node.entry) continue;
-    const found = new Set<string>();
-    const seen = new Set<string>([node.id]);
-    let level = parents.get(node.id) ?? [];
-    while (level.length > 0) {
-      const up: string[] = [];
-      for (const id of level) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        if (entry.get(id)) found.add(id);
-        else up.push(...(parents.get(id) ?? []));
-      }
-      level = up;
-    }
-    out.set(node.id, [...found]);
-  }
-  return out;
-}
-
-/** 这一版相对上线版本新增或改过的卡（key）；没有上线版本 → 空（全是新的，固定抽样已经覆盖）。 */
-export function changedKeys(
-  previous: FaqReleaseSnapshot | null | undefined,
-  snapshot: FaqReleaseSnapshot,
-): Set<string> {
-  if (!previous) return new Set();
-  const diff = diffSnapshots(previous, snapshot);
-  return new Set(
-    [...diff.nodes.added, ...diff.nodes.changed].map((node) => node.key),
-  );
-}
-
-/**
- * 选这一版要问的问题。返回 skipped = 标的卡这一版里没有、所以没问的开发集条数。
- */
-export function selectModelEvalCases(input: {
-  items: ReleaseEvalItem[];
-  snapshot: FaqReleaseSnapshot;
-  changed: Set<string>;
-  regression: FaqRegressionCase[];
-  limits?: Partial<
-    Pick<ModelGateLimits, 'sampleSize' | 'changedMax' | 'regressionMax'>
-  >;
-}): { cases: ModelEvalCase[]; skipped: number } {
-  const limits: ModelGateLimits = { ...MODEL_GATE, ...input.limits };
-  const idOfKey = new Map(input.snapshot.nodes.map((n) => [n.key, n.id]));
-  const nodeIds = new Set(input.snapshot.nodes.map((n) => n.id));
-  const ancestors = entryAncestors(input.snapshot);
-  const allowedFor = (ids: string[]) => [
-    ...new Set([...ids, ...ids.flatMap((id) => ancestors.get(id) ?? [])]),
-  ];
-  let skipped = 0;
-  const usable: (ReleaseEvalItem & { gold: string[] })[] = [];
-  for (const item of input.items) {
-    if (item.expect !== 'answer') {
-      usable.push({ ...item, gold: [] });
-      continue;
-    }
-    const gold = [item.faq, ...(item.acceptable ?? [])]
-      .map((key) => (key ? idOfKey.get(key) : undefined))
-      .filter((id): id is string => id !== undefined);
-    const main = item.faq ? idOfKey.get(item.faq) : undefined;
-    if (!main) {
-      skipped += 1;
-      continue;
-    }
-    usable.push({ ...item, gold: [main, ...gold.filter((id) => id !== main)] });
-  }
-  const toCase = (
-    item: ReleaseEvalItem & { gold: string[] },
-    source: ModelEvalCase['source'],
-  ): ModelEvalCase => ({
-    id: item.id,
-    source,
-    locale: serviceLocale(item.locale),
-    message: item.message,
-    expect: item.expect,
-    faqId: item.gold[0] ?? null,
-    allowed: allowedFor(item.gold),
-  });
-  const seen = new Set<string>();
-  const cases: ModelEvalCase[] = [];
-  const add = (one: ModelEvalCase) => {
-    const text = one.message.trim();
-    if (text === '' || seen.has(text)) return;
-    seen.add(text);
-    cases.push(one);
-  };
-  const ordered = [...usable].sort((a, b) =>
-    sha(a.id) < sha(b.id) ? -1 : sha(a.id) > sha(b.id) ? 1 : 0,
-  );
-  for (const item of ordered.slice(0, limits.sampleSize))
-    add(toCase(item, 'sample'));
-  const changedIds = new Set(
-    [...input.changed]
-      .map((key) => idOfKey.get(key))
-      .filter((id): id is string => id !== undefined),
-  );
-  ordered
-    .filter((item) => item.gold.some((id) => changedIds.has(id)))
-    .slice(0, limits.changedMax)
-    .forEach((item) => add(toCase(item, 'changed')));
-  input.regression
-    .filter((one) => nodeIds.has(one.faqId))
-    .slice(0, limits.regressionMax)
-    .forEach((one, index) =>
-      add({
-        id: `regression-${index + 1}`,
-        source: 'regression',
-        locale: serviceLocale(one.locale),
-        message: one.text,
-        expect: 'answer',
-        faqId: one.faqId,
-        allowed: allowedFor([one.faqId]),
-      }),
-    );
-  return { cases, skipped };
-}
-
-export type ModelEvalScore = {
-  right: boolean;
-  wrongCard: boolean;
-  extraCard: boolean;
-  error: boolean;
-};
-
-/** 一个问题的判分（规则见文件头）。 */
-export function scoreModelAnswer(
-  one: ModelEvalCase,
-  got: ReleaseEvalAnswer,
-): ModelEvalScore {
-  if (got.kind === 'error')
-    return { right: false, wrongCard: false, extraCard: false, error: true };
-  const shown = got.kind === 'answer' ? got.nodeId : null;
-  switch (one.expect) {
-    case 'answer':
-      return {
-        right: shown !== null && one.allowed.includes(shown),
-        wrongCard: shown !== null && !one.allowed.includes(shown),
-        extraCard: false,
-        error: false,
-      };
-    case 'no_match':
-      return {
-        // 没卡、或先追问（不给卡）都算对；评测脚本还要求追问时 covered = false，这里不细分
-        right: shown === null,
-        wrongCard: shown !== null,
-        extraCard: false,
-        error: false,
-      };
-    case 'smalltalk':
-      return {
-        right: got.kind === 'smalltalk',
-        wrongCard: false,
-        extraCard: shown !== null,
-        error: false,
-      };
-  }
-}
 
 const previousModelWrongRate = (report: unknown): number | null => {
   if (typeof report !== 'object' || report === null) return null;
@@ -279,30 +107,10 @@ const previousModelWrongRate = (report: unknown): number | null => {
       typeof part === 'object' &&
       part !== null &&
       (part as { kind?: unknown }).kind === 'model',
-  ) as { metrics?: Record<string, unknown>; passed?: unknown } | undefined;
+  ) as { metrics?: Record<string, unknown> } | undefined;
   const value = model?.metrics?.wrongRate;
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 };
-
-export type ModelReleaseGateDeps = {
-  answerer: ReleaseAnswerer;
-  items?: () => ReleaseEvalItem[];
-  regressionCases?: () => Promise<FaqRegressionCase[]>;
-  /** 先把这一版的向量算好（线上检索的向量那一路要用；幂等）。 */
-  prepare?: (version: number) => Promise<unknown>;
-  now?: () => Date;
-  limits?: Partial<ModelGateLimits>;
-};
-
-const label = (one: ModelEvalCase, keyOf: Map<string, string>) =>
-  one.expect === 'answer'
-    ? (keyOf.get(one.faqId ?? '') ?? one.faqId ?? '?')
-    : one.expect;
-
-const gotLabel = (got: ReleaseEvalAnswer, keyOf: Map<string, string>) =>
-  got.kind === 'answer' || got.kind === 'clarify'
-    ? `${got.kind}:${keyOf.get(got.nodeId ?? '') ?? got.nodeId ?? 'none'}`
-    : got.kind;
 
 export function createModelReleaseGate(
   deps: ModelReleaseGateDeps,
@@ -310,13 +118,71 @@ export function createModelReleaseGate(
   const now = deps.now ?? (() => new Date());
   const limits: ModelGateLimits = { ...MODEL_GATE, ...deps.limits };
   let items: ReleaseEvalItem[] | null = null;
+  const loadItems = () =>
+    (items ??= (deps.items ?? (() => loadReleaseEvalItems()))());
+  /** 这一版要问的全部题：单问（开发集 + 回归）与追问（只问动过的父卡）。 */
+  async function plan(
+    input: Pick<FaqReleaseGateInput, 'snapshot' | 'previous'>,
+  ) {
+    const regression = deps.regressionCases
+      ? await deps.regressionCases().catch(() => [])
+      : [];
+    const changed = changedKeys(input.previous?.snapshot, input.snapshot);
+    const single = planQuestions({
+      items: loadItems(),
+      snapshot: input.snapshot,
+      changed,
+      regression,
+      questionsMax: limits.questionsMax,
+    });
+    const followups = planFollowups({
+      items: loadItems(),
+      snapshot: input.snapshot,
+      parents: followupParents(input.previous?.snapshot, input.snapshot),
+      changed,
+    }).slice(0, Math.max(0, limits.questionsMax - single.questions.length));
+    const screens = planScreens({
+      questions: single.questions,
+      snapshot: input.snapshot,
+      sample: limits.screenSample,
+    }).slice(
+      0,
+      Math.max(
+        0,
+        limits.questionsMax - single.questions.length - followups.length,
+      ),
+    );
+    return {
+      questions: [...single.questions, ...followups, ...screens],
+      skipped: single.skipped,
+      leaked: single.leaked,
+      leakedDev: single.leakedDev,
+    };
+  }
   return {
+    async estimate(input) {
+      if (!deps.answerer.available()) return null;
+      const { questions } = await plan(input);
+      return estimateCheck({
+        questions,
+        touched: input.previous?.snapshot
+          ? touchedNodes(input.previous.snapshot, input.snapshot)
+          : new Set(),
+        liveReport: input.previous?.evalReport ?? null,
+        driftSample: limits.driftSample,
+        budgetUsd: limits.budgetUsd,
+      });
+    },
     async evaluate(input: FaqReleaseGateInput): Promise<FaqReleaseEvalReport> {
       const report = (
         passed: boolean,
         summary: string,
         metrics: Record<string, number> = {},
         misses: ModelEvalMiss[] = [],
+        extra: Pick<
+          FaqReleaseEvalReport,
+          'suites' | 'receipt' | 'collisions' | 'candidatePool'
+        > = {},
       ): FaqReleaseEvalReport => ({
         kind: 'model',
         passed,
@@ -325,29 +191,30 @@ export function createModelReleaseGate(
         metrics,
         // 报告里的 misses 与检索的同一个字段：这里是问题原文、期望与实际
         misses: misses as unknown as FaqReleaseEvalReport['misses'],
+        ...extra,
       });
       if (!deps.answerer.available())
         return report(
           false,
-          'The live-pipeline sample could not run: no model API key (OPENROUTER_API_KEY) on this server',
+          'The live-pipeline check could not run: no model API key (OPENROUTER_API_KEY) on this server',
         );
-      items ??= (deps.items ?? (() => loadReleaseEvalItems()))();
-      const regression = deps.regressionCases
-        ? await deps.regressionCases().catch(() => [])
-        : [];
-      const { cases, skipped } = selectModelEvalCases({
-        items,
-        snapshot: input.snapshot,
-        changed: changedKeys(input.previous?.snapshot, input.snapshot),
-        regression,
-        limits,
-      });
-      if (cases.length === 0)
+      const { questions, skipped, leaked, leakedDev } = await plan(input);
+      if (questions.length === 0)
         return report(
           false,
-          'The live-pipeline sample has no questions for this library (no labelled card is in this release)',
-          { cases: 0, skippedCases: skipped },
+          'The live-pipeline check has no questions for this library (no labelled card is in this release)',
+          {
+            cases: 0,
+            skippedCases: skipped,
+            regressionLeaked: leaked,
+            devLeaked: leakedDev,
+          },
         );
+      // 上线版本：逐题对比（没有上线版本、或旧版本行没有快照 = 不比）
+      const live =
+        input.previous?.snapshot && input.previous.version !== input.version
+          ? input.previous
+          : null;
       if (deps.prepare) {
         if (
           (await input.progress?.({ stage: 'vectors', done: 0, total: 1 })) ===
@@ -355,139 +222,138 @@ export function createModelReleaseGate(
         )
           return report(false, 'The check was replaced by a newer one');
         await deps.prepare(input.version);
+        if (live) await deps.prepare(live.version);
       }
-      const session = deps.answerer.forRelease({
+      // 重复问法（免费，只提醒）：查不了（没有向量、没有上线版本）就不写
+      const liveSnapshot = live?.snapshot ?? null;
+      const collisions: CollisionReport | null =
+        deps.vectors && liveSnapshot
+          ? await deps
+              .vectors(input.version)
+              .then((rows) =>
+                rows
+                  ? newTextCollisions({
+                      rows,
+                      snapshot: input.snapshot,
+                      live: liveSnapshot,
+                      min: limits.collisionMin,
+                      max: limits.collisionsMax,
+                    })
+                  : null,
+              )
+              .catch(() => null)
+          : null;
+      // 这一版新加的卡（上线版本里没有）：出了它们而被判错的题是「待重标」，不是新出的错
+      const liveIds = new Set(liveSnapshot?.nodes.map((n) => n.id) ?? []);
+      const fresh = liveSnapshot
+        ? new Set(
+            input.snapshot.nodes
+              .filter((n) => !liveIds.has(n.id))
+              .map((n) => n.id),
+          )
+        : undefined;
+      const run = await runReleaseQuestions({
+        questions,
+        ...(fresh ? { fresh } : {}),
+        candidate: deps.answerer.forRelease({
+          version: input.version,
+          snapshot: input.snapshot,
+        }),
+        live: live
+          ? deps.answerer.forRelease({
+              version: live.version,
+              snapshot: live.snapshot,
+            })
+          : null,
         version: input.version,
-        snapshot: input.snapshot,
+        limits,
+        signal: input.signal,
+        progress: (done, total) =>
+          input.progress?.({ stage: 'model', done, total }) ??
+          Promise.resolve(true),
       });
+      const judgement = judgeRelease(run, limits, { skipped, leakedDev });
       const keyOf = new Map(input.snapshot.nodes.map((n) => [n.id, n.key]));
-      const results: {
-        one: ModelEvalCase;
-        got: ReleaseEvalAnswer;
-        score: ModelEvalScore;
-      }[] = [];
-      let spent = 0;
-      let stopped: null | 'budget' | 'replaced' = null;
-      let next = 0;
-      let done = 0;
-      const worker = async () => {
-        while (stopped === null && next < cases.length) {
-          if (input.signal?.aborted) {
-            stopped = 'replaced';
-            return;
-          }
-          if (spent >= limits.budgetUsd) {
-            stopped = 'budget';
-            return;
-          }
-          const one = cases[next++];
-          const got = await session.ask({
-            message: one.message,
-            locale: one.locale,
-            signal: input.signal,
-          });
-          spent += got.costUsd;
-          results.push({ one, got, score: scoreModelAnswer(one, got) });
-          done += 1;
-          if (done % limits.progressEvery === 0 || done === cases.length) {
-            const alive = await input.progress?.({
-              stage: 'model',
-              done,
-              total: cases.length,
-            });
-            if (alive === false) stopped = 'replaced';
-          }
-        }
+      const metrics = {
+        ...releaseCheckMetrics({
+          run,
+          judgement,
+          skipped,
+          leaked,
+          leakedDev,
+          previousWrongRate: previousModelWrongRate(input.previous?.evalReport),
+        }),
+        ...(collisions
+          ? {
+              collisionTextsChecked: collisions.fresh,
+              collisionsNew: collisions.total,
+              collisionCardPairs: collisions.cardPairs,
+            }
+          : {}),
       };
-      await input.progress?.({ stage: 'model', done: 0, total: cases.length });
-      await Promise.all(
-        Array.from({ length: Math.max(1, limits.concurrency) }, () => worker()),
+      const misses = missesOf(
+        run.results,
+        keyOf,
+        limits.reaskConfirm,
+        limits.missesMax,
       );
-      const count = (
-        pick: (s: ModelEvalScore) => boolean,
-        source?: ModelEvalCase['source'],
-      ) =>
-        results.filter(
-          (r) => (!source || r.one.source === source) && pick(r.score),
-        ).length;
-      const answered = results.filter((r) => !r.score.error);
-      const wrong = count((s) => s.wrongCard);
-      const errors = count((s) => s.error);
-      const positives = answered.filter((r) => r.one.expect === 'answer');
-      const wrongRate = answered.length > 0 ? wrong / answered.length : 0;
-      const errorRate = results.length > 0 ? errors / results.length : 0;
-      const metrics: Record<string, number> = {
-        cases: results.length,
-        planned: cases.length,
-        sampleCases: results.filter((r) => r.one.source === 'sample').length,
-        changedCases: results.filter((r) => r.one.source === 'changed').length,
-        regressionCases: results.filter((r) => r.one.source === 'regression')
-          .length,
-        skippedCases: skipped,
-        wrongCards: wrong,
-        wrongRate: Number(wrongRate.toFixed(4)),
-        rightRate: Number(
-          (positives.length > 0
-            ? positives.filter((r) => r.score.right).length / positives.length
-            : 0
-          ).toFixed(4),
-        ),
-        extraCards: count((s) => s.extraCard),
-        errors,
-        costUsd: Number(spent.toFixed(4)),
-        unpricedCalls: results.reduce((sum, r) => sum + r.got.unpricedCalls, 0),
-        regressionWrong: count((s) => s.wrongCard, 'regression'),
-      };
-      const before = previousModelWrongRate(input.previous?.evalReport);
-      if (before !== null) metrics.previousWrongRate = before;
-      const misses: ModelEvalMiss[] = results
-        .filter((r) => r.score.wrongCard || r.score.error)
-        .slice(0, limits.missesMax)
-        .map((r) => ({
-          id: r.one.id,
-          source: r.one.source,
-          locale: r.one.locale,
-          text: r.one.message,
-          expected: label(r.one, keyOf),
-          got: gotLabel(r.got, keyOf),
-        }));
-      const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
       const model = deps.answerer.model();
-      if (stopped === 'replaced')
+      const extra = {
+        suites: judgement.suites,
+        receipt: releaseCheckReceipt({
+          model,
+          questions,
+          liveVersion: live?.version ?? null,
+          limits,
+        }),
+        ...(collisions ? { collisions: collisions.pairs } : {}),
+        candidatePool: candidatePool(run.results),
+      };
+      if (run.stopped === 'replaced')
         return report(
           false,
           'The check was replaced by a newer one',
           metrics,
           misses,
+          extra,
         );
-      if (stopped === 'budget')
+      if (run.stopped === 'budget')
         return report(
           false,
-          `Live-pipeline sample stopped at the budget ($${limits.budgetUsd}) after ${results.length} of ${cases.length} questions`,
+          `Live-pipeline check stopped at the budget ($${limits.budgetUsd}) after ${run.results.length} of ${questions.length} questions`,
           metrics,
           misses,
-        );
-      const reasons: string[] = [];
-      if (errorRate > limits.errorRateMax)
-        reasons.push(
-          `${errors} of ${results.length} questions got no answer (model or balance problem), so the check does not count`,
-        );
-      if (wrongRate > limits.wrongRateMax)
-        reasons.push(
-          `wrong card ${pct(wrongRate)} > ${pct(limits.wrongRateMax)}`,
-        );
-      if (before !== null && wrongRate > before + limits.wrongRiseMax)
-        reasons.push(
-          `wrong card ${pct(wrongRate)} is more than ${pct(limits.wrongRiseMax)} above the live version (${pct(before)})`,
+          extra,
         );
       return report(
-        reasons.length === 0,
-        reasons.length === 0
-          ? `Live-pipeline sample passed (${model}): wrong card ${pct(wrongRate)} over ${answered.length} questions, $${spent.toFixed(3)}`
-          : `Live-pipeline sample failed (${model}): ${reasons.join('; ')}`,
+        judgement.passed,
+        releaseCheckSummary({
+          passed: judgement.passed,
+          model,
+          judgement,
+          run,
+          collisions: collisions?.total ?? 0,
+        }),
         metrics,
         misses,
+        extra,
       );
     },
   };
 }
+
+// 旧的导出名（评测脚本与测试在用）
+export {
+  caseExpectation,
+  changedKeys,
+  entryAncestors,
+  loadReleaseEvalItems,
+  planQuestions,
+  scoreModelAnswer,
+  type EvalQuestion,
+  type EvalQuestion as ModelEvalCase,
+  type ModelEvalScore,
+  type ReleaseEvalItem,
+} from './release-check/questions';
+export type { ModelEvalMiss } from './release-check/report';
+export type { FaqTextCollision } from './release-check/collisions';

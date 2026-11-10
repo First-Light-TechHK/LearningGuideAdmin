@@ -1140,7 +1140,7 @@
       "counts": "{nodes} questions, {entries} entries, {choices} choice questions, {edges} links, {phrasings} phrasings",
       "create": "Create new version",
       "creating": "Creating…",
-      "createHint": "Freezes the working copy, then runs the graph checks, the retrieval check and the live-pipeline sample in the background (about 3–5 minutes). Nothing goes live until you publish.",
+      "createHint": "Freezes the working copy, then runs the graph checks, the retrieval check and the live-pipeline check in the background (every dev question, compared one by one with the live version; unchanged questions come from the cache at no cost; about 5–10 minutes). Nothing goes live until you publish.",
       "sameAsLatest": "Nothing changed since v{version}, so no new version was created.",
       "created": "v{version} created.",
       "history": "Version history",
@@ -1190,11 +1190,101 @@
         "starting": "Checking…",
         "retrieval": "Checking: retrieval",
         "vectors": "Checking: preparing vectors",
-        "model": "Checking: live-pipeline sample {done} / {total}"
+        "model": "Checking: live pipeline {done} / {total}"
       },
       "interruptedHint": "The check did not finish (a restart or deploy stopped it). Use Check again to run it again.",
-      "model": "Live-pipeline sample {result}: wrong card {wrong}%, {cases} questions, about ¥{cny}",
-      "modelNotRun": "Live-pipeline sample: not run"
+      "model": "Live-pipeline check {result}: wrong card {wrong}%, {cases} questions, about ¥{cny}",
+      "modelNotRun": "Live-pipeline check: not run",
+      "estimate": "About {questions} questions ({single} single, {followups} with a card on screen); about {paid} need asking again, about ¥{cny} (cap ¥{cap}).",
+      "estimateFirst": "About {questions} questions ({single} single, {followups} with a card on screen); the live version has no check to go by, so all may need asking, at most ¥{cap}.",
+      "details": "Check details",
+      "hideDetails": "Hide details",
+      "report": {
+        "label": "Live-pipeline check details",
+        "tabs": {
+          "suites": "Suites",
+          "slices": "Slices",
+          "misses": "Questions",
+          "spend": "Spend",
+          "duplicates": "Duplicate wording"
+        },
+        "columns": {
+          "suite": "Suite",
+          "status": "Role",
+          "n": "Questions",
+          "wrong": "Wrong card (95% upper)",
+          "worse": "Newly wrong",
+          "result": "Result"
+        },
+        "status": {
+          "gate": "Blocks release",
+          "track": "Tracked"
+        },
+        "suite": {
+          "combined": "All single questions",
+          "s650": "S650 (written per card)",
+          "blind": "Blind questions",
+          "regression": "Regression (accepted user wording)",
+          "followup": "Follow-ups (parent card on screen)",
+          "changed": "Questions on changed cards",
+          "language": "Language {value}",
+          "style": "Style {value}",
+          "multi": "Several asks in one message",
+          "blindNone": "Blind questions the library has no card for",
+          "screen": "New question with another card on screen"
+        },
+        "asks": "Card per ask {rate} ({covered} of {asks}); {stray} card(s) for no ask; in the order asked {inOrder} of {ordered}",
+        "screen": "Against the same {pairs} questions with no card on screen: {changed} answer(s) changed, {lost} right answer(s) lost",
+        "noSuites": "This check has no suite results.",
+        "missColumns": {
+          "why": "Why",
+          "text": "Question",
+          "expected": "Expected",
+          "got": "Got",
+          "live": "Live got"
+        },
+        "why": {
+          "newly_wrong": "Newly wrong",
+          "lost_right": "Right on live, not answered now",
+          "wrong_card": "Wrong card",
+          "relabel": "To relabel (answered by a card new in this release)",
+          "timeout": "Timed out",
+          "error": "No answer"
+        },
+        "onScreen": "On screen: {key}",
+        "noMisses": "No wrong cards, timeouts or unanswered questions.",
+        "missesMore": "Showing the first {count}, most serious first.",
+        "spend": {
+          "total": "Total",
+          "model": "Small model",
+          "rerank": "Rerank",
+          "embed": "Question vectors",
+          "candidate": "Candidate version",
+          "live": "Live version",
+          "checks": "Re-asks and drift checks",
+          "saved": "Saved by the cache",
+          "byLayer": "By layer",
+          "byVersion": "By version",
+          "cache": "Cache (hits / misses)",
+          "paid": "{count} questions asked for real",
+          "drift": "Drift check: {changed} of {checked} differed from the cache",
+          "unpriced": "{count} requests came back without a price and are not counted"
+        },
+        "duplicates": {
+          "hint": "Text this release added to a card that is nearly the same as text on another card (similarity ≥ 0.95): retrieval cannot tell which card to give. A note only; it does not block the release.",
+          "pair": "{added}: “{addedText}” ≈ {other}: “{otherText}”",
+          "byState": "The two cards are told apart by user state; likely intended",
+          "none": "No new duplicate wording."
+        },
+        "reason": {
+          "interval": "Wrong-card 95% upper bound {high} is above {max}",
+          "point": "Wrong card {rate} is above {max} over {scored} questions",
+          "worse": "{count} newly wrong against the live version",
+          "small": "Under {min} questions, so tracked only",
+          "rightDrop": "Right answers fell from {live} to {now} against the live version ({lost} lost, {gained} gained), more than {max}",
+          "cardWhenNone": "A card was shown for {rate} of the questions the library has no card for, more than {max}"
+        }
+      }
     },
     "candidates": {
       "search": "Search topics, questions or examples...",
@@ -1269,7 +1359,7 @@
       "turnsOne": "1 learner question",
       "seen": "First seen {first} · last seen {last}",
       "examples": "Examples (scrubbed)",
-      "examplesHint": "Ticked examples become phrasings and eval cases. Examples with a hidden personal detail cannot become phrasings.",
+      "examplesHint": "Ticked examples alternate: one becomes a phrasing, the next is kept only as a release-check question, never both. Examples with a hidden personal detail cannot be ticked.",
       "hiddenDetail": "hidden personal detail",
       "mixTitle": "Why the AI missed",
       "nodes": "Related questions",
@@ -1324,8 +1414,9 @@
       "confirmDismiss": "Dismiss candidate",
       "cancel": "Cancel",
       "saving": "Saving…",
-      "addedOne": "Added 1 phrasing ({skipped} skipped). The ticked examples are now eval cases for this FAQ.",
-      "addedMany": "Added {added} phrasings ({skipped} skipped). The ticked examples are now eval cases for this FAQ.",
+      "addedOne": "Added 1 phrasing ({skipped} skipped).",
+      "addedMany": "Added {added} phrasings ({skipped} skipped).",
+      "heldOut": "{held} more kept only as release-check questions, not as phrasings.",
       "dismissed": "Candidate dismissed.",
       "faqAccepted": "FAQ saved and the candidate accepted.",
       "faqNotAccepted": "FAQ saved, but the candidate was not accepted: {error}",
@@ -1545,7 +1636,7 @@
         "users": "Who asked"
       },
       "saidHint": "Users' own words, redacted by Portal, and what the AI did then.",
-      "saidPickHint": "Ticked wordings are added to the card and become eval cases. Lines with hidden personal details cannot be ticked.",
+      "saidPickHint": "Ticked wordings alternate: one is added to the card, the next is kept only as a release-check question, never both. Lines with hidden personal details cannot be ticked.",
       "locale": {
         "en-GB": "English",
         "zh-CN": "Simplified",

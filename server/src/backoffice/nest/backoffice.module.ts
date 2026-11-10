@@ -41,10 +41,13 @@ import {
   createPgFaqReleaseSource,
 } from '../modules/helpdesk/faqs/faqReleaseService';
 import { createPgFaqMapRepository } from '../modules/helpdesk/faqs/faqMapRepository';
+import { pgSqlDb } from '../modules/helpdesk/faqs/faqRepository';
+import { createFaqCommandBus } from '../modules/helpdesk/pipeline/faqCommandBus';
 import {
-  createFaqService,
-  type FaqService,
-} from '../modules/helpdesk/faqs/faqService';
+  backOfficeFaqServices,
+  createFaqCommands,
+} from '../modules/helpdesk/pipeline/faqCommands';
+import { createFaqService } from '../modules/helpdesk/faqs/faqService';
 import {
   createEnvFaqVectorIndexer,
   sharedFaqVectorSearch,
@@ -71,7 +74,8 @@ import { createPortalStudentsClient } from '../modules/students/portalStudentsCl
 import { createStudentsService } from '../modules/students/studentsService';
 import {
   autoSeedDemoOnce,
-  shouldAutoSeedDemo,
+  autoSeedLibraryOnce,
+  helpdeskBootSeed,
 } from '../modules/helpdesk/demo/helpdeskDemoSeed';
 import { tryRecordAuditEvent } from '../repositories/auditRepository';
 import {
@@ -175,14 +179,17 @@ export class HelpdeskFlywheelScheduler
 
 /**
  * 部署的 DEV（APP_ENV=DEV 且 NODE_ENV=production）启动后在后台灌一次 Helpdesk 演示数据和 FAQ 卡片库 v3.1，
- * 方便测试和产品演示；灌过就不再灌（删除用 npm run seed:helpdesk-demo -- --remove）。其它环境什么都不做。
+ * 方便测试和产品演示；灌过就不再灌（删除用 npm run seed:helpdesk-demo -- --remove）。
+ * SIT / UAT（或设了 HELPDESK_FAQ_LIBRARY_SEED=on 的环境）只导卡库：卡片、流程树、发布，不灌演示行。
+ * 其它环境什么都不做。
  */
 @Injectable()
 export class HelpdeskDemoBoot implements OnApplicationBootstrap {
   onApplicationBootstrap(): void {
-    if (!shouldAutoSeedDemo(process.env)) return;
+    const seed = helpdeskBootSeed(process.env);
     // 不 await：不阻塞启动和健康检查
-    void autoSeedDemoOnce();
+    if (seed === 'demo') void autoSeedDemoOnce();
+    else if (seed === 'library') void autoSeedLibraryOnce();
   }
 }
 
@@ -194,6 +201,21 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
     // v5 问题树：同一个仓库与发布来源（快照按版本缓存）给 FAQ、问题树、发布与 Portal 的 faq-release/current
     const graph = createPgFaqGraphRepository();
     const releaseSource = createPgFaqReleaseSource(graph);
+    const releaseVersion = () => releaseSource.publishedVersion();
+    // 卡库的领域服务（规则、校验都在这里）。第一版发布之后 Portal 读的 FAQ 只来自那一版快照；
+    // 归档前查还在用它的父节点。飞轮接受候选暂时还直接用它，下一步作为一个命令搬上写入流水线。
+    const faqs = createFaqService({
+      releaseVersion,
+      liveParents: (id) => graph.liveParents(id),
+    });
+    const graphService = createFaqGraphService({ graph });
+    // BackOffice 页面：读直接走服务，写全部经写入流水线（pipeline/faqCommandBus.ts）
+    const backOffice = backOfficeFaqServices({
+      bus: createFaqCommandBus({ db: pgSqlDb }),
+      commands: createFaqCommands({ releaseVersion }),
+      faqs,
+      graph: graphService,
+    });
     return {
       module: BackofficeModule,
       controllers: [
@@ -225,19 +247,8 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
           provide: HELPDESK_SERVICE,
           useFactory: () => createHelpdeskService(),
         },
-        {
-          provide: HELPDESK_FAQ_SERVICE,
-          // 第一版发布之后 Portal 读的 FAQ 只来自那一版快照；归档前查还在用它的父节点
-          useFactory: () =>
-            createFaqService({
-              releaseVersion: () => releaseSource.publishedVersion(),
-              liveParents: (id) => graph.liveParents(id),
-            }),
-        },
-        {
-          provide: HELPDESK_FAQ_GRAPH_SERVICE,
-          useFactory: () => createFaqGraphService({ graph }),
-        },
+        { provide: HELPDESK_FAQ_SERVICE, useValue: backOffice.faqs },
+        { provide: HELPDESK_FAQ_GRAPH_SERVICE, useValue: backOffice.graph },
         options.releaseAnswerer ?? {
           provide: HELPDESK_RELEASE_ANSWERER,
           useValue: null,
@@ -257,6 +268,10 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
                       // 线上检索的向量那一路要这一版的向量（只算改过的文字；没配向量模型 = 不做）
                       prepare: (version) =>
                         createEnvFaqVectorIndexer().index(version),
+                      // 重复问法检查读的是线上检索那一份内存索引（不另读一份向量）
+                      vectors: (version) =>
+                        sharedFaqVectorSearch().texts?.(version) ??
+                        Promise.resolve(null),
                     }),
                   }
                 : {}),
@@ -282,12 +297,11 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         // FAQ 逐张审核（只追加的审核记录；状态按卡的当前版本算）与改动历史
         {
           provide: HELPDESK_FAQ_REVIEW_SERVICE,
-          useFactory: (faqs: FaqService) =>
+          useFactory: () =>
             createFaqReviewService({
               reviews: createPgFaqReviewRepository(),
               faqs,
             }),
-          inject: [HELPDESK_FAQ_SERVICE],
         },
         // AI 按指令改卡（只用 DeepSeek，不保存）
         {
@@ -317,12 +331,12 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         },
         {
           provide: HELPDESK_FAQ_CANDIDATE_SERVICE,
-          useFactory: (labeller: GapLabeller, faqs: FaqService) => {
+          useFactory: (labeller: GapLabeller) => {
             const insights = createPgInsightRepository();
             return createFaqCandidateService({
               candidates: createPgCandidateRepository(),
               graph,
-              graphService: createFaqGraphService({ graph }),
+              graphService,
               portal: createPortalHelpdeskClient(),
               nodes: () => workingNodeTexts(graph),
               map: createPgFaqMapRepository(),
@@ -331,12 +345,12 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
               // 审核页的相似卡：和线上检索同一份向量索引（没配向量模型 → 文字相似度）
               vectors: {
                 search: sharedFaqVectorSearch(),
-                release: () => releaseSource.publishedVersion(),
+                release: releaseVersion,
               },
               labeller,
             });
           },
-          inject: [HELPDESK_GAP_LABELLER, HELPDESK_FAQ_SERVICE],
+          inject: [HELPDESK_GAP_LABELLER],
         },
         {
           provide: HELPDESK_FLYWHEEL_RUNS_SERVICE,

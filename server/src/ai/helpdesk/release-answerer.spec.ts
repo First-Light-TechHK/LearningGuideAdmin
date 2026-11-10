@@ -1,5 +1,7 @@
+import { createMemoryEvalCacheStore } from '../../contracts/helpdesk-eval-cache';
 import type {
   HelpdeskQaCandidate,
+  HelpdeskQaSearch,
   HelpdeskQaSource,
 } from '../../contracts/helpdesk-qa';
 import { createReleaseAnswerer } from './release-answerer';
@@ -10,8 +12,8 @@ import type {
 } from './workflow/engine';
 
 /**
- * 发布前真流程抽样检查的答题器（契约 helpdesk-release-eval.ts）：候选来源钉在候选版本上（qaFor），
- * 按聊天面板的第一句问，回出了哪张卡；没有 key、出错 → error（不算答错）。模型是假的 runner。
+ * 发布前真流程检查的答题器（契约 helpdesk-release-eval.ts）：候选来源钉在候选版本上（qaFor），
+ * 按聊天面板的第一句问（追问带屏幕上的卡），回出了哪张卡；没有 key、出错 → error（不算答错）。模型是假的 runner。
  */
 const id = (n: number) =>
   `0192dddd-0000-7000-8000-${String(n).padStart(12, '0')}`;
@@ -36,15 +38,31 @@ const ENV = {
   HELPDESK_RERANK_MODEL: 'off',
 };
 
+const FAILED: HelpdeskQaCandidate = {
+  ...RESET,
+  id: id(2),
+  question: 'My payment failed. What now?',
+  answer: 'Check the card details and try again.',
+  blocks: [{ id: 'b1', text: 'Check the card details and try again.' }],
+};
+
 function setup(
   reply: (spec: AgentStepSpec) => Promise<AgentStepOutcome>,
   env: NodeJS.ProcessEnv = ENV,
+  cache?: ReturnType<typeof createMemoryEvalCacheStore>,
+  cards: HelpdeskQaCandidate[] = [RESET],
 ) {
   const pinned: { version: number; snapshot: unknown }[] = [];
+  const searches: HelpdeskQaSearch[] = [];
   const qa: HelpdeskQaSource = {
-    findCandidates: () => Promise.resolve([RESET]),
-    findPublished: (faqId) =>
-      Promise.resolve(faqId === RESET.id ? { ...RESET, score: 0 } : null),
+    findCandidates: (search) => {
+      searches.push(search);
+      return Promise.resolve(cards);
+    },
+    findPublished: (faqId) => {
+      const card = cards.find((c) => c.id === faqId);
+      return Promise.resolve(card ? { ...card, score: 0 } : null);
+    },
     findPopular: () => Promise.resolve([]),
     releaseVersion: () => Promise.resolve(7),
   };
@@ -59,8 +77,9 @@ function setup(
     },
     runner: { run },
     env: () => env,
+    ...(cache ? { cache } : {}),
   });
-  return { answerer, pinned, run };
+  return { answerer, pinned, run, searches };
 }
 
 const called = (args: Record<string, string>): Promise<AgentStepOutcome> =>
@@ -88,13 +107,51 @@ describe('release answerer (live pipeline on a candidate release)', () => {
       message: 'forgot my password',
       locale: 'en-GB',
     });
-    expect(got).toMatchObject({ kind: 'answer', nodeId: RESET.id });
+    // intent and covered go to the shared scoring (contracts/helpdesk-eval-scoring.ts)
+    expect(got).toMatchObject({
+      kind: 'answer',
+      nodeId: RESET.id,
+      intent: 'question',
+      covered: null,
+    });
+    // the cards the model saw (the release check counts them per card for the next estimate)
+    expect(got.candidates).toEqual([RESET.id]);
     expect(run).toHaveBeenCalled();
     // every question is its own user: the per-user hourly limit never cuts a sample short
     for (let i = 0; i < 35; i += 1)
       expect(
         (await session.ask({ message: `password ${i}`, locale: 'en-GB' })).kind,
       ).toBe('answer');
+  });
+
+  it('a follow-up is asked like Portal sends it: the card on screen leads the search and is never shown again, with the earlier turn', async () => {
+    const PARENT = id(9);
+    const { answerer, searches, run } = setup((spec) =>
+      spec.tool.name === 'explain'
+        ? called({ covered: 'no' })
+        : called({ intent: 'question', faqId: RESET.id, confidence: 'sure' }),
+    );
+    const got = await answerer
+      .forRelease({ version: 7, snapshot: { nodes: [] } })
+      .ask({
+        message: 'and if I forgot it again?',
+        locale: 'en-GB',
+        screen: { nodeId: PARENT, recentTurns: ['How do I sign in?'] },
+      });
+    expect(got).toMatchObject({ kind: 'answer', nodeId: RESET.id });
+    expect(searches.some((s) => s.nodeId === PARENT)).toBe(true);
+    // the earlier turn goes to the model step (the search only reads it when the reranker is on)
+    expect(
+      run.mock.calls.some(([spec]) =>
+        JSON.stringify(spec).includes('How do I sign in?'),
+      ),
+    ).toBe(true);
+    // a first question has no card on screen
+    searches.length = 0;
+    await answerer
+      .forRelease({ version: 7, snapshot: { nodes: [] } })
+      .ask({ message: 'forgot my password', locale: 'en-GB' });
+    expect(searches.every((s) => s.nodeId === undefined)).toBe(true);
   });
 
   it('a model that picks nothing is no card; a model error is an error, never a wrong card', async () => {
@@ -115,7 +172,142 @@ describe('release answerer (live pipeline on a candidate release)', () => {
       await failing.answerer
         .forRelease({ version: 7, snapshot: {} })
         .ask({ message: 'forgot my password', locale: 'en-GB' }),
-    ).toMatchObject({ kind: 'error', nodeId: null });
+    ).toMatchObject({ kind: 'error', nodeId: null, failure: 'error' });
+  });
+
+  it('with the stage cache, the same question on the same cards is asked of the model once and answered the same', async () => {
+    const cache = createMemoryEvalCacheStore();
+    const { answerer, run } = setup(
+      () => called({ intent: 'question', faqId: RESET.id, confidence: 'sure' }),
+      ENV,
+      cache,
+    );
+    const session = answerer.forRelease({ version: 7, snapshot: {} });
+    const first = await session.ask({
+      message: 'forgot my password',
+      locale: 'en-GB',
+    });
+    const calls = run.mock.calls.length;
+    expect(first.cache?.step).toMatchObject({ hits: 0 });
+    expect(first.cache?.step.misses).toBeGreaterThan(0);
+    // a later check (another session on the same cards) pays nothing for it
+    const again = await answerer
+      .forRelease({ version: 8, snapshot: {} })
+      .ask({ message: 'forgot my password', locale: 'en-GB' });
+    expect(run.mock.calls.length).toBe(calls);
+    expect(again).toMatchObject({
+      kind: first.kind,
+      nodeId: first.nodeId,
+      intent: first.intent,
+      spend: { model: 0, rerank: 0, embed: 0 },
+    });
+    expect(again.cache?.step).toMatchObject({ misses: 0 });
+    // bypass asks again and leaves the cache as it was
+    await answerer
+      .forRelease({ version: 8, snapshot: {} })
+      .ask({ message: 'forgot my password', locale: 'en-GB', cache: 'bypass' });
+    expect(run.mock.calls.length).toBe(calls * 2);
+  });
+
+  it('one message that asks several things: returns every card in the order shown and how many asks had none', async () => {
+    const message =
+      'How do I reset my password? And what do I do when my payment failed?';
+    const reply =
+      (card2: string) =>
+      (spec: AgentStepSpec): Promise<AgentStepOutcome> =>
+        spec.tool.name === 'split_asks'
+          ? Promise.resolve({
+              kind: 'called',
+              args: { count: '2' },
+              extras: {
+                lists: {},
+                texts: {
+                  ask1: 'How do I reset my password?',
+                  ask2: 'What do I do when my payment failed?',
+                },
+                flags: {},
+              },
+            })
+          : spec.tool.name === 'pick_asks'
+            ? called({
+                intent: 'question',
+                card1: RESET.id,
+                confidence1: 'sure',
+                card2,
+                confidence2: 'sure',
+              })
+            : called({
+                intent: 'question',
+                faqId: RESET.id,
+                confidence: 'sure',
+              });
+    const env = { ...ENV, HELPDESK_MULTI_ASK: 'on' };
+    const both = setup(reply(FAILED.id), env, undefined, [RESET, FAILED]);
+    const got = await both.answerer
+      .forRelease({ version: 7, snapshot: {} })
+      .ask({ message, locale: 'en-GB' });
+    expect(got).toMatchObject({
+      kind: 'answer',
+      nodeId: RESET.id,
+      more: [FAILED.id],
+    });
+    expect('missed' in got).toBe(false);
+    const one = setup(reply('none'), env, undefined, [RESET, FAILED]);
+    const missed = await one.answerer
+      .forRelease({ version: 7, snapshot: {} })
+      .ask({ message, locale: 'en-GB' });
+    expect(missed).toMatchObject({
+      kind: 'answer',
+      nodeId: RESET.id,
+      missed: 1,
+    });
+    expect('more' in missed).toBe(false);
+  });
+
+  it('says which retrieval layer did not work for a question (the release check does not count a run without them)', async () => {
+    const rerankOn = {
+      ...ENV,
+      HELPDESK_RERANK_MODEL: 'voyageai/rerank-2.5-lite',
+    };
+    const pick = (spec: AgentStepSpec) =>
+      spec.tool.name === 'explain'
+        ? called({ covered: 'no' })
+        : called({ intent: 'question', faqId: RESET.id, confidence: 'sure' });
+    const fetchMock = jest.spyOn(globalThis, 'fetch');
+    try {
+      // the reranker answers 502: the question is still answered, from the unranked candidates
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(new Response('{}', { status: 502 })),
+      );
+      const failed = await setup(pick, rerankOn, undefined, [RESET, FAILED])
+        .answerer.forRelease({ version: 7, snapshot: {} })
+        .ask({ message: 'forgot my password', locale: 'en-GB' });
+      expect(failed).toMatchObject({
+        kind: 'answer',
+        nodeId: RESET.id,
+        degraded: ['rerank'],
+      });
+      // every layer worked: nothing to say
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              results: [
+                { index: 0, relevance_score: 0.7 },
+                { index: 1, relevance_score: 0.6 },
+              ],
+            }),
+          ),
+        ),
+      );
+      const fine = await setup(pick, rerankOn, undefined, [RESET, FAILED])
+        .answerer.forRelease({ version: 7, snapshot: {} })
+        .ask({ message: 'forgot my password', locale: 'en-GB' });
+      expect(fine.kind).toBe('answer');
+      expect(fine).not.toHaveProperty('degraded');
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   it('is not available without an API key, and then answers nothing', async () => {
@@ -127,7 +319,7 @@ describe('release answerer (live pipeline on a candidate release)', () => {
       await answerer
         .forRelease({ version: 7, snapshot: {} })
         .ask({ message: 'forgot my password', locale: 'en-GB' }),
-    ).toMatchObject({ kind: 'error' });
+    ).toMatchObject({ kind: 'error', failure: 'no_key' });
     expect(run).not.toHaveBeenCalled();
   });
 });

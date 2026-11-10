@@ -416,11 +416,64 @@ export type FaqReleaseEvalReport = {
   summary: string;
   ranAt: string;
   metrics: Record<string, number>;
-  /** retrieval：没进前 8 的用例；model（真流程抽样）：答错卡或没得到回答的问题（expected / got）。 */
+  /** retrieval：没进前 8 的用例；model（真流程检查）：答错卡或没得到回答的问题（expected / got）。 */
   misses: { nodeId?: string; key?: string; locale: string; source: string; text: string; rank?: number | null; expected?: string; got?: string }[];
   sourceVersion?: number;
-  /** combined：检索检查与真流程抽样各一份。 */
+  /** combined：检索检查与真流程检查各一份。 */
   parts?: FaqReleaseEvalReport[];
+  /** 真流程检查（release check v2）：套件与切片。 */
+  suites?: FaqEvalSuite[];
+  /** 这次检查用了什么（模型、题集、缓存版本……）。 */
+  receipt?: Record<string, string | number>;
+  /** 这一版新加的、和别的卡几乎一样的文字（只提醒）。 */
+  collisions?: FaqTextCollision[];
+};
+
+/** 真流程检查的一个套件或切片：gate = 不过就不能发布；track = 只看（比线上新错仍然拦）。规则见服务端 release-check/policy.ts。 */
+export type FaqEvalSuite = {
+  id: string;
+  label: string;
+  status: 'gate' | 'track';
+  /** interval = 95% 上界；point = 点估计（题够多才算）；paired = 和线上逐题比（新错、答对率）。旧报告没有。 */
+  rule?: 'interval' | 'point' | 'paired';
+  passed: boolean;
+  n: number;
+  metrics: Record<string, number>;
+  /** 服务端的英文原因（旧报告、拿不到门槛时才直接显示）。 */
+  reasons: string[];
+};
+
+/** 真流程检查的问题清单（报告的 misses，按轻重排好）。 */
+export type FaqModelMiss = {
+  id: string;
+  set: string;
+  locale: string;
+  text: string;
+  expected: string;
+  got: string;
+  live?: string;
+  onScreen?: string;
+  why: 'newly_wrong' | 'lost_right' | 'wrong_card' | 'relabel' | 'timeout' | 'error' | string;
+};
+
+export type FaqTextCollision = {
+  similarity: number;
+  added: { key: string; text: string; source: string };
+  other: { key: string; text: string; source: string };
+  /** 两张卡靠用户状态（signals）分开：多半是该有的。 */
+  byState: boolean;
+};
+
+/** 「发布新版本」之前的估计：要问几道题、估计几道真付钱、约多少钱（美元；没有上次的记录 = null）。 */
+export type FaqCheckEstimate = {
+  questions: number;
+  single: number;
+  followups: number;
+  touchedCards: number;
+  paid: number;
+  usd: number | null;
+  budgetUsd: number;
+  basis: 'last_check' | 'no_history';
 };
 
 /** 检查进行到哪一步（后台检查，owner 2026-11-03）。 */
@@ -476,7 +529,13 @@ export type FaqSnapshotDiff = {
 };
 
 /** 「发布新版本」：工作副本的检查与它和当前上线版本的差异。 */
-export type FaqWorkingCopy = { checks: FaqGraphCheckResult; diff: FaqSnapshotDiff; published: number | null };
+export type FaqWorkingCopy = {
+  checks: FaqGraphCheckResult;
+  diff: FaqSnapshotDiff;
+  published: number | null;
+  /** 真流程检查的估计；没有真流程检查（没有 key、关着）或旧的服务端 = null / 不写。 */
+  estimate?: FaqCheckEstimate | null;
+};
 
 export type FaqReleaseDiff = { base: number | null; head: number | "working"; diff: FaqSnapshotDiff };
 
@@ -649,8 +708,15 @@ export type AcceptCandidateResult = {
   phrasingsAdded: number;
   phrasingsSkipped: number;
   evalCasesAdded: number;
+  /** 勾选的例句里只当发布检查题、没加成问法的句数（服务端 splitForEval：一句问法、一句检查题轮流）。 */
+  heldOut?: number;
   edgeId: string | null;
 };
+
+/** 勾选 n 句里会加成问法的句数（和服务端 splitForEval 一致：第 1、3、5… 句；只勾一句就是问法）。 */
+export function phrasingsFromPicks(n: number): number {
+  return n < 2 ? n : Math.ceil(n / 2);
+}
 
 /* ---------------- FAQ 候选审核（candidate-review/api-spec.md §2、§3、§5、§6） ---------------- */
 

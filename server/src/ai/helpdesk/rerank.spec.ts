@@ -4,6 +4,7 @@ import type {
 } from '../../contracts/helpdesk-qa';
 import {
   directPick,
+  directPickOwn,
   openRouterReranker,
   RERANK_LIMITS,
   rerankConfig,
@@ -30,7 +31,7 @@ describe('rerankConfig (read each call; the tiered defaults unless set, off with
     expect(rerankConfig({ OPENROUTER_API_KEY: KEY })).toEqual({
       model: 'voyageai/rerank-2.5-lite',
       keep: 5,
-      direct: { score: 0.816, margin: 0.05 },
+      direct: { score: 0.84, margin: 0.05 },
     });
   });
 
@@ -44,7 +45,7 @@ describe('rerankConfig (read each call; the tiered defaults unless set, off with
     ).toBeNull();
   });
 
-  it('reads model, keep and the direct thresholds; off or bad values mean "keep all" / "never direct"', () => {
+  it('reads model, keep and the direct thresholds; off means "keep all" / "never direct", bad values mean the defaults', () => {
     expect(
       rerankConfig({
         OPENROUTER_API_KEY: KEY,
@@ -57,20 +58,31 @@ describe('rerankConfig (read each call; the tiered defaults unless set, off with
       keep: 5,
       direct: { score: 0.83, margin: 0.05 },
     });
+    expect(
+      rerankConfig({
+        OPENROUTER_API_KEY: KEY,
+        HELPDESK_RERANK_MODEL: 'cohere/rerank-v3',
+        HELPDESK_RERANK_KEEP: 'off',
+        HELPDESK_RERANK_DIRECT: 'OFF',
+      }),
+    ).toEqual({ model: 'cohere/rerank-v3', keep: null, direct: null });
     for (const [keep, direct] of [
       ['0', '1.5,0.1'],
       ['x', '0.8'],
-      ['2.5', 'off'],
-      ['off', 'OFF'],
+      ['2.5', '0.8,'],
     ])
       expect(
         rerankConfig({
           OPENROUTER_API_KEY: KEY,
-          HELPDESK_RERANK_MODEL: 'm',
+          HELPDESK_RERANK_MODEL: 'not a model id',
           HELPDESK_RERANK_KEEP: keep,
           HELPDESK_RERANK_DIRECT: direct,
         }),
-      ).toEqual({ model: 'm', keep: null, direct: null });
+      ).toEqual({
+        model: 'voyageai/rerank-2.5-lite',
+        keep: 5,
+        direct: { score: 0.84, margin: 0.05 },
+      });
   });
 });
 
@@ -158,9 +170,49 @@ describe('rerankedSource (only findCandidates changes)', () => {
     ]);
   });
 
-  it('returns the retrieval result unchanged when the reranker fails', async () => {
-    const ranked = rerankedSource(qa, () => Promise.resolve(null), 1);
-    await expect(ranked.findCandidates(search)).resolves.toBe(found);
+  it('returns the retrieval result unchanged when the reranker fails, and says the rerank layer was skipped', async () => {
+    const degraded = jest.fn();
+    const ranked = rerankedSource(qa, () => Promise.resolve(null), 1, {
+      degraded,
+    });
+    await expect(ranked.findCandidates(search)).resolves.toEqual(found);
+    expect(degraded.mock.calls).toEqual([['rerank']]);
+  });
+
+  it('keeps the vector hits when the reranker fails: lexical and vector cards take turns, within the lexical limit (2026-11-09)', async () => {
+    const degraded = jest.fn();
+    const ranked = rerankedSource(
+      {
+        ...qa,
+        findVectorCandidates: () =>
+          Promise.resolve([card(2), card(8), card(9)]),
+      },
+      () => Promise.resolve(null),
+      2,
+      { degraded },
+    );
+    const out = await ranked.findCandidates({ ...search, limit: 4 });
+    // 字词 1、2、3；向量里新的 8、9：一边一张，至多 limit 张，不带 rerankScore
+    expect(out.map((c) => c.id)).toEqual([
+      card(1).id,
+      card(8).id,
+      card(2).id,
+      card(9).id,
+    ]);
+    expect(out.every((c) => c.rerankScore === undefined)).toBe(true);
+    expect(degraded.mock.calls).toEqual([['rerank']]);
+  });
+
+  it('says nothing was skipped when both layers worked', async () => {
+    const degraded = jest.fn();
+    const ranked = rerankedSource(
+      { ...qa, findVectorCandidates: () => Promise.resolve([]) },
+      (_, docs) => Promise.resolve(docs.map(() => 0.5)),
+      null,
+      { degraded },
+    );
+    await ranked.findCandidates(search);
+    expect(degraded).not.toHaveBeenCalled();
   });
 
   it('reranks the pool of retrieval candidates plus the vector top cards (deduplicated), asking for RERANK_LIMITS.vectorPool', async () => {
@@ -183,15 +235,24 @@ describe('rerankedSource (only findCandidates changes)', () => {
     expect(out.map((c) => c.id)).toEqual([card(7).id, card(1).id]);
   });
 
-  it('a failing vector side leaves the retrieval candidates', async () => {
-    const ranked = rerankedSource(
-      { ...qa, findVectorCandidates: () => Promise.reject(new Error('x')) },
-      (_, docs) => Promise.resolve(docs.map(() => 0.5)),
-      null,
-    );
-    expect((await ranked.findCandidates(search)).map((c) => c.id)).toEqual(
-      found.map((c) => c.id),
-    );
+  it('a failing vector side leaves the retrieval candidates and says the vector layer was skipped', async () => {
+    // 抛错，或来源自己说这一路没生效（null：超时、还没算好）
+    for (const findVectorCandidates of [
+      () => Promise.reject(new Error('x')),
+      () => Promise.resolve(null),
+    ]) {
+      const degraded = jest.fn();
+      const ranked = rerankedSource(
+        { ...qa, findVectorCandidates },
+        (_, docs) => Promise.resolve(docs.map(() => 0.5)),
+        null,
+        { degraded },
+      );
+      expect((await ranked.findCandidates(search)).map((c) => c.id)).toEqual(
+        found.map((c) => c.id),
+      );
+      expect(degraded.mock.calls).toEqual([['vector']]);
+    }
   });
 
   it('with search.context, also asks vectors and the reranker with "previous → message" and keeps the higher score per card', async () => {
@@ -230,6 +291,11 @@ describe('rerankedSource (only findCandidates changes)', () => {
       [card(1).id, 0.6],
       [card(2).id, 0.2],
     ]);
+    // the message's own score is kept beside it (a changed topic is judged on it alone)
+    expect(out.map((c) => c.rerankOwn)).toEqual([0.1, 0.6, 0.1]);
+    // asked once (no earlier message): the score is the message's own, nothing beside it
+    const once = await rerankedSource(qa, rerank, 3).findCandidates(search);
+    expect(once.every((c) => !('rerankOwn' in c))).toBe(true);
   });
 
   it('with search.context, one failing rerank call still ranks by the other', async () => {
@@ -269,5 +335,43 @@ describe('directPick (give the top card without the model only when the reranker
     ['no candidates', [], direct],
   ] as const)('returns null with %s', (_, list, thresholds) => {
     expect(directPick([...list], thresholds)).toBeNull();
+  });
+});
+
+describe('directPickOwn (a card on screen: answer directly only when the message alone clearly asks for another card, 2026-11-10)', () => {
+  const direct = { score: 0.8, margin: 0.1 };
+  const shown = card(9, { rerankScore: 0.3 });
+
+  it('picks another card that is sure on the message alone, also when the list is ordered by the score with the earlier message', () => {
+    const fresh = card(1, { rerankScore: 0.9, rerankOwn: 0.9 });
+    const old = card(2, { rerankScore: 0.95, rerankOwn: 0.2 });
+    expect(directPickOwn([old, fresh, shown], shown.id, direct)).toBe(fresh);
+    // asked once: rerankScore is the message's own score
+    const only = card(3, { rerankScore: 0.9 });
+    expect(directPickOwn([only, shown], shown.id, direct)).toBe(only);
+  });
+
+  it.each([
+    [
+      'the card on screen is the best match',
+      [card(9, { rerankScore: 0.95 }), card(1, { rerankScore: 0.5 })],
+    ],
+    [
+      'the card on screen is a close second (the lead is counted against it)',
+      [card(1, { rerankScore: 0.9 }), card(9, { rerankScore: 0.85 })],
+    ],
+    [
+      'the best match is a follow-up of the card on screen',
+      [card(1, { rerankScore: 0.95, relation: 'child' }), shown],
+    ],
+    [
+      'sure only with the earlier message',
+      [card(1, { rerankScore: 0.95, rerankOwn: 0.4 }), shown],
+    ],
+    ['a choice card on top', [card(1, { rerankScore: 0.95, type: 'choice' })]],
+    ['no rerank scores', [card(1), card(2)]],
+  ] as const)('returns null when %s', (_, list) => {
+    expect(directPickOwn([...list], shown.id, direct)).toBeNull();
+    expect(directPickOwn([...list], shown.id, null)).toBeNull();
   });
 });

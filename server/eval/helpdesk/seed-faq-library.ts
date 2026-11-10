@@ -8,6 +8,7 @@ import {
   parseSeedArgs,
   seedExitCode,
   seedFaqLibrary,
+  seedVectorsProblem,
 } from '../../src/backoffice/modules/helpdesk/faqs/faqLibrarySeed';
 import {
   createFaqReleaseService,
@@ -15,7 +16,10 @@ import {
 } from '../../src/backoffice/modules/helpdesk/faqs/faqReleaseService';
 import { createPgFaqRepository } from '../../src/backoffice/modules/helpdesk/faqs/faqRepository';
 import { createFaqService } from '../../src/backoffice/modules/helpdesk/faqs/faqService';
-import { createEnvFaqVectorIndexer } from '../../src/backoffice/modules/helpdesk/faqs/faqVectors';
+import {
+  createEnvFaqVectorIndexer,
+  openRouterFaqEmbedder,
+} from '../../src/backoffice/modules/helpdesk/faqs/faqVectors';
 
 /**
  * 从 FAQ 库文件导入问题树并建发布版本 v1（helpdesk-v5-faq-graph-design §8.2）：
@@ -25,6 +29,8 @@ import { createEnvFaqVectorIndexer } from '../../src/backoffice/modules/helpdesk
  * 经正常的服务层，按 key 幂等（再跑一次只改有变化的）；工作表没变就不新建版本。评测门是免费的检索评测
  * （不问模型）。放在 eval/ 下：不进 nest build（tsconfig.build.json 排除 eval），也就不改变 dist 的结构。
  * 输出一份 JSON 报告（建了 / 改了 / 跳过的 key、边、问法、版本）。
+ * 配了向量模型而新版本的向量没算成 → stderr 说明并以 1 退出（卡片和版本已经写好，补跑
+ * npm run helpdesk:faq-vectors 即可；不报错的话没人知道检索只剩字词一路）。
  */
 async function main(): Promise<void> {
   const args = parseSeedArgs(process.argv.slice(2));
@@ -40,7 +46,7 @@ async function main(): Promise<void> {
   const releaseSource = createPgFaqReleaseSource(graph);
   // 新版本的向量（配了 HELPDESK_EMBED_MODEL 才算）在关连接池之前算完
   const indexer = createEnvFaqVectorIndexer();
-  const indexing: Promise<unknown>[] = [];
+  const indexing: Promise<object | null>[] = [];
   try {
     const report = await seedFaqLibrary(
       {
@@ -65,9 +71,13 @@ async function main(): Promise<void> {
       library,
       { actor: { employeeId }, release: args.release },
     );
-    await Promise.all(indexing);
+    const vectors = seedVectorsProblem(
+      openRouterFaqEmbedder(process.env) !== null,
+      await Promise.all(indexing),
+    );
     console.log(JSON.stringify(report, null, 2));
-    process.exitCode = seedExitCode(report);
+    if (vectors) console.error(vectors);
+    process.exitCode = vectors ? 1 : seedExitCode(report);
   } finally {
     await Promise.allSettled(indexing);
     await closePool();

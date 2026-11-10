@@ -1,4 +1,8 @@
 import { readFileSync } from 'node:fs';
+import {
+  HELPDESK_SETTINGS,
+  readHelpdeskSetting,
+} from '../../../../contracts/helpdesk-settings';
 import { join } from 'node:path';
 
 import { Logger } from '@nestjs/common';
@@ -44,6 +48,11 @@ const LIBRARY = join(__dirname, 'library', 'faq-library-v3.1.json');
 const MAP = join(__dirname, 'library', 'faq-map-v2.json');
 /** 记在 backoffice_settings：灌过一次就不再自动灌（--remove 之后也不会被启动灌回来）。 */
 export const DEMO_MARKER_KEY = 'helpdesk_demo_seeded';
+/**
+ * 非 DEV 环境（SIT / UAT，或设了 HELPDESK_FAQ_LIBRARY_SEED=on）第一次只导卡库（卡片、流程树、发布，不灌演示行）
+ * 后写的标记。之后和 DEV 一样只看下面三个版本标记同步差异。
+ */
+export const LIBRARY_MARKER_KEY = 'helpdesk_faq_library_seeded';
 /**
  * 热门 FAQ 那一版（库文件里的 popular；产品 2026-11-02 在 Helpdesk-FAQ-Popular.xlsx 里挑的 25 张）。
  * 库文件的 popular 再改就换这个值：已经灌过的 DEV 下次启动只同步 popular，不重灌整库（BackOffice 里的编辑不动）。
@@ -116,9 +125,17 @@ async function withLibraryDeps<T>(work: (deps: SeedDeps) => Promise<T>) {
   }
 }
 
-function seedLibrary(employeeId: string | null, release: boolean) {
+function seedLibrary(
+  employeeId: string | null,
+  release: boolean,
+  keepStaffEdits = false,
+) {
   return withLibraryDeps((deps) =>
-    seedFaqLibrary(deps, readLibrary(), { actor: { employeeId }, release }),
+    seedFaqLibrary(deps, readLibrary(), {
+      actor: { employeeId },
+      release,
+      keepStaffEdits,
+    }),
   );
 }
 
@@ -218,6 +235,48 @@ export type HelpdeskDemoReport = {
   ok: boolean;
 };
 
+export type HelpdeskLibraryReport = {
+  library: unknown;
+  map: unknown;
+  release: unknown;
+  ok: boolean;
+};
+
+/**
+ * 先导卡（不发布），再导流程树，最后再导一次并发布（发布把卡和树一起冻结进版本）。按 key 幂等。
+ * keepStaffEdits：员工在 BackOffice 改过的卡不动（非 DEV 环境第一次导入用，库里原来有卡也不覆盖员工的改动）。
+ */
+async function seedLibraryAndMap(
+  employeeId: string | null,
+  keepStaffEdits: boolean,
+): Promise<HelpdeskLibraryReport> {
+  const library = await seedLibrary(employeeId, false, keepStaffEdits);
+  const seed = readMap();
+  const actor = { employeeId };
+  const mapRepository = createPgFaqMapRepository();
+  // 整库重灌时库里可能还有上一版的树（--remove 不删结构）
+  await pruneFaqMap({ map: mapRepository }, seed, actor);
+  const map = await seedFaqMap(
+    { map: mapRepository, faqs: createPgFaqRepository() },
+    seed,
+    actor,
+  );
+  const release = await seedLibrary(employeeId, true, keepStaffEdits);
+  return {
+    library: summary(library),
+    map: { placements: map.placements },
+    release: summary(release),
+    ok: seedExitCode(release) === 0 && map.placements.missingCards.length === 0,
+  };
+}
+
+/** 整库刚导过：库文件里的 popular、卡片内容和流程树就是这一版。 */
+async function markLibraryTags() {
+  await setMarker(DEMO_POPULAR_MARKER_KEY, DEMO_POPULAR_TAG);
+  await setMarker(DEMO_CONTENT_MARKER_KEY, DEMO_CONTENT_TAG);
+  await setMarker(DEMO_MAP_MARKER_KEY, DEMO_MAP_TAG);
+}
+
 /** 先导卡，再导流程树，最后发布（发布把卡和树一起冻结进版本），然后写演示行。按 key / id 幂等。 */
 export async function seedHelpdeskDemo(options: {
   employeeId: string | null;
@@ -234,33 +293,29 @@ export async function seedHelpdeskDemo(options: {
     ok: true,
   };
   if (options.library) {
-    const library = await seedLibrary(options.employeeId, false);
-    const seed = readMap();
-    const actor = { employeeId: options.employeeId };
-    const mapRepository = createPgFaqMapRepository();
-    // 整库重灌时库里可能还有上一版的树（--remove 不删结构）
-    await pruneFaqMap({ map: mapRepository }, seed, actor);
-    const map = await seedFaqMap(
-      { map: mapRepository, faqs: createPgFaqRepository() },
-      seed,
-      actor,
-    );
-    const release = await seedLibrary(options.employeeId, true);
-    out.library = summary(library);
-    out.map = { placements: map.placements };
-    out.release = summary(release);
-    out.ok =
-      seedExitCode(release) === 0 && map.placements.missingCards.length === 0;
+    const report = await seedLibraryAndMap(options.employeeId, false);
+    out.library = report.library;
+    out.map = report.map;
+    out.release = report.release;
+    out.ok = report.ok;
   }
   out.demo = await seedDemoRows(demoDb);
   await setMarker(DEMO_MARKER_KEY, DEMO_LIBRARY_TAG);
-  // 整库刚灌过：库文件里的 popular、卡片内容和流程树就是这一版
-  if (options.library && out.ok) {
-    await setMarker(DEMO_POPULAR_MARKER_KEY, DEMO_POPULAR_TAG);
-    await setMarker(DEMO_CONTENT_MARKER_KEY, DEMO_CONTENT_TAG);
-    await setMarker(DEMO_MAP_MARKER_KEY, DEMO_MAP_TAG);
-  }
+  if (options.library && out.ok) await markLibraryTags();
   return out;
+}
+
+/**
+ * 只导卡库：卡片、流程树、发布，不灌演示行（SIT / UAT 启动时用）。员工在 BackOffice 改过的卡不动。
+ * 导过就写 LIBRARY_MARKER_KEY；干净才写三个版本标记，不干净下次启动由版本标记那几步接着补。
+ */
+export async function seedHelpdeskLibrary(
+  employeeId: string | null,
+): Promise<HelpdeskLibraryReport> {
+  const report = await seedLibraryAndMap(employeeId, true);
+  await setMarker(LIBRARY_MARKER_KEY, DEMO_LIBRARY_TAG);
+  if (report.ok) await markLibraryTags();
+  return report;
 }
 
 export function removeHelpdeskDemo() {
@@ -275,8 +330,88 @@ export function shouldAutoSeedDemo(env: NodeJS.ProcessEnv): boolean {
   return (
     (env.APP_ENV ?? '').trim().toUpperCase() === 'DEV' &&
     env.NODE_ENV === 'production' &&
-    (env.HELPDESK_DEMO_DATA ?? '').trim().toLowerCase() !== 'off'
+    readHelpdeskSetting(HELPDESK_SETTINGS.demoData, env)
   );
+}
+
+/**
+ * 只导卡库（卡片、流程树、发布，不灌演示行）：只在部署运行（NODE_ENV=production）时。
+ * HELPDESK_FAQ_LIBRARY_SEED=off 处处关，=on 任何环境都开（PROD、PPE 要明确设 on）；不设时 SIT 和 UAT 开。
+ * 部署的 DEV 走演示数据那条（shouldAutoSeedDemo），里面已经含卡库。
+ */
+export function shouldAutoSeedLibrary(env: NodeJS.ProcessEnv): boolean {
+  if (env.NODE_ENV !== 'production') return false;
+  const flag = readHelpdeskSetting(HELPDESK_SETTINGS.faqLibrarySeed, env);
+  if (flag !== null) return flag;
+  const appEnv = (env.APP_ENV ?? '').trim().toUpperCase();
+  return appEnv === 'SIT' || appEnv === 'UAT';
+}
+
+/** 启动时导什么：demo = 卡库 + 演示行（部署的 DEV），library = 只导卡库，null = 什么都不导。 */
+export function helpdeskBootSeed(
+  env: NodeJS.ProcessEnv,
+): 'demo' | 'library' | null {
+  if (shouldAutoSeedDemo(env)) return 'demo';
+  if (shouldAutoSeedLibrary(env)) return 'library';
+  return null;
+}
+
+/** 已经整库导过（DEV 的演示标记或只导卡库的标记，任一个在都算）。 */
+async function librarySeeded(): Promise<boolean> {
+  return (
+    (await marker(DEMO_MARKER_KEY)) !== null ||
+    (await marker(LIBRARY_MARKER_KEY)) !== null
+  );
+}
+
+/** 三个版本标记依次同步：热门、卡片内容、流程树（树在卡片内容之后：新卡先建出来才能挂）。 */
+async function syncLibraryTags(
+  logger: Pick<Logger, 'log' | 'warn'>,
+): Promise<SyncOutcome> {
+  const popular = await syncTagOnce(logger, POPULAR_STEP);
+  const content = await syncTagOnce(logger, CONTENT_STEP);
+  const map = await syncTagOnce(logger, MAP_STEP);
+  return combined([popular, content, map]);
+}
+
+/**
+ * SIT / UAT 启动后在后台导一次卡库（不阻塞启动和健康检查，不灌演示行）。和 DEV 一样用 advisory lock
+ * 只让一个实例导；导过就只看三个版本标记同步差异，员工在 BackOffice 改过的卡不动。失败只记日志，下次启动再试。
+ */
+export async function autoSeedLibraryOnce(
+  logger: Pick<Logger, 'log' | 'warn'> = new Logger('HelpdeskFaqLibrary'),
+): Promise<'skipped' | 'busy' | 'seeded' | 'synced' | 'failed'> {
+  try {
+    if (await librarySeeded()) return await syncLibraryTags(logger);
+    const result = await createPgJobLock(undefined, DEMO_LOCK).withLock(
+      async () => {
+        if (await librarySeeded()) return null;
+        return seedHelpdeskLibrary(null);
+      },
+    );
+    if (!result.acquired) return 'busy';
+    if (!result.value) return 'skipped';
+    logger[result.value.ok ? 'log' : 'warn'](
+      JSON.stringify({
+        type: 'helpdesk',
+        event: 'faq_library_seeded',
+        ok: result.value.ok,
+        library: result.value.library,
+        map: result.value.map,
+        release: result.value.release,
+      }),
+    );
+    return result.value.ok ? 'seeded' : 'failed';
+  } catch (error) {
+    logger.warn(
+      JSON.stringify({
+        type: 'helpdesk',
+        event: 'faq_library_seed_failed',
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return 'failed';
+  }
 }
 
 /**
@@ -289,13 +424,8 @@ export async function autoSeedDemoOnce(
   logger: Pick<Logger, 'log' | 'warn'> = new Logger('HelpdeskDemo'),
 ): Promise<'skipped' | 'busy' | 'seeded' | 'synced' | 'failed'> {
   try {
-    if ((await marker(DEMO_MARKER_KEY)) !== null) {
-      const popular = await syncTagOnce(logger, POPULAR_STEP);
-      const content = await syncTagOnce(logger, CONTENT_STEP);
-      // 树在卡片内容之后：新卡先建出来才能挂
-      const map = await syncTagOnce(logger, MAP_STEP);
-      return combined([popular, content, map]);
-    }
+    if ((await marker(DEMO_MARKER_KEY)) !== null)
+      return await syncLibraryTags(logger);
     const result = await createPgJobLock(undefined, DEMO_LOCK).withLock(
       async () => {
         if ((await marker(DEMO_MARKER_KEY)) !== null) return null;

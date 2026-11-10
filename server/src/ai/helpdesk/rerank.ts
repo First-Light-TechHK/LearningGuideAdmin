@@ -3,9 +3,17 @@ import type {
   HelpdeskQaSource,
 } from '../../contracts/helpdesk-qa';
 import {
-  HELPDESK_DEFAULTS,
-  helpdeskSetting,
-} from '../../contracts/helpdesk-defaults';
+  HELPDESK_SETTINGS,
+  readHelpdeskSetting,
+  type RerankDirect,
+} from '../../contracts/helpdesk-settings';
+import {
+  evalCacheKey,
+  evalCacheScope,
+  measureSpend,
+  replayLatency,
+  reportSpend,
+} from '../../contracts/helpdesk-eval-cache';
 
 /**
  * 精排（分级方案 L2，owner 2026-11-02：精排也走 OpenRouter，按价格选，参数量不限）。
@@ -13,9 +21,10 @@ import {
  * 缺省开（contracts/helpdesk-defaults.ts，owner 2026-11-03）；没有 OPENROUTER_API_KEY 就不精排，候选顺序不变。
  * 每次现读（不用重新部署），没设 = 缺省方案，off = 关掉：
  * - HELPDESK_RERANK_MODEL：OpenRouter /rerank 的模型（缺省 voyageai/rerank-2.5-lite）；off = 不精排。
- * - HELPDESK_RERANK_KEEP：精排后留给模型看的候选数（缺省 5）；off = 全留。
- * - HELPDESK_RERANK_DIRECT：「分数,领先差距」（缺省 0.816,0.05）：没有屏幕上的卡片、第一名是答案卡、
- *   分数与领先第二名的差距都够 → 直接给卡，不调用模型（阈值只在开发集上标定）。off 或写错 = 从不直接给。
+ * - HELPDESK_RERANK_KEEP：精排后留给模型看的候选数（缺省 5）；off = 全留。写错 = 缺省并告警（helpdesk-settings.ts）。
+ * - HELPDESK_RERANK_DIRECT：「分数,领先差距」（缺省 0.84,0.05）：没有屏幕上的卡片、第一名是答案卡、
+ *   分数与领先第二名的差距都够 → 直接给卡，不调用模型（阈值只在开发集上标定）。off = 从不直接给；写错（含空的一半，如 0.8,）= 缺省并告警。
+ *   屏幕上有卡片时同一条线只用于「换了话题」：只看本句自己的分数，第一名不是那张卡、也不是它的追问（directPickOwn）。
  * 精排失败或超时（RERANK_LIMITS.timeoutMs）→ 原顺序，学员不会因为它拿不到候选；不重试。
  */
 export const RERANK_LIMITS = {
@@ -32,38 +41,22 @@ export const RERANK_LIMITS = {
 export type RerankConfig = {
   model: string;
   keep: number | null;
-  direct: { score: number; margin: number } | null;
+  direct: RerankDirect | null;
 };
 
-/** 精排模型：没设 = 缺省，off = null（不精排）。 */
+/** 精排模型：没设 = 缺省，off = null（不精排）；写法见 contracts/helpdesk-settings.ts。 */
 export function rerankModel(env: NodeJS.ProcessEnv): string | null {
-  return helpdeskSetting(
-    env.HELPDESK_RERANK_MODEL,
-    HELPDESK_DEFAULTS.rerankModel,
-  );
+  return readHelpdeskSetting(HELPDESK_SETTINGS.rerankModel, env);
 }
 
 export function rerankConfig(env: NodeJS.ProcessEnv): RerankConfig | null {
   const model = rerankModel(env);
   if (!model || !env.OPENROUTER_API_KEY?.trim()) return null;
-  const keepSetting = env.HELPDESK_RERANK_KEEP?.trim() ?? '';
-  const keepRaw = Number(keepSetting);
-  const keep =
-    keepSetting === ''
-      ? HELPDESK_DEFAULTS.rerankKeep
-      : Number.isInteger(keepRaw) && keepRaw > 0
-        ? keepRaw
-        : null;
-  const directSetting = env.HELPDESK_RERANK_DIRECT?.trim() ?? '';
-  const parts = directSetting.split(',').map((part) => Number(part.trim()));
-  const direct =
-    directSetting === ''
-      ? { ...HELPDESK_DEFAULTS.rerankDirect }
-      : parts.length === 2 &&
-          parts.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)
-        ? { score: parts[0], margin: parts[1] }
-        : null;
-  return { model, keep, direct };
+  return {
+    model,
+    keep: readHelpdeskSetting(HELPDESK_SETTINGS.rerankKeep, env),
+    direct: readHelpdeskSetting(HELPDESK_SETTINGS.rerankDirect, env),
+  };
 }
 
 export type Reranker = (
@@ -104,7 +97,10 @@ export function openRouterReranker(input: {
       if (!response.ok) return null;
       const body = (await response.json()) as {
         results?: { index?: unknown; relevance_score?: unknown }[];
+        usage?: { cost?: unknown };
       };
+      // 精排也要钱（OpenRouter 回 usage.cost）：检查里记进这一问的花费，线上聊天不记
+      reportSpend('rerank', body.usage?.cost);
       const scores: (number | null)[] = documents.map(() => null);
       for (const row of body.results ?? []) {
         if (
@@ -123,19 +119,108 @@ export function openRouterReranker(input: {
   };
 }
 
+/**
+ * 发布前检查用的精排缓存（契约 contracts/helpdesk-eval-cache.ts 的 rerank 层）：分数按（模型, 问句, 卡片文本）
+ * 一对一对记（Voyage 这类交叉编码器每一对单独打分，和同批的其他卡无关），卡改了只重算那几对。
+ * 全部命中：照记录的耗时等（不超过精排时限）再给分数；有没记的：只把没记的那几张拿去真精排。
+ * 精排失败（null）不记。不在检查的一问里（线上聊天）→ 原样交给 inner。
+ */
+export function cachedReranker(inner: Reranker, model: string): Reranker {
+  return async (query, documents) => {
+    const scope = evalCacheScope();
+    if (!scope || documents.length === 0) return inner(query, documents);
+    const asked = query.slice(0, RERANK_LIMITS.queryChars);
+    const keys = documents.map((document) =>
+      evalCacheKey('rerank', { model, query: asked, document }),
+    );
+    const stats = scope.stats.rerank;
+    const known =
+      scope.mode === 'use'
+        ? await scope.store.get('rerank', keys)
+        : new Map<string, never>();
+    const scores = keys.map((key) => {
+      const value = known.get(key)?.value;
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    });
+    const missing = scores.flatMap((score, index) =>
+      score === null ? [index] : [],
+    );
+    if (missing.length === 0) {
+      const entries = keys.map((key) => known.get(key)!);
+      const latency = Math.max(...entries.map((e) => e.latencyMs));
+      await replayLatency(Math.min(latency, RERANK_LIMITS.timeoutMs));
+      stats.hits += 1;
+      stats.savedUsd += entries.reduce((sum, e) => sum + e.costUsd, 0);
+      return scores as number[];
+    }
+    stats.misses += 1;
+    // 记下的那几对没再花钱
+    stats.savedUsd += [...known.values()].reduce(
+      (sum, e) => sum + e.costUsd,
+      0,
+    );
+    const started = performance.now();
+    const { value: fresh, spent } = await measureSpend(() =>
+      inner(
+        asked,
+        missing.map((index) => documents[index]),
+      ),
+    );
+    if (!fresh) return null;
+    const latencyMs = Math.round(performance.now() - started);
+    missing.forEach((index, at) => (scores[index] = fresh[at]));
+    await scope.store
+      .put(
+        'rerank',
+        missing.map((index, at) => ({
+          key: keys[index],
+          entry: {
+            value: fresh[at],
+            latencyMs,
+            // 一次请求的钱按卡数摊到每一对
+            costUsd: spent.rerank / missing.length,
+          },
+        })),
+      )
+      .catch(() => undefined);
+    return scores as number[];
+  };
+}
+
 /** withContext：追问卡片前面带上父卡片的问题（「父问题 → 追问」），单独看也是完整的问题。 */
 const rerankDocument = (c: HelpdeskQaCandidate, withContext: boolean) =>
   `${withContext && c.under ? `${c.under} → ` : ''}${c.question}\n${c.answer.slice(0, RERANK_LIMITS.answerChars)}`;
 
+/** 这一次检索里没生效的层（超时或出错，已退回别的路）。 */
+export type RetrievalLayer = 'vector' | 'rerank';
+
+/** 精排失败时：字词候选与向量命中一边一张轮着排（字词在前），不带 rerankScore。 */
+function interleave(
+  lexical: HelpdeskQaCandidate[],
+  vector: HelpdeskQaCandidate[],
+): HelpdeskQaCandidate[] {
+  const out: HelpdeskQaCandidate[] = [];
+  for (let i = 0; i < Math.max(lexical.length, vector.length); i += 1) {
+    if (lexical[i]) out.push(lexical[i]);
+    if (vector[i]) out.push(vector[i]);
+  }
+  return out;
+}
+
 /**
  * 候选按精排分数从高到低重排（同分保持原顺序），每张带上 rerankScore，至多留 keep 张。
- * 只改 findCandidates；精排失败就原样返回。
+ * 只改 findCandidates。降级不再是静默的（2026-11-09）：向量那一路失败或超时、精排失败，都经
+ * options.degraded 报出来（检索步记进 output.degraded，计入模型健康的 failures）；精排失败时
+ * 已经取回的向量命中不丢，和字词候选轮着排，条数不超过字词那一路要的 limit。
  */
 export function rerankedSource(
   qa: HelpdeskQaSource,
   reranker: Reranker,
   keep: number | null,
-  options: { withContext?: boolean } = {},
+  options: {
+    withContext?: boolean;
+    degraded?: (layer: RetrievalLayer) => void;
+  } = {},
 ): HelpdeskQaSource {
   return {
     ...qa,
@@ -154,20 +239,28 @@ export function rerankedSource(
                 text,
                 limit: RERANK_LIMITS.vectorPool,
               })
-              .catch(() => [])
-          : Promise.resolve([]);
+              .then(
+                (hits) => {
+                  // null = 这一路没生效（超时、出错或向量还没算好）
+                  if (hits === null) options.degraded?.('vector');
+                  return hits ?? [];
+                },
+                () => {
+                  options.degraded?.('vector');
+                  return [] as HelpdeskQaCandidate[];
+                },
+              )
+          : Promise.resolve([] as HelpdeskQaCandidate[]);
       const [retrieved, vector, vectorWithPrevious] = await Promise.all([
         qa.findCandidates(search),
         vectorOf(search.text),
         withPrevious ? vectorOf(withPrevious) : Promise.resolve([]),
       ]);
       const seen = new Set(retrieved.map((c) => c.id));
-      const found = [
-        ...retrieved,
-        ...[...vector, ...vectorWithPrevious].filter(
-          (c) => !seen.has(c.id) && seen.add(c.id),
-        ),
-      ];
+      const vectorOnly = [...vector, ...vectorWithPrevious].filter(
+        (c) => !seen.has(c.id) && seen.add(c.id),
+      );
+      const found = [...retrieved, ...vectorOnly];
       if (found.length === 0) return found;
       const documents = found.map((c) =>
         rerankDocument(c, options.withContext ?? false),
@@ -180,11 +273,22 @@ export function rerankedSource(
         own && previous
           ? own.map((score, index) => Math.max(score, previous[index]))
           : (own ?? previous);
-      if (!scores) return retrieved;
+      if (!scores) {
+        options.degraded?.('rerank');
+        return interleave(retrieved, vectorOnly).slice(
+          0,
+          Math.max(search.limit, retrieved.length),
+        );
+      }
       const ranked = found
         .map((c, index) => ({ c, index, score: scores[index] }))
         .sort((a, b) => b.score - a.score || a.index - b.index)
-        .map(({ c, score }) => ({ ...c, rerankScore: score }));
+        .map(({ c, score, index }) => ({
+          ...c,
+          rerankScore: score,
+          // 两次都算了：本句自己的分数另记一份（换话题的判断只看它）
+          ...(own && previous ? { rerankOwn: own[index] } : {}),
+        }));
       return keep ? ranked.slice(0, keep) : ranked;
     },
   };
@@ -194,6 +298,9 @@ export function rerankedSource(
  * 精排有把握时直接给第一名（不调用大模型）：第一名有 rerankScore、是答案卡（不是 choice），
  * 分数 ≥ direct.score，且比第二名高出 ≥ direct.margin（只有一张时差距按它自己的分数算）。
  */
+/** 浮点减法的误差容忍（分数都在 0–1，远小于有意义的分数差）。 */
+const DIRECT_EPSILON = 1e-9;
+
 export function directPick(
   candidates: HelpdeskQaCandidate[],
   direct: RerankConfig['direct'],
@@ -203,7 +310,32 @@ export function directPick(
   if (!top || top.rerankScore === undefined) return null;
   if ((top.type ?? 'answer') !== 'answer') return null;
   const margin = top.rerankScore - (second?.rerankScore ?? 0);
-  return top.rerankScore >= direct.score && margin >= direct.margin
+  // 两个界都含等号，按人读小数的意思比：0.84 − 0.79 在浮点里是 0.04999…，要算够 0.05（黑盒测试 D5）
+  return top.rerankScore >= direct.score - DIRECT_EPSILON &&
+    margin >= direct.margin - DIRECT_EPSILON
     ? top
     : null;
+}
+
+/**
+ * 屏幕上有卡片时的直接给卡（换话题，2026-11-10）：和 directPick 同一条线，但只看本句自己的精排分数
+ * （rerankOwn；「前文 → 本句」那一次抬高的是上一个话题的卡，不能用来判断换了话题），并且第一名
+ * 不能是屏幕上那张卡（问的还是它）、也不能是它的追问（relation child，要模型结合那张卡看）。
+ * candidates 要含屏幕上那张卡：它排第一 → 不直出；它排第二 → 领先幅度按它算。
+ */
+export function directPickOwn(
+  candidates: HelpdeskQaCandidate[],
+  shownId: string,
+  direct: RerankConfig['direct'],
+): HelpdeskQaCandidate | null {
+  const own = candidates
+    .map((c, index) => ({ c, index, score: c.rerankOwn ?? c.rerankScore }))
+    .filter((x): x is typeof x & { score: number } => x.score !== undefined)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const top = directPick(
+    own.map(({ c, score }) => ({ ...c, rerankScore: score })),
+    direct,
+  );
+  if (!top || top.id === shownId || top.relation === 'child') return null;
+  return candidates.find((c) => c.id === top.id) ?? null;
 }

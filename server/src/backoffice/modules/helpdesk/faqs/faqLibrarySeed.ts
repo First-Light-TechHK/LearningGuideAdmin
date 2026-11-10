@@ -782,3 +782,22 @@ export function seedExitCode(report: SeedReport): 0 | 1 {
     ? 1
     : 0;
 }
+
+/**
+ * 灌库后这一版的向量有没有算成（命令行用）。配了向量模型（configured）而某一次没算成（null）→ 一句
+ * 说明（命令行打到 stderr 并以 1 退出）；没配向量模型、或都算成了 → null。
+ * 真模型实跑 2026-11-09：算向量时上游 429，只留下一行警告，灌库照样报成功，发布检查就在没有向量的
+ * 库上只靠字词检索跑完了。
+ */
+export function seedVectorsProblem(
+  configured: boolean,
+  indexed: readonly (object | null)[],
+): string | null {
+  const failed = indexed.filter((report) => report === null).length;
+  if (!configured || failed === 0) return null;
+  return (
+    'FAQ vectors were not built for the new release (see the warning above): ' +
+    'search runs on words only until they are. ' +
+    'Run `npm run helpdesk:faq-vectors` and check that it reports the release.'
+  );
+}
