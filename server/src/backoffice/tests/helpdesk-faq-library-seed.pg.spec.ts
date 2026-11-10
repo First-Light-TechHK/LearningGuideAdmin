@@ -8,6 +8,7 @@ import {
   parseFaqLibrary,
   parseSeedArgs,
   seedExitCode,
+  seedVectorsProblem,
   seedFaqLibrary,
   seedIdempotencyKey,
   syncLibraryPopular,
@@ -234,6 +235,17 @@ describe('seed command line (eval/helpdesk/seed-faq-library.ts)', () => {
         },
       }),
     ).toBe(1);
+  });
+
+  it('says so when the new release got no vectors although a vector model is set (2026-11-09: a 429 left only a warning)', () => {
+    const built = { release: 1, model: 'baai/bge-m3', embedded: 3 };
+    expect(seedVectorsProblem(true, [built])).toBeNull();
+    expect(seedVectorsProblem(true, [])).toBeNull();
+    // no vector model: nothing to build, nothing wrong
+    expect(seedVectorsProblem(false, [null])).toBeNull();
+    expect(seedVectorsProblem(true, [built, null])).toContain(
+      'npm run helpdesk:faq-vectors',
+    );
   });
 });
 
