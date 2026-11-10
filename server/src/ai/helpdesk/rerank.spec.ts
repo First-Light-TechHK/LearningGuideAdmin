@@ -4,6 +4,7 @@ import type {
 } from '../../contracts/helpdesk-qa';
 import {
   directPick,
+  directPickOwn,
   openRouterReranker,
   RERANK_LIMITS,
   rerankConfig,
@@ -290,6 +291,11 @@ describe('rerankedSource (only findCandidates changes)', () => {
       [card(1).id, 0.6],
       [card(2).id, 0.2],
     ]);
+    // the message's own score is kept beside it (a changed topic is judged on it alone)
+    expect(out.map((c) => c.rerankOwn)).toEqual([0.1, 0.6, 0.1]);
+    // asked once (no earlier message): the score is the message's own, nothing beside it
+    const once = await rerankedSource(qa, rerank, 3).findCandidates(search);
+    expect(once.every((c) => !('rerankOwn' in c))).toBe(true);
   });
 
   it('with search.context, one failing rerank call still ranks by the other', async () => {
@@ -329,5 +335,43 @@ describe('directPick (give the top card without the model only when the reranker
     ['no candidates', [], direct],
   ] as const)('returns null with %s', (_, list, thresholds) => {
     expect(directPick([...list], thresholds)).toBeNull();
+  });
+});
+
+describe('directPickOwn (a card on screen: answer directly only when the message alone clearly asks for another card, 2026-11-10)', () => {
+  const direct = { score: 0.8, margin: 0.1 };
+  const shown = card(9, { rerankScore: 0.3 });
+
+  it('picks another card that is sure on the message alone, also when the list is ordered by the score with the earlier message', () => {
+    const fresh = card(1, { rerankScore: 0.9, rerankOwn: 0.9 });
+    const old = card(2, { rerankScore: 0.95, rerankOwn: 0.2 });
+    expect(directPickOwn([old, fresh, shown], shown.id, direct)).toBe(fresh);
+    // asked once: rerankScore is the message's own score
+    const only = card(3, { rerankScore: 0.9 });
+    expect(directPickOwn([only, shown], shown.id, direct)).toBe(only);
+  });
+
+  it.each([
+    [
+      'the card on screen is the best match',
+      [card(9, { rerankScore: 0.95 }), card(1, { rerankScore: 0.5 })],
+    ],
+    [
+      'the card on screen is a close second (the lead is counted against it)',
+      [card(1, { rerankScore: 0.9 }), card(9, { rerankScore: 0.85 })],
+    ],
+    [
+      'the best match is a follow-up of the card on screen',
+      [card(1, { rerankScore: 0.95, relation: 'child' }), shown],
+    ],
+    [
+      'sure only with the earlier message',
+      [card(1, { rerankScore: 0.95, rerankOwn: 0.4 }), shown],
+    ],
+    ['a choice card on top', [card(1, { rerankScore: 0.95, type: 'choice' })]],
+    ['no rerank scores', [card(1), card(2)]],
+  ] as const)('returns null when %s', (_, list) => {
+    expect(directPickOwn([...list], shown.id, direct)).toBeNull();
+    expect(directPickOwn([...list], shown.id, null)).toBeNull();
   });
 });

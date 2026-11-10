@@ -15,7 +15,7 @@ import {
 import type { JsonObject } from '../../../contracts/helpdesk-trace';
 import type { AgentCallExtras, WorkflowTemplate } from './engine';
 import { NONE } from './faq-workflow';
-import { directPick, type RerankConfig } from '../rerank';
+import { directPick, directPickOwn, type RerankConfig } from '../rerank';
 import { LEARNER_STATE_RULE, learnerFacts } from './learner-facts';
 import {
   askPool as pool,
@@ -416,10 +416,15 @@ export function assistWorkflow(deps: {
           const degraded: JsonObject =
             layers.length > 0 ? { degraded: [...layers] } : {};
           state = { ...state, split };
-          // 分级 L2：第一句（屏幕上没有卡片）且精排有把握 → 直接给第一名，不问模型（固定开头结尾照旧）
-          const direct = nodeId
-            ? null
-            : directPick(candidates, deps.direct ?? null);
+          // 分级 L2：精排有把握 → 直接给第一名，不问模型（固定开头结尾照旧）。第一句（屏幕上没有卡片）
+          // 看候选的分数；屏幕上有卡片时只在「换了话题」时直出：本句自己的分数有把握，第一名不是那张卡、
+          // 也不是它的追问（directPickOwn）。真模型实跑 2026-11-09：带一张不相关的旧卡问 200 道，原本
+          // 直出的 117 道全都改问了模型，4 道因此超时
+          const direct = shown
+            ? directPickOwn(found, shown.id, deps.direct ?? null)
+            : nodeId
+              ? null
+              : directPick(candidates, deps.direct ?? null);
           if (direct) {
             const output: JsonObject = {
               candidates: candidates.map((c) => ({
@@ -429,7 +434,7 @@ export function assistWorkflow(deps: {
                   ? { rerankScore: c.rerankScore }
                   : {}),
               })),
-              shown: null,
+              shown: shown?.id ?? null,
               direct: direct.id,
               ...degraded,
             };

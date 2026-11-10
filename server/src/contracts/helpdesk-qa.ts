@@ -78,6 +78,11 @@ export type HelpdeskQaCandidate = {
   /** 精排分数（ai/helpdesk/rerank.ts，只在开了 HELPDESK_RERANK_MODEL 时有），越大越相关。 */
   rerankScore?: number;
   /**
+   * 只按本句自己算的精排分数（不含「前文 → 本句」那一次）；只在两次都算了时有，没有 = rerankScore
+   * 本身就是本句的分数。屏幕上有卡片时判断「是不是换了话题」只看它（rerank.ts directPickOwn）。
+   */
+  rerankOwn?: number;
+  /**
    * 追问卡片：它跟在哪张卡片下面（发布版本里那张父卡片的问题，同一语言）。追问的问题是接着父卡片问的
    * （如「手机上也有吗？」），单独看缺上下文；HELPDESK_CARD_CONTEXT=on 时给精排和挑卡模型一起看。
    */

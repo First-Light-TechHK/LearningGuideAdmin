@@ -24,6 +24,7 @@ import {
  * - HELPDESK_RERANK_KEEP：精排后留给模型看的候选数（缺省 5）；off = 全留。写错 = 缺省并告警（helpdesk-settings.ts）。
  * - HELPDESK_RERANK_DIRECT：「分数,领先差距」（缺省 0.84,0.05）：没有屏幕上的卡片、第一名是答案卡、
  *   分数与领先第二名的差距都够 → 直接给卡，不调用模型（阈值只在开发集上标定）。off = 从不直接给；写错（含空的一半，如 0.8,）= 缺省并告警。
+ *   屏幕上有卡片时同一条线只用于「换了话题」：只看本句自己的分数，第一名不是那张卡、也不是它的追问（directPickOwn）。
  * 精排失败或超时（RERANK_LIMITS.timeoutMs）→ 原顺序，学员不会因为它拿不到候选；不重试。
  */
 export const RERANK_LIMITS = {
@@ -282,7 +283,12 @@ export function rerankedSource(
       const ranked = found
         .map((c, index) => ({ c, index, score: scores[index] }))
         .sort((a, b) => b.score - a.score || a.index - b.index)
-        .map(({ c, score }) => ({ ...c, rerankScore: score }));
+        .map(({ c, score, index }) => ({
+          ...c,
+          rerankScore: score,
+          // 两次都算了：本句自己的分数另记一份（换话题的判断只看它）
+          ...(own && previous ? { rerankOwn: own[index] } : {}),
+        }));
       return keep ? ranked.slice(0, keep) : ranked;
     },
   };
@@ -309,4 +315,27 @@ export function directPick(
     margin >= direct.margin - DIRECT_EPSILON
     ? top
     : null;
+}
+
+/**
+ * 屏幕上有卡片时的直接给卡（换话题，2026-11-10）：和 directPick 同一条线，但只看本句自己的精排分数
+ * （rerankOwn；「前文 → 本句」那一次抬高的是上一个话题的卡，不能用来判断换了话题），并且第一名
+ * 不能是屏幕上那张卡（问的还是它）、也不能是它的追问（relation child，要模型结合那张卡看）。
+ * candidates 要含屏幕上那张卡：它排第一 → 不直出；它排第二 → 领先幅度按它算。
+ */
+export function directPickOwn(
+  candidates: HelpdeskQaCandidate[],
+  shownId: string,
+  direct: RerankConfig['direct'],
+): HelpdeskQaCandidate | null {
+  const own = candidates
+    .map((c, index) => ({ c, index, score: c.rerankOwn ?? c.rerankScore }))
+    .filter((x): x is typeof x & { score: number } => x.score !== undefined)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const top = directPick(
+    own.map(({ c, score }) => ({ ...c, rerankScore: score })),
+    direct,
+  );
+  if (!top || top.id === shownId || top.relation === 'child') return null;
+  return candidates.find((c) => c.id === top.id) ?? null;
 }
