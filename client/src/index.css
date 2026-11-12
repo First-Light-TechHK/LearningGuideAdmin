@@ -269,13 +269,26 @@ body,
   border-radius: 999px !important;
 }
 
-/* AI Tutor 聊天（§4.3.5）：用户气泡为蓝底，其内 Markdown 文本改为白色——
-   @uiw/react-md-editor 的 .wmde-markdown 用 var(--color-fg-default) 固定深色，
-   仅靠气泡容器的 color 无法透传，故按类提权覆盖 */
+/* AI Tutor 用户气泡为蓝底，原有 Markdown 文字使用白色。 */
 .chat-bubble-user .wmde-markdown {
   color: var(--color-bg-container);
 }
-/* ===== AI Tutor Chat Markdown 扩展样式（2026-10-30，与 Portal 侧对齐）=====
+/* 模型可能输出带缩进的段落；Markdown 将其渲染为 pre，长行需留在气泡内。 */
+.tutor-answer {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.tutor-answer pre,
+.tutor-answer pre code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.tutor-answer pre {
+  overflow-x: hidden;
+}
+/* ===== 历史 Markdown 扩展样式 =====
    由 normalizeTutorMarkdown 预处理出的结构对应的样式：
    - strong / em：加粗强调（提示词允许每段 ≤2 处）
    - sup：脚注引用上标 [1]
@@ -319,6 +332,25 @@ body,
 .chat-bubble-user .wmde-markdown .markdown-sources > p {
   color: rgba(255, 255, 255, 0.9);
 }
+/* Portal TutorAnswer 的回答排版，限定在 Backoffice AI Chat。 */
+.tutor-answer { line-height: 1.5; }
+.tutor-answer p { margin: 0 0 .6em; white-space: normal; overflow-wrap: anywhere; }
+.tutor-answer p:last-child { margin-bottom: 0; }
+.tutor-answer ul,
+.tutor-answer ol { margin: 0 0 .6em; padding-left: 1.5em; }
+.tutor-answer li { margin: .25em 0; }
+.tutor-answer li > p { margin: 0; }
+.tutor-answer pre { margin: 0 0 .6em; padding: .6em .8em; border-radius: 6px; background: rgba(16,24,40,.06); }
+.tutor-answer pre code { background: transparent; }
+.tutor-answer .katex-display { margin: .5em 0; max-width: 100%; overflow-x: auto; }
+.tutor-answer table { display: block; max-width: 100%; overflow-x: auto; margin: 0 0 .6em; }
+.tutor-answer img { display: block; max-width: 100%; height: auto; margin: .5em 0; border-radius: 6px; }
+.tutor-answer a { color: inherit; text-decoration: underline; }
+.tutor-answer blockquote { margin: 0 0 .6em; padding-left: .8em; border-left: 2px solid var(--color-border); color: var(--color-text-secondary); }
+.tutor-answer-sources { margin: .6em 0 0; color: var(--color-text-secondary); font-size: .9em; line-height: 1.4; }
+.tutor-answer-sources p { margin: 0 0 2px; }
+.tutor-answer-sources p:first-child { font-weight: 600; }
+.chat-bubble-user .tutor-answer-sources { color: rgba(255, 255, 255, .85); }
 /* KaTeX 样式必须在应用入口全局引入 katex/dist/katex.min.css。
    若未引入，公式会渲染为无样式的纯文本 */
 

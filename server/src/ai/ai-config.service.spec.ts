@@ -59,6 +59,10 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       systemPrompt: 'MAIN-A\n\nLECTURE-A',
       welcomeMsg: 'WELCOME-A',
     });
+    expect(result.dialoguePrompts).toEqual({
+      basePrompt: 'MAIN-A',
+      modePrompt: 'LECTURE-A',
+    });
   });
 
   it.each([

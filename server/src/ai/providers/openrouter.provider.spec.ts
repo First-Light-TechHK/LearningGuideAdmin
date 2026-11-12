@@ -239,4 +239,64 @@ describe('OpenRouterProvider', () => {
         .next(),
     ).rejects.toBeInstanceOf(LlmTimeoutError);
   });
+
+  it('通用 Dialogue 连接阶段超时独立于旧总超时', async () => {
+    globalThis.fetch = jest.fn(
+      (_: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new Error('request aborted')),
+            { once: true },
+          );
+        }),
+    );
+    await expect(
+      new OpenRouterProvider()
+        .stream({
+          model: 'model',
+          messages: [],
+          apiKey: 'test-key',
+          baseUrl: 'https://example.invalid',
+          connectionTimeoutMs: 10,
+        })
+        .next(),
+    ).rejects.toBeInstanceOf(LlmTimeoutError);
+  });
+
+  it('通用 Dialogue 首段及后续闲置分别超时', async () => {
+    const openStream = (first: string) =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            if (first) controller.enqueue(new TextEncoder().encode(first));
+          },
+        }),
+        { status: 200 },
+      );
+    globalThis.fetch = jest.fn().mockResolvedValue(openStream(''));
+    const options = {
+      model: 'model',
+      messages: [],
+      apiKey: 'test-key',
+      baseUrl: 'https://example.invalid',
+      firstTokenTimeoutMs: 10,
+      idleTimeoutMs: 10,
+    };
+    await expect(
+      new OpenRouterProvider().stream(options).next(),
+    ).rejects.toBeInstanceOf(LlmTimeoutError);
+
+    globalThis.fetch = jest
+      .fn()
+      .mockResolvedValue(
+        openStream('data: {"choices":[{"delta":{"content":"first"}}]}\n'),
+      );
+    const stream = new OpenRouterProvider().stream(options);
+    await expect(stream.next()).resolves.toEqual({
+      value: 'first',
+      done: false,
+    });
+    await expect(stream.next()).rejects.toBeInstanceOf(LlmTimeoutError);
+  });
 });

@@ -273,6 +273,24 @@
   },
   "aiTutor": {
     "title": "AI 导师",
+    "sources": "来源",
+    "dialogueTesting": {
+      "open": "多路线对话测试",
+      "back": "返回正式对话",
+      "title": "对话测试",
+      "addRoute": "添加路线",
+      "noRoutes": "请先添加测试路线",
+      "runAll": "发送到所有路线",
+      "route": "路线",
+      "remove": "移除",
+      "useKnowledge": "使用知识库",
+      "complete": "完成",
+      "streaming": "生成中",
+      "error": "失败",
+      "aborted": "已取消",
+      "question": "问题：",
+      "storageError": "浏览器无法保存测试结果，请在离开页面前复制所需内容"
+    },
     "online": "上线",
     "changeCourse": "切换课程",
     "manageOnline": "管理所有上线状态",
@@ -476,6 +494,8 @@
       "editTitle": "编辑标题",
       "edit": "编辑",
       "preview": "预览",
+      "sourceReferences": "来源链接（{count}）",
+      "sourceEditHint": "在上方 Markdown 正文中编辑来源链接；保存后随课程发布版本一起发布。",
       "saveFailed": "自动保存失败：切页/切课程会被阻断，避免丢稿（修改仍保留在本地）",
       "placeholder": "在此编辑 Markdown 源码…"
     },

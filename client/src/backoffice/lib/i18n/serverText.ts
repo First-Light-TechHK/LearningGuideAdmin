@@ -10,6 +10,7 @@ import { t } from "./messages";
  * 新增后端中文报错时要在这里加译文，tests/i18n-guard.test.ts 会扫描后端源码检查。
  */
 export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> = [
+  ["模型不在可用列表中", "The selected model is not available."],
   ["测试版本已变化，请刷新后重试", "The test release has changed. Refresh and try again."],
   ["课程在你打开后已被他人修改，请刷新后查看最新内容。", "This course was changed by someone else after you opened it. Refresh to see the changes."],
   ["LLM 上游生成失败", "The model could not complete this response."],

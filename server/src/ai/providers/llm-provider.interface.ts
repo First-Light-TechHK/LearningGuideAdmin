@@ -20,6 +20,9 @@ export interface LlmStreamOptions {
   reasoningEffort?: 'low' | 'none';
   signal?: AbortSignal;
   timeoutMs?: number;
+  connectionTimeoutMs?: number;
+  firstTokenTimeoutMs?: number;
+  idleTimeoutMs?: number;
   onEvent?: (event: Exclude<LlmStreamEvent, { type: 'delta' }>) => void;
 }
 

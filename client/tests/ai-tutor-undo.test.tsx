@@ -23,14 +23,14 @@ afterEach(() => {
   localStorage.clear()
 })
 
-async function openChat() {
+async function openChat(userContent = original) {
   server = installFakeServer()
   server.on('GET', '/api/session', { data: { employee: employee('ADMIN') } })
   useAiStore.setState({
     ownerId: 'employee-1', config: { releaseId: 'r1' } as AiConfigView, selectedCourseId: 'undo-course',
     messages: [
       { role: 'ai', content: 'Welcome', createdAt: '1' },
-      { role: 'user', content: original, createdAt: '2' },
+      { role: 'user', content: userContent, createdAt: '2' },
       { role: 'ai', content: 'Answer', createdAt: '3' },
     ],
   })
@@ -70,4 +70,12 @@ test('取消撤回保留输入草稿和对话', async () => {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
   assert.equal(input.value, 'draft')
   assert.equal(useAiStore.getState().messages.length, 3)
+})
+
+test('用户消息保留原有 Markdown 展示，不抽取回答来源', async () => {
+  await openChat('Question [Source: private note]')
+  const bubble = document.querySelector('.chat-bubble-user')
+  assert.match(bubble?.textContent ?? '', /Question \[Source: private note\]/)
+  assert.ok(bubble?.querySelector('.wmde-markdown'))
+  assert.equal(bubble?.querySelector('.tutor-answer'), null)
 })

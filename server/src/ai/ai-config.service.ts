@@ -482,13 +482,17 @@ export class AiConfigService implements OnModuleInit {
           where: { courseId_releaseId: { courseId, releaseId } },
         })
       : null;
-    return this.promptsFromConfig(cfg, mode);
+    const { systemPrompt, welcomeMsg } = await this.promptsFromConfig(
+      cfg,
+      mode,
+    );
+    return { systemPrompt, welcomeMsg };
   }
 
   private async promptsFromConfig(
     cfg: CourseAiConfig | null,
     mode: PromptMode,
-  ): Promise<ResolvedPrompts> {
+  ): Promise<ResolvedPrompts & { basePrompt: string; modePrompt: string }> {
     const modeIdField =
       mode === 'LECTURE'
         ? cfg?.lectureModeId
@@ -524,6 +528,8 @@ export class AiConfigService implements OnModuleInit {
       return {
         systemPrompt: modePrompt,
         welcomeMsg: cfg?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
+        basePrompt: '',
+        modePrompt,
       };
     }
     const mainPrompt = cfg?.mainSystemPrompt ?? DEFAULT_MAIN_PROMPT;
@@ -531,6 +537,8 @@ export class AiConfigService implements OnModuleInit {
     return {
       systemPrompt,
       welcomeMsg: cfg?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
+      basePrompt: mainPrompt,
+      modePrompt,
     };
   }
 
@@ -564,9 +572,12 @@ export class AiConfigService implements OnModuleInit {
     const cfg = await this.prisma.courseAiConfig.findUnique({
       where: { courseId_releaseId: { courseId, releaseId } },
     });
+    const { systemPrompt, welcomeMsg, basePrompt, modePrompt } =
+      await this.promptsFromConfig(cfg, mode);
     return {
       runtime: this.runtimeFromConfig(cfg),
-      prompts: await this.promptsFromConfig(cfg, mode),
+      prompts: { systemPrompt, welcomeMsg },
+      dialoguePrompts: { basePrompt, modePrompt },
     };
   }
 

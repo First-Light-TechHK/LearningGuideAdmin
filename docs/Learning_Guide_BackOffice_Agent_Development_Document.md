@@ -244,7 +244,7 @@ model AiRateLimitHit {
 - 同步命令：`npm run prompts:sync`（upsert `lecture-default` / `socratic-default`，不触碰课程级覆盖）
 - 落库口径：`PromptTemplate.welcomeMsg` 存 `zh-CN` 供后台展示；学员端 welcome 按 `locale` 读取文件对应语言
 - 欢迎语口径：课程已在进入 AI Tutor 前选定，默认文案不再提示“请选择一个课程”
-- **运行时兜底（2026-10-26）**：应用启动**不写库**；库中缺少某模式默认行时，`GET /api/ai/prompts` 与对话提示词解析直接回退上述文件默认值（`src/ai/prompts/`），因此空库 / 云端未执行 `prompts:sync` 时后台不再出现空白 Prompt。`npm run prompts:sync` 仍保留为“主动把文件内容写入数据库”的手段。
+- **默认模板同步与兜底（2026-11-11）**：应用启动时将 `src/ai/prompts/` 中的 Lecture、Socratic、Assessment 默认模板 upsert 到 `PromptTemplate`；同步失败只记录 warning。库中缺少某模式默认行时，`GET /api/ai/prompts` 与对话提示词解析回退文件默认值，因此空库或同步失败时后台不出现空白 Prompt。`npm run prompts:sync` 保留为手动修复手段。课程／Release 自定义 Prompt 和绑定的非默认模板仍按优先级生效。
 
 ---
 

@@ -122,11 +122,15 @@ export async function chatStream(
     message: string
     mode: AiMode
     history: Array<{ role: 'user' | 'assistant'; content: string }>
+    releaseId?: string
+    model?: string
+    useKnowledge?: boolean
   },
   onEvent: (e: ChatStreamEvent) => void,
   signal?: AbortSignal,
+  endpoint = '/api/ai/chat-stream',
 ): Promise<void> {
-  const res = await fetch('/api/ai/chat-stream', {
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useEmployee } from '../backoffice/employeeSession';
 import { ConfigPanel } from '../components/ai/ConfigPanel'
 import { ChatWindow } from '../components/ai/ChatWindow'
+import { DialogueTestingPanel } from '../components/ai/DialogueTestingPanel'
+import { Button } from '../components/ui'
 import { TutorManagerModal } from '../components/ai/TutorManagerModal'
 import { useAiStore } from '../stores/aiStore'
 import { useAiText } from '../components/ai/i18n'
@@ -67,9 +69,12 @@ export function AITutorTopBar() {
  * 左右分栏比例（2026-10-20 改拍）：配置面板 40%、对话窗口 60%。
  */
 export function AITutor() {
+  const [testing, setTesting] = useState(false)
+  const { text } = useAiText()
   const init = useAiStore((s) => s.init)
   const cancel = useAiStore((s) => s.cancel)
   const ownerId = useAiStore((s) => s.ownerId)
+  const selectedCourseId = useAiStore((s) => s.selectedCourseId)
   const { employeeId } = useEmployee()
 
   useEffect(() => {
@@ -87,7 +92,10 @@ export function AITutor() {
         <ConfigPanel />
       </div>
       <div style={{ flex: '1 1 0', minWidth: 0 }}>
-        <ChatWindow />
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: tokens.spacing.sm }}>
+          <Button onClick={() => setTesting((value) => !value)}>{text(testing ? 'dialogueTesting.back' : 'dialogueTesting.open')}</Button>
+          <div style={{ flex: 1, minHeight: 0 }}>{testing ? <DialogueTestingPanel key={`${ownerId}:${selectedCourseId}`} /> : <ChatWindow />}</div>
+        </div>
       </div>
       <TutorManagerModal />
     </div>

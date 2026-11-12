@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   KNOWLEDGE_CLIENT,
   type KnowledgeClient,
@@ -18,6 +18,7 @@ import {
 } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
+import { DialogueTestStreamDto } from './dto/dialogue-test-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmTimeoutError } from './providers/llm-provider.interface';
 import { OpenRouterHttpError } from './providers/openrouter.provider';
@@ -26,6 +27,7 @@ import {
   compileTutorDialogue,
   visibleTutorAnswer,
 } from './tutor/dialogue-runtime';
+import { compileMotherbaseDialogue } from './tutor/motherbase-dialogue';
 import { buildTutorContext, loadTutorRelease } from './tutor/course-context';
 import {
   imageAfterParagraph,
@@ -116,6 +118,36 @@ export class AiChatService {
     });
   }
 
+  /** 母版方案试跑：每条路线可选模型、Release 和知识开关，不写回正式配置。 */
+  async *streamDialogueTest(
+    dto: DialogueTestStreamDto,
+    signal?: AbortSignal,
+  ): AsyncGenerator<string> {
+    if (!this.configs.availableModels().includes(dto.model)) {
+      throw new BadRequestException('模型不在可用列表中');
+    }
+    yield* this.run({
+      courseIdHint: dto.courseId,
+      message: dto.message,
+      mode: dto.mode,
+      history: dto.history,
+      locale: null,
+      channel: 'admin',
+      quota: 'admin-test',
+      signal,
+      testRoute: { model: dto.model, useKnowledge: dto.useKnowledge },
+      resolve: async () => {
+        const course = await this.knowledge.getCourse(dto.courseId);
+        if (!course) throw new NotFoundException('课程不存在');
+        return {
+          courseId: course.id,
+          courseTitle: course.title,
+          releaseId: dto.releaseId,
+        };
+      },
+    });
+  }
+
   /**
    * 学员端对话（2026-10-22）：按 Portal course.slug 匹配 Course.externalId，
    * 强制 aiTutorOnline，且只读 currentReleaseId（绝不读 aiTestReleaseId）。
@@ -168,6 +200,7 @@ export class AiChatService {
     /** Portal 学员 userId（2026-10-28）：用于日志审计和用户级限流分桶；后台测试/直播间不传 */
     userId?: string;
     signal?: AbortSignal;
+    testRoute?: { model: string; useKnowledge: boolean };
     resolve: () => Promise<{
       courseId: string;
       courseTitle: string;
@@ -178,9 +211,11 @@ export class AiChatService {
     const requestId = randomUUID();
     const history = selectRecentCompleteTurns(
       input.history ?? [],
-      input.mode === 'SOCRATIC'
-        ? MAX_SOCRATIC_HISTORY_TURNS
-        : MAX_HISTORY_TURNS,
+      input.testRoute
+        ? 10
+        : input.mode === 'SOCRATIC'
+          ? MAX_SOCRATIC_HISTORY_TURNS
+          : MAX_HISTORY_TURNS,
     );
     let courseId = input.courseIdHint;
     let releaseId: string | null = null;
@@ -237,6 +272,7 @@ export class AiChatService {
         releaseId,
       );
       const buildContext = async (query: string, topics: string[] = []) => {
+        if (input.testRoute?.useKnowledge === false) return '';
         const context = await buildTutorContext(
           this.knowledge,
           release,
@@ -328,7 +364,10 @@ export class AiChatService {
         this.configs.resolveTutorRun(courseId, releaseId, input.mode),
         buildContext(contextQuery, summaryTopics),
       ]);
-      const { runtime, prompts } = runConfig;
+      const { runtime: resolvedRuntime, prompts, dialoguePrompts } = runConfig;
+      const runtime = input.testRoute
+        ? { ...resolvedRuntime, model: input.testRoute.model }
+        : resolvedRuntime;
       if (initialContext === null) progress('retrieval_initial_empty');
       let context =
         initialContext === null && broadCourseHelp
@@ -373,23 +412,46 @@ export class AiChatService {
       providerName = runtime.provider;
       model = runtime.model;
       progress('context_ready');
-      const compiled = compileTutorDialogue({
-        courseId,
-        releaseId,
-        courseTitle: resolved.courseTitle,
-        pageTitles: release.pages.map((page) => page.title),
-        mode: input.mode,
-        message: input.message,
-        systemPrompt: prompts.systemPrompt,
-        context: context ?? '',
-        history,
-      });
-      const messages = compiled.messages;
-      promptHash = compiled.promptHash;
-      const images = selectKnowledgeImages(
-        context ?? '',
-        courseId,
-        question,
+      let messages: ReturnType<typeof compileTutorDialogue>['messages'];
+      let testMaxOutputTokens: number | undefined;
+      let testTemperature: number | undefined;
+      if (input.testRoute) {
+        const compiled = compileMotherbaseDialogue({
+          basePrompt: dialoguePrompts.basePrompt,
+          modePrompt: dialoguePrompts.modePrompt,
+          knowledgeMarkdown: context ?? '',
+          mode: input.mode,
+          message: input.message,
+          history: history.flatMap((turn) => [
+            { role: 'user' as const, content: turn.user },
+            { role: 'assistant' as const, content: turn.assistant },
+          ]),
+        });
+        messages = compiled.messages;
+        testMaxOutputTokens = compiled.maxOutputTokens;
+        testTemperature = compiled.temperature;
+        promptHash = createHash('sha256')
+          .update(JSON.stringify(messages))
+          .digest('hex');
+      } else {
+        const compiled = compileTutorDialogue({
+          courseId,
+          releaseId,
+          courseTitle: resolved.courseTitle,
+          pageTitles: release.pages.map((page) => page.title),
+          mode: input.mode,
+          message: input.message,
+          systemPrompt: prompts.systemPrompt,
+          context: context ?? '',
+          history,
+        });
+        messages = compiled.messages;
+        promptHash = compiled.promptHash;
+      }
+      const images = (
+        input.testRoute
+          ? []
+          : selectKnowledgeImages(context ?? '', courseId, question)
       ).map((image) =>
         input.channel === 'learner'
           ? {
@@ -404,9 +466,10 @@ export class AiChatService {
 
       const provider = this.registry.get(runtime.provider);
       const MAX_RETRIES = 2;
-      const maxOutputTokens =
-        runtime.model === 'qwen/qwen3.6-flash' ||
-        runtime.model === 'google/gemini-3.5-flash'
+      const maxOutputTokens = input.testRoute
+        ? testMaxOutputTokens!
+        : runtime.model === 'qwen/qwen3.6-flash' ||
+            runtime.model === 'google/gemini-3.5-flash'
           ? 4096
           : 2048;
       let attempt = 0;
@@ -450,11 +513,18 @@ export class AiChatService {
             messages,
             apiKey: runtime.apiKey,
             baseUrl: runtime.baseUrl,
-            temperature: input.mode === 'SOCRATIC' ? 0.45 : 0.25,
+            temperature: input.testRoute
+              ? testTemperature!
+              : input.mode === 'SOCRATIC'
+                ? 0.45
+                : 0.25,
             maxOutputTokens,
             ...(reasoningEffort ? { reasoningEffort } : {}),
             signal: input.signal,
             timeoutMs: 60_000,
+            connectionTimeoutMs: 30_000,
+            firstTokenTimeoutMs: 20_000,
+            idleTimeoutMs: 15_000,
             onEvent: (event) => {
               if (event.type === 'finish') finishReason = event.reason;
               else usage = event.usage;
