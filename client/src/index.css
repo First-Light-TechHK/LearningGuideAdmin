@@ -269,17 +269,11 @@ body,
   border-radius: 999px !important;
 }
 
-/* AI Tutor 聊天（§4.3.5）：用户气泡为蓝底，其内 Markdown 文本改为白色——
-   @uiw/react-md-editor 的 .wmde-markdown 用 var(--color-fg-default) 固定深色，
-   仅靠气泡容器的 color 无法透传，故按类提权覆盖 */
+/* AI Tutor 用户气泡为蓝底，原有 Markdown 文字使用白色。 */
 .chat-bubble-user .wmde-markdown {
   color: var(--color-bg-container);
 }
-/* ===== AI Tutor Chat Markdown 扩展样式（2026-10-30，与 Portal 侧对齐）=====
-   由 normalizeTutorMarkdown 预处理出的结构对应的样式：
-   - strong / em：加粗强调（提示词允许每段 ≤2 处）
-   - sup：脚注引用上标 [1]
-   - .markdown-sources：底部 Sources 来源块 */
+/* AI Tutor 用户消息的 Markdown 样式。 */
 .wmde-markdown strong { font-weight: 700; }
 .chat-bubble-user .wmde-markdown strong { color: var(--color-bg-container); }
 .wmde-markdown sup {
@@ -288,37 +282,14 @@ body,
   vertical-align: super;
   padding: 0 1px;
 }
-/* 底部 Sources 来源块：灰色小字 + 左边框，视觉上与正文分离 */
-.wmde-markdown .markdown-sources {
-  margin: 10px 0 0;
-  padding: 8px 10px;
-  border-left: 2px solid var(--color-border);
-  border-radius: 0 4px 4px 0;
-  background: rgba(0, 0, 0, 0.03);
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--color-text-secondary);
-}
-.wmde-markdown .markdown-sources > p {
-  margin: 0 0 2px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-}
-.wmde-markdown .markdown-sources > ul,
-.wmde-markdown .markdown-sources > ol {
-  margin: 0;
-  padding-left: 16px;
-  list-style: none;
-}
-.wmde-markdown .markdown-sources > li { margin: 0; padding: 0; }
-.chat-bubble-user .wmde-markdown .markdown-sources {
-  background: rgba(255, 255, 255, 0.15);
-  border-left-color: rgba(255, 255, 255, 0.5);
-  color: rgba(255, 255, 255, 0.85);
-}
-.chat-bubble-user .wmde-markdown .markdown-sources > p {
-  color: rgba(255, 255, 255, 0.9);
-}
+.tutor-answer { min-width: 0; max-width: 100%; overflow-wrap: anywhere; line-height: 1.5; }
+.tutor-answer p { margin: 0 0 .6em; overflow-wrap: anywhere; }
+.tutor-answer p:last-child { margin-bottom: 0; }
+.tutor-answer pre { margin: 0 0 .6em; padding: .6em .8em; max-width: 100%; overflow-x: auto; }
+.tutor-answer pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tutor-answer .katex-display, .tutor-answer table { max-width: 100%; overflow-x: auto; }
+.tutor-answer img { display: block; max-width: 100%; height: auto; margin: .5em 0; }
+.tutor-answer-sources { margin-top: 10px; padding: 8px 10px; border-left: 2px solid var(--color-border); color: var(--color-text-secondary); }
 /* KaTeX 样式必须在应用入口全局引入 katex/dist/katex.min.css。
    若未引入，公式会渲染为无样式的纯文本 */
 

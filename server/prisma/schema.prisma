@@ -190,6 +190,7 @@ model CourseAiConfig {
   // LLM 配置（llmProvider / llmBaseUrl / apiKey / model 均课程级共享；model null 回退 AI_AVAILABLE_MODELS[0]）
   llmProvider String // 如: "openrouter"
   model       String?
+  runningSolution String @default("grounded-jack")
   llmBaseUrl  String? // 可选的自定义 Base URL
   apiKey      String? // 加密存储
 
@@ -1025,6 +1026,9 @@ model CommerceCourse {
   draftSourceEnvironment String?
   draftSourceVersionLabel String?
   trialEnabled           Boolean               @default(false)
+  /// 乐观并发（PRD §23）：每次草稿写入 +1，前端以 If-Match: "r<revision>" 提交；见 draft-revision.ts
+  revision               Int                   @default(0)
+  revisionBy             String?               @db.Uuid
 
   // v1 兼容 / 迁移过渡
   subtitle               String?
@@ -1218,6 +1222,8 @@ model CourseVersion {
   sourceEnvironment   String?
   sourceVersionLabel  String?
   snapshotData        Json
+  /// 内容指纹 sha256(规范化内容视图)，见 content-hash.ts；旧版本为空时按快照现算
+  contentHash         String?
   wentLiveAt          DateTime?
   exportedAt          DateTime?
   exportedBy          String?        @db.Uuid
@@ -1305,6 +1311,9 @@ model CommerceCourseAuthor {
   @@index([employeeId])
 }
 
+/// 课程事件：只追加（数据库触发器拒绝 UPDATE / DELETE / TRUNCATE）。
+/// 同一张表既是 History，也是发布事件的发件箱：id 即 seq，action 即事件类型。
+/// 消费者按 id 往后读，且只读 txid 小于当前快照 xmin 的行，避免并发提交造成的序号空洞。
 model CourseAuthoringActivity {
   id              BigInt   @id @default(autoincrement())
   courseId        String?
@@ -1312,7 +1321,9 @@ model CourseAuthoringActivity {
   actorEmployeeId String?  @db.Uuid
   action          String
   detail          Json?
+  reason          String?
   requestId       String?
+  txid            BigInt   @default(dbgenerated("((pg_current_xact_id())::text)::bigint"))
   createdAt       DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([courseId, createdAt(sort: Desc)])
@@ -1413,4 +1424,18 @@ model HelpdeskIdempotency {
   @@id([command, actor, key], map: "helpdesk_idempotency_pkey")
   @@index([at], map: "helpdesk_idempotency_at_idx")
   @@map("helpdesk_idempotency")
+}
+
+model AiEvaluationTask {
+  submissionKey String? @map("submission_key")
+  id        String   @id @db.Uuid
+  owner     String
+  status    String
+  payload   Json
+  source    Bytes?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([owner, createdAt(sort: Desc)], map: "ai_evaluation_tasks_owner_created")
+  @@unique([owner, submissionKey], map: "ai_evaluation_tasks_submission")
+  @@map("ai_evaluation_tasks")
 }

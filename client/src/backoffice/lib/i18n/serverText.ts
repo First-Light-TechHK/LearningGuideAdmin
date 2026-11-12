@@ -10,7 +10,12 @@ import { t } from "./messages";
  * 新增后端中文报错时要在这里加译文，tests/i18n-guard.test.ts 会扫描后端源码检查。
  */
 export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> = [
+  ["向量检索上游暂不可用", "The embedding retrieval service is temporarily unavailable."],
+  ["模型不在可用列表中", "The selected model is not available."],
   ["测试版本已变化，请刷新后重试", "The test release has changed. Refresh and try again."],
+  ["课程在你打开后已被他人修改，请刷新后查看最新内容。", "This course was changed by someone else after you opened it. Refresh to see the changes."],
+  ["上线版本已变化，请刷新后重试", "The live release has changed. Refresh and try again."],
+  ["Yong 方案不可用", "The Yong running solution is unavailable."],
   ["LLM 上游生成失败", "The model could not complete this response."],
   ["LLM 上游连接中断", "The model connection was interrupted."],
   ["所选知识库版本没有可用正文", "The selected release has no usable course content."],

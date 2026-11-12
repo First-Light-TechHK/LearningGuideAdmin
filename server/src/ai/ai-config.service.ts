@@ -43,6 +43,7 @@ export interface AiModeView {
 
 /** 对外的 AI 配置视图：apiKey 永不明文返回（§2 红线），只暴露是否已配置 */
 export interface AiConfigView {
+  runningSolution: 'grounded-jack' | 'dialogue-yong';
   courseId: string;
   /** 「测试所选 Release」id（Course.aiTestReleaseId ?? currentReleaseId；§5.2，2026-10-20） */
   releaseId: string | null;
@@ -286,6 +287,7 @@ export class AiConfigService implements OnModuleInit {
     const data = {
       llmProvider: dto.llmProvider,
       model: dto.llmModel,
+      ...(dto.runningSolution ? { runningSolution: dto.runningSolution } : {}),
       ...(dto.apiKey !== undefined
         ? { apiKey: dto.apiKey === '' ? null : this.crypto.encrypt(dto.apiKey) }
         : {}),
@@ -482,13 +484,17 @@ export class AiConfigService implements OnModuleInit {
           where: { courseId_releaseId: { courseId, releaseId } },
         })
       : null;
-    return this.promptsFromConfig(cfg, mode);
+    const { systemPrompt, welcomeMsg } = await this.promptsFromConfig(
+      cfg,
+      mode,
+    );
+    return { systemPrompt, welcomeMsg };
   }
 
   private async promptsFromConfig(
     cfg: CourseAiConfig | null,
     mode: PromptMode,
-  ): Promise<ResolvedPrompts> {
+  ): Promise<ResolvedPrompts & { basePrompt: string; modePrompt: string }> {
     const modeIdField =
       mode === 'LECTURE'
         ? cfg?.lectureModeId
@@ -524,6 +530,8 @@ export class AiConfigService implements OnModuleInit {
       return {
         systemPrompt: modePrompt,
         welcomeMsg: cfg?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
+        basePrompt: '',
+        modePrompt,
       };
     }
     const mainPrompt = cfg?.mainSystemPrompt ?? DEFAULT_MAIN_PROMPT;
@@ -531,6 +539,8 @@ export class AiConfigService implements OnModuleInit {
     return {
       systemPrompt,
       welcomeMsg: cfg?.welcomeMsg || defaultWelcome(mode, 'zh-CN'),
+      basePrompt: mainPrompt,
+      modePrompt,
     };
   }
 
@@ -564,10 +574,26 @@ export class AiConfigService implements OnModuleInit {
     const cfg = await this.prisma.courseAiConfig.findUnique({
       where: { courseId_releaseId: { courseId, releaseId } },
     });
+    const { systemPrompt, welcomeMsg, basePrompt, modePrompt } =
+      await this.promptsFromConfig(cfg, mode);
     return {
       runtime: this.runtimeFromConfig(cfg),
-      prompts: await this.promptsFromConfig(cfg, mode),
+      prompts: { systemPrompt, welcomeMsg },
+      dialoguePrompts: { basePrompt, modePrompt },
     };
+  }
+
+  async resolveRunningSolution(
+    courseId: string,
+    releaseId: string,
+  ): Promise<'grounded-jack' | 'dialogue-yong'> {
+    const cfg = await this.prisma.courseAiConfig.findUnique({
+      where: { courseId_releaseId: { courseId, releaseId } },
+      select: { runningSolution: true },
+    });
+    return cfg?.runningSolution === 'dialogue-yong'
+      ? 'dialogue-yong'
+      : 'grounded-jack';
   }
 
   private runtimeFromConfig(cfg: CourseAiConfig | null) {
@@ -641,6 +667,10 @@ export class AiConfigService implements OnModuleInit {
       // 2026-10-29：main 为共享主提示词（讲授/苏格拉底拼接最前）；Welcome / Model 为课程级共享；System Prompt 按模式分开
       welcomeMsg: cfg?.welcomeMsg ?? null,
       model: currentModel(cfg?.model ?? this.defaultModel()),
+      runningSolution:
+        cfg?.runningSolution === 'dialogue-yong'
+          ? 'dialogue-yong'
+          : 'grounded-jack',
       main: {
         systemPrompt: cfg?.mainSystemPrompt ?? null,
       },

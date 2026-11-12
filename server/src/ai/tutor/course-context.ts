@@ -26,18 +26,21 @@ export async function buildTutorContext(
   release: KnowledgeRelease,
   query: string,
   summaryTopics: string[] = [],
+  format: 'structured' | 'wiki' = 'structured',
 ): Promise<{ text: string | null; strategy: 'snapshot' | 'retrieval' }> {
   const pages = release.pages.filter((page) => page.contentMd?.trim());
   if (!pages.length)
     throw new BadRequestException('所选知识库版本没有可用正文');
   const text = pages
     .map((page, index) =>
-      JSON.stringify({
-        reference: `S${index + 1}`,
-        source: page.title,
-        sourceLevel: sourceLevel(page.title),
-        evidence: page.contentMd,
-      }),
+      format === 'wiki'
+        ? `# ${page.title}\n\n${page.contentMd?.trim() ?? ''}`
+        : JSON.stringify({
+            reference: `S${index + 1}`,
+            source: page.title,
+            sourceLevel: sourceLevel(page.title),
+            evidence: page.contentMd,
+          }),
     )
     .join('\n\n');
   const estimatedTokens = Math.ceil(Buffer.byteLength(text, 'utf8') / 4);

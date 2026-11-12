@@ -244,7 +244,7 @@ model AiRateLimitHit {
 - 同步命令：`npm run prompts:sync`（upsert `lecture-default` / `socratic-default`，不触碰课程级覆盖）
 - 落库口径：`PromptTemplate.welcomeMsg` 存 `zh-CN` 供后台展示；学员端 welcome 按 `locale` 读取文件对应语言
 - 欢迎语口径：课程已在进入 AI Tutor 前选定，默认文案不再提示“请选择一个课程”
-- **运行时兜底（2026-10-26）**：应用启动**不写库**；库中缺少某模式默认行时，`GET /api/ai/prompts` 与对话提示词解析直接回退上述文件默认值（`src/ai/prompts/`），因此空库 / 云端未执行 `prompts:sync` 时后台不再出现空白 Prompt。`npm run prompts:sync` 仍保留为“主动把文件内容写入数据库”的手段。
+- **默认模板同步与兜底（2026-11-11）**：应用启动时将 `src/ai/prompts/` 中的 Lecture、Socratic、Assessment 默认模板 upsert 到 `PromptTemplate`；同步失败只记录 warning。库中缺少某模式默认行时，`GET /api/ai/prompts` 与对话提示词解析回退文件默认值，因此空库或同步失败时后台不出现空白 Prompt。`npm run prompts:sync` 保留为手动修复手段。课程／Release 自定义 Prompt 和绑定的非默认模板仍按优先级生效。
 
 ---
 
@@ -1483,3 +1483,7 @@ ALLOWED_EXTENSIONS="txt,md,tex,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1
 ### 2026-11-05 遗留质量检查清理
 
 全仓 ESLint/Oxlint 已清至 0 errors / 0 warnings，未调整规则。表单重置与异步加载分开，组件/工具导出拆开以支持 Fast Refresh，KS 查询向量通过契约令牌注入。完整单测后端 1784 passed / 166 skipped、前端 503 passed；types/build 通过。经用户确认，前端已加入 app/vendor 分包配置，保持 500 kB 阈值；实际构建 34 个 JS 文件、最大 293019 bytes，无构建警告。独立 Review 与手动验收待执行。文件清单和验证命令见 docs/AI_tutor/Motherbase_Refactor.md §8。
+
+运行方案切换：Save 后保留当前聊天，仅影响后续回答。缓存按员工、课程、Release 隔离，首次迁入当前方案的旧缓存，不合并其他方案历史。生成与保存互斥。
+
+AI 测试新契约见 [AI_Testing.md](AI_Testing.md)，依据 2026-11-12 用户确认的单题/Excel 测试与停止规则。

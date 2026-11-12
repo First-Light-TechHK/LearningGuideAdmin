@@ -22,6 +22,23 @@ function safeDiagnostic(value: unknown): string | undefined {
     : undefined;
 }
 
+async function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new LlmTimeoutError()), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * OpenRouter 适配器（§4.4.2 第 5 步；§12 事项 #2 拍板：OpenAI 兼容接口）。
  * 走 /chat/completions 流式协议（SSE），不依赖任何厂商 SDK。
@@ -45,16 +62,36 @@ export class OpenRouterProvider implements LlmProvider {
         (!Number.isSafeInteger(opts.maxOutputTokens) ||
           opts.maxOutputTokens < 1)) ||
       (opts.timeoutMs !== undefined &&
-        (!Number.isSafeInteger(opts.timeoutMs) || opts.timeoutMs < 1))
+        (!Number.isSafeInteger(opts.timeoutMs) || opts.timeoutMs < 1)) ||
+      [
+        opts.connectionTimeoutMs,
+        opts.firstTokenTimeoutMs,
+        opts.idleTimeoutMs,
+      ].some(
+        (value) =>
+          value !== undefined && (!Number.isSafeInteger(value) || value < 1),
+      )
     )
       throw new TypeError('invalid LLM stream options');
     const timeoutSignal = opts.timeoutMs
       ? AbortSignal.timeout(opts.timeoutMs)
       : undefined;
+    const connectionController = opts.connectionTimeoutMs
+      ? new AbortController()
+      : undefined;
+    const connectionTimer = connectionController
+      ? setTimeout(() => connectionController.abort(), opts.connectionTimeoutMs)
+      : undefined;
     const signal =
-      opts.signal && timeoutSignal
-        ? AbortSignal.any([opts.signal, timeoutSignal])
-        : (opts.signal ?? timeoutSignal);
+      [opts.signal, timeoutSignal, connectionController?.signal].filter(
+        (item): item is AbortSignal => !!item,
+      ).length > 1
+        ? AbortSignal.any(
+            [opts.signal, timeoutSignal, connectionController?.signal].filter(
+              (item): item is AbortSignal => !!item,
+            ),
+          )
+        : (opts.signal ?? timeoutSignal ?? connectionController?.signal);
     const body = {
       model: opts.model,
       messages: opts.messages satisfies LlmMessage[],
@@ -66,9 +103,19 @@ export class OpenRouterProvider implements LlmProvider {
       ...(opts.maxOutputTokens === undefined
         ? {}
         : { max_tokens: opts.maxOutputTokens }),
-      ...(opts.reasoningEffort === undefined
+      ...(opts.reasoningEffort === undefined &&
+      opts.reasoningEnabled === undefined
         ? {}
-        : { reasoning: { effort: opts.reasoningEffort } }),
+        : {
+            reasoning: {
+              ...(opts.reasoningEffort === undefined
+                ? {}
+                : { effort: opts.reasoningEffort }),
+              ...(opts.reasoningEnabled === undefined
+                ? {}
+                : { enabled: opts.reasoningEnabled }),
+            },
+          }),
     };
     let res: Response;
     try {
@@ -82,9 +129,14 @@ export class OpenRouterProvider implements LlmProvider {
         ...(signal ? { signal } : {}),
       });
     } catch (error) {
-      if (timeoutSignal?.aborted && !opts.signal?.aborted)
+      if (
+        (timeoutSignal?.aborted || connectionController?.signal.aborted) &&
+        !opts.signal?.aborted
+      )
         throw new LlmTimeoutError();
       throw error;
+    } finally {
+      if (connectionTimer) clearTimeout(connectionTimer);
     }
 
     if (!res.ok || !res.body) {
@@ -125,14 +177,28 @@ export class OpenRouterProvider implements LlmProvider {
     let buffer = '';
     let finishReason: string | null = null;
     let finishEmitted = false;
+    let hasContent = false;
+    const firstTokenDeadline = opts.firstTokenTimeoutMs
+      ? Date.now() + opts.firstTokenTimeoutMs
+      : undefined;
 
     try {
       while (true) {
         let read: ReadableStreamReadResult<Uint8Array>;
         try {
-          read = await reader.read();
+          const readTimeout = hasContent
+            ? opts.idleTimeoutMs
+            : firstTokenDeadline
+              ? Math.max(1, firstTokenDeadline - Date.now())
+              : undefined;
+          read = readTimeout
+            ? await readWithTimeout(reader, readTimeout)
+            : await reader.read();
         } catch (error) {
-          if (timeoutSignal?.aborted && !opts.signal?.aborted)
+          if (
+            error instanceof LlmTimeoutError ||
+            (timeoutSignal?.aborted && !opts.signal?.aborted)
+          )
             throw new LlmTimeoutError();
           throw error;
         }
@@ -225,8 +291,10 @@ export class OpenRouterProvider implements LlmProvider {
             if (typeof choice?.finish_reason === 'string')
               finishReason = choice.finish_reason;
             const delta = choice?.delta?.content;
-            if (typeof delta === 'string' && delta)
+            if (typeof delta === 'string' && delta) {
+              hasContent = true;
               yield { type: 'delta', content: delta };
+            }
           } catch (error) {
             if (error instanceof HttpException) throw error;
             throw new HttpException('LLM 上游生成失败', HttpStatus.BAD_GATEWAY);

@@ -12,6 +12,15 @@ import { pickSummaryLocalization, summaryTitle } from './course-summary';
 import { detailToCompletenessInput } from './version-snapshot';
 import { HISTORY_ACTIONS, PublishingService } from './publishing.service';
 import { syncTextLearningPoints } from './course-authoring.service';
+import { draftContentHash, versionContentHash } from './content-hash';
+
+const CLEARED_DRAFT = {
+  hasDraft: false,
+  lifecycleStatus: 'LIVE',
+  draftSourceType: null,
+  draftSourceEnvironment: null,
+  draftSourceVersionLabel: null,
+} as const;
 
 /** 课程列表/详情/工作流（v2）�?*/
 @Injectable()
@@ -211,10 +220,43 @@ export class CommerceCoursesService {
         code: 'COURSE_NOT_FOUND',
         message: 'Course not found',
       });
+    const draftState =
+      course.hasDraft &&
+      course.liveVersionId &&
+      (await this.clearDraftIfSameAsLive(
+        course.id,
+        course.liveVersionId,
+        course.updatedAt,
+      ))
+        ? CLEARED_DRAFT
+        : null;
     return {
       ...course,
+      ...draftState,
       completeness: computeCompleteness(detailToCompletenessInput(course)),
     };
+  }
+
+  /**
+   * PRD §15.1：草稿内容与线上版本相同即 No draft。
+   * 编辑只把 hasDraft 置为"可能有改动"，这里按内容指纹判定；改回原样后打开课程即恢复 No draft。
+   * 条件更新带上读到的 updatedAt：比较期间有人又改了草稿，就不清标记。
+   */
+  private async clearDraftIfSameAsLive(
+    courseId: string,
+    liveVersionId: string,
+    seenUpdatedAt: Date,
+  ): Promise<boolean> {
+    const [draft, live] = await Promise.all([
+      draftContentHash(this.prisma, courseId),
+      versionContentHash(this.prisma, liveVersionId),
+    ]);
+    if (!live || draft !== live) return false;
+    const { count } = await this.prisma.commerceCourse.updateMany({
+      where: { id: courseId, hasDraft: true, updatedAt: seenUpdatedAt },
+      data: CLEARED_DRAFT,
+    });
+    return count === 1;
   }
 
   async assertExists(id: string) {

@@ -273,6 +273,24 @@
   },
   "aiTutor": {
     "title": "AI 导师",
+    "sources": "来源",
+    "dialogueTesting": {
+      "open": "多路线对话测试",
+      "back": "返回正式对话",
+      "title": "对话测试",
+      "addRoute": "添加路线",
+      "noRoutes": "请先添加测试路线",
+      "runAll": "发送到所有路线",
+      "route": "路线",
+      "remove": "移除",
+      "useKnowledge": "使用知识库",
+      "complete": "完成",
+      "streaming": "生成中",
+      "error": "失败",
+      "aborted": "已取消",
+      "question": "问题：",
+      "storageError": "浏览器无法保存测试结果，请在离开页面前复制所需内容"
+    },
     "online": "上线",
     "changeCourse": "切换课程",
     "manageOnline": "管理所有上线状态",
@@ -286,6 +304,7 @@
     "systemPromptHint": "当前编辑「{mode}」模式的系统提示词；欢迎语与 LLM 模型为所有模式共享。",
     "welcomeMessage": "欢迎语",
     "llmModel": "LLM 模型",
+    "runningSolution": "运行方案",
     "selectModel": "选择模型",
     "reset": "重置",
     "resetTitle": "恢复为默认模板？",
@@ -340,7 +359,10 @@
     "undoConfirmContent": "该用户消息及其 AI 回复将被删除。此操作不可撤销。",
     "undoConfirmOk": "确认撤回",
     "undoDone": "已撤回",
-    "cancel": "取消"
+    "cancel": "取消",
+    "evaluation": {
+      "open": "AI 测试"
+    }
   },
   "knowledge": {
     "common": {
@@ -476,6 +498,8 @@
       "editTitle": "编辑标题",
       "edit": "编辑",
       "preview": "预览",
+      "sourceReferences": "来源链接（{count}）",
+      "sourceEditHint": "在上方 Markdown 正文中编辑来源链接；保存后随课程发布版本一起发布。",
       "saveFailed": "自动保存失败：切页/切课程会被阻断，避免丢稿（修改仍保留在本地）",
       "placeholder": "在此编辑 Markdown 源码…"
     },

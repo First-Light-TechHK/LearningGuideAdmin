@@ -273,6 +273,24 @@
   },
   "aiTutor": {
     "title": "AI Tutor",
+    "sources": "Sources",
+    "dialogueTesting": {
+      "open": "Multi-route dialogue test",
+      "back": "Back to dialogue",
+      "title": "Dialogue testing",
+      "addRoute": "Add route",
+      "noRoutes": "Add a test route first",
+      "runAll": "Send to all routes",
+      "route": "Route",
+      "remove": "Remove",
+      "useKnowledge": "Use knowledge",
+      "complete": "Complete",
+      "streaming": "Streaming",
+      "error": "Failed",
+      "aborted": "Cancelled",
+      "question": "Question:",
+      "storageError": "The browser cannot save test results. Copy what you need before leaving."
+    },
     "online": "Online",
     "changeCourse": "Change Course",
     "manageOnline": "Manage all online tutors",
@@ -286,6 +304,7 @@
     "systemPromptHint": "Editing the {mode} System Prompt. Welcome Message and LLM Model are shared by all modes.",
     "welcomeMessage": "Welcome Message",
     "llmModel": "LLM Model",
+    "runningSolution": "Running Solution",
     "selectModel": "Select a model",
     "reset": "Reset",
     "resetTitle": "Restore the default template?",
@@ -340,7 +359,10 @@
     "undoConfirmContent": "This user message and its AI reply will be deleted. This cannot be undone.",
     "undoConfirmOk": "Undo",
     "undoDone": "Undone",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "evaluation": {
+      "open": "AI Testing"
+    }
   },
   "knowledge": {
     "common": {
@@ -476,6 +498,8 @@
       "editTitle": "Edit title",
       "edit": "Edit",
       "preview": "Preview",
+      "sourceReferences": "Source links ({count})",
+      "sourceEditHint": "Edit source links in the Markdown above; they are published with the course Release.",
       "saveFailed": "Auto-save failed: switching pages/courses will be blocked to prevent data loss (changes are kept locally)",
       "placeholder": "Edit Markdown source here…"
     },

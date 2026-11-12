@@ -25,6 +25,7 @@ import { OperationsController } from './operations.controller';
 import { EnvironmentController } from './environment.controller';
 import { CourseAuthoringService } from './course-authoring.service';
 import { MediaUploadService } from './media-upload.service';
+import { DraftRevisionInterceptor } from './draft-revision';
 
 /**
  * 商品课程 v2（Commerce Course）：课程管理、课程包导入/导出、Portal v1 投影。
@@ -54,6 +55,7 @@ import { MediaUploadService } from './media-upload.service';
     },
     PackageImporter,
     PublishingService,
+    DraftRevisionInterceptor,
     PricingService,
     TrialService,
     PreviewService,

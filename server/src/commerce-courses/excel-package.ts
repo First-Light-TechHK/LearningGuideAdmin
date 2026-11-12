@@ -64,6 +64,57 @@ export function toSeconds(value: unknown): number | null {
   return null;
 }
 
+/**
+ * 模板里的时间列（LP 开始时间、展品触发时间）都是 mm:ss。Excel 会把手输的
+ * `09:47` 自动识别成时间 09:47:00（9 小时 47 分），toSeconds 读出来是 35220 秒，
+ * 远超视频时长。所以 Excel 时间值、以及秒位为 0 的 “hh:mm:ss” 文本都按模板
+ * 平移一位读成 mm:ss（09:47:00 → 9 分 47 秒）；秒位不为 0 的 hh:mm:ss 文本
+ * 和 mm:ss 文本按字面读。
+ */
+export function templateSeconds(value: unknown): number | null {
+  const seconds = toSeconds(value);
+  if (seconds === null) return null;
+  const shifted =
+    typeof value === 'number' ||
+    (typeof value === 'string' && value.trim().split(':').length === 3);
+  if (shifted && seconds % 60 === 0) return seconds / 60;
+  return seconds;
+}
+
+export function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+}
+
+/** PRD 第 20 章第 11 条：LP / 展品触发点不能超出视频时长。 */
+function warnTimesBeyondVideo(
+  lessonNo: number,
+  language: string,
+  video: {
+    durationSeconds?: number;
+    learningPoints: { timeSeconds: number; title: string }[];
+    exhibitTriggers?: { timeSeconds: number; exhibitRef: string }[];
+  } | null,
+  warnings: string[],
+): void {
+  const duration = video?.durationSeconds;
+  if (!video || !duration) return;
+  for (const lp of video.learningPoints)
+    if (lp.timeSeconds > duration)
+      warnings.push(
+        `Lesson ${lessonNo} 视频学习点「${lp.title}」时间 ${formatClock(lp.timeSeconds)} 超出视频时长 ${formatClock(duration)}（${language}）`,
+      );
+  for (const trigger of video.exhibitTriggers ?? [])
+    if (trigger.timeSeconds > duration)
+      warnings.push(
+        `Lesson ${lessonNo} 展品 ${trigger.exhibitRef} 触发时间 ${formatClock(trigger.timeSeconds)} 超出视频时长 ${formatClock(duration)}（${language}）`,
+      );
+}
+
 export function numberedLines(raw: string): string[] {
   return raw
     .split(/\r?\n/)
@@ -115,10 +166,12 @@ function parseLessons(rows: unknown[][]): RawLesson[] {
       current.textLps.push(cell(row[1]));
     else if (inVideo) {
       const lp = cell(row[1]);
-      if (lp && typeof row[2] === 'number')
+      const lpSeconds =
+        typeof row[2] === 'number' ? templateSeconds(row[2]) : null;
+      if (lp && lpSeconds !== null)
         current.videoLps.push({
           title: lp,
-          timeSeconds: Math.round(row[2] * 86400),
+          timeSeconds: lpSeconds,
         });
       const ex = cell(row[4]);
       if (ex)
@@ -426,8 +479,8 @@ function parseNewLessons(rows: unknown[][]): NewLesson[] {
         textZh: cell(row[2]),
         videoEn: cell(row[3]),
         videoZh: cell(row[4]),
-        startEn: toSeconds(row[5]),
-        startZh: toSeconds(row[6]),
+        startEn: templateSeconds(row[5]),
+        startZh: templateSeconds(row[6]),
       });
     }
   }
@@ -438,12 +491,12 @@ function parseNewLessons(rows: unknown[][]): NewLesson[] {
 function parseTriggerTimes(value: unknown): number[] {
   if (value === null || value === undefined || value === '') return [];
   if (typeof value === 'number') {
-    const s = toSeconds(value);
+    const s = templateSeconds(value);
     return s === null ? [] : [s];
   }
   return cell(value)
     .split(/[,，]/)
-    .map((part) => toSeconds(part))
+    .map((part) => templateSeconds(part.trim()))
     .filter((n): n is number => n !== null && Number.isFinite(n));
 }
 
@@ -464,6 +517,7 @@ function mapReadingType(value: string): PackageReading['type'] {
   const v = value.toLowerCase();
   if (v.includes('book')) return 'BOOK';
   if (v.includes('paper')) return 'PAPER';
+  if (v.includes('other')) return 'OTHER';
   return 'ARTICLE';
 }
 
@@ -818,6 +872,14 @@ async function buildNewTemplatePackage(
       }
     }
 
+    for (const lang of languages)
+      warnTimesBeyondVideo(
+        def.no,
+        lang,
+        localized[lang]?.video ?? null,
+        warnings,
+      );
+
     // 推荐阅读（英文）
     const readings: PackageReading[] = [];
     for (const row of readingRows) {
@@ -1130,6 +1192,7 @@ async function buildLegacyPackage(
         : null,
       text: { html, learningPoints: textLearningPoints },
     };
+    warnTimesBeyondVideo(lesson.no, LANG, loc.video, warnings);
     const qs: PackageKnowledgeQuestion[] = knowledge.get(lesson.no) || [];
     const appTest = applications.get(lesson.no);
     pkgLessons.push({

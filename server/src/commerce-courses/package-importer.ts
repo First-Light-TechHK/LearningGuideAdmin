@@ -174,6 +174,9 @@ export class PackageImporter {
           data: {
             hasDraft: true,
             lifecycleStatus: 'WORKING',
+            // 导入整包覆盖草稿：已打开的编辑页再保存会收到 409，而不是覆盖导入结果
+            revision: { increment: 1 },
+            revisionBy: null,
             trialEnabled: Boolean(manifest.course.trial?.enabled),
             draftSourceType: 'IMPORT',
             draftSourceEnvironment: manifest.source.environment ?? null,

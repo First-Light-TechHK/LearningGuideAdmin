@@ -31,6 +31,7 @@ import { PortalPreviewService } from './portal-preview.service';
 import { PortalProjectionService } from './portal-projection.service';
 import { sendMedia } from './media-stream';
 import { CourseStorageService } from './storage.service';
+import { DraftRevisionInterceptor } from './draft-revision';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
@@ -124,6 +125,7 @@ export class CommerceCoursesController {
   }
 
   @Get(':id')
+  @UseInterceptors(DraftRevisionInterceptor)
   detail(@Param('id') id: string) {
     return this.courses.detail(id);
   }
@@ -271,6 +273,7 @@ export class CommerceCoursesController {
 
   // ===== 编辑工作区（第一版） =====
   @Put(':id')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   updateCourse(
     @Param('id') id: string,
@@ -290,6 +293,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/localizations/:language')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   updateLocalization(
     @Param('id') id: string,
@@ -307,6 +311,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/lessons')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(201)
   createLesson(
     @Param('id') id: string,
@@ -316,6 +321,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/reorder')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   reorderLessons(
     @Param('id') id: string,
@@ -325,6 +331,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   updateLesson(
     @Param('id') id: string,
@@ -343,6 +350,7 @@ export class CommerceCoursesController {
   }
 
   @Delete(':id/lessons/:lessonId')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   deleteLesson(@Param('id') id: string, @Param('lessonId') lessonId: string) {
     return this.courses.deleteLesson(id, lessonId);
@@ -414,6 +422,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/cover')
+  @UseInterceptors(DraftRevisionInterceptor)
   @UseInterceptors(FileInterceptor('file'))
   uploadCover(
     @Param('id') id: string,
@@ -425,12 +434,14 @@ export class CommerceCoursesController {
   }
 
   @Delete(':id/cover')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   deleteCover(@Param('id') id: string) {
     return this.authoring.deleteCover(id);
   }
 
   @Put(':id/lessons/:lessonId/video')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   setLessonVideo(
     @Param('id') id: string,
@@ -446,6 +457,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId/learning-points')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   saveLearningPoints(
     @Param('id') id: string,
@@ -465,6 +477,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId/triggers')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   saveTriggers(
     @Param('id') id: string,
@@ -484,6 +497,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/lessons/:lessonId/exhibits')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(201)
   createExhibit(
     @Param('id') id: string,
@@ -502,6 +516,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId/exhibits/:exhibitId')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   updateExhibit(
     @Param('id') id: string,
@@ -520,6 +535,7 @@ export class CommerceCoursesController {
   }
 
   @Delete(':id/lessons/:lessonId/exhibits/:exhibitId')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   deleteExhibit(
     @Param('id') id: string,
@@ -530,6 +546,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId/readings')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   saveReadings(
     @Param('id') id: string,
@@ -565,6 +582,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/readings/import')
+  @UseInterceptors(DraftRevisionInterceptor)
   @UseInterceptors(FileInterceptor('file'))
   importReadings(
     @Param('id') id: string,
@@ -574,6 +592,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId/knowledge-test')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   saveKnowledgeTest(
     @Param('id') id: string,
@@ -597,6 +616,7 @@ export class CommerceCoursesController {
   }
 
   @Put(':id/lessons/:lessonId/application-test')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   saveApplicationTest(
     @Param('id') id: string,
@@ -608,6 +628,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/understanding/import')
+  @UseInterceptors(DraftRevisionInterceptor)
   @UseInterceptors(FileInterceptor('file'))
   importUnderstanding(
     @Param('id') id: string,
@@ -635,6 +656,7 @@ export class CommerceCoursesController {
 
   // ===== 草稿 / 发布 / 版本（PRD §15）=====
   @Post(':id/publish')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   publish(
     @Param('id') id: string,
@@ -645,6 +667,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/delete-draft')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   deleteDraft(@Param('id') id: string, @Req() request: BackofficeRequest) {
     return this.publishing.deleteDraft(id, actor(request));
@@ -661,6 +684,7 @@ export class CommerceCoursesController {
   }
 
   @Post(':id/restore')
+  @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   restore(
     @Param('id') id: string,

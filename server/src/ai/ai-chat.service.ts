@@ -1,9 +1,12 @@
+import type { EvaluationExecution } from './evaluation-execution';
+import { tutorModelPolicy } from './tutor/model-policy';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -17,7 +20,9 @@ import {
   type AiChatStatus,
 } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
+import { AiChatYongService } from './ai-chat-yong.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
+import { DialogueTestStreamDto } from './dto/dialogue-test-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { LlmTimeoutError } from './providers/llm-provider.interface';
 import { OpenRouterHttpError } from './providers/openrouter.provider';
@@ -83,6 +88,7 @@ export class AiChatService {
     private readonly registry: ProviderRegistry,
     private readonly rateLimit: RateLimitService,
     private readonly chatLogger: AiChatLogger,
+    @Optional() private readonly yong?: AiChatYongService,
   ) {}
 
   /** 后台测试对话：读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId） */
@@ -90,6 +96,19 @@ export class AiChatService {
     dto: ChatStreamDto,
     signal?: AbortSignal,
   ): AsyncGenerator<string> {
+    if (this.yong) {
+      const course = await this.knowledge.getCourse(dto.courseId);
+      const releaseId = course?.aiTestReleaseId ?? course?.currentReleaseId;
+      if (
+        course &&
+        releaseId &&
+        (await this.configs.resolveRunningSolution(course.id, releaseId)) ===
+          'dialogue-yong'
+      ) {
+        yield* this.yong.streamChat(dto, signal);
+        return;
+      }
+    }
     yield* this.run({
       courseIdHint: dto.courseId,
       message: dto.message,
@@ -116,6 +135,41 @@ export class AiChatService {
     });
   }
 
+  async *streamDialogueTest(
+    dto: DialogueTestStreamDto,
+    signal?: AbortSignal,
+    evaluation?: EvaluationExecution,
+  ): AsyncGenerator<string> {
+    if (!this.configs.availableModels().includes(dto.model))
+      throw new BadRequestException('模型不在可用列表中');
+    if (dto.runningSolution === 'dialogue-yong') {
+      if (!this.yong) throw new BadRequestException('Yong 方案不可用');
+      yield* this.yong.streamDialogueTest(dto, signal, evaluation);
+      return;
+    }
+    yield* this.run({
+      courseIdHint: dto.courseId,
+      message: dto.message,
+      mode: dto.mode,
+      history: dto.history,
+      locale: evaluation?.locale ?? dto.locale ?? null,
+      channel: 'admin',
+      quota: evaluation?.batch ? 'batch-test' : 'admin-test',
+      signal,
+      evaluation,
+      testRoute: { model: dto.model, useKnowledge: dto.useKnowledge },
+      resolve: async () => {
+        const course = await this.knowledge.getCourse(dto.courseId);
+        if (!course) throw new NotFoundException('课程不存在');
+        return {
+          courseId: course.id,
+          courseTitle: course.title,
+          releaseId: dto.releaseId,
+        };
+      },
+    });
+  }
+
   /**
    * 学员端对话（2026-10-22）：按 Portal course.slug 匹配 Course.externalId，
    * 强制 aiTutorOnline，且只读 currentReleaseId（绝不读 aiTestReleaseId）。
@@ -124,6 +178,21 @@ export class AiChatService {
     dto: LearnerChatStreamDto,
     signal?: AbortSignal,
   ): AsyncGenerator<string> {
+    if (this.yong) {
+      const course = await this.knowledge.getCourseByExternalId(
+        dto.externalCourseId,
+      );
+      if (
+        course?.currentReleaseId &&
+        (await this.configs.resolveRunningSolution(
+          course.id,
+          course.currentReleaseId,
+        )) === 'dialogue-yong'
+      ) {
+        yield* this.yong.streamLearnerChat(dto, signal);
+        return;
+      }
+    }
     yield* this.run({
       courseIdHint: dto.externalCourseId,
       message: dto.message,
@@ -168,6 +237,8 @@ export class AiChatService {
     /** Portal 学员 userId（2026-10-28）：用于日志审计和用户级限流分桶；后台测试/直播间不传 */
     userId?: string;
     signal?: AbortSignal;
+    evaluation?: EvaluationExecution;
+    testRoute?: { model: string; useKnowledge: boolean };
     resolve: () => Promise<{
       courseId: string;
       courseTitle: string;
@@ -237,6 +308,7 @@ export class AiChatService {
         releaseId,
       );
       const buildContext = async (query: string, topics: string[] = []) => {
+        if (input.testRoute?.useKnowledge === false) return '';
         const context = await buildTutorContext(
           this.knowledge,
           release,
@@ -248,7 +320,9 @@ export class AiChatService {
       };
 
       const question = input.message.trim();
-      const english = !/[\u3400-\u9fff]/u.test(question);
+      const english = input.evaluation?.locale
+        ? input.evaluation.locale === 'en-GB'
+        : !/[\u3400-\u9fff]/u.test(question);
       const broadCourseHelp =
         /\b(?:lesson|course)\b.*\b(?:whole|entire|everything)\b|\b(?:whole|entire)\b.*\b(?:lesson|course)\b/i.test(
           question,
@@ -325,10 +399,23 @@ export class AiChatService {
       }
 
       const [runConfig, initialContext] = await Promise.all([
-        this.configs.resolveTutorRun(courseId, releaseId, input.mode),
+        this.configs
+          .resolveTutorRun(courseId, releaseId, input.mode)
+          .then((current) =>
+            input.evaluation
+              ? {
+                  ...input.evaluation.snapshot,
+                  runtime: {
+                    ...input.evaluation.snapshot.runtime,
+                    apiKey: current.runtime.apiKey,
+                  },
+                }
+              : current,
+          ),
         buildContext(contextQuery, summaryTopics),
       ]);
       const { runtime, prompts } = runConfig;
+      if (input.testRoute) runtime.model = input.testRoute.model;
       if (initialContext === null) progress('retrieval_initial_empty');
       let context =
         initialContext === null && broadCourseHelp
@@ -404,11 +491,8 @@ export class AiChatService {
 
       const provider = this.registry.get(runtime.provider);
       const MAX_RETRIES = 2;
-      const maxOutputTokens =
-        runtime.model === 'qwen/qwen3.6-flash' ||
-        runtime.model === 'google/gemini-3.5-flash'
-          ? 4096
-          : 2048;
+      const policy = tutorModelPolicy(runtime.model, input.mode);
+      const maxOutputTokens = policy.maxOutputTokens;
       let attempt = 0;
       while (true) {
         attempt += 1;
@@ -420,14 +504,9 @@ export class AiChatService {
         let recorded = false;
         const attemptStartedAt = Date.now();
         const reasoningEffort =
-          runtime.model === 'deepseek/deepseek-v4.1-flash'
-            ? attempt === 1
-              ? 'low'
-              : 'none'
-            : runtime.model === 'qwen/qwen3.6-flash' ||
-                runtime.model === 'google/gemini-3.5-flash'
-              ? 'low'
-              : undefined;
+          runtime.model === 'deepseek/deepseek-v4.1-flash' && attempt > 1
+            ? 'none'
+            : policy.reasoningEffort;
         finishReason = undefined;
         usage = undefined;
         const recordAttempt = () => {
@@ -450,11 +529,17 @@ export class AiChatService {
             messages,
             apiKey: runtime.apiKey,
             baseUrl: runtime.baseUrl,
-            temperature: input.mode === 'SOCRATIC' ? 0.45 : 0.25,
+            ...(runtime.model === 'anthropic/claude-haiku-5.5'
+              ? {}
+              : { temperature: input.mode === 'SOCRATIC' ? 0.45 : 0.25 }),
+            reasoningEnabled: policy.reasoningEnabled,
             maxOutputTokens,
             ...(reasoningEffort ? { reasoningEffort } : {}),
             signal: input.signal,
             timeoutMs: 60_000,
+            connectionTimeoutMs: 30_000,
+            firstTokenTimeoutMs: 20_000,
+            idleTimeoutMs: 15_000,
             onEvent: (event) => {
               if (event.type === 'finish') finishReason = event.reason;
               else usage = event.usage;

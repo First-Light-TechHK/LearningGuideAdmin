@@ -124,3 +124,19 @@ test('快速选择 Release 时，旧响应不能覆盖后一次选择', async ()
   await old
   assert.equal(useAiStore.getState().config?.releaseId, 'r3')
 })
+
+ test('saving either running solution preserves messages and reload history', async () => {
+  const messages = [{ role: 'user' as const, content: 'keep', createdAt: 'now' }]
+  useAiStore.setState({ ownerId: 'e1', selectedCourseId: 'c1', config: { ...config('r1'), runningSolution: 'grounded-jack' }, messages })
+  aiApi.saveConfig = async (payload) => ({ ...config('r1'), runningSolution: payload.runningSolution })
+  for (const runningSolution of ['dialogue-yong', 'grounded-jack'] as const) {
+    useAiStore.getState().patchForm({ runningSolution })
+    assert.equal(await useAiStore.getState().save(), true)
+    assert.equal(useAiStore.getState().messages, messages)
+  }
+  assert.deepEqual(JSON.parse(localStorage.getItem('aitutor.chat.v4.["e1","c1","r1"]')!), messages)
+  aiApi.getConfig = async () => ({ ...config('r1'), runningSolution: 'dialogue-yong' })
+  knowledgeApi.listReleases = async () => []
+  await useAiStore.getState().refreshActiveCourse()
+  assert.equal(useAiStore.getState().messages, messages)
+})

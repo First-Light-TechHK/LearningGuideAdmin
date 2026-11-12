@@ -1,4 +1,6 @@
-# P3 服务端 Tutor 持久化迁移提案（待裁决）
+# P3 服务端 Tutor 持久化迁移提案（已搁置）
+
+> 2026-11-09：已确认 Portal 持有学员身份、对话和学习状态。此文仅保留为旧方案参考，当前实施边界见 `Improvement_Branch_Migration.md`；不得据此修改 KS schema。
 
 > 状态：仅设计提案，未修改 Prisma schema、数据库或迁移。依据根目录 `AI_Tutor_Architecture.md` §5.2–5.3、`AI_Tutor_Implementation_Plan.md` §5，以及现有 `AiChatSession`/EmployeeSession 实况。需数据负责人确认主体映射、保留期、访问/删除政策后，才能实现 schema/migration。
 

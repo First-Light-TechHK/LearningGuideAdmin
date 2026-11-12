@@ -5,7 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
  * 限流来源：学员个人对话与直播间分开配额（2026-10-23）；
  * 后台 AI Tutor 测试对话单独一个桶，不占学员额度（QA 2026-10-27 A2）。
  */
-export type AiRateLimitChannel = 'portal' | 'study-group' | 'admin-test';
+export type AiRateLimitChannel =
+  'portal' | 'study-group' | 'admin-test' | 'batch-test';
 
 /** 限流计数的存放处：滑动窗口内未满则记一次并返回 true，满了返回 false 且不记 */
 export interface RateLimitStore {
@@ -68,6 +69,7 @@ export class RateLimitService {
 
   private limitFor(channel: AiRateLimitChannel): number {
     if (channel === 'portal') return RateLimitService.LIMIT;
+    if (channel === 'batch-test') return 20;
     const [envName, fallback] =
       channel === 'study-group'
         ? [

@@ -7,6 +7,7 @@ import {
 import { OpenRouterHttpError } from './providers/openrouter.provider';
 import { AiChatLogger, type AiChatLogEntry } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
+import { AiChatYongService } from './ai-chat-yong.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
 import type { LlmStreamOptions } from './providers/llm-provider.interface';
@@ -70,6 +71,9 @@ function setup(stream: StreamFn) {
   } as unknown as KnowledgeClient;
 
   const configs = {
+    availableModels: jest
+      .fn()
+      .mockReturnValue(['openai/gpt-x', 'openai/gpt-y']),
     resolveRuntime: jest.fn().mockResolvedValue({
       provider: 'openrouter',
       model: 'openai/gpt-x',
@@ -84,6 +88,7 @@ function setup(stream: StreamFn) {
   configs.resolveTutorRun = jest.fn(async (courseId, releaseId, mode) => ({
     runtime: await configs.resolveRuntime(courseId, releaseId, mode),
     prompts: await configs.resolvePrompts(courseId, releaseId, mode),
+    dialoguePrompts: { basePrompt: 'BASE', modePrompt: mode },
   }));
 
   const registry = {
@@ -108,7 +113,16 @@ function setup(stream: StreamFn) {
   );
   const write = chatLogger.write as jest.MockedFunction<AiChatLogger['write']>;
   const entryOf = (): AiChatLogEntry => write.mock.calls[0][0];
-  return { service, write, entryOf, knowledge, configs, rateLimit };
+  return {
+    service,
+    write,
+    entryOf,
+    knowledge,
+    configs,
+    registry,
+    rateLimit,
+    chatLogger,
+  };
 }
 
 function dto(history: ChatStreamDto['history'] = []): ChatStreamDto {
@@ -126,7 +140,156 @@ async function collect(gen: AsyncGenerator<string>): Promise<string> {
   return chunks.join('');
 }
 
+describe('Running Solution 路由', () => {
+  it('Yong 方案由统一入口转给 Yong 实现，Jack 路径不调用 Yong', async () => {
+    const { knowledge, configs, registry, rateLimit, chatLogger } = setup(
+      async function* () {
+        yield 'Jack';
+      },
+    );
+    const yong = {
+      streamChat: jest.fn(async function* () {
+        yield 'Yong';
+      }),
+    } as unknown as AiChatYongService;
+    const service = new AiChatService(
+      knowledge,
+      configs,
+      registry,
+      rateLimit,
+      chatLogger,
+      yong,
+    );
+    configs.resolveRunningSolution = jest
+      .fn()
+      .mockResolvedValueOnce('dialogue-yong')
+      .mockResolvedValueOnce('grounded-jack');
+    expect(await collect(service.streamChat(dto()))).toBe('Yong');
+    expect(yong.streamChat).toHaveBeenCalledTimes(1);
+    expect(await collect(service.streamChat(dto()))).toContain('Jack');
+    expect(yong.streamChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('学员入口按上线 Release 选择 Yong', async () => {
+    const { knowledge, configs, registry, rateLimit, chatLogger } = setup(
+      async function* () {
+        yield 'Jack';
+      },
+    );
+    const yong = {
+      streamLearnerChat: jest.fn(async function* () {
+        yield 'Yong';
+      }),
+    } as unknown as AiChatYongService;
+    const service = new AiChatService(
+      knowledge,
+      configs,
+      registry,
+      rateLimit,
+      chatLogger,
+      yong,
+    );
+    configs.resolveRunningSolution = jest
+      .fn()
+      .mockResolvedValue('dialogue-yong');
+    expect(
+      await collect(
+        service.streamLearnerChat({
+          externalCourseId: 'course-slug',
+          locale: 'zh-CN',
+          message: 'Question',
+          mode: 'LECTURE',
+        }),
+      ),
+    ).toBe('Yong');
+    expect(configs.resolveRunningSolution).toHaveBeenCalledWith(
+      COURSE_ID,
+      LIVE_RELEASE,
+    );
+  });
+});
+
 describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
+  it('独立测试路线覆盖模型和 Release，使用Jack消息装配', async () => {
+    let options: LlmStreamOptions | undefined;
+    const { service, configs } = setup(async function* (received) {
+      options = received;
+      yield '测试答复';
+    });
+    await expect(
+      collect(
+        service.streamDialogueTest({
+          courseId: COURSE_ID,
+          releaseId: LIVE_RELEASE,
+          model: 'openai/gpt-y',
+          runningSolution: 'grounded-jack',
+          useKnowledge: true,
+          mode: 'SOCRATIC',
+          message: '为什么？',
+          history: [],
+        }),
+      ),
+    ).resolves.toBe('测试答复');
+    expect(configs.resolveTutorRun).toHaveBeenCalledWith(
+      COURSE_ID,
+      LIVE_RELEASE,
+      'SOCRATIC',
+    );
+    expect(options?.model).toBe('openai/gpt-y');
+    expect(options?.messages[0].content).toContain('SYS');
+  });
+
+  it('测试路线关闭知识时不执行检索', async () => {
+    let options: LlmStreamOptions | undefined;
+    const { service, knowledge } = setup(async function* (received) {
+      options = received;
+      yield '测试答复';
+    });
+    await collect(
+      service.streamDialogueTest({
+        courseId: COURSE_ID,
+        releaseId: TEST_RELEASE,
+        model: 'openai/gpt-x',
+        runningSolution: 'grounded-jack',
+        useKnowledge: false,
+        mode: 'LECTURE',
+        message: '为什么？',
+        history: [],
+      }),
+    );
+    expect(knowledge.retrieveChunks).not.toHaveBeenCalled();
+    expect(options?.messages[0].content).not.toContain(
+      'Current Knowledge Wiki release markdown:',
+    );
+  });
+
+  it('测试路线拒绝未知模型及其他课程的 Release', async () => {
+    const { service, knowledge } = setup(async function* () {
+      yield '答复';
+    });
+    const input = {
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      model: 'unknown',
+      runningSolution: 'grounded-jack' as const,
+      useKnowledge: true,
+      mode: 'LECTURE' as const,
+      message: '问题',
+      history: [],
+    };
+    await expect(collect(service.streamDialogueTest(input))).rejects.toThrow(
+      '模型不在可用列表中',
+    );
+    (knowledge.getRelease as jest.Mock).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: 'another-course',
+      pages: [{ title: '页面', contentMd: '正文' }],
+    });
+    await expect(
+      collect(service.streamDialogueTest({ ...input, model: 'openai/gpt-x' })),
+    ).rejects.toThrow('知识库版本不属于当前课程');
+  });
+
   it('后台在相关段落后展示当前 Release 图片，无需用户要求图片', async () => {
     const { service, knowledge } = setup(async function* () {
       yield '状态变量描述系统的当前数值。\n\n';
@@ -1361,8 +1524,8 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     await expect(collect(service.streamChat(dto()))).rejects.toThrow(
       'AI 回答达到输出上限，内容未完成',
     );
-    expect(outputBudget).toBe(4096);
-    expect(effort).toBe('low');
+    expect(outputBudget).toBe(8192);
+    expect(effort).toBeUndefined();
     expect(entryOf().finishReason).toBe('length');
     expect(entryOf().usage).toEqual({
       outputTokens: 4096,
@@ -1389,7 +1552,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     await expect(collect(service.streamChat(dto()))).resolves.toContain(
       '完整回答',
     );
-    expect(outputBudget).toBe(4096);
+    expect(outputBudget).toBe(8192);
     expect(effort).toBe('low');
   });
 
@@ -1408,7 +1571,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
     expect(entryOf().attempts?.[0]?.answerChars).toBe('partial answer'.length);
   });
 
-  it('其他Tutor模型沿用2048输出tokens预算', async () => {
+  it('其他Tutor模型使用默认讲解预算', async () => {
     let maxOutputTokens: number | undefined;
     const { service, configs } = setup(async function* (opts) {
       await Promise.resolve();
@@ -1422,7 +1585,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
       baseUrl: 'https://example.invalid',
     });
     await collect(service.streamChat(dto()));
-    expect(maxOutputTokens).toBe(2048);
+    expect(maxOutputTokens).toBe(4096);
   });
 
   it('DeepSeek Flash Tutor 请求采用低推理力度', async () => {
@@ -1558,7 +1721,7 @@ describe('AiChatService 学员端对话（2026-10-22）', () => {
       persistentLearningState: null,
     });
     expect(captured[0]?.temperature).toBe(0.25);
-    expect(captured[0]?.maxOutputTokens).toBe(2048);
+    expect(captured[0]?.maxOutputTokens).toBe(4096);
     expect(configs.resolveRuntime).toHaveBeenNthCalledWith(
       1,
       COURSE_ID,
