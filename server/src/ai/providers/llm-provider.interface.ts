@@ -17,7 +17,8 @@ export interface LlmStreamOptions {
   baseUrl: string;
   temperature?: number;
   maxOutputTokens?: number;
-  reasoningEffort?: 'low' | 'none';
+  reasoningEffort?: 'low' | 'none' | 'minimal';
+  reasoningEnabled?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   connectionTimeoutMs?: number;

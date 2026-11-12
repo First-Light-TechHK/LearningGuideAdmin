@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useEmployee } from '../backoffice/employeeSession';
 import { ConfigPanel } from '../components/ai/ConfigPanel'
 import { ChatWindow } from '../components/ai/ChatWindow'
-import { DialogueTestingPanel } from '../components/ai/DialogueTestingPanel'
+import { EvaluationPanel } from '../components/ai/EvaluationPanel'
 import { Button } from '../components/ui'
 import { TutorManagerModal } from '../components/ai/TutorManagerModal'
 import { useAiStore } from '../stores/aiStore'
@@ -74,7 +74,6 @@ export function AITutor() {
   const init = useAiStore((s) => s.init)
   const cancel = useAiStore((s) => s.cancel)
   const ownerId = useAiStore((s) => s.ownerId)
-  const selectedCourseId = useAiStore((s) => s.selectedCourseId)
   const { employeeId } = useEmployee()
 
   useEffect(() => {
@@ -93,10 +92,11 @@ export function AITutor() {
       </div>
       <div style={{ flex: '1 1 0', minWidth: 0 }}>
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: tokens.spacing.sm }}>
-          <Button onClick={() => setTesting((value) => !value)}>{text(testing ? 'dialogueTesting.back' : 'dialogueTesting.open')}</Button>
-          <div style={{ flex: 1, minHeight: 0 }}>{testing ? <DialogueTestingPanel key={`${ownerId}:${selectedCourseId}`} /> : <ChatWindow />}</div>
+          <Button onClick={() => setTesting((value) => !value)}>{text('evaluation.open')}</Button>
+          <div style={{ flex: 1, minHeight: 0 }}>{<ChatWindow />}</div>
         </div>
       </div>
+      <EvaluationPanel open={testing} close={() => setTesting(false)} />
       <TutorManagerModal />
     </div>
   )

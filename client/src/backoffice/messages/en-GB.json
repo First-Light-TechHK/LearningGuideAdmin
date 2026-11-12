@@ -304,6 +304,7 @@
     "systemPromptHint": "Editing the {mode} System Prompt. Welcome Message and LLM Model are shared by all modes.",
     "welcomeMessage": "Welcome Message",
     "llmModel": "LLM Model",
+    "runningSolution": "Running Solution",
     "selectModel": "Select a model",
     "reset": "Reset",
     "resetTitle": "Restore the default template?",
@@ -358,7 +359,10 @@
     "undoConfirmContent": "This user message and its AI reply will be deleted. This cannot be undone.",
     "undoConfirmOk": "Undo",
     "undoDone": "Undone",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "evaluation": {
+      "open": "AI Testing"
+    }
   },
   "knowledge": {
     "common": {

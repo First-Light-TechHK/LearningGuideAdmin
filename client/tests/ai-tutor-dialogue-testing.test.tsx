@@ -39,5 +39,6 @@ test('测试路线按员工课程隔离保存，添加路线不写正式 AI 配�
   const key = 'aitutor.dialogue-testing.v1.["employee-1","course-1"]'
   await waitFor(() => assert.equal(JSON.parse(localStorage.getItem(key) ?? '{}').routes?.length, 1))
   assert.equal(JSON.parse(localStorage.getItem(key)!).routes[0].releaseId, 'release-1')
+  assert.equal(JSON.parse(localStorage.getItem(key)!).routes[0].runningSolution, 'grounded-jack')
   assert.equal(server.callsTo('PUT', /\/api\/ai\/config/).length, 0)
 })

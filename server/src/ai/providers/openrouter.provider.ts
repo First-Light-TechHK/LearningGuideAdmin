@@ -103,9 +103,19 @@ export class OpenRouterProvider implements LlmProvider {
       ...(opts.maxOutputTokens === undefined
         ? {}
         : { max_tokens: opts.maxOutputTokens }),
-      ...(opts.reasoningEffort === undefined
+      ...(opts.reasoningEffort === undefined &&
+      opts.reasoningEnabled === undefined
         ? {}
-        : { reasoning: { effort: opts.reasoningEffort } }),
+        : {
+            reasoning: {
+              ...(opts.reasoningEffort === undefined
+                ? {}
+                : { effort: opts.reasoningEffort }),
+              ...(opts.reasoningEnabled === undefined
+                ? {}
+                : { enabled: opts.reasoningEnabled }),
+            },
+          }),
     };
     let res: Response;
     try {

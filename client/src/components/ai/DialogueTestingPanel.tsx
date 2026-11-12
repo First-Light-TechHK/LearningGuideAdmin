@@ -5,8 +5,9 @@ import { useAiStore } from '../../stores/aiStore'
 import { TutorMarkdown } from './TutorMarkdown'
 import { useAiText } from './i18n'
 
-type Route = { id: string; model: string; releaseId: string; useKnowledge: boolean }
-type Result = { question: string; answer: string; mode: AiMode; model: string; releaseId: string; useKnowledge: boolean; status: 'streaming' | 'complete' | 'error' | 'aborted'; error?: string; createdAt: string }
+type RunningSolution = 'grounded-jack' | 'dialogue-yong'
+type Route = { id: string; model: string; releaseId: string; useKnowledge: boolean; runningSolution: RunningSolution }
+type Result = { question: string; answer: string; mode: AiMode; model: string; releaseId: string; useKnowledge: boolean; runningSolution: RunningSolution; status: 'streaming' | 'complete' | 'error' | 'aborted'; error?: string; createdAt: string }
 type Saved = { routes: Route[]; results: Record<string, Result[]> }
 
 const storageKey = (ownerId: string, courseId: string) => `aitutor.dialogue-testing.v1.${JSON.stringify([ownerId, courseId])}`
@@ -17,7 +18,7 @@ function load(ownerId: string, courseId: string): Saved | null {
     if (!raw) return null
     const saved = JSON.parse(raw) as Saved
     if (!Array.isArray(saved.routes) || !saved.results || typeof saved.results !== 'object') return null
-    return { routes: saved.routes, results: Object.fromEntries(Object.entries(saved.results).map(([id, items]) => [id, Array.isArray(items) ? items.map((item) => item.status === 'streaming' ? { ...item, status: 'aborted' } : item) : []])) }
+    return { routes: saved.routes.map((route) => ({ ...route, runningSolution: route.runningSolution === 'dialogue-yong' ? 'dialogue-yong' as const : 'grounded-jack' as const })), results: Object.fromEntries(Object.entries(saved.results).map(([id, items]) => [id, Array.isArray(items) ? items.map((item) => item.status === 'streaming' ? { ...item, status: 'aborted' } : item) : []])) }
   } catch { return null }
 }
 
@@ -53,7 +54,7 @@ export function DialogueTestingPanel() {
     const model = config?.model && models.includes(config.model) ? config.model : models[0]
     const releaseId = config?.releaseId ?? releases[0]?.id
     if (!model || !releaseId) return
-    setRoutes((current) => [...current, { id: crypto.randomUUID(), model, releaseId, useKnowledge: true }])
+    setRoutes((current) => [...current, { id: crypto.randomUUID(), model, releaseId, useKnowledge: true, runningSolution: config?.runningSolution ?? 'grounded-jack' }])
   }
 
   const updateRoute = (id: string, change: Partial<Route>) => {
@@ -75,9 +76,9 @@ export function DialogueTestingPanel() {
           { role: 'user' as const, content: item.question },
           { role: 'assistant' as const, content: item.answer },
         ]).slice(-20)
-        const next: Result = { question: input, answer: '', mode, model: route.model, releaseId: route.releaseId, useKnowledge: route.useKnowledge, status: 'streaming', createdAt: new Date().toISOString() }
+        const next: Result = { question: input, answer: '', mode, model: route.model, releaseId: route.releaseId, useKnowledge: route.useKnowledge, runningSolution: route.runningSolution, status: 'streaming', createdAt: new Date().toISOString() }
         try {
-          await chatStream({ courseId, releaseId: route.releaseId, model: route.model, useKnowledge: route.useKnowledge, message: input, mode, history }, (event) => {
+          await chatStream({ courseId, releaseId: route.releaseId, model: route.model, useKnowledge: route.useKnowledge, runningSolution: route.runningSolution, message: input, mode, history }, (event) => {
             if ('delta' in event) {
               next.answer += event.delta
               setResults((current) => ({ ...current, [route.id]: [...previous, { ...next }] }))
@@ -114,12 +115,13 @@ export function DialogueTestingPanel() {
         <Space wrap>
           <Select value={route.model} onChange={(model) => updateRoute(route.id, { model })} options={models.map((model) => ({ value: model, label: model }))} style={{ minWidth: 180 }} disabled={running} />
           <Select value={route.releaseId} onChange={(releaseId) => updateRoute(route.id, { releaseId })} options={releases.map((release) => ({ value: release.id, label: release.versionTag }))} style={{ minWidth: 160 }} disabled={running} />
+          <Select value={route.runningSolution ?? 'grounded-jack'} onChange={(runningSolution) => updateRoute(route.id, { runningSolution })} options={[{ value: 'grounded-jack', label: 'Grounded Tutor - Jack' }, { value: 'dialogue-yong', label: 'Dialogue Tutor - Yong' }]} style={{ minWidth: 180 }} disabled={running} />
           <Switch checked={route.useKnowledge} onChange={(useKnowledge) => updateRoute(route.id, { useKnowledge })} disabled={running} /> {text('dialogueTesting.useKnowledge')}
         </Space>
         {(results[route.id] ?? []).map((result, i) => <div key={`${result.createdAt}-${i}`} style={{ marginTop: 16 }}>
-          <Space><Tag color={result.status === 'complete' ? 'green' : result.status === 'error' ? 'red' : 'default'}>{text(`dialogueTesting.${result.status}`)}</Tag><span>{result.model} · {releases.find((item) => item.id === result.releaseId)?.versionTag ?? result.releaseId}</span></Space>
+          <Space><Tag color={result.status === 'complete' ? 'green' : result.status === 'error' ? 'red' : 'default'}>{text(`dialogueTesting.${result.status}`)}</Tag><span>{result.runningSolution === 'dialogue-yong' ? 'Dialogue Tutor - Yong' : 'Grounded Tutor - Jack'} · {result.model} · {releases.find((item) => item.id === result.releaseId)?.versionTag ?? result.releaseId}</span></Space>
           <p><strong>{text('dialogueTesting.question')}</strong> {result.question}</p>
-          {result.answer && <TutorMarkdown content={result.answer} />}
+          {result.answer && <TutorMarkdown content={result.answer} courseId={courseId} sourcesLabel={text('sources')} />}
           {result.error && <Alert type="error" message={result.error} />}
         </div>)}
       </Card>)}

@@ -13,6 +13,10 @@ import { Type } from 'class-transformer';
 import { ChatHistoryItemDto } from './chat-stream.dto';
 
 export class DialogueTestStreamDto {
+  @IsOptional()
+  @IsIn(['zh-CN', 'en-GB'])
+  locale?: 'zh-CN' | 'en-GB';
+
   @IsUUID()
   courseId!: string;
 
@@ -26,6 +30,9 @@ export class DialogueTestStreamDto {
 
   @IsBoolean()
   useKnowledge!: boolean;
+
+  @IsIn(['grounded-jack', 'dialogue-yong'])
+  runningSolution!: 'grounded-jack' | 'dialogue-yong';
 
   @IsIn(['LECTURE', 'SOCRATIC'])
   mode!: 'LECTURE' | 'SOCRATIC';

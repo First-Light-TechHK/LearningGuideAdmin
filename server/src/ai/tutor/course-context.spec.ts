@@ -18,6 +18,25 @@ const release: KnowledgeRelease = {
 };
 
 describe('母版式 Release 上下文', () => {
+  it('Yong 小包按 Page 顺序使用完整 Wiki Markdown，Jack 保持结构化来源', async () => {
+    const retrieveChunks = jest.fn();
+    const knowledge = {
+      retrieveChunks,
+    } as unknown as KnowledgeClient;
+    const yong = await buildTutorContext(
+      knowledge,
+      release,
+      'state',
+      [],
+      'wiki',
+    );
+    const jack = await buildTutorContext(knowledge, release, 'state');
+    expect(yong.text).toBe(
+      '# Lesson 1\n\nState variables describe a model.\n\n# 全书七章精华提炼\n\nLater chapters cover eigenvalues.',
+    );
+    expect(jack.text).toContain('"sourceLevel":"lesson"');
+    expect(retrieveChunks).not.toHaveBeenCalled();
+  });
   it('小包包含全部正文及来源层级，不依赖 embedding 检索', async () => {
     const retrieveChunks = jest.fn();
     const result = await buildTutorContext(

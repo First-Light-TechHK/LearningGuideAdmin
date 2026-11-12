@@ -1,12 +1,15 @@
+import type { EvaluationExecution } from './evaluation-execution';
+import { tutorModelPolicy } from './tutor/model-policy';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
   KNOWLEDGE_CLIENT,
   type KnowledgeClient,
@@ -17,6 +20,7 @@ import {
   type AiChatStatus,
 } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
+import { AiChatYongService } from './ai-chat-yong.service';
 import { ChatHistoryItemDto, ChatStreamDto } from './dto/chat-stream.dto';
 import { DialogueTestStreamDto } from './dto/dialogue-test-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
@@ -27,7 +31,6 @@ import {
   compileTutorDialogue,
   visibleTutorAnswer,
 } from './tutor/dialogue-runtime';
-import { compileMotherbaseDialogue } from './tutor/motherbase-dialogue';
 import { buildTutorContext, loadTutorRelease } from './tutor/course-context';
 import {
   imageAfterParagraph,
@@ -85,6 +88,7 @@ export class AiChatService {
     private readonly registry: ProviderRegistry,
     private readonly rateLimit: RateLimitService,
     private readonly chatLogger: AiChatLogger,
+    @Optional() private readonly yong?: AiChatYongService,
   ) {}
 
   /** 后台测试对话：读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId） */
@@ -92,6 +96,19 @@ export class AiChatService {
     dto: ChatStreamDto,
     signal?: AbortSignal,
   ): AsyncGenerator<string> {
+    if (this.yong) {
+      const course = await this.knowledge.getCourse(dto.courseId);
+      const releaseId = course?.aiTestReleaseId ?? course?.currentReleaseId;
+      if (
+        course &&
+        releaseId &&
+        (await this.configs.resolveRunningSolution(course.id, releaseId)) ===
+          'dialogue-yong'
+      ) {
+        yield* this.yong.streamChat(dto, signal);
+        return;
+      }
+    }
     yield* this.run({
       courseIdHint: dto.courseId,
       message: dto.message,
@@ -118,23 +135,28 @@ export class AiChatService {
     });
   }
 
-  /** 母版方案试跑：每条路线可选模型、Release 和知识开关，不写回正式配置。 */
   async *streamDialogueTest(
     dto: DialogueTestStreamDto,
     signal?: AbortSignal,
+    evaluation?: EvaluationExecution,
   ): AsyncGenerator<string> {
-    if (!this.configs.availableModels().includes(dto.model)) {
+    if (!this.configs.availableModels().includes(dto.model))
       throw new BadRequestException('模型不在可用列表中');
+    if (dto.runningSolution === 'dialogue-yong') {
+      if (!this.yong) throw new BadRequestException('Yong 方案不可用');
+      yield* this.yong.streamDialogueTest(dto, signal, evaluation);
+      return;
     }
     yield* this.run({
       courseIdHint: dto.courseId,
       message: dto.message,
       mode: dto.mode,
       history: dto.history,
-      locale: null,
+      locale: evaluation?.locale ?? dto.locale ?? null,
       channel: 'admin',
-      quota: 'admin-test',
+      quota: evaluation?.batch ? 'batch-test' : 'admin-test',
       signal,
+      evaluation,
       testRoute: { model: dto.model, useKnowledge: dto.useKnowledge },
       resolve: async () => {
         const course = await this.knowledge.getCourse(dto.courseId);
@@ -156,6 +178,21 @@ export class AiChatService {
     dto: LearnerChatStreamDto,
     signal?: AbortSignal,
   ): AsyncGenerator<string> {
+    if (this.yong) {
+      const course = await this.knowledge.getCourseByExternalId(
+        dto.externalCourseId,
+      );
+      if (
+        course?.currentReleaseId &&
+        (await this.configs.resolveRunningSolution(
+          course.id,
+          course.currentReleaseId,
+        )) === 'dialogue-yong'
+      ) {
+        yield* this.yong.streamLearnerChat(dto, signal);
+        return;
+      }
+    }
     yield* this.run({
       courseIdHint: dto.externalCourseId,
       message: dto.message,
@@ -200,6 +237,7 @@ export class AiChatService {
     /** Portal 学员 userId（2026-10-28）：用于日志审计和用户级限流分桶；后台测试/直播间不传 */
     userId?: string;
     signal?: AbortSignal;
+    evaluation?: EvaluationExecution;
     testRoute?: { model: string; useKnowledge: boolean };
     resolve: () => Promise<{
       courseId: string;
@@ -211,11 +249,9 @@ export class AiChatService {
     const requestId = randomUUID();
     const history = selectRecentCompleteTurns(
       input.history ?? [],
-      input.testRoute
-        ? 10
-        : input.mode === 'SOCRATIC'
-          ? MAX_SOCRATIC_HISTORY_TURNS
-          : MAX_HISTORY_TURNS,
+      input.mode === 'SOCRATIC'
+        ? MAX_SOCRATIC_HISTORY_TURNS
+        : MAX_HISTORY_TURNS,
     );
     let courseId = input.courseIdHint;
     let releaseId: string | null = null;
@@ -284,7 +320,9 @@ export class AiChatService {
       };
 
       const question = input.message.trim();
-      const english = !/[\u3400-\u9fff]/u.test(question);
+      const english = input.evaluation?.locale
+        ? input.evaluation.locale === 'en-GB'
+        : !/[\u3400-\u9fff]/u.test(question);
       const broadCourseHelp =
         /\b(?:lesson|course)\b.*\b(?:whole|entire|everything)\b|\b(?:whole|entire)\b.*\b(?:lesson|course)\b/i.test(
           question,
@@ -361,13 +399,23 @@ export class AiChatService {
       }
 
       const [runConfig, initialContext] = await Promise.all([
-        this.configs.resolveTutorRun(courseId, releaseId, input.mode),
+        this.configs
+          .resolveTutorRun(courseId, releaseId, input.mode)
+          .then((current) =>
+            input.evaluation
+              ? {
+                  ...input.evaluation.snapshot,
+                  runtime: {
+                    ...input.evaluation.snapshot.runtime,
+                    apiKey: current.runtime.apiKey,
+                  },
+                }
+              : current,
+          ),
         buildContext(contextQuery, summaryTopics),
       ]);
-      const { runtime: resolvedRuntime, prompts, dialoguePrompts } = runConfig;
-      const runtime = input.testRoute
-        ? { ...resolvedRuntime, model: input.testRoute.model }
-        : resolvedRuntime;
+      const { runtime, prompts } = runConfig;
+      if (input.testRoute) runtime.model = input.testRoute.model;
       if (initialContext === null) progress('retrieval_initial_empty');
       let context =
         initialContext === null && broadCourseHelp
@@ -412,46 +460,23 @@ export class AiChatService {
       providerName = runtime.provider;
       model = runtime.model;
       progress('context_ready');
-      let messages: ReturnType<typeof compileTutorDialogue>['messages'];
-      let testMaxOutputTokens: number | undefined;
-      let testTemperature: number | undefined;
-      if (input.testRoute) {
-        const compiled = compileMotherbaseDialogue({
-          basePrompt: dialoguePrompts.basePrompt,
-          modePrompt: dialoguePrompts.modePrompt,
-          knowledgeMarkdown: context ?? '',
-          mode: input.mode,
-          message: input.message,
-          history: history.flatMap((turn) => [
-            { role: 'user' as const, content: turn.user },
-            { role: 'assistant' as const, content: turn.assistant },
-          ]),
-        });
-        messages = compiled.messages;
-        testMaxOutputTokens = compiled.maxOutputTokens;
-        testTemperature = compiled.temperature;
-        promptHash = createHash('sha256')
-          .update(JSON.stringify(messages))
-          .digest('hex');
-      } else {
-        const compiled = compileTutorDialogue({
-          courseId,
-          releaseId,
-          courseTitle: resolved.courseTitle,
-          pageTitles: release.pages.map((page) => page.title),
-          mode: input.mode,
-          message: input.message,
-          systemPrompt: prompts.systemPrompt,
-          context: context ?? '',
-          history,
-        });
-        messages = compiled.messages;
-        promptHash = compiled.promptHash;
-      }
-      const images = (
-        input.testRoute
-          ? []
-          : selectKnowledgeImages(context ?? '', courseId, question)
+      const compiled = compileTutorDialogue({
+        courseId,
+        releaseId,
+        courseTitle: resolved.courseTitle,
+        pageTitles: release.pages.map((page) => page.title),
+        mode: input.mode,
+        message: input.message,
+        systemPrompt: prompts.systemPrompt,
+        context: context ?? '',
+        history,
+      });
+      const messages = compiled.messages;
+      promptHash = compiled.promptHash;
+      const images = selectKnowledgeImages(
+        context ?? '',
+        courseId,
+        question,
       ).map((image) =>
         input.channel === 'learner'
           ? {
@@ -466,12 +491,8 @@ export class AiChatService {
 
       const provider = this.registry.get(runtime.provider);
       const MAX_RETRIES = 2;
-      const maxOutputTokens = input.testRoute
-        ? testMaxOutputTokens!
-        : runtime.model === 'qwen/qwen3.6-flash' ||
-            runtime.model === 'google/gemini-3.5-flash'
-          ? 4096
-          : 2048;
+      const policy = tutorModelPolicy(runtime.model, input.mode);
+      const maxOutputTokens = policy.maxOutputTokens;
       let attempt = 0;
       while (true) {
         attempt += 1;
@@ -483,14 +504,9 @@ export class AiChatService {
         let recorded = false;
         const attemptStartedAt = Date.now();
         const reasoningEffort =
-          runtime.model === 'deepseek/deepseek-v4.1-flash'
-            ? attempt === 1
-              ? 'low'
-              : 'none'
-            : runtime.model === 'qwen/qwen3.6-flash' ||
-                runtime.model === 'google/gemini-3.5-flash'
-              ? 'low'
-              : undefined;
+          runtime.model === 'deepseek/deepseek-v4.1-flash' && attempt > 1
+            ? 'none'
+            : policy.reasoningEffort;
         finishReason = undefined;
         usage = undefined;
         const recordAttempt = () => {
@@ -513,11 +529,10 @@ export class AiChatService {
             messages,
             apiKey: runtime.apiKey,
             baseUrl: runtime.baseUrl,
-            temperature: input.testRoute
-              ? testTemperature!
-              : input.mode === 'SOCRATIC'
-                ? 0.45
-                : 0.25,
+            ...(runtime.model === 'anthropic/claude-haiku-5.5'
+              ? {}
+              : { temperature: input.mode === 'SOCRATIC' ? 0.45 : 0.25 }),
+            reasoningEnabled: policy.reasoningEnabled,
             maxOutputTokens,
             ...(reasoningEffort ? { reasoningEffort } : {}),
             signal: input.signal,

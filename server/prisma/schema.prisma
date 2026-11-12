@@ -190,6 +190,7 @@ model CourseAiConfig {
   // LLM 配置（llmProvider / llmBaseUrl / apiKey / model 均课程级共享；model null 回退 AI_AVAILABLE_MODELS[0]）
   llmProvider String // 如: "openrouter"
   model       String?
+  runningSolution String @default("grounded-jack")
   llmBaseUrl  String? // 可选的自定义 Base URL
   apiKey      String? // 加密存储
 
@@ -1423,4 +1424,18 @@ model HelpdeskIdempotency {
   @@id([command, actor, key], map: "helpdesk_idempotency_pkey")
   @@index([at], map: "helpdesk_idempotency_at_idx")
   @@map("helpdesk_idempotency")
+}
+
+model AiEvaluationTask {
+  submissionKey String? @map("submission_key")
+  id        String   @id @db.Uuid
+  owner     String
+  status    String
+  payload   Json
+  source    Bytes?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([owner, createdAt(sort: Desc)], map: "ai_evaluation_tasks_owner_created")
+  @@unique([owner, submissionKey], map: "ai_evaluation_tasks_submission")
+  @@map("ai_evaluation_tasks")
 }

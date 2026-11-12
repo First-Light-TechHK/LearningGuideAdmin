@@ -285,6 +285,19 @@ export function ConfigPanel() {
             style={{ width: '100%' }}
           />
         </div>
+        <div style={{ ...sectionStyle, flex: '0 0 auto', marginTop: tokens.spacing.md }}>
+          <div style={labelStyle}>{text('runningSolution')}</div>
+          <Select
+            value={form.runningSolution}
+            disabled={!access.canEdit || streaming}
+            onChange={(runningSolution) => patchForm({ runningSolution })}
+            options={[
+              { value: 'grounded-jack', label: 'Grounded Tutor - Jack' },
+              { value: 'dialogue-yong', label: 'Dialogue Tutor - Yong' },
+            ]}
+            style={{ width: '100%' }}
+          />
+        </div>
       </Card>
 
       {/* 底部操作栏（2026-10-20 脱离卡片，位于卡片下方）：Reset 蓝色下划线文字链接（左）；Unsaved changes + Save 靠右（§4.2.5）。View 角色只读，不显示 */}
@@ -312,7 +325,7 @@ export function ConfigPanel() {
           </Popconfirm>
           <Space size={tokens.spacing.lg}>
             {dirty && <Text type="warning">{text('unsaved')}</Text>}
-            <Button type="primary" loading={saving} onClick={() => void onSave()}>
+            <Button type="primary" loading={saving} disabled={streaming} onClick={() => void onSave()}>
               {text('save')}
             </Button>
           </Space>

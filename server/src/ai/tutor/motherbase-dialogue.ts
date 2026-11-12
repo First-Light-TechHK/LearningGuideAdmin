@@ -1,4 +1,8 @@
-import type { LlmMessage } from '../providers/llm-provider.interface';
+import { tutorModelPolicy } from './model-policy';
+import type {
+  LlmStreamOptions,
+  LlmMessage,
+} from '../providers/llm-provider.interface';
 
 const MAX_CONTEXT_MESSAGES = 20;
 
@@ -21,6 +25,7 @@ function languageGuard(input: string): string {
 }
 
 export function compileMotherbaseDialogue(input: {
+  model?: string;
   basePrompt: string;
   modePrompt: string;
   knowledgeMarkdown: string;
@@ -29,8 +34,10 @@ export function compileMotherbaseDialogue(input: {
   message: string;
 }): {
   messages: LlmMessage[];
-  temperature: number;
+  temperature?: number;
   maxOutputTokens: number;
+  reasoningEffort?: LlmStreamOptions['reasoningEffort'];
+  reasoningEnabled?: boolean;
 } {
   const question = input.message.trim();
   if (!question) throw new Error('Message is required.');
@@ -53,13 +60,23 @@ export function compileMotherbaseDialogue(input: {
         item.content?.trim(),
     )
     .slice(-MAX_CONTEXT_MESSAGES);
+  const socratic = input.mode === 'SOCRATIC';
+  const policy = tutorModelPolicy(input.model ?? '', input.mode);
   return {
     messages: [
       { role: 'system', content: system },
       ...history.map((item) => ({ role: item.role, content: item.content })),
       { role: 'user', content: question },
     ],
-    temperature: input.mode === 'SOCRATIC' ? 0.55 : 0.35,
-    maxOutputTokens: 1400,
+    ...(input.model === 'anthropic/claude-haiku-5.5'
+      ? {}
+      : { temperature: socratic ? 0.55 : 0.35 }),
+    maxOutputTokens: policy.maxOutputTokens,
+    ...(policy.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: policy.reasoningEffort }),
+    ...(policy.reasoningEnabled === undefined
+      ? {}
+      : { reasoningEnabled: policy.reasoningEnabled }),
   };
 }

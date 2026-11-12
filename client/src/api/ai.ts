@@ -16,6 +16,7 @@ export interface AiModeView {
 }
 
 export interface AiConfigView {
+  runningSolution: 'grounded-jack' | 'dialogue-yong'
   courseId: string
   /** 「测试所选 Release」id（2026-10-20 按 Release 维度；§5.2） */
   releaseId: string | null
@@ -84,6 +85,7 @@ export const aiApi = {
     systemPrompt?: string
     welcomeMsg?: string
     llmModel: string
+    runningSolution: 'grounded-jack' | 'dialogue-yong'
   }) => http.put<AiConfigView>('/ai/config', data).then((r) => r.data),
   /** 重置为默认值（§4.2.4；2026-10-29 新增 MAIN） */
   resetConfig: (courseId: string, mode: AiSegmentKey) =>
@@ -118,6 +120,7 @@ export type ChatStreamEvent =
 export async function chatStream(
   payload: {
     courseId: string
+    locale?: 'zh-CN' | 'en-GB'
     expectedReleaseId?: string
     message: string
     mode: AiMode
@@ -125,6 +128,7 @@ export async function chatStream(
     releaseId?: string
     model?: string
     useKnowledge?: boolean
+    runningSolution?: 'grounded-jack' | 'dialogue-yong'
   },
   onEvent: (e: ChatStreamEvent) => void,
   signal?: AbortSignal,

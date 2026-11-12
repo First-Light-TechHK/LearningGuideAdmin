@@ -34,7 +34,7 @@ describe('通用 Dialogue 母版消息编译', () => {
       content: '什么是 state variable?',
     });
     expect(result.temperature).toBe(0.35);
-    expect(result.maxOutputTokens).toBe(1400);
+    expect(result.maxOutputTokens).toBe(4096);
   });
 
   it('无知识时使用母版文案，Socratic 参数与中文语言规则生效', () => {
@@ -67,4 +67,34 @@ describe('通用 Dialogue 母版消息编译', () => {
       'Message is required.',
     );
   });
+  it.each([
+    ['deepseek/deepseek-v4.1-flash', 8192, 4096, 'low', 'low', undefined],
+    ['deepseek/deepseek-r1-0528', 16384, 8192, undefined, undefined, undefined],
+    ['openai/gpt-4o-mini', 4096, 2048, undefined, undefined, undefined],
+    ['anthropic/claude-haiku-5.5', 8192, 4096, 'low', 'low', undefined],
+    ['google/gemini-3.5-flash', 8192, 4096, 'low', 'minimal', undefined],
+    ['qwen/qwen3.6-flash', 8192, 4096, undefined, undefined, false],
+    ['google/gemma-4-31b-it', 4096, 2048, undefined, undefined, false],
+    ['nvidia/nemotron-3-super-120b-a12b', 8192, 4096, 'low', 'low', undefined],
+  ])(
+    '模型 %s 使用独立预算和兼容参数',
+    (model, lecture, socratic, effort, socraticEffort, enabled) => {
+      for (const mode of ['LECTURE', 'SOCRATIC'] as const) {
+        const result = compileMotherbaseDialogue({
+          ...base,
+          model,
+          mode,
+        });
+        expect(result.maxOutputTokens).toBe(
+          mode === 'LECTURE' ? lecture : socratic,
+        );
+        expect(result.reasoningEffort).toBe(
+          mode === 'LECTURE' ? effort : socraticEffort,
+        );
+        expect(result.reasoningEnabled).toBe(enabled);
+        if (model === 'anthropic/claude-haiku-5.5')
+          expect(result).not.toHaveProperty('temperature');
+      }
+    },
+  );
 });

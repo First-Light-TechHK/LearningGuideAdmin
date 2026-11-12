@@ -56,10 +56,32 @@ export class EmbeddingService {
    * 错误仅落服务器日志，对外抛出通用错误（§9 安全）。
    */
   private async callEmbeddingApi(input: string[]): Promise<number[][]> {
+    const startedAt = Date.now();
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.requestEmbedding(input);
+      } catch (error) {
+        const retry =
+          error instanceof KnowledgeUnavailableError ||
+          (error instanceof Error &&
+            ['TimeoutError', 'AbortError'].includes(error.name));
+        this.logger.warn(
+          `Embedding attempt=${attempt} elapsedMs=${Date.now() - startedAt}`,
+        );
+        if (!retry || attempt >= 3) throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, 250 * 2 ** (attempt - 1)),
+        );
+      }
+    }
+  }
+
+  private async requestEmbedding(input: string[]): Promise<number[][]> {
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}/embeddings`, {
         method: 'POST',
+        signal: AbortSignal.timeout(8000),
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.apiKey}`,
@@ -76,16 +98,16 @@ export class EmbeddingService {
           ? cause.code
           : undefined;
       this.logger.warn(
-        `Embedding API 连接失败：${error instanceof Error ? error.message : 'unknown'}${typeof code === 'string' ? ` (${code})` : ''}`,
+        `Embedding API 连接失败 code=${typeof code === 'string' && /^[A-Z_]+$/.test(code) ? code : 'unknown'}`,
       );
       throw new KnowledgeUnavailableError('向量检索无法连接');
     }
 
     if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      this.logger.warn(
-        `Embedding API 返回 ${res.status}: ${errText.slice(0, 200)}`,
-      );
+      this.logger.warn(`Embedding API status=${res.status}`);
+      await res.body?.cancel();
+      if ([429, 500, 502, 503, 504].includes(res.status))
+        throw new KnowledgeUnavailableError('向量检索上游暂不可用');
       throw new Error(`Embedding 上游返回 ${res.status}`);
     }
 

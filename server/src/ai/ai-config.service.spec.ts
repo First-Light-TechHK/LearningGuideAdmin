@@ -44,6 +44,23 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
 
   let service: AiConfigService;
 
+  it('Running Solution 按 Course 和 Release 读取，缺省保持 Jack', async () => {
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValueOnce({
+      runningSolution: 'dialogue-yong',
+    });
+    expect(await service.resolveRunningSolution('c1', 'r1')).toBe(
+      'dialogue-yong',
+    );
+    expect(mockPrisma.courseAiConfig.findUnique).toHaveBeenCalledWith({
+      where: { courseId_releaseId: { courseId: 'c1', releaseId: 'r1' } },
+      select: { runningSolution: true },
+    });
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValueOnce(null);
+    expect(await service.resolveRunningSolution('c1', 'r2')).toBe(
+      'grounded-jack',
+    );
+  });
+
   it('一轮配置只读一次，Prompt 与模型使用同一 Release 快照', async () => {
     mockPrisma.courseAiConfig.findUnique.mockResolvedValueOnce({
       model: 'model-a',

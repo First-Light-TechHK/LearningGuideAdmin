@@ -1483,3 +1483,7 @@ ALLOWED_EXTENSIONS="txt,md,tex,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1
 ### 2026-11-05 遗留质量检查清理
 
 全仓 ESLint/Oxlint 已清至 0 errors / 0 warnings，未调整规则。表单重置与异步加载分开，组件/工具导出拆开以支持 Fast Refresh，KS 查询向量通过契约令牌注入。完整单测后端 1784 passed / 166 skipped、前端 503 passed；types/build 通过。经用户确认，前端已加入 app/vendor 分包配置，保持 500 kB 阈值；实际构建 34 个 JS 文件、最大 293019 bytes，无构建警告。独立 Review 与手动验收待执行。文件清单和验证命令见 docs/AI_tutor/Motherbase_Refactor.md §8。
+
+运行方案切换：Save 后保留当前聊天，仅影响后续回答。缓存按员工、课程、Release 隔离，首次迁入当前方案的旧缓存，不合并其他方案历史。生成与保存互斥。
+
+AI 测试新契约见 [AI_Testing.md](AI_Testing.md)，依据 2026-11-12 用户确认的单题/Excel 测试与停止规则。
