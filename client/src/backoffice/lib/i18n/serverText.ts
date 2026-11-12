@@ -11,6 +11,7 @@ import { t } from "./messages";
  */
 export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> = [
   ["测试版本已变化，请刷新后重试", "The test release has changed. Refresh and try again."],
+  ["课程在你打开后已被他人修改，请刷新后查看最新内容。", "This course was changed by someone else after you opened it. Refresh to see the changes."],
   ["LLM 上游生成失败", "The model could not complete this response."],
   ["LLM 上游连接中断", "The model connection was interrupted."],
   ["所选知识库版本没有可用正文", "The selected release has no usable course content."],

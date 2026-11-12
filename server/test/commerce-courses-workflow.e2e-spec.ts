@@ -7,7 +7,13 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/common/app-setup';
 import { PublishingService } from '../src/commerce-courses/publishing.service';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { signInAs } from './helpers/employee-session';
+import request from 'supertest';
+import {
+  E2E_PASSWORD,
+  ensureEmployee,
+  resetRateLimits,
+  signInAs,
+} from './helpers/employee-session';
 
 /**
  * 商品课程发布与课时编辑的幂等与原子性：重复点"发布""删除草稿"（或两人同时点）
@@ -120,7 +126,7 @@ describe('Commerce course workflow (e2e)', () => {
     const agent = await signInAs(app, 'ADMIN');
     const created: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
-      .send({ code: `${code}-H`, title: 'Fingerprint e2e' });
+      .send({ code: `${code}-H`, title: `${code} fingerprint` });
     const id: string = created.body.data.id;
     const lesson: SuccessResponse<{ lessons: { id: string }[] }> = await agent
       .post(`/api/backoffice/courses/${id}/lessons`)
@@ -198,6 +204,75 @@ describe('Commerce course workflow (e2e)', () => {
     expect(
       await prisma.courseAuthoringActivity.count({ where: { id: event.id } }),
     ).toBe(1);
+  });
+
+  it('refuses a draft write from a page opened before someone else saved (PRD 23)', async () => {
+    const alice = await signInAs(app, 'ADMIN');
+    const bobEmail = await ensureEmployee('e2e-admin-bob@example.com', 'ADMIN');
+    resetRateLimits();
+    const bob = request.agent(app.getHttpServer());
+    await bob
+      .post('/api/auth/sign-in')
+      .send({ email: bobEmail, password: E2E_PASSWORD })
+      .expect(200);
+
+    const created: SuccessResponse<{ id: string }> = await alice
+      .post('/api/backoffice/courses')
+      .send({ code: `${code}-R`, title: `${code} revision` });
+    expect(created.body).toMatchObject({ error: null });
+    const id: string = created.body.data.id;
+    const lesson: SuccessResponse<{ lessons: { id: string }[] }> = await alice
+      .post(`/api/backoffice/courses/${id}/lessons`)
+      .send({ title: 'One' })
+      .expect(201);
+    const lessonId = lesson.body.data.lessons[0].id;
+    const url = `/api/backoffice/courses/${id}/lessons/${lessonId}`;
+
+    // 两人同时打开课程，拿到同一个 ETag
+    const opened = await alice.get(`/api/backoffice/courses/${id}`).expect(200);
+    const etag = opened.headers.etag;
+    expect(etag).toMatch(/^"r\d+"$/);
+    await bob.get(`/api/backoffice/courses/${id}`).expect(200);
+
+    // Alice 同一页面并行保存两处：都成功
+    const saves = await Promise.all([
+      alice.put(url).set('If-Match', etag).send({ title: 'Uno' }),
+      alice.put(url).set('If-Match', etag).send({ description: 'First' }),
+    ]);
+    expect(saves.map((r) => r.status)).toEqual([200, 200]);
+
+    // Bob 用打开时的 ETag 保存：409，提示刷新
+    const stale: ErrorResponse = await bob
+      .put(url)
+      .set('If-Match', etag)
+      .send({ title: 'Eins' });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('COURSE_STALE');
+    expect(stale.body.error.message).toContain('Refresh');
+
+    // 刷新后用新 ETag 保存：成功
+    const refreshed = await bob.get(`/api/backoffice/courses/${id}`);
+    const fresh = refreshed.headers.etag;
+    const ok = await bob
+      .put(url)
+      .set('If-Match', fresh)
+      .send({ title: 'Eins' });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.etag).not.toBe(fresh);
+
+    // 失败的写入不占 revision：之后用同一个 ETag 仍能保存
+    const current = ok.headers.etag;
+    await bob
+      .put(
+        `/api/backoffice/courses/${id}/lessons/00000000-0000-0000-0000-000000000000`,
+      )
+      .set('If-Match', current)
+      .send({ title: 'Nobody' })
+      .expect(404);
+    await alice
+      .get(`/api/backoffice/courses/${id}`)
+      .expect(200)
+      .expect('ETag', current);
   });
 
   it('deletes a draft once when Delete draft is pressed twice at the same time', async () => {

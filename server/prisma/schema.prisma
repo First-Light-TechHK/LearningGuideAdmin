@@ -1025,6 +1025,9 @@ model CommerceCourse {
   draftSourceEnvironment String?
   draftSourceVersionLabel String?
   trialEnabled           Boolean               @default(false)
+  /// 乐观并发（PRD §23）：每次草稿写入 +1，前端以 If-Match: "r<revision>" 提交；见 draft-revision.ts
+  revision               Int                   @default(0)
+  revisionBy             String?               @db.Uuid
 
   // v1 兼容 / 迁移过渡
   subtitle               String?
