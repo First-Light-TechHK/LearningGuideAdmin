@@ -30,7 +30,11 @@ describe('Commerce course workflow (e2e)', () => {
 
   afterAll(async () => {
     const courses = await prisma.commerceCourse.findMany({
-      where: { code: { in: [code, `${code}-L`, `${code}-O`, `${code}-P`] } },
+      where: {
+        code: {
+          in: [code, `${code}-L`, `${code}-O`, `${code}-P`, `${code}-H`],
+        },
+      },
     });
     for (const course of courses) {
       await prisma.commerceCourse.update({
@@ -107,6 +111,68 @@ describe('Commerce course workflow (e2e)', () => {
         .send({});
       expect(second.status).toBe(200);
       expect(second.body.data.versionNo).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('treats a draft edited back to the live content as No draft (PRD 15.1)', async () => {
+    const agent = await signInAs(app, 'ADMIN');
+    const created: SuccessResponse<{ id: string }> = await agent
+      .post('/api/backoffice/courses')
+      .send({ code: `${code}-H`, title: 'Fingerprint e2e' });
+    const id: string = created.body.data.id;
+    const lesson: SuccessResponse<{ lessons: { id: string }[] }> = await agent
+      .post(`/api/backoffice/courses/${id}/lessons`)
+      .send({ title: 'One' })
+      .expect(201);
+    const lessonId = lesson.body.data.lessons[0].id;
+
+    const publishing = app.get(PublishingService);
+    const spy = jest
+      .spyOn(publishing, 'completenessForDraft')
+      .mockResolvedValue({ canPublish: true, publishBlockers: [] } as never);
+    try {
+      await agent
+        .post(`/api/backoffice/courses/${id}/publish`)
+        .send({})
+        .expect(200);
+      const v1 = await prisma.courseVersion.findFirstOrThrow({
+        where: { courseId: id },
+      });
+      expect(v1.contentHash).toMatch(/^[0-9a-f]{64}$/);
+
+      // 改了再改回原样：草稿与线上一致，显示 No draft
+      const edited: SuccessResponse<{ hasDraft: boolean }> = await agent
+        .put(`/api/backoffice/courses/${id}/lessons/${lessonId}`)
+        .send({ title: 'Uno' });
+      expect(edited.body.data.hasDraft).toBe(true);
+      const reverted: SuccessResponse<{ hasDraft: boolean }> = await agent
+        .put(`/api/backoffice/courses/${id}/lessons/${lessonId}`)
+        .send({ title: 'One' });
+      expect(reverted.body.data.hasDraft).toBe(false);
+      const detail: SuccessResponse<{ hasDraft: boolean }> = await agent.get(
+        `/api/backoffice/courses/${id}`,
+      );
+      expect(detail.body.data.hasDraft).toBe(false);
+
+      // 标记还在但内容没变时点发布：不生成重复版本，标记被清掉
+      await prisma.commerceCourse.update({
+        where: { id },
+        data: { hasDraft: true },
+      });
+      const same: ErrorResponse = await agent
+        .post(`/api/backoffice/courses/${id}/publish`)
+        .send({});
+      expect(same.status).toBe(409);
+      expect(same.body.error.code).toBe('NO_DRAFT');
+      expect(
+        await prisma.courseVersion.count({ where: { courseId: id } }),
+      ).toBe(1);
+      expect(
+        (await prisma.commerceCourse.findUniqueOrThrow({ where: { id } }))
+          .hasDraft,
+      ).toBe(false);
     } finally {
       spy.mockRestore();
     }

@@ -24,6 +24,7 @@ import {
   type VersionSnapshot,
 } from './version-snapshot';
 import { TrialService } from './trial.service';
+import { snapshotContentHash, versionContentHash } from './content-hash';
 
 export interface VersionLabelResult {
   label: string;
@@ -180,8 +181,11 @@ export class PublishingService {
     // 然后看到草稿已发布返回 NO_DRAFT，不会撞 (courseId, versionNo) 唯一键变成 500。
     const version = await this.prisma.$transaction(
       async (tx) => {
-        const [locked] = await tx.$queryRaw<{ hasDraft: boolean }[]>`
-          SELECT "hasDraft" FROM "CommerceCourse" WHERE id = ${courseId} FOR UPDATE`;
+        const [locked] = await tx.$queryRaw<
+          { hasDraft: boolean; liveVersionId: string | null }[]
+        >`
+          SELECT "hasDraft", "liveVersionId" FROM "CommerceCourse"
+          WHERE id = ${courseId} FOR UPDATE`;
         if (!locked?.hasDraft) {
           throw new ConflictException({
             code: 'NO_DRAFT',
@@ -189,6 +193,24 @@ export class PublishingService {
           });
         }
         const snapshot = await captureVersionSnapshot(tx, courseId);
+        const contentHash = await snapshotContentHash(tx, snapshot);
+        // 草稿改回了线上内容（PRD §15.1）：清掉草稿标记，不生成重复版本。
+        if (
+          locked.liveVersionId &&
+          (await versionContentHash(tx, locked.liveVersionId)) === contentHash
+        ) {
+          await tx.commerceCourse.update({
+            where: { id: courseId },
+            data: {
+              hasDraft: false,
+              lifecycleStatus: 'LIVE',
+              draftSourceType: null,
+              draftSourceEnvironment: null,
+              draftSourceVersionLabel: null,
+            },
+          });
+          return null;
+        }
         const last = await tx.courseVersion.findFirst({
           where: { courseId },
           orderBy: { versionNo: 'desc' },
@@ -213,6 +235,7 @@ export class PublishingService {
             sourceEnvironment: source.environment,
             sourceVersionLabel: source.label,
             snapshotData: snapshot as unknown as Prisma.InputJsonValue,
+            contentHash,
             wentLiveAt: new Date(),
             createdBy: actorEmployeeId,
           },
@@ -248,6 +271,12 @@ export class PublishingService {
       },
       { timeout: 30_000 },
     );
+    if (!version) {
+      throw new ConflictException({
+        code: 'NO_DRAFT',
+        message: 'The draft is the same as the live version.',
+      });
+    }
 
     return {
       versionId: version.id,

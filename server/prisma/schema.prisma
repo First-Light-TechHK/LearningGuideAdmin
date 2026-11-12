@@ -1218,6 +1218,8 @@ model CourseVersion {
   sourceEnvironment   String?
   sourceVersionLabel  String?
   snapshotData        Json
+  /// 内容指纹 sha256(规范化内容视图)，见 content-hash.ts；旧版本为空时按快照现算
+  contentHash         String?
   wentLiveAt          DateTime?
   exportedAt          DateTime?
   exportedBy          String?        @db.Uuid
