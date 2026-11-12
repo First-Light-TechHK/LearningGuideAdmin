@@ -1307,6 +1307,9 @@ model CommerceCourseAuthor {
   @@index([employeeId])
 }
 
+/// 课程事件：只追加（数据库触发器拒绝 UPDATE / DELETE / TRUNCATE）。
+/// 同一张表既是 History，也是发布事件的发件箱：id 即 seq，action 即事件类型。
+/// 消费者按 id 往后读，且只读 txid 小于当前快照 xmin 的行，避免并发提交造成的序号空洞。
 model CourseAuthoringActivity {
   id              BigInt   @id @default(autoincrement())
   courseId        String?
@@ -1314,7 +1317,9 @@ model CourseAuthoringActivity {
   actorEmployeeId String?  @db.Uuid
   action          String
   detail          Json?
+  reason          String?
   requestId       String?
+  txid            BigInt   @default(dbgenerated("((pg_current_xact_id())::text)::bigint"))
   createdAt       DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([courseId, createdAt(sort: Desc)])

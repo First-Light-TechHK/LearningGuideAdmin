@@ -178,6 +178,28 @@ describe('Commerce course workflow (e2e)', () => {
     }
   });
 
+  it('keeps course events append-only, each with its transaction id', async () => {
+    const course = await prisma.commerceCourse.findFirstOrThrow({
+      where: { code: `${code}-H` },
+    });
+    const event = await prisma.courseAuthoringActivity.findFirstOrThrow({
+      where: { courseId: course.id, action: 'PUBLISH' },
+    });
+    expect(event.txid > 0n).toBe(true);
+    await expect(
+      prisma.courseAuthoringActivity.update({
+        where: { id: event.id },
+        data: { detail: { edited: true } },
+      }),
+    ).rejects.toThrow(/append-only/);
+    await expect(
+      prisma.courseAuthoringActivity.delete({ where: { id: event.id } }),
+    ).rejects.toThrow(/append-only/);
+    expect(
+      await prisma.courseAuthoringActivity.count({ where: { id: event.id } }),
+    ).toBe(1);
+  });
+
   it('deletes a draft once when Delete draft is pressed twice at the same time', async () => {
     const agent = await signInAs(app, 'ADMIN');
     const course = await prisma.commerceCourse.findFirstOrThrow({

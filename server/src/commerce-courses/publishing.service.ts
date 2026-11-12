@@ -464,6 +464,7 @@ export class PublishingService {
           actorEmployeeId,
           action: HISTORY_ACTIONS.CHANGE_STATUS,
           detail: { from, to: body.status, reason },
+          reason,
         },
       }),
     ]);
