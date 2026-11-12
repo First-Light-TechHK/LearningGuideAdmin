@@ -6,7 +6,7 @@
 export type PackageLanguage = 'en-GB' | 'zh-CN' | (string & {});
 
 export type ExhibitType = 'IMAGE' | 'VIDEO' | 'MODEL3D';
-export type ReadingType = 'BOOK' | 'ARTICLE' | 'PAPER';
+export type ReadingType = 'BOOK' | 'ARTICLE' | 'PAPER' | 'OTHER';
 export type LearningMode = 'VIDEO_ONLY' | 'TEXT_ONLY' | 'VIDEO_AND_TEXT';
 export type TrialRowStatus = 'READY' | 'RE_CONFIRM' | 'LOCKED';
 
