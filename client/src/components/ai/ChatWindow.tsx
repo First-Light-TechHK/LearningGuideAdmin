@@ -16,13 +16,25 @@ import {
   type MenuProps,
 } from '../ui'
 import { CopyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SendOutlined, UndoOutlined, UserOutlined } from '@ant-design/icons'
+import MDEditor from '@uiw/react-md-editor'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { TutorMarkdown } from './TutorMarkdown'
+import { safeMarkdownPlugins } from './safeMarkdownPlugins'
 import { useAiStore, type ChatMessage } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
 import { useAiText } from './i18n'
+import { normalizeTutorMarkdown } from './normalizeTutorMarkdown'
 import { copyToClipboard, stripMarkdown } from './chatUtils'
-import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
+import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState'
 import { tokens } from '../../theme/tokens'
+
+const katexPlugins = {
+  remarkPlugins: [remarkGfm, remarkMath],
+  rehypePlugins: [rehypeKatex],
+  pluginsFilter: safeMarkdownPlugins,
+}
 
 /** 默认头像占位（后续可替换为课程/用户自定义头像） */
 const AI_AVATAR = <RobotOutlined />
@@ -202,6 +214,7 @@ function Bubble({
   onRetry,
   onUndo,
   text,
+  courseId,
 }: {
   msg: ChatMessage
   /** 是否为最后一条 user 消息（决定刷新/撤回按钮是否启用） */
@@ -212,6 +225,7 @@ function Bubble({
   onRetry: () => Promise<void>
   onUndo: () => void
   text: (key: string) => string
+  courseId: string | null
 }) {
   const isUser = msg.role === 'user'
   const hasContent = Boolean(msg.content?.trim())
@@ -243,6 +257,7 @@ function Bubble({
         <div
           style={{
             maxWidth: '75%',
+            minWidth: 0,
             background: isUser ? tokens.color.primary : tokens.color.bg.layout,
             color: isUser ? tokens.color.bg.container : 'inherit',
             padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
@@ -252,7 +267,13 @@ function Bubble({
         >
           {hasContent ? (
             <div data-color-mode="light" className={isUser ? 'chat-bubble-user' : undefined}>
-              <TutorMarkdown content={msg.content} />
+              {isUser ? (
+                <MDEditor.Markdown
+                  source={normalizeTutorMarkdown(msg.content)}
+                  {...katexPlugins}
+                  style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
+                />
+              ) : <TutorMarkdown content={msg.content} courseId={courseId} sourcesLabel={text('sources')} />}
               {(msg.status === 'error' || msg.status === 'aborted') &&
                 <div role="status">{text(msg.status === 'aborted' ? 'aborted' : 'incomplete')}</div>}
             </div>
@@ -333,6 +354,7 @@ function Bubble({
  */
 export function ChatWindow() {
   const { message, modal } = App.useApp()
+  const saving = useAiStore((s) => s.saving)
   const mode = useAiStore((s) => s.mode)
   const messages = useAiStore((s) => s.messages)
   const streaming = useAiStore((s) => s.streaming)
@@ -447,6 +469,7 @@ export function ChatWindow() {
                 isLastUser={isLastUser}
                 streaming={streaming}
                 text={text}
+                courseId={selectedCourseId}
                 onCopyPlain={async () => {
                   const ok = await copyToClipboard(stripMarkdown(m.content))
                   message[ok ? 'success' : 'error'](ok ? text('copied') : text('copyFailed'))
@@ -495,7 +518,7 @@ export function ChatWindow() {
         <Button
           type="primary"
           icon={<SendOutlined />}
-          disabled={!selectedCourseId || (!streaming && !input.trim())}
+          disabled={saving || !selectedCourseId || (!streaming && !input.trim())}
           onClick={() => streaming ? cancel() : void onSend()}
         >
           {text(streaming ? 'stop' : 'send')}

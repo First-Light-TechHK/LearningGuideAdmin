@@ -4,7 +4,7 @@ import type {
   KnowledgeRelease,
 } from '../../ks/contract/knowledge-client';
 
-const CONTEXT_TOKEN_BUDGET = 1100;
+const CONTEXT_TOKEN_BUDGET = 8000;
 const MAX_CONTEXT_CHUNKS = 5;
 const SNAPSHOT_TOKEN_BUDGET = 6000;
 
@@ -26,18 +26,21 @@ export async function buildTutorContext(
   release: KnowledgeRelease,
   query: string,
   summaryTopics: string[] = [],
+  format: 'structured' | 'wiki' = 'structured',
 ): Promise<{ text: string | null; strategy: 'snapshot' | 'retrieval' }> {
   const pages = release.pages.filter((page) => page.contentMd?.trim());
   if (!pages.length)
     throw new BadRequestException('所选知识库版本没有可用正文');
   const text = pages
     .map((page, index) =>
-      JSON.stringify({
-        reference: `S${index + 1}`,
-        source: page.title,
-        sourceLevel: sourceLevel(page.title),
-        evidence: page.contentMd,
-      }),
+      format === 'wiki'
+        ? `# ${page.title}\n\n${page.contentMd?.trim() ?? ''}`
+        : JSON.stringify({
+            reference: `S${index + 1}`,
+            source: page.title,
+            sourceLevel: sourceLevel(page.title),
+            evidence: page.contentMd,
+          }),
     )
     .join('\n\n');
   const estimatedTokens = Math.ceil(Buffer.byteLength(text, 'utf8') / 4);
@@ -203,7 +206,7 @@ async function buildRetrievedContext(
       : chunks;
   if (relevantChunks.length === 0) return null;
 
-  // 按 token 预算拼接，超出时按 score 从高到低截断
+  // 保持检索排名，在预算内选择完整片段，避免截断定义或公式。
   const blocks: string[] = [];
   const seen = new Set<string>();
   let totalTokens = 0;

@@ -19,12 +19,14 @@ import {
 import {
   applyVersionSnapshotInTx,
   captureVersionSnapshot,
-  detailToCompletenessInput,
+  completenessTrial,
+  loadBrokenAssetIds,
   snapshotToCompletenessInput,
   type VersionSnapshot,
 } from './version-snapshot';
 import { TrialService } from './trial.service';
 import { snapshotContentHash, versionContentHash } from './content-hash';
+import { employeeNames, operatorName } from './employee-names';
 
 export interface VersionLabelResult {
   label: string;
@@ -67,6 +69,7 @@ export const HISTORY_ACTIONS = {
   CHANGE_STATUS: 'CHANGE_STATUS',
   OPERATIONS_PUBLISH: 'OPERATIONS_PUBLISH',
   CREATE_COURSE: 'CREATE_COURSE',
+  ADD_LEARNING_LANGUAGE: 'ADD_LEARNING_LANGUAGE',
 } as const;
 
 @Injectable()
@@ -77,56 +80,21 @@ export class PublishingService {
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
   ) {}
 
-  /** 读取工作区（草稿）并计算完成度。 */
+  /**
+   * 读取工作区（草稿）并计算完成度：先拍一份快照（只读），再走和线上版本相同的规则，
+   * 所以课程详情、Publish 门禁和导出检查对同一份内容给出同样的 issues。
+   */
   async completenessForDraft(courseId: string): Promise<CourseCompleteness> {
-    const [detail, trial] = await Promise.all([
-      this.draftDetail(courseId),
+    const [snapshot, trial, brokenAssetIds] = await Promise.all([
+      captureVersionSnapshot(this.prisma, courseId),
       this.trial.get(courseId),
+      loadBrokenAssetIds(this.prisma, courseId),
     ]);
     return computeCompleteness(
-      detailToCompletenessInput({
-        ...detail,
-        trialRows: trial.rows
-          .filter((row) => row.inTrial)
-          .map((row) => ({
-            lessonId: row.lessonId,
-            status: row.status,
-            videoCutoffSeconds: row.videoCutoffSeconds,
-            textCutoffLearningPointId: row.textCutoffLearningPointId,
-          })),
+      snapshotToCompletenessInput(snapshot, completenessTrial(trial), {
+        brokenAssetIds,
       }),
     );
-  }
-
-  async draftDetail(courseId: string) {
-    const course = await this.prisma.commerceCourse.findUnique({
-      where: { id: courseId },
-      include: {
-        category: true,
-        cover: true,
-        localizations: true,
-        trialRows: true,
-        lessons: {
-          where: { archivedAt: null },
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            localizations: { include: { video: true } },
-            exhibits: { include: { media: true, thumbnail: true } },
-            readings: { orderBy: { sortOrder: 'asc' } },
-            questions: { orderBy: { sortOrder: 'asc' } },
-            applicationTest: true,
-            learningPoints: { orderBy: { sortOrder: 'asc' } },
-            triggers: true,
-          },
-        },
-      },
-    });
-    if (!course)
-      throw new NotFoundException({
-        code: 'COURSE_NOT_FOUND',
-        message: 'Course not found',
-      });
-    return course;
   }
 
   /** 发布草稿：生成不可变版本，立即成为本环境线上版本。 */
@@ -173,6 +141,8 @@ export class PublishingService {
         code: 'PUBLISH_BLOCKED',
         message: completeness.publishBlockers.join(' '),
         blockers: completeness.publishBlockers,
+        blockerCodes: completeness.publishBlockerCodes,
+        incompleteLessons: completeness.incompleteLessons,
       });
     }
 
@@ -536,15 +506,6 @@ export class PublishingService {
         id: true,
         code: true,
         liveVersionId: true,
-        trialEnabled: true,
-        trialRows: {
-          select: {
-            lessonId: true,
-            status: true,
-            videoCutoffSeconds: true,
-            textCutoffLearningPointId: true,
-          },
-        },
       },
     });
     if (!course)
@@ -571,17 +532,8 @@ export class PublishingService {
     const completeness = computeCompleteness(
       snapshotToCompletenessInput(
         live.snapshotData as unknown as VersionSnapshot,
-        {
-          trialEnabled: course.trialEnabled,
-          trialRows: trial.rows
-            .filter((row) => row.inTrial)
-            .map((row) => ({
-              lessonId: row.lessonId,
-              status: row.status,
-              videoCutoffSeconds: row.videoCutoffSeconds,
-              textCutoffLearningPointId: row.textCutoffLearningPointId,
-            })),
-        },
+        completenessTrial(trial),
+        { brokenAssetIds: await loadBrokenAssetIds(this.prisma, courseId) },
       ),
     );
     if (!canExport(completeness)) {
@@ -634,32 +586,15 @@ export class PublishingService {
       }),
       this.prisma.courseAuthoringActivity.count({ where }),
     ]);
-    const actorIds = [
-      ...new Set(
-        rows
-          .map((row) => row.actorEmployeeId)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ];
-    const employees = actorIds.length
-      ? await this.prisma.employee.findMany({
-          where: { employeeId: { in: actorIds } },
-          select: { employeeId: true, loginEmail: true },
-        })
-      : [];
-    const nameById = new Map(
-      employees.map((employee) => [
-        employee.employeeId,
-        employee.loginEmail.split('@')[0] ?? employee.loginEmail,
-      ]),
+    const names = await employeeNames(
+      this.prisma,
+      rows.map((row) => row.actorEmployeeId),
     );
     return {
       items: rows.map((row) => ({
         id: row.id.toString(),
         time: row.createdAt,
-        operator: row.actorEmployeeId
-          ? (nameById.get(row.actorEmployeeId) ?? row.actorEmployeeId)
-          : 'System',
+        operator: operatorName(names, row.actorEmployeeId),
         action: row.action,
         versionNo: row.versionNo,
         detail: row.detail,
@@ -670,14 +605,16 @@ export class PublishingService {
     };
   }
 
+  /** 写一条 History；传入事务连接时，和事务里的写入同成同败。 */
   async recordHistory(
     courseId: string | null,
     action: string,
     detail: unknown,
     actorEmployeeId: string | null,
     versionNo?: number,
+    db: PrismaService | Prisma.TransactionClient = this.prisma,
   ) {
-    return this.prisma.courseAuthoringActivity.create({
+    return db.courseAuthoringActivity.create({
       data: {
         courseId,
         versionNo: versionNo ?? null,

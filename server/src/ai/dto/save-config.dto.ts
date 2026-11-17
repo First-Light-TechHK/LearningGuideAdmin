@@ -23,6 +23,10 @@ export class SaveAiConfigDto {
   @MaxLength(100)
   llmModel!: string;
 
+  @IsOptional()
+  @IsIn(['grounded-jack', 'dialogue-yong'])
+  runningSolution?: 'grounded-jack' | 'dialogue-yong';
+
   /** 该模式自定义 System Prompt（优先级高于该模式模板）；省略/空串表示清除 */
   @IsOptional()
   @IsString()

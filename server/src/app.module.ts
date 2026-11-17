@@ -1,3 +1,4 @@
+import { pool, query } from './backoffice/lib/db';
 import { Logger, Module, ModuleMetadata, Provider } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
@@ -95,6 +96,10 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
         ? [
             AiModule.register({
               adminApi: admin,
+              evaluationDb: {
+                provide: 'EVALUATION_DB',
+                useValue: { pool, query },
+              },
               learnerApi: agent,
               knowledge: knowledgeProvider(roles),
               files: FilesModule.register({ authoring: false }),

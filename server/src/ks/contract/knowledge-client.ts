@@ -44,7 +44,7 @@ export interface RetrievedChunk {
   pageTitle: string;
   heading: string | null;
   content: string;
-  /** 余弦相似度分数（0-1，越高越相关） */
+  /** 余弦相似度分数；返回顺序由向量与关键词融合排名决定。 */
   score: number;
   tokenCount: number;
 }
@@ -57,8 +57,7 @@ export interface KnowledgeClient {
   getReleaseMeta(releaseId: string): Promise<KnowledgeReleaseMeta | null>;
   getRelease(releaseId: string): Promise<KnowledgeRelease | null>;
   /**
-   * RAG 向量检索（2026-10-26 新增）：
-   * 对 query 生成 embedding，在 release 的 KnowledgeChunk 中做余弦相似度检索。
+   * RAG 混合检索：对 query 做向量及关键词召回，按融合排名返回当前 Release 的片段。
    * 返回空数组表示无相关结果或未建索引。
    */
   retrieveChunks(

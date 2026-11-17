@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
   ValidateNested,
@@ -17,6 +18,11 @@ export class LearnerChatStreamDto {
   @MinLength(1)
   @MaxLength(100)
   externalCourseId!: string;
+
+  /** Portal 已读取的上线版本，用于防止版本切换后继续旧对话。 */
+  @IsOptional()
+  @IsUUID()
+  expectedReleaseId?: string;
 
   @IsString()
   @MinLength(1)

@@ -791,7 +791,9 @@ export async function seedDemoRows(
       const needs = reviewed % 7 === 3;
       const { rowCount } = await client.query(
         `INSERT INTO helpdesk_faq_reviews (id, faq_id, faq_version, status, note, employee_id, at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING`,
+         VALUES ($1, $2, $3, $4, $5, $6,
+           GREATEST($7::timestamptz, (SELECT updated_at FROM helpdesk_faqs WHERE id = $2)))
+         ON CONFLICT (id) DO NOTHING`,
         [
           demoId('review', faq.key),
           faq.id,

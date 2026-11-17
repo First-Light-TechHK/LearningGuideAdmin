@@ -5,12 +5,42 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import type { ReadingType } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import * as XLSX from 'xlsx';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  allocate,
+  exhibitCounterKey,
+  formatApplicationCode,
+  formatExhibitCode,
+  formatKnowledgeCode,
+  lessonNumber,
+} from './code-allocator';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
+import { parseLanguage } from './course-info';
+import { runCourseWrite, type CourseTx } from './course-write';
+import {
+  parseTriggers,
+  parseVideoPoints,
+  saveTriggersInTx,
+  saveVideoPointsInTx,
+} from './study-points';
+import { defaultLanguageTest } from './lesson-tests';
 import { convertDocxToHtml } from './docx-to-html';
+import { exhibitInUseMessage, textUsages, videoUsages } from './exhibit-usage';
+import { requireArray } from './input';
+import {
+  checkReadingRows,
+  missingReadingColumns,
+  parseReadingList,
+  readingTemplateCsv,
+} from './reading-import';
+import {
+  normalizeHeader,
+  readSheetTable,
+  sheetCell,
+  type SheetTable,
+} from './sheet-table';
 import { mp4DurationSeconds } from './media-duration';
 import {
   MediaValidationError,
@@ -22,7 +52,11 @@ import { CourseStorageService } from './storage.service';
 import { categoryRef, EXHIBIT_FIELDS } from './localized-fields';
 import { parseLocalized } from '../common/i18n/localized';
 
-const READING_TYPES = new Set(['BOOK', 'ARTICLE', 'PAPER', 'OTHER']);
+/** 读取可以走事务外的连接，也可以走写入事务里的连接。 */
+type Db = PrismaService | CourseTx;
+
+/** 推荐阅读只有一份英文列表（PRD L411）。 */
+const READING_LANGUAGE = 'en-GB';
 const EXHIBIT_TYPES = new Set(['IMAGE', 'VIDEO', 'MODEL3D']);
 
 function required(value: unknown, message: string): string {
@@ -33,110 +67,6 @@ function required(value: unknown, message: string): string {
 
 function upper(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
-}
-
-function stripHtml(value: string): string {
-  return value
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export interface ParsedTextLearningPoint {
-  heading: string;
-  hasBody: boolean;
-}
-
-/** 从富文本中识别 Heading 1；仅 H1 是 LP（PRD 12.5.2）。 */
-export function parseTextLearningPoints(
-  html: string,
-): ParsedTextLearningPoint[] {
-  const matches = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
-  return matches
-    .map((match, index) => {
-      const heading = stripHtml(match[1] ?? '');
-      const start = (match.index ?? 0) + match[0].length;
-      const end =
-        index + 1 < matches.length
-          ? (matches[index + 1].index ?? html.length)
-          : html.length;
-      const body = stripHtml(html.slice(start, end));
-      return { heading, hasBody: Boolean(body) };
-    })
-    .filter((row) => Boolean(row.heading));
-}
-
-/**
- * 把文本中的 H1 同步为 TEXT Learning Point。
- * 标题不变的 LP 复用原 code，避免简单编辑导致学习进度 ID 漂移。
- */
-export async function syncTextLearningPoints(
-  client: PrismaService | Prisma.TransactionClient,
-  lessonId: string,
-  language: string,
-  html: string | null,
-): Promise<void> {
-  const points = html ? parseTextLearningPoints(html) : [];
-  const existing = await client.learningPoint.findMany({
-    where: { lessonId, language },
-    orderBy: { sortOrder: 'asc' },
-  });
-  const codeByTitle = new Map(
-    existing
-      .filter((lp) => (lp.source as string) === 'TEXT')
-      .map((lp) => [lp.title, lp.code]),
-  );
-  const usedCodes = new Set(existing.map((lp) => lp.code));
-
-  await client.learningPoint.deleteMany({
-    where: { lessonId, language, source: 'TEXT' },
-  });
-
-  const nextCode = (title: string): string => {
-    const reused = codeByTitle.get(title);
-    if (reused) return reused;
-    let index = 1;
-    while (usedCodes.has(`T${index}`)) index++;
-    const code = `T${index}`;
-    usedCodes.add(code);
-    return code;
-  };
-
-  const codes: string[] = [];
-  for (const [index, point] of points.entries()) {
-    const code = nextCode(point.heading);
-    codes.push(code);
-    await client.learningPoint.create({
-      data: {
-        lessonId,
-        language,
-        code,
-        title: point.heading,
-        source: 'TEXT',
-        anchorHeading: point.heading,
-        sortOrder: index,
-      },
-    });
-  }
-
-  await client.lessonLocalization.updateMany({
-    where: { lessonId, language },
-    data: {
-      textLearningPoints: points.length
-        ? (points.map((point, index) => ({
-            code: codes[index],
-            heading: point.heading,
-            hasBody: point.hasBody,
-          })) as unknown as Prisma.InputJsonValue)
-        : Prisma.DbNull,
-    },
-  });
 }
 
 @Injectable()
@@ -257,22 +187,39 @@ export class CourseAuthoringService {
       { originalname: string; mimetype?: string; buffer: Buffer } | undefined,
   ) {
     const asset = await this.uploadMedia(courseId, file, 'COVER');
-    await this.prisma.commerceCourse.update({
-      where: { id: courseId },
-      data: {
-        coverAssetId: asset.id,
-        hasDraft: true,
-        lifecycleStatus: 'WORKING',
-      },
-    });
+    try {
+      await runCourseWrite(this.prisma, courseId, async (tx) => {
+        await tx.commerceCourse.update({
+          where: { id: courseId },
+          data: { coverAssetId: asset.id },
+        });
+      });
+    } catch (error) {
+      // 封面没绑上：刚传的文件和资产行不留下孤儿。
+      await this.discardUploadedAsset(courseId, asset);
+      throw error;
+    }
     return asset;
   }
 
+  private async discardUploadedAsset(
+    courseId: string,
+    asset: { id: string; extension: string },
+  ): Promise<void> {
+    await this.prisma.courseMediaAsset
+      .delete({ where: { id: asset.id } })
+      .catch(() => undefined);
+    await this.storage
+      .removeMedia(this.storage.mediaKey(courseId, asset.id, asset.extension))
+      .catch(() => undefined);
+  }
+
   async deleteCover(courseId: string) {
-    await this.assertCourse(courseId);
-    await this.prisma.commerceCourse.update({
-      where: { id: courseId },
-      data: { coverAssetId: null, hasDraft: true, lifecycleStatus: 'WORKING' },
+    await runCourseWrite(this.prisma, courseId, async (tx) => {
+      await tx.commerceCourse.update({
+        where: { id: courseId },
+        data: { coverAssetId: null },
+      });
     });
     return { deleted: true };
   }
@@ -283,7 +230,8 @@ export class CourseAuthoringService {
     language: string,
     assetId: string,
   ) {
-    const lesson = await this.requireLesson(courseId, lessonId);
+    // 下载、解析时长都放在事务外：事务里只做写入，不拿着课程锁等存储。
+    await this.requireLesson(courseId, lessonId);
     const asset = await this.requireAsset(courseId, assetId);
     if (asset.kind !== 'VIDEO') {
       throw new BadRequestException({
@@ -304,23 +252,25 @@ export class CourseAuthoringService {
             ),
           ) || null
         : null);
-    const existing = lesson.localizations.find(
-      (loc) => loc.language === language,
-    );
-    await this.prisma.lessonLocalization.upsert({
-      where: { lessonId_language: { lessonId, language } },
-      create: {
-        lessonId,
-        language,
-        title: existing?.title ?? lesson.code,
-        description: existing?.description ?? null,
-        videoAssetId: assetId,
-        videoDurationSeconds: duration,
-        textHtml: existing?.textHtml ?? null,
-      },
-      update: { videoAssetId: assetId, videoDurationSeconds: duration },
+    await runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lesson = await this.requireLesson(courseId, lessonId, tx);
+      const existing = lesson.localizations.find(
+        (loc) => loc.language === language,
+      );
+      await tx.lessonLocalization.upsert({
+        where: { lessonId_language: { lessonId, language } },
+        create: {
+          lessonId,
+          language,
+          title: existing?.title ?? lesson.code,
+          description: existing?.description ?? null,
+          videoAssetId: assetId,
+          videoDurationSeconds: duration,
+          textHtml: existing?.textHtml ?? null,
+        },
+        update: { videoAssetId: assetId, videoDurationSeconds: duration },
+      });
     });
-    await this.touchCourse(courseId);
     return { assetId, durationSeconds: duration };
   }
 
@@ -328,108 +278,40 @@ export class CourseAuthoringService {
     courseId: string,
     lessonId: string,
     language: string,
-    input: Array<{ code?: string; title: string; timeSeconds: number }>,
+    input: unknown,
   ) {
-    const lesson = await this.requireLesson(courseId, lessonId);
-    const duration =
-      lesson.localizations.find((loc) => loc.language === language)
-        ?.videoDurationSeconds ?? null;
-    const existing = lesson.learningPoints.filter(
-      (lp) => lp.language === language && lp.source === 'VIDEO',
-    );
-    const codeByTitle = new Map(existing.map((lp) => [lp.title, lp.code]));
-    const usedCodes = new Set(
-      lesson.learningPoints
-        .filter((lp) => lp.language === language)
-        .map((lp) => lp.code),
-    );
-    const points = input.map((point, index) => {
-      const title = required(
-        point.title,
-        `Learning point ${index + 1} needs a title.`,
-      );
-      const timeSeconds = Math.max(
-        0,
-        Math.round(Number(point.timeSeconds) || 0),
-      );
-      if (duration !== null && timeSeconds > duration) {
-        throw new BadRequestException({
-          code: 'LP_BEYOND_VIDEO',
-          message: `Learning point "${title}" is beyond the video length.`,
-        });
-      }
-      let code = point.code?.trim() || codeByTitle.get(title) || '';
-      if (!code) {
-        let n = 1;
-        while (usedCodes.has(`V${n}`)) n++;
-        code = `V${n}`;
-      }
-      usedCodes.add(code);
-      return { code, title, timeSeconds, sortOrder: index };
+    const lang = parseLanguage(language, 'language');
+    const rows = parseVideoPoints(input);
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      await this.requireLesson(courseId, lessonId, tx);
+      return { points: await saveVideoPointsInTx(tx, lessonId, lang, rows) };
     });
-    await this.prisma.$transaction(async (tx) => {
-      await tx.learningPoint.deleteMany({
-        where: { lessonId, language, source: 'VIDEO' },
-      });
-      for (const point of points) {
-        await tx.learningPoint.create({
-          data: { lessonId, language, source: 'VIDEO', ...point },
-        });
-      }
-      await tx.commerceCourse.update({
-        where: { id: courseId },
-        data: { hasDraft: true, lifecycleStatus: 'WORKING' },
-      });
-    });
-    return { points };
   }
 
   async saveTriggers(
     courseId: string,
     lessonId: string,
     language: string,
-    input: Array<{ exhibitId: string; timeSeconds: number }>,
+    input: unknown,
   ) {
-    const lesson = await this.requireLesson(courseId, lessonId);
-    const duration =
-      lesson.localizations.find((loc) => loc.language === language)
-        ?.videoDurationSeconds ?? null;
-    const exhibitIds = new Set(lesson.exhibits.map((exhibit) => exhibit.id));
-    const rows = input.map((row, index) => {
-      if (!exhibitIds.has(row.exhibitId)) {
-        throw new BadRequestException({
-          code: 'EXHIBIT_NOT_FOUND',
-          message: `Exhibit ${index + 1} does not belong to this lesson.`,
-        });
-      }
-      const timeSeconds = Math.max(0, Math.round(Number(row.timeSeconds) || 0));
-      if (duration !== null && timeSeconds > duration) {
-        throw new BadRequestException({
-          code: 'TRIGGER_BEYOND_VIDEO',
-          message: `Exhibit trigger ${index + 1} is beyond the video length.`,
-        });
-      }
-      return { exhibitId: row.exhibitId, timeSeconds };
+    const lang = parseLanguage(language, 'language');
+    const rows = parseTriggers(input);
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lesson = await this.requireLesson(courseId, lessonId, tx);
+      const exhibitIds = new Set(lesson.exhibits.map((exhibit) => exhibit.id));
+      return saveTriggersInTx(tx, lessonId, lang, rows, exhibitIds);
     });
-    await this.prisma.$transaction(async (tx) => {
-      await tx.exhibitTrigger.deleteMany({ where: { lessonId, language } });
-      for (const row of rows) {
-        await tx.exhibitTrigger.create({
-          data: { lessonId, language, ...row },
-        });
-      }
-      await tx.commerceCourse.update({
-        where: { id: courseId },
-        data: { hasDraft: true, lifecycleStatus: 'WORKING' },
-      });
-    });
-    return { triggers: rows.length };
   }
 
+  /**
+   * 新展品：编号由服务器按课程分配（E001、E002……，全课程唯一，删除后不再发），
+   * 发来的 `code` 不算数；排在本课时展品的最后。
+   */
   async createExhibit(
     courseId: string,
     lessonId: string,
     body: {
+      /** 已忽略：展品编号由服务器分配。 */
       code?: string;
       type: string;
       mediaAssetId?: string | null;
@@ -438,31 +320,36 @@ export class CourseAuthoringService {
       localized?: unknown;
     },
   ) {
-    await this.requireLesson(courseId, lessonId);
-    const type = upper(body.type);
-    if (!EXHIBIT_TYPES.has(type)) {
-      throw new BadRequestException({
-        code: 'EXHIBIT_TYPE_INVALID',
-        message: 'Media type must be Image, Video or 3D.',
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      await this.requireLesson(courseId, lessonId, tx);
+      const type = upper(body.type);
+      if (!EXHIBIT_TYPES.has(type)) {
+        throw new BadRequestException({
+          code: 'EXHIBIT_TYPE_INVALID',
+          message: 'Media type must be Image, Video or 3D.',
+        });
+      }
+      if (body.mediaAssetId) {
+        await this.requireAsset(courseId, body.mediaAssetId, tx);
+      }
+      if (body.thumbnailAssetId) {
+        await this.requireAsset(courseId, body.thumbnailAssetId, tx);
+      }
+      const code = await this.allocateExhibitCode(courseId, tx);
+      return tx.exhibit.create({
+        data: {
+          lessonId,
+          courseId,
+          sortOrder: await this.nextExhibitOrder(lessonId, tx),
+          code,
+          type: type as never,
+          mediaAssetId: body.mediaAssetId ?? null,
+          thumbnailAssetId: body.thumbnailAssetId ?? null,
+          sourceText: body.sourceText ?? null,
+          localized: parseLocalized(body.localized, EXHIBIT_FIELDS),
+        },
       });
-    }
-    if (body.mediaAssetId) await this.requireAsset(courseId, body.mediaAssetId);
-    if (body.thumbnailAssetId)
-      await this.requireAsset(courseId, body.thumbnailAssetId);
-    const code = body.code?.trim() || (await this.nextExhibitCode(courseId));
-    const exhibit = await this.prisma.exhibit.create({
-      data: {
-        lessonId,
-        code,
-        type: type as never,
-        mediaAssetId: body.mediaAssetId ?? null,
-        thumbnailAssetId: body.thumbnailAssetId ?? null,
-        sourceText: body.sourceText ?? null,
-        localized: parseLocalized(body.localized, EXHIBIT_FIELDS),
-      },
     });
-    await this.touchCourse(courseId);
-    return exhibit;
   }
 
   async updateExhibit(
@@ -477,121 +364,206 @@ export class CourseAuthoringService {
       localized?: unknown;
     },
   ) {
-    await this.requireLesson(courseId, lessonId);
-    const exhibit = await this.prisma.exhibit.findFirst({
-      where: { id: exhibitId, lessonId },
-    });
-    if (!exhibit)
-      throw new NotFoundException({
-        code: 'EXHIBIT_NOT_FOUND',
-        message: 'Exhibit not found.',
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      await this.requireLesson(courseId, lessonId, tx);
+      const exhibit = await tx.exhibit.findFirst({
+        where: { id: exhibitId, lessonId },
       });
-    if (body.mediaAssetId) await this.requireAsset(courseId, body.mediaAssetId);
-    if (body.thumbnailAssetId)
-      await this.requireAsset(courseId, body.thumbnailAssetId);
-    const type = body.type ? upper(body.type) : null;
-    if (type && !EXHIBIT_TYPES.has(type)) {
-      throw new BadRequestException({
-        code: 'EXHIBIT_TYPE_INVALID',
-        message: 'Media type must be Image, Video or 3D.',
+      if (!exhibit)
+        throw new NotFoundException({
+          code: 'EXHIBIT_NOT_FOUND',
+          message: 'Exhibit not found.',
+        });
+      if (body.mediaAssetId) {
+        await this.requireAsset(courseId, body.mediaAssetId, tx);
+      }
+      if (body.thumbnailAssetId) {
+        await this.requireAsset(courseId, body.thumbnailAssetId, tx);
+      }
+      const type = body.type ? upper(body.type) : null;
+      if (type && !EXHIBIT_TYPES.has(type)) {
+        throw new BadRequestException({
+          code: 'EXHIBIT_TYPE_INVALID',
+          message: 'Media type must be Image, Video or 3D.',
+        });
+      }
+      return tx.exhibit.update({
+        where: { id: exhibitId },
+        data: {
+          ...(type ? { type: type as never } : {}),
+          ...(body.mediaAssetId !== undefined
+            ? { mediaAssetId: body.mediaAssetId }
+            : {}),
+          ...(body.thumbnailAssetId !== undefined
+            ? { thumbnailAssetId: body.thumbnailAssetId }
+            : {}),
+          ...(body.sourceText !== undefined
+            ? { sourceText: body.sourceText }
+            : {}),
+          ...(body.localized !== undefined
+            ? { localized: parseLocalized(body.localized, EXHIBIT_FIELDS) }
+            : {}),
+        },
       });
-    }
-    const updated = await this.prisma.exhibit.update({
-      where: { id: exhibitId },
-      data: {
-        ...(type ? { type: type as never } : {}),
-        ...(body.mediaAssetId !== undefined
-          ? { mediaAssetId: body.mediaAssetId }
-          : {}),
-        ...(body.thumbnailAssetId !== undefined
-          ? { thumbnailAssetId: body.thumbnailAssetId }
-          : {}),
-        ...(body.sourceText !== undefined
-          ? { sourceText: body.sourceText }
-          : {}),
-        ...(body.localized !== undefined
-          ? { localized: parseLocalized(body.localized, EXHIBIT_FIELDS) }
-          : {}),
-      },
     });
-    await this.touchCourse(courseId);
-    return updated;
   }
 
   async deleteExhibit(courseId: string, lessonId: string, exhibitId: string) {
-    const lesson = await this.requireLesson(courseId, lessonId);
-    const exhibit = lesson.exhibits.find((row) => row.id === exhibitId);
-    if (!exhibit)
-      throw new NotFoundException({
-        code: 'EXHIBIT_NOT_FOUND',
-        message: 'Exhibit not found.',
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lesson = await this.requireLesson(courseId, lessonId, tx);
+      const exhibit = lesson.exhibits.find((row) => row.id === exhibitId);
+      if (!exhibit)
+        throw new NotFoundException({
+          code: 'EXHIBIT_NOT_FOUND',
+          message: 'Exhibit not found.',
+        });
+      // 还被视频触发或正文引用着：不删，并说明在哪一课的哪个位置
+      const active = await tx.lesson.findMany({
+        where: { courseId, archivedAt: null },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true },
       });
-    if (lesson.triggers.some((trigger) => trigger.exhibitId === exhibitId)) {
-      throw new ConflictException({
-        code: 'EXHIBIT_IN_USE',
-        message: 'Used in Video triggers. Remove the trigger first.',
-      });
-    }
-    const referencedInText = lesson.localizations.some(
-      (loc) =>
-        loc.textHtml?.includes(exhibitId) ||
-        loc.textHtml?.includes(`data-exhibit-code="${exhibit.code}"`),
-    );
-    if (referencedInText) {
-      throw new ConflictException({
-        code: 'EXHIBIT_IN_USE',
-        message: 'Used in text content. Remove it there first.',
-      });
-    }
-    await this.prisma.exhibit.delete({ where: { id: exhibitId } });
-    await this.touchCourse(courseId);
-    return { deleted: true };
+      const lessonPosition = active.findIndex((row) => row.id === lessonId) + 1;
+      const usages = [
+        ...videoUsages(lessonPosition, lesson.triggers, exhibitId),
+        ...textUsages(lessonPosition, lesson.localizations, exhibit),
+      ];
+      if (usages.length > 0) {
+        throw new ConflictException({
+          code: 'EXHIBIT_IN_USE',
+          message: exhibitInUseMessage(usages),
+          details: { usages },
+        });
+      }
+      await tx.exhibit.delete({ where: { id: exhibitId } });
+      return { deleted: true };
+    });
   }
 
+  /**
+   * 展品排序：要给出本课时全部展品的新顺序，缺一个或多一个都不写（400）；
+   * 不是本课时的展品 id 整批拒绝（404）。位置重新编成 1..N。
+   */
+  async reorderExhibits(courseId: string, lessonId: string, input: unknown) {
+    const ids = requireArray(input, 'exhibitIds', {
+      code: 'EXHIBIT_ORDER_INVALID',
+    });
+    if (
+      ids.some((id) => typeof id !== 'string') ||
+      new Set(ids).size !== ids.length
+    ) {
+      throw new BadRequestException({
+        code: 'EXHIBIT_ORDER_INVALID',
+        message: 'exhibitIds must be a list of distinct exhibit ids.',
+        details: { field: 'exhibitIds' },
+      });
+    }
+    const order = ids as string[];
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lesson = await this.requireLesson(courseId, lessonId, tx);
+      const byId = new Map(lesson.exhibits.map((row) => [row.id, row]));
+      if (order.some((id) => !byId.has(id))) {
+        throw new NotFoundException({
+          code: 'EXHIBIT_NOT_FOUND',
+          message: 'Exhibit not found.',
+        });
+      }
+      if (order.length !== byId.size) {
+        throw new BadRequestException({
+          code: 'EXHIBIT_ORDER_INCOMPLETE',
+          message: 'List every exhibit of the lesson exactly once.',
+          details: { expected: byId.size, received: order.length },
+        });
+      }
+      for (const [index, id] of order.entries()) {
+        const row = byId.get(id);
+        if (row && row.sortOrder !== index + 1) {
+          await tx.exhibit.update({
+            where: { id },
+            data: { sortOrder: index + 1 },
+          });
+        }
+      }
+      return {
+        exhibits: order.map((id, index) => ({
+          id,
+          code: byId.get(id)?.code ?? '',
+          sortOrder: index + 1,
+        })),
+      };
+    });
+  }
+
+  /**
+   * 推荐阅读就地保存。每个课时只有一份英文列表（PRD L411）：无论请求写的是哪种语言，都存成 en-GB，
+   * 课时里别的语言的旧行一并并入这一份。认出已有的行（请求里带 id）就改这一行，id 不变；
+   * 请求里没有的已有行删除；`sortOrder` 跟请求顺序。标题、作者、推荐理由没填也存，
+   * 只有 Type 不在 Book / Article / Paper / Other 里才 400（并且什么都不写）。
+   */
   async saveReadings(
     courseId: string,
     lessonId: string,
-    language: string,
-    rows: Array<{
-      type: string;
-      title: string;
-      author: string;
-      whyRecommended: string;
-    }>,
+    language: unknown,
+    input: unknown,
   ) {
-    await this.requireLesson(courseId, lessonId);
-    const data = rows.map((row, index) => {
-      const type = upper(row.type);
-      if (!READING_TYPES.has(type)) {
-        throw new BadRequestException({
-          code: 'READING_TYPE_INVALID',
-          message: 'Type must be Book, Article, Paper or Other.',
-        });
-      }
-      return {
-        type: type as never,
-        title: required(row.title, `Reading ${index + 1} needs a title.`),
-        author: required(row.author, `Reading ${index + 1} needs an author.`),
-        whyRecommended: required(
-          row.whyRecommended,
-          `Reading ${index + 1} needs a recommendation.`,
-        ),
-        sortOrder: index,
-      };
-    });
-    await this.prisma.$transaction(async (tx) => {
-      await tx.recommendedReading.deleteMany({ where: { lessonId, language } });
-      for (const row of data) {
-        await tx.recommendedReading.create({
-          data: { lessonId, language, ...row },
-        });
-      }
-      await tx.commerceCourse.update({
-        where: { id: courseId },
-        data: { hasDraft: true, lifecycleStatus: 'WORKING' },
+    void language;
+    const rows = parseReadingList(input);
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      await this.requireLesson(courseId, lessonId, tx);
+      const existing = await tx.recommendedReading.findMany({
+        where: { lessonId },
+        select: { id: true },
       });
+      const existingIds = new Set(existing.map((row) => row.id));
+      const taken = new Set<string>();
+      const found = rows.map((row) => {
+        if (!row.id || !existingIds.has(row.id) || taken.has(row.id)) {
+          return null;
+        }
+        taken.add(row.id);
+        return row.id;
+      });
+      const stale = existing
+        .filter((row) => !taken.has(row.id))
+        .map((row) => row.id);
+      if (stale.length > 0) {
+        await tx.recommendedReading.deleteMany({
+          where: { id: { in: stale } },
+        });
+      }
+
+      const readings: Array<{
+        id: string;
+        type: string;
+        title: string;
+        author: string;
+        whyRecommended: string;
+        sortOrder: number;
+      }> = [];
+      for (const [index, row] of rows.entries()) {
+        const data = {
+          language: READING_LANGUAGE,
+          type: row.type as ReadingType,
+          title: row.title,
+          author: row.author,
+          whyRecommended: row.whyRecommended,
+          sortOrder: index,
+        };
+        const id = found[index];
+        const saved = id
+          ? await tx.recommendedReading.update({ where: { id }, data })
+          : await tx.recommendedReading.create({ data: { lessonId, ...data } });
+        readings.push({
+          id: saved.id,
+          type: row.type,
+          title: row.title,
+          author: row.author,
+          whyRecommended: row.whyRecommended,
+          sortOrder: index,
+        });
+      }
+      return { count: readings.length, readings };
     });
-    return { count: data.length };
   }
 
   async saveKnowledgeTest(
@@ -600,16 +572,35 @@ export class CourseAuthoringService {
     enabled: boolean,
     rows: Array<{ code?: string; question: string; referenceAnswer: string }>,
   ) {
-    await this.requireLesson(courseId, lessonId);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.knowledgeQuestion.deleteMany({ where: { lessonId } });
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lesson = await this.requireLesson(courseId, lessonId, tx);
+      const language = await this.defaultLanguageOf(courseId, tx);
+      await tx.knowledgeQuestion.deleteMany({ where: { lessonId, language } });
       if (enabled) {
+        // 过渡写法（B14 起改为 id/code 就地更新与计数器分配）：K-{课时号}{序号}，遇到本课程里已有的编号就顺延。
+        const taken = new Set(
+          (
+            await tx.knowledgeQuestion.findMany({
+              where: { courseId },
+              select: { code: true },
+            })
+          ).map((row) => row.code),
+        );
+        const lessonNo = lessonNumber(lesson.code, lesson.sortOrder);
+        let sequence = 0;
         for (const [index, row] of rows.entries()) {
+          let code: string;
+          do {
+            sequence += 1;
+            code = formatKnowledgeCode(lessonNo, sequence);
+          } while (taken.has(code));
+          taken.add(code);
           await tx.knowledgeQuestion.create({
             data: {
               lessonId,
-              code:
-                row.code?.trim() || `K-${String(index + 1).padStart(4, '0')}`,
+              courseId,
+              language,
+              code,
               question: required(
                 row.question,
                 `Question ${index + 1} is required.`,
@@ -623,12 +614,8 @@ export class CourseAuthoringService {
           });
         }
       }
-      await tx.commerceCourse.update({
-        where: { id: courseId },
-        data: { hasDraft: true, lifecycleStatus: 'WORKING' },
-      });
+      return { count: enabled ? rows.length : 0 };
     });
-    return { count: enabled ? rows.length : 0 };
   }
 
   async saveApplicationTest(
@@ -636,39 +623,52 @@ export class CourseAuthoringService {
     lessonId: string,
     body: { enabled: boolean; scenario?: string; referenceAnswer?: string },
   ) {
-    await this.requireLesson(courseId, lessonId);
-    if (!body.enabled) {
-      await this.prisma.applicationTest.deleteMany({ where: { lessonId } });
-    } else {
-      await this.prisma.applicationTest.upsert({
-        where: { lessonId },
-        create: {
-          lessonId,
-          scenario: required(
-            body.scenario,
-            'Application question is required.',
-          ),
-          referenceAnswer: required(
-            body.referenceAnswer,
-            'Application reference answer is required.',
-          ),
-          enabled: true,
-        },
-        update: {
-          scenario: required(
-            body.scenario,
-            'Application question is required.',
-          ),
-          referenceAnswer: required(
-            body.referenceAnswer,
-            'Application reference answer is required.',
-          ),
-          enabled: true,
-        },
-      });
-    }
-    await this.touchCourse(courseId);
-    return { enabled: body.enabled };
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lesson = await this.requireLesson(courseId, lessonId, tx);
+      const language = await this.defaultLanguageOf(courseId, tx);
+      if (!body.enabled) {
+        await tx.applicationTest.deleteMany({ where: { lessonId, language } });
+      } else {
+        // 过渡写法（B14 起改为按语言保存、关闭只隐藏）：首次创建时给 A-{课时号}{序号}。
+        const existing = await tx.applicationTest.findUnique({
+          where: { lessonId_language: { lessonId, language } },
+          select: { id: true },
+        });
+        const code = existing
+          ? undefined
+          : await this.freeApplicationCode(courseId, lesson, tx);
+        await tx.applicationTest.upsert({
+          where: { lessonId_language: { lessonId, language } },
+          create: {
+            lessonId,
+            courseId,
+            language,
+            code: code as string,
+            scenario: required(
+              body.scenario,
+              'Application question is required.',
+            ),
+            referenceAnswer: required(
+              body.referenceAnswer,
+              'Application reference answer is required.',
+            ),
+            enabled: true,
+          },
+          update: {
+            scenario: required(
+              body.scenario,
+              'Application question is required.',
+            ),
+            referenceAnswer: required(
+              body.referenceAnswer,
+              'Application reference answer is required.',
+            ),
+            enabled: true,
+          },
+        });
+      }
+      return { enabled: body.enabled };
+    });
   }
 
   async parseDocx(
@@ -713,81 +713,105 @@ export class CourseAuthoringService {
     }
   }
 
+  /**
+   * 批量导入推荐阅读：表头不对就整个文件 400（不写任何东西）；否则在一个事务里把没有错误的行
+   * 加到各课时英文列表的末尾，有错误的行跳过并逐行说明。返回
+   * `{ rowsRead, added, byLesson: [{ lessonCode, added }], errors: [{ row, message }] }`。
+   */
   async importReadings(
     courseId: string,
     file: { originalname: string; buffer: Buffer } | undefined,
   ) {
-    const rows = this.readSheet(file);
+    const table = this.readTable(file);
+    const missing = missingReadingColumns(table.headers);
+    if (missing.length > 0) {
+      throw new BadRequestException({
+        code: 'READING_COLUMNS_INVALID',
+        message: 'Use the template to import readings.',
+        details: { missing },
+      });
+    }
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const lessons = await tx.lesson.findMany({
+        where: { courseId, archivedAt: null },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true, code: true },
+      });
+      const check = checkReadingRows(
+        table.rows,
+        lessons.map((lesson) => lesson.code),
+      );
+      const lessonByCode = new Map(
+        lessons.map((lesson) => [lesson.code, lesson]),
+      );
+      const last = await tx.recommendedReading.groupBy({
+        by: ['lessonId'],
+        where: { lessonId: { in: lessons.map((lesson) => lesson.id) } },
+        _max: { sortOrder: true },
+      });
+      const nextOrder = new Map(
+        last.map((row) => [row.lessonId, (row._max.sortOrder ?? -1) + 1]),
+      );
+      const added = new Map<string, number>();
+      for (const row of check.valid) {
+        const lesson = lessonByCode.get(row.lessonCode);
+        if (!lesson) continue;
+        const sortOrder = nextOrder.get(lesson.id) ?? 0;
+        nextOrder.set(lesson.id, sortOrder + 1);
+        await tx.recommendedReading.create({
+          data: {
+            lessonId: lesson.id,
+            language: READING_LANGUAGE,
+            type: row.type as ReadingType,
+            title: row.title,
+            author: row.author,
+            whyRecommended: row.whyRecommended,
+            sortOrder,
+          },
+        });
+        added.set(row.lessonCode, (added.get(row.lessonCode) ?? 0) + 1);
+      }
+      return {
+        rowsRead: check.rowsRead,
+        added: check.valid.length,
+        byLesson: lessons
+          .filter((lesson) => added.has(lesson.code))
+          .map((lesson) => ({
+            lessonCode: lesson.code,
+            added: added.get(lesson.code) ?? 0,
+          })),
+        errors: check.errors,
+      };
+    });
+  }
+
+  /** 推荐阅读导入模板（CSV，BOM 开头）：每个启用课时一行，预填 Course ID、Lesson ID 和英文课时名。 */
+  async downloadReadingTemplate(courseId: string): Promise<string> {
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: { code: true },
+    });
+    if (!course) {
+      throw new NotFoundException({
+        code: 'COURSE_NOT_FOUND',
+        message: 'Course not found',
+      });
+    }
     const lessons = await this.prisma.lesson.findMany({
       where: { courseId, archivedAt: null },
-      select: { id: true, code: true },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      include: { localizations: true },
     });
-    const lessonByCode = new Map(
-      lessons.map((lesson) => [lesson.code, lesson]),
+    return readingTemplateCsv(
+      course.code,
+      lessons.map((lesson) => ({
+        code: lesson.code,
+        title:
+          lesson.localizations
+            .find((loc) => loc.language === READING_LANGUAGE)
+            ?.title.trim() ?? '',
+      })),
     );
-    const errors: Array<{ row: number; message: string }> = [];
-    let added = 0;
-    for (const [index, row] of rows.entries()) {
-      const lessonCode = this.cell(row, 'Lesson ID', 'LessonID');
-      const lesson = lessonByCode.get(lessonCode);
-      if (!lesson) {
-        errors.push({
-          row: index + 2,
-          message: `Lesson ID ${lessonCode || '(empty)'} doesn't exist`,
-        });
-        continue;
-      }
-      const type = upper(this.cell(row, 'Type'));
-      const title = this.cell(row, 'Title');
-      const author = this.cell(row, 'Author');
-      const why = this.cell(
-        row,
-        'Why we recommend it',
-        'Why we recommend',
-        'Why',
-      );
-      if (!READING_TYPES.has(type)) {
-        errors.push({
-          row: index + 2,
-          message: 'Type must be Book, Article, Paper or Other',
-        });
-        continue;
-      }
-      if (!title) {
-        errors.push({ row: index + 2, message: 'Title is empty' });
-        continue;
-      }
-      if (!author) {
-        errors.push({ row: index + 2, message: 'Author is empty' });
-        continue;
-      }
-      if (!why) {
-        errors.push({
-          row: index + 2,
-          message: 'Why we recommend it is empty',
-        });
-        continue;
-      }
-      const last = await this.prisma.recommendedReading.findFirst({
-        where: { lessonId: lesson.id, language: 'en-GB' },
-        orderBy: { sortOrder: 'desc' },
-        select: { sortOrder: true },
-      });
-      await this.prisma.recommendedReading.create({
-        data: {
-          lessonId: lesson.id,
-          language: 'en-GB',
-          type: type as never,
-          title,
-          author,
-          whyRecommended: why,
-          sortOrder: (last?.sortOrder ?? -1) + 1,
-        },
-      });
-      added++;
-    }
-    await this.touchCourse(courseId);
-    return { added, errors };
   }
 
   async importUnderstanding(
@@ -820,88 +844,98 @@ export class CourseAuthoringService {
       }
     }
 
-    const lessons = await this.prisma.lesson.findMany({
-      where: { courseId, archivedAt: null },
-      include: { applicationTest: true },
-    });
-    const lessonByCode = new Map(
-      lessons.map((lesson) => [lesson.code, lesson]),
-    );
-    const errors: Array<{ row: number; message: string }> = [];
-    const byLesson: Record<string, number> = {};
-    const applicationSeen = new Set<string>();
-    let added = 0;
-
-    for (const [index, row] of rows.entries()) {
-      const rowNo = index + 2;
-      const lessonCode = this.cell(row, 'Lesson ID', 'LessonID');
-      const lesson = lessonByCode.get(lessonCode);
-      if (singleLessonId && lesson?.id !== singleLessonId) continue;
-      if (!lesson) {
-        errors.push({
-          row: rowNo,
-          message: `Lesson ID ${lessonCode || '(empty)'} doesn't exist`,
-        });
-        continue;
-      }
-      const type = this.cell(row, 'Type');
-      const question = this.cell(row, 'Question');
-      const referenceAnswer = this.cell(
-        row,
-        'Reference answer',
-        'Reference Answer',
+    return runCourseWrite(this.prisma, courseId, async (tx) => {
+      const defaultLanguage = await this.defaultLanguageOf(courseId, tx);
+      const lessons = await tx.lesson.findMany({
+        where: { courseId, archivedAt: null },
+        include: { applicationTests: true },
+      });
+      const lessonByCode = new Map(
+        lessons.map((lesson) => [lesson.code, lesson]),
       );
-      if (type !== 'Knowledge' && type !== 'Application') {
-        errors.push({
-          row: rowNo,
-          message: 'Type must be Knowledge or Application',
-        });
-        continue;
-      }
-      if (!question) {
-        errors.push({ row: rowNo, message: 'Question is empty' });
-        continue;
-      }
-      if (!referenceAnswer) {
-        errors.push({ row: rowNo, message: 'Reference answer is empty' });
-        continue;
-      }
-      if (type === 'Application') {
-        if (lesson.applicationTest || applicationSeen.has(lessonCode)) {
+      const errors: Array<{ row: number; message: string }> = [];
+      const byLesson: Record<string, number> = {};
+      const applicationSeen = new Set<string>();
+      let added = 0;
+
+      for (const [index, row] of rows.entries()) {
+        const rowNo = index + 2;
+        const lessonCode = this.cell(row, 'Lesson ID', 'LessonID');
+        const lesson = lessonByCode.get(lessonCode);
+        if (singleLessonId && lesson?.id !== singleLessonId) continue;
+        if (!lesson) {
           errors.push({
             row: rowNo,
-            message: `${lessonCode} already has an Application Test`,
+            message: `Lesson ID ${lessonCode || '(empty)'} doesn't exist`,
           });
           continue;
         }
-        applicationSeen.add(lessonCode);
-        await this.prisma.applicationTest.create({
-          data: {
-            lessonId: lesson.id,
-            scenario: question,
-            referenceAnswer,
-            enabled: true,
-          },
-        });
-      } else {
-        const count = await this.prisma.knowledgeQuestion.count({
-          where: { lessonId: lesson.id },
-        });
-        await this.prisma.knowledgeQuestion.create({
-          data: {
-            lessonId: lesson.id,
-            code: `K-${String(count + 1).padStart(4, '0')}`,
-            question,
-            referenceAnswer,
-            sortOrder: count,
-          },
-        });
+        const type = this.cell(row, 'Type');
+        const question = this.cell(row, 'Question');
+        const referenceAnswer = this.cell(
+          row,
+          'Reference answer',
+          'Reference Answer',
+        );
+        if (type !== 'Knowledge' && type !== 'Application') {
+          errors.push({
+            row: rowNo,
+            message: 'Type must be Knowledge or Application',
+          });
+          continue;
+        }
+        if (!question) {
+          errors.push({ row: rowNo, message: 'Question is empty' });
+          continue;
+        }
+        if (!referenceAnswer) {
+          errors.push({ row: rowNo, message: 'Reference answer is empty' });
+          continue;
+        }
+        if (type === 'Application') {
+          if (
+            defaultLanguageTest(lesson.applicationTests, defaultLanguage) ||
+            applicationSeen.has(lessonCode)
+          ) {
+            errors.push({
+              row: rowNo,
+              message: `${lessonCode} already has an Application Test`,
+            });
+            continue;
+          }
+          applicationSeen.add(lessonCode);
+          await tx.applicationTest.create({
+            data: {
+              lessonId: lesson.id,
+              courseId,
+              language: defaultLanguage,
+              code: await this.freeApplicationCode(courseId, lesson, tx),
+              scenario: question,
+              referenceAnswer,
+              enabled: true,
+            },
+          });
+        } else {
+          const count = await tx.knowledgeQuestion.count({
+            where: { lessonId: lesson.id, language: defaultLanguage },
+          });
+          await tx.knowledgeQuestion.create({
+            data: {
+              lessonId: lesson.id,
+              courseId,
+              language: defaultLanguage,
+              code: await this.freeKnowledgeCode(courseId, lesson, tx),
+              question,
+              referenceAnswer,
+              sortOrder: count,
+            },
+          });
+        }
+        byLesson[lessonCode] = (byLesson[lessonCode] ?? 0) + 1;
+        added++;
       }
-      byLesson[lessonCode] = (byLesson[lessonCode] ?? 0) + 1;
-      added++;
-    }
-    if (added > 0) await this.touchCourse(courseId);
-    return { added, byLesson, errors };
+      return { added, byLesson, errors };
+    });
   }
 
   async downloadUnderstandingTemplate(courseId: string): Promise<string> {
@@ -941,21 +975,63 @@ export class CourseAuthoringService {
       });
   }
 
-  private async touchCourse(courseId: string) {
-    await this.prisma.commerceCourse.update({
+  private async defaultLanguageOf(
+    courseId: string,
+    db: Db = this.prisma,
+  ): Promise<string> {
+    const course = await db.commerceCourse.findUnique({
       where: { id: courseId },
-      data: {
-        hasDraft: true,
-        lifecycleStatus: 'WORKING',
-        draftSourceType: null,
-        draftSourceEnvironment: null,
-        draftSourceVersionLabel: null,
-      },
+      select: { defaultContentLanguage: true },
     });
+    return course?.defaultContentLanguage ?? 'en-GB';
   }
 
-  private async requireLesson(courseId: string, lessonId: string) {
-    const lesson = await this.prisma.lesson.findFirst({
+  /** 过渡用：本课程里还没被占用的 A-{课时号}{序号}。 */
+  private async freeApplicationCode(
+    courseId: string,
+    lesson: { code: string; sortOrder: number },
+    db: Db = this.prisma,
+  ): Promise<string> {
+    const taken = new Set(
+      (
+        await db.applicationTest.findMany({
+          where: { courseId },
+          select: { code: true },
+        })
+      ).map((row) => row.code),
+    );
+    const lessonNo = lessonNumber(lesson.code, lesson.sortOrder);
+    let sequence = 1;
+    while (taken.has(formatApplicationCode(lessonNo, sequence))) sequence += 1;
+    return formatApplicationCode(lessonNo, sequence);
+  }
+
+  /** 过渡用：本课程里还没被占用的 K-{课时号}{序号}（第一个空位）。 */
+  private async freeKnowledgeCode(
+    courseId: string,
+    lesson: { code: string; sortOrder: number },
+    db: Db = this.prisma,
+  ): Promise<string> {
+    const taken = new Set(
+      (
+        await db.knowledgeQuestion.findMany({
+          where: { courseId },
+          select: { code: true },
+        })
+      ).map((row) => row.code),
+    );
+    const lessonNo = lessonNumber(lesson.code, lesson.sortOrder);
+    let sequence = 1;
+    while (taken.has(formatKnowledgeCode(lessonNo, sequence))) sequence += 1;
+    return formatKnowledgeCode(lessonNo, sequence);
+  }
+
+  private async requireLesson(
+    courseId: string,
+    lessonId: string,
+    db: Db = this.prisma,
+  ) {
+    const lesson = await db.lesson.findFirst({
       where: { id: lessonId, courseId, archivedAt: null },
       include: {
         localizations: true,
@@ -972,8 +1048,12 @@ export class CourseAuthoringService {
     return lesson;
   }
 
-  private async requireAsset(courseId: string, assetId: string) {
-    const asset = await this.prisma.courseMediaAsset.findFirst({
+  private async requireAsset(
+    courseId: string,
+    assetId: string,
+    db: Db = this.prisma,
+  ) {
+    const asset = await db.courseMediaAsset.findFirst({
       where: { id: assetId, courseId },
     });
     if (!asset)
@@ -984,17 +1064,33 @@ export class CourseAuthoringService {
     return asset;
   }
 
-  private async nextExhibitCode(courseId: string): Promise<string> {
-    const rows = await this.prisma.exhibit.findMany({
-      where: { lesson: { courseId } },
-      select: { code: true },
+  private async nextExhibitOrder(
+    lessonId: string,
+    db: Db = this.prisma,
+  ): Promise<number> {
+    const last = await db.exhibit.findFirst({
+      where: { lessonId },
+      orderBy: { sortOrder: 'desc' },
+      select: { sortOrder: true },
     });
-    let max = 0;
-    for (const row of rows) {
-      const match = /^E(\d+)$/i.exec(row.code);
-      if (match) max = Math.max(max, Number(match[1]));
+    return (last?.sortOrder ?? 0) + 1;
+  }
+
+  /** 下一个展品编号：计数器只增不减；包导入带来的、已被占用的编号跳过。 */
+  private async allocateExhibitCode(
+    courseId: string,
+    tx: CourseTx,
+  ): Promise<string> {
+    for (;;) {
+      const code = formatExhibitCode(
+        await allocate(tx, exhibitCounterKey(courseId)),
+      );
+      const taken = await tx.exhibit.findUnique({
+        where: { courseId_code: { courseId, code } },
+        select: { id: true },
+      });
+      if (!taken) return code;
     }
-    return `E${String(max + 1).padStart(3, '0')}`;
   }
 
   private assertExpectedKind(
@@ -1016,9 +1112,10 @@ export class CourseAuthoringService {
     }
   }
 
-  private readSheet(
+  /** 读上传的 .xlsx / .csv（CSV 按 UTF-8，开头的 BOM 去掉）；读不出来 400。 */
+  private readTable(
     file: { originalname: string; buffer: Buffer } | undefined,
-  ) {
+  ): SheetTable {
     if (!file?.buffer) {
       throw new BadRequestException({
         code: 'FILE_REQUIRED',
@@ -1026,13 +1123,7 @@ export class CourseAuthoringService {
       });
     }
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      if (!sheet) throw new Error('No sheet');
-      return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-        defval: '',
-        raw: false,
-      });
+      return readSheetTable(file.buffer);
     } catch {
       throw new BadRequestException({
         code: 'SHEET_INVALID',
@@ -1041,27 +1132,18 @@ export class CourseAuthoringService {
     }
   }
 
+  private readSheet(
+    file: { originalname: string; buffer: Buffer } | undefined,
+  ) {
+    return this.readTable(file).rows;
+  }
+
   private normalizeHeader(value: string): string {
-    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return normalizeHeader(value);
   }
 
   private cell(row: Record<string, unknown>, ...names: string[]): string {
-    const entries = Object.entries(row);
-    for (const name of names) {
-      const normalized = this.normalizeHeader(name);
-      const found = entries.find(
-        ([key]) => this.normalizeHeader(key) === normalized,
-      );
-      if (found) {
-        const value = found[1];
-        return typeof value === 'string' ||
-          typeof value === 'number' ||
-          typeof value === 'boolean'
-          ? String(value).trim()
-          : '';
-      }
-    }
-    return '';
+    return sheetCell(row, ...names);
   }
 }
 

@@ -1,5 +1,12 @@
+import { NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  formatApplicationCode,
+  formatKnowledgeCode,
+  lessonNumber,
+} from './code-allocator';
+import { defaultLanguageRows, defaultLanguageTest } from './lesson-tests';
 import type {
   CompletenessInput,
   ContentLesson,
@@ -51,6 +58,8 @@ export interface SnapshotLesson {
   }>;
   exhibits: Array<{
     code: string;
+    /** 课时内的显示顺序；展品有顺序之前拍的旧快照没有这一项，按数组顺序当作顺序。 */
+    sortOrder?: number;
     type: string;
     mediaAssetId: string | null;
     thumbnailAssetId: string | null;
@@ -66,10 +75,11 @@ export interface SnapshotLesson {
     anchorHeading: string | null;
     sortOrder: number;
   }>;
+  /** 展品和时间点都可以还没填（没填完也可以保存），读者按 null 处理为"未选 / 未填"。 */
   triggers: Array<{
-    exhibitCode: string;
+    exhibitCode: string | null;
     language: string;
-    timeSeconds: number;
+    timeSeconds: number | null;
   }>;
   readings: Array<{
     language: string;
@@ -106,17 +116,25 @@ export async function captureVersionSnapshot(
         orderBy: { sortOrder: 'asc' },
         include: {
           localizations: true,
-          exhibits: true,
+          exhibits: { orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }] },
           learningPoints: { orderBy: { sortOrder: 'asc' } },
-          triggers: true,
+          triggers: {
+            orderBy: [{ timeSeconds: 'asc' }, { sortOrder: 'asc' }],
+          },
           readings: { orderBy: { sortOrder: 'asc' } },
           questions: { orderBy: { sortOrder: 'asc' } },
-          applicationTest: true,
+          applicationTests: true,
         },
       },
     },
   });
-  if (!course) throw new Error(`Course ${courseId} not found`);
+  if (!course)
+    throw new NotFoundException({
+      code: 'COURSE_NOT_FOUND',
+      message: 'Course not found',
+    });
+  // 测试按语言存；快照在 B14 之前只带默认内容语言的那一份。
+  const testLanguage = course.defaultContentLanguage;
 
   return {
     formatVersion: 2,
@@ -156,6 +174,7 @@ export async function captureVersionSnapshot(
           })),
           exhibits: lesson.exhibits.map((exhibit) => ({
             code: exhibit.code,
+            sortOrder: exhibit.sortOrder,
             type: exhibit.type,
             mediaAssetId: exhibit.mediaAssetId,
             thumbnailAssetId: exhibit.thumbnailAssetId,
@@ -171,13 +190,13 @@ export async function captureVersionSnapshot(
             anchorHeading: lp.anchorHeading,
             sortOrder: lp.sortOrder,
           })),
-          triggers: lesson.triggers
-            .map((trigger) => ({
-              exhibitCode: exhibitCodeById.get(trigger.exhibitId) ?? '',
-              language: trigger.language,
-              timeSeconds: trigger.timeSeconds,
-            }))
-            .filter((trigger) => Boolean(trigger.exhibitCode)),
+          triggers: lesson.triggers.map((trigger) => ({
+            exhibitCode: trigger.exhibitId
+              ? (exhibitCodeById.get(trigger.exhibitId) ?? null)
+              : null,
+            language: trigger.language,
+            timeSeconds: trigger.timeSeconds,
+          })),
           readings: lesson.readings.map((reading) => ({
             language: reading.language,
             type: reading.type,
@@ -186,24 +205,38 @@ export async function captureVersionSnapshot(
             whyRecommended: reading.whyRecommended,
             sortOrder: reading.sortOrder,
           })),
-          questions: lesson.questions.map((question) => ({
-            code: question.code,
-            question: question.question,
-            referenceAnswer: question.referenceAnswer,
-            sortOrder: question.sortOrder,
-            enabled: question.enabled,
-          })),
-          applicationTest: lesson.applicationTest
-            ? {
-                scenario: lesson.applicationTest.scenario,
-                referenceAnswer: lesson.applicationTest.referenceAnswer,
-                enabled: lesson.applicationTest.enabled,
-              }
-            : null,
+          questions: defaultLanguageRows(lesson.questions, testLanguage).map(
+            (question) => ({
+              code: question.code,
+              question: question.question,
+              referenceAnswer: question.referenceAnswer,
+              sortOrder: question.sortOrder,
+              enabled: question.enabled,
+            }),
+          ),
+          applicationTest: capturedTest(
+            defaultLanguageTest(lesson.applicationTests, testLanguage),
+          ),
         };
       }),
     },
   };
+}
+
+function capturedTest(
+  test: {
+    scenario: string;
+    referenceAnswer: string | null;
+    enabled: boolean;
+  } | null,
+): SnapshotLesson['applicationTest'] {
+  return test
+    ? {
+        scenario: test.scenario,
+        referenceAnswer: test.referenceAnswer,
+        enabled: test.enabled,
+      }
+    : null;
 }
 
 /**
@@ -348,10 +381,20 @@ export async function applyVersionSnapshotInTx(
     }
 
     const exhibitIdByCode = new Map<string, string>();
-    for (const exhibit of lesson.exhibits) {
+    // 带 sortOrder 的快照按它排；旧快照没有，数组顺序就是顺序。位置重新编成 1..N。
+    const exhibitsInOrder = lesson.exhibits.every(
+      (exhibit) => typeof exhibit.sortOrder === 'number',
+    )
+      ? [...lesson.exhibits].sort(
+          (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0),
+        )
+      : lesson.exhibits;
+    for (const [index, exhibit] of exhibitsInOrder.entries()) {
       const created = await tx.exhibit.create({
         data: {
           lessonId,
+          courseId,
+          sortOrder: index + 1,
           code: exhibit.code,
           type: exhibit.type as never,
           mediaAssetId: exhibit.mediaAssetId,
@@ -378,17 +421,16 @@ export async function applyVersionSnapshotInTx(
       });
     }
     for (const trigger of lesson.triggers) {
-      const exhibitId = exhibitIdByCode.get(trigger.exhibitCode);
-      if (exhibitId) {
-        await tx.exhibitTrigger.create({
-          data: {
-            lessonId,
-            exhibitId,
-            language: trigger.language,
-            timeSeconds: trigger.timeSeconds,
-          },
-        });
-      }
+      await tx.exhibitTrigger.create({
+        data: {
+          lessonId,
+          exhibitId: trigger.exhibitCode
+            ? (exhibitIdByCode.get(trigger.exhibitCode) ?? null)
+            : null,
+          language: trigger.language,
+          timeSeconds: trigger.timeSeconds,
+        },
+      });
     }
     for (const reading of lesson.readings) {
       await tx.recommendedReading.create({
@@ -403,11 +445,31 @@ export async function applyVersionSnapshotInTx(
         },
       });
     }
+    // 题目编号在课程内唯一：旧快照里的编号（每个课时都从 K-0001 起）可能已被别的课时占用，
+    // 占用了就按 K-{课时号}{序号} 顺延，没占用就保留快照里的编号。
+    const lessonNo = lessonNumber(lesson.code, lesson.sortOrder);
+    const takenKnowledge = new Set(
+      (
+        await tx.knowledgeQuestion.findMany({
+          where: { courseId },
+          select: { code: true },
+        })
+      ).map((row) => row.code),
+    );
+    let sequence = 0;
     for (const question of lesson.questions) {
+      let code = question.code;
+      while (!code || takenKnowledge.has(code)) {
+        sequence += 1;
+        code = formatKnowledgeCode(lessonNo, sequence);
+      }
+      takenKnowledge.add(code);
       await tx.knowledgeQuestion.create({
         data: {
           lessonId,
-          code: question.code,
+          courseId,
+          language: snapshot.course.defaultContentLanguage,
+          code,
           question: question.question,
           referenceAnswer: question.referenceAnswer,
           sortOrder: question.sortOrder,
@@ -416,9 +478,28 @@ export async function applyVersionSnapshotInTx(
       });
     }
     if (lesson.applicationTest) {
+      const takenApplication = new Set(
+        (
+          await tx.applicationTest.findMany({
+            where: { courseId },
+            select: { code: true },
+          })
+        ).map((row) => row.code),
+      );
+      let applicationSequence = 1;
+      while (
+        takenApplication.has(
+          formatApplicationCode(lessonNo, applicationSequence),
+        )
+      ) {
+        applicationSequence += 1;
+      }
       await tx.applicationTest.create({
         data: {
           lessonId,
+          courseId,
+          language: snapshot.course.defaultContentLanguage,
+          code: formatApplicationCode(lessonNo, applicationSequence),
           scenario: lesson.applicationTest.scenario,
           referenceAnswer: lesson.applicationTest.referenceAnswer,
           enabled: lesson.applicationTest.enabled,
@@ -428,18 +509,48 @@ export async function applyVersionSnapshotInTx(
   }
 }
 
-/** 快照 → 完成度输入（工作区 detail 与快照共用同一套规则）。 */
+interface CompletenessTrial {
+  trialEnabled: boolean;
+  trialRows: Array<{
+    lessonId: string;
+    status?: string | null;
+    videoCutoffSeconds?: number | null;
+    textCutoffLearningPointId?: string | null;
+  }>;
+}
+
+/** TrialService.get 的结果 → 完成度要看的试看设置（试看不在快照里，随课程当前设置读取）。 */
+export function completenessTrial(trial: {
+  enabled: boolean;
+  rows: Array<{
+    inTrial: boolean;
+    lessonId: string;
+    status?: string | null;
+    videoCutoffSeconds?: number | null;
+    textCutoffLearningPointId?: string | null;
+  }>;
+}): CompletenessTrial {
+  return {
+    trialEnabled: trial.enabled,
+    trialRows: trial.rows
+      .filter((row) => row.inTrial)
+      .map((row) => ({
+        lessonId: row.lessonId,
+        status: row.status,
+        videoCutoffSeconds: row.videoCutoffSeconds,
+        textCutoffLearningPointId: row.textCutoffLearningPointId,
+      })),
+  };
+}
+
+/**
+ * 快照 → 完成度输入。草稿、线上版本、导出检查和预览都先拍快照再走这里，
+ * 所以同一份内容在哪里算出的 issues 都一样。
+ */
 export function snapshotToCompletenessInput(
   snapshot: VersionSnapshot,
-  trial: {
-    trialEnabled: boolean;
-    trialRows: Array<{
-      lessonId: string;
-      status?: string | null;
-      videoCutoffSeconds?: number | null;
-      textCutoffLearningPointId?: string | null;
-    }>;
-  },
+  trial: CompletenessTrial,
+  options: { brokenAssetIds?: ReadonlySet<string> } = {},
 ): CompletenessInput {
   const localizations: ContentLocalization[] = snapshot.course.localizations;
   const lessons: ContentLesson[] = snapshot.course.lessons.map((lesson) => ({
@@ -457,72 +568,50 @@ export function snapshotToCompletenessInput(
     learningPoints: lesson.learningPoints.map((lp) => ({
       language: lp.language,
       source: lp.source,
+      code: lp.code,
+      title: lp.title,
+      timeSeconds: lp.timeSeconds,
     })),
+    triggers: (lesson.triggers ?? []).map((trigger) => ({
+      language: trigger.language,
+      exhibitCode: trigger.exhibitCode,
+      timeSeconds: trigger.timeSeconds,
+    })),
+    exhibits: (lesson.exhibits ?? []).map((exhibit) => ({
+      code: exhibit.code,
+      type: exhibit.type,
+      mediaAssetId: exhibit.mediaAssetId,
+      thumbnailAssetId: exhibit.thumbnailAssetId,
+      localized: exhibit.localized,
+    })),
+    readings: lesson.readings ?? [],
     questions: lesson.questions,
     applicationTest: lesson.applicationTest,
   }));
   return {
     categoryId: snapshot.course.categoryId,
+    coverAssetId: snapshot.course.coverAssetId,
     learningMode: snapshot.course.learningMode,
     learningLanguages: snapshot.course.learningLanguages,
     localizations,
     lessons,
     trialEnabled: trial.trialEnabled,
     trialRows: trial.trialRows,
+    brokenAssetIds: options.brokenAssetIds,
   };
 }
 
-/** 工作区 detail → 完成度输入。 */
-export function detailToCompletenessInput(detail: {
-  categoryId?: string | null;
-  learningMode: string;
-  learningLanguages: unknown;
-  trialEnabled?: boolean;
-  localizations: Array<CourseLocalizationLike>;
-  lessons: Array<{
-    id: string;
-    code: string;
-    sortOrder: number;
-    archivedAt?: Date | null;
-    localizations: Array<
-      CourseLocalizationLike & {
-        videoAssetId?: string | null;
-        video?: { id: string } | null;
-        videoDurationSeconds?: number | null;
-        textHtml?: string | null;
-      }
-    >;
-    learningPoints?: Array<{ language: string; source: string }>;
-    questions?: Array<{ question: string; referenceAnswer: string | null }>;
-    applicationTest?: {
-      scenario: string;
-      referenceAnswer: string | null;
-      enabled: boolean;
-    } | null;
-  }>;
-  trialRows: Array<{
-    lessonId: string;
-    status?: string | null;
-    videoCutoffSeconds?: number | null;
-    textCutoffLearningPointId?: string | null;
-  }>;
-}): CompletenessInput {
-  return {
-    categoryId: detail.categoryId ?? null,
-    learningMode: detail.learningMode,
-    learningLanguages: (detail.learningLanguages as string[]) ?? [],
-    localizations: detail.localizations,
-    lessons: detail.lessons,
-    trialEnabled: Boolean(detail.trialEnabled),
-    trialRows: detail.trialRows,
-  };
-}
-
-interface CourseLocalizationLike {
-  language: string;
-  title?: string | null;
-  shortDescription?: string | null;
-  overview?: string | null;
-  whatYouLearn?: unknown;
-  provides?: unknown;
+/**
+ * 这门课里文件已损坏或丢失的资产（CourseMediaAsset.brokenAt 非空）。
+ * 完成度据此把封面、视频、展品文件标成 "This file is missing or damaged"。
+ */
+export async function loadBrokenAssetIds(
+  prisma: PrismaService | Prisma.TransactionClient,
+  courseId: string,
+): Promise<ReadonlySet<string>> {
+  const rows = await prisma.courseMediaAsset.findMany({
+    where: { courseId, brokenAt: { not: null } },
+    select: { id: true },
+  });
+  return new Set(rows.map((row) => row.id));
 }

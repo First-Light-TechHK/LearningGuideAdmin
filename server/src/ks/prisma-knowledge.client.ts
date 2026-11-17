@@ -5,6 +5,7 @@ import {
   type EmbeddingQueryClient,
 } from './contract/embedding-client';
 import { PrismaService } from '../prisma/prisma.service';
+import { mergeRetrievedChunks, retrievalTerms } from './keyword-retrieval';
 import type {
   KnowledgeClient,
   KnowledgeCourse,
@@ -123,8 +124,8 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
   }
 
   /**
-   * RAG 向量检索：对 query 生成 embedding，在 release 的 KnowledgeChunk 中
-   * 做余弦相似度检索（topK=6，阈值=0.35）。KS 侧持有向量数据，Agent 只拿结果。
+   * RAG 混合检索：向量召回（topK=6，阈值=0.35）与课程关键词召回按排名融合。
+   * 两路均限定当前 Release；KS 侧持有向量数据，Agent 只拿结果。
    */
   async retrieveChunks(
     releaseId: string,
@@ -136,16 +137,10 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
     const queryVec = await this.embedding.embedQuery(query);
     const vecStr = `[${queryVec.join(',')}]`;
 
-    const rows = await this.prisma.$queryRawUnsafe<
-      Array<{
-        pageTitle: string;
-        heading: string | null;
-        content: string;
-        score: number;
-        tokenCount: number;
-      }>
-    >(
-      `
+    const terms = retrievalTerms(query);
+    const [rows, lexical] = await Promise.all([
+      this.prisma.$queryRawUnsafe<RetrievedChunk[]>(
+        `
       SELECT "pageTitle", "heading", "content",
              1 - (embedding <=> $1::vector(1536)) AS score,
              "tokenCount"
@@ -154,19 +149,43 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
       ORDER BY embedding <=> $1::vector(1536)
       LIMIT $3
     `,
-      vecStr,
-      releaseId,
+        vecStr,
+        releaseId,
+        topK,
+      ),
+      terms.length
+        ? this.prisma.$queryRawUnsafe<RetrievedChunk[]>(
+            `
+        SELECT "pageTitle", "heading", "content",
+               COALESCE(1 - (embedding <=> $1::vector(1536)), 0) AS score,
+               "tokenCount"
+        FROM "KnowledgeChunk"
+        WHERE "releaseId" = $2
+          AND EXISTS (
+            SELECT 1 FROM unnest($3::text[]) AS term
+            WHERE strpos(lower("content"), term) > 0
+               OR strpos(lower(COALESCE("heading", '')), term) > 0
+          )
+        ORDER BY (
+          SELECT SUM(
+            CASE WHEN strpos(lower(COALESCE("heading", '')), term) > 0 THEN 2 ELSE 0 END
+            + CASE WHEN strpos(lower("content"), term) > 0 THEN 1 ELSE 0 END
+          ) FROM unnest($3::text[]) AS term
+        ) DESC, "sortOrder" ASC, "id" ASC
+        LIMIT $4
+      `,
+            vecStr,
+            releaseId,
+            terms,
+            topK,
+          )
+        : Promise.resolve([] as RetrievedChunk[]),
+    ]);
+
+    return mergeRetrievedChunks(
+      rows.filter((r) => r.score >= RETRIEVAL_SCORE_THRESHOLD),
+      lexical,
       topK,
     );
-
-    return rows
-      .filter((r) => r.score >= RETRIEVAL_SCORE_THRESHOLD)
-      .map((r) => ({
-        pageTitle: r.pageTitle,
-        heading: r.heading,
-        content: r.content,
-        score: r.score,
-        tokenCount: r.tokenCount,
-      }));
   }
 }

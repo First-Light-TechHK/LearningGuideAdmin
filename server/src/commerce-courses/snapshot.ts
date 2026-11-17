@@ -63,7 +63,11 @@ type LessonRow = Lesson & {
     timeSeconds: number | null;
     sortOrder: number;
   }[];
-  triggers: { exhibitId: string; language: string; timeSeconds: number }[];
+  triggers: {
+    exhibitId: string | null;
+    language: string;
+    timeSeconds: number | null;
+  }[];
 };
 export type CourseAggregate = CommerceCourse & {
   category?: { id: string; name: string } | null;
@@ -164,11 +168,13 @@ export function buildCourseSnapshot(agg: CourseAggregate): CourseSnapshot {
                   .filter((t) => t.language === loc.language)
                   .map((t) => ({
                     timeSeconds: t.timeSeconds,
-                    exhibitRef: exhibitCodeById(lesson.exhibits, t.exhibitId),
+                    exhibitRef: t.exhibitId
+                      ? exhibitCodeById(lesson.exhibits, t.exhibitId)
+                      : undefined,
                   }))
                   .filter(
                     (t): t is { timeSeconds: number; exhibitRef: string } =>
-                      Boolean(t.exhibitRef),
+                      Boolean(t.exhibitRef) && t.timeSeconds !== null,
                   ),
               }
             : null,

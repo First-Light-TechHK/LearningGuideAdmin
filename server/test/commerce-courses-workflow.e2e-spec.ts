@@ -23,6 +23,9 @@ describe('Commerce course workflow (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const code = `E2E-WF-${Date.now()}`;
+  // Course codes are handed out by the server now, so each course made here is
+  // remembered by the id the create call returned (and removed again afterwards).
+  const ownIds: Partial<Record<'P' | 'H' | 'R' | 'L' | 'O', string>> = {};
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -37,9 +40,7 @@ describe('Commerce course workflow (e2e)', () => {
   afterAll(async () => {
     const courses = await prisma.commerceCourse.findMany({
       where: {
-        code: {
-          in: [code, `${code}-L`, `${code}-O`, `${code}-P`, `${code}-H`],
-        },
+        id: { in: Object.values(ownIds).filter((id) => id !== undefined) },
       },
     });
     for (const course of courses) {
@@ -71,8 +72,9 @@ describe('Commerce course workflow (e2e)', () => {
     const agent = await signInAs(app, 'ADMIN');
     const created: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
-      .send({ code: `${code}-P`, title: 'Publish e2e' });
+      .send({ title: 'Publish e2e' });
     const id: string = created.body.data.id;
+    ownIds.P = id;
     await agent
       .post(`/api/backoffice/courses/${id}/lessons`)
       .send({ title: 'One' })
@@ -138,8 +140,9 @@ describe('Commerce course workflow (e2e)', () => {
     const agent = await signInAs(app, 'ADMIN');
     const created: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
-      .send({ code: `${code}-H`, title: `${code} fingerprint` });
+      .send({ title: `${code} fingerprint` });
     const id: string = created.body.data.id;
+    ownIds.H = id;
     const lesson: SuccessResponse<{ lessons: { id: string }[] }> = await agent
       .post(`/api/backoffice/courses/${id}/lessons`)
       .send({ title: 'One' })
@@ -197,8 +200,8 @@ describe('Commerce course workflow (e2e)', () => {
   });
 
   it('keeps course events append-only, each with its transaction id', async () => {
-    const course = await prisma.commerceCourse.findFirstOrThrow({
-      where: { code: `${code}-H` },
+    const course = await prisma.commerceCourse.findUniqueOrThrow({
+      where: { id: ownIds.H },
     });
     const event = await prisma.courseAuthoringActivity.findFirstOrThrow({
       where: { courseId: course.id, action: 'PUBLISH' },
@@ -230,9 +233,10 @@ describe('Commerce course workflow (e2e)', () => {
 
     const created: SuccessResponse<{ id: string }> = await alice
       .post('/api/backoffice/courses')
-      .send({ code: `${code}-R`, title: `${code} revision` });
+      .send({ title: `${code} revision` });
     expect(created.body).toMatchObject({ error: null });
     const id: string = created.body.data.id;
+    ownIds.R = id;
     const lesson: SuccessResponse<{ lessons: { id: string }[] }> = await alice
       .post(`/api/backoffice/courses/${id}/lessons`)
       .send({ title: 'One' })
@@ -260,7 +264,11 @@ describe('Commerce course workflow (e2e)', () => {
       .send({ title: 'Eins' });
     expect(stale.status).toBe(409);
     expect(stale.body.error.code).toBe('COURSE_STALE');
-    expect(stale.body.error.message).toContain('Refresh');
+    expect(stale.body.error.message).toBe(
+      'This course was updated by e2e-admin. Reload to see the latest changes.',
+    );
+    expect(stale.body.error.details?.updatedByName).toBe('e2e-admin');
+    expect(typeof stale.body.error.details?.revision).toBe('number');
 
     // 刷新后用新 ETag 保存：成功
     const refreshed = await bob.get(`/api/backoffice/courses/${id}`);
@@ -289,10 +297,7 @@ describe('Commerce course workflow (e2e)', () => {
 
   it('deletes a draft once when Delete draft is pressed twice at the same time', async () => {
     const agent = await signInAs(app, 'ADMIN');
-    const course = await prisma.commerceCourse.findFirstOrThrow({
-      where: { code: `${code}-P` },
-    });
-    const id = course.id;
+    const id = ownIds.P!;
     await agent
       .post(`/api/backoffice/courses/${id}/lessons`)
       .send({ title: 'Draft only' })
@@ -326,8 +331,9 @@ describe('Commerce course workflow (e2e)', () => {
     const agent = await signInAs(app, 'ADMIN');
     const created: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
-      .send({ code: `${code}-L`, title: 'Lessons e2e' });
+      .send({ title: 'Lessons e2e' });
     const id: string = created.body.data.id;
+    ownIds.L = id;
 
     // 同时新建两节课：序号和默认 code 各不相同
     const made = await Promise.all([
@@ -346,7 +352,7 @@ describe('Commerce course workflow (e2e)', () => {
     expect(lessons.map((l) => l.sortOrder)).toEqual([1, 2]);
     expect(new Set(lessons.map((l) => l.code)).size).toBe(2);
 
-    // 改成另一节课已有的 code：409，标题也不会被写进去
+    // Lesson ID 由服务器分配、不能改：改成另一节课已有的 code 也是 400，标题也不会被写进去
     // （两次新建谁先拿到锁不固定，所以先记下第二节课原来的标题）
     const before = await prisma.lessonLocalization.findFirstOrThrow({
       where: { lessonId: lessons[1].id },
@@ -354,8 +360,8 @@ describe('Commerce course workflow (e2e)', () => {
     const dup: ErrorResponse = await agent
       .put(`/api/backoffice/courses/${id}/lessons/${lessons[1].id}`)
       .send({ code: lessons[0].code, title: 'Should not stick' });
-    expect(dup.status).toBe(409);
-    expect(dup.body.error.code).toBe('LESSON_CODE_DUPLICATE');
+    expect(dup.status).toBe(400);
+    expect(dup.body.error.code).toBe('LESSON_ID_IMMUTABLE');
     const title = await prisma.lessonLocalization.findFirst({
       where: { lessonId: lessons[1].id },
     });
@@ -373,11 +379,12 @@ describe('Commerce course workflow (e2e)', () => {
     const agent = await signInAs(app, 'ADMIN');
     const mine: SuccessResponse<{ id: string }> = await agent
       .post('/api/backoffice/courses')
-      .send({ code: `${code}-O`, title: 'Order e2e' });
-    const other = await prisma.commerceCourse.findFirst({
-      where: { code: `${code}-L` },
+      .send({ title: 'Order e2e' });
+    const other = await prisma.commerceCourse.findUniqueOrThrow({
+      where: { id: ownIds.L },
     });
     const myId: string = mine.body.data.id;
+    ownIds.O = myId;
     await agent
       .post(`/api/backoffice/courses/${myId}/lessons`)
       .send({ title: 'Mine' });
@@ -385,7 +392,7 @@ describe('Commerce course workflow (e2e)', () => {
       where: { courseId: myId },
     });
     const otherLesson = await prisma.lesson.findFirstOrThrow({
-      where: { courseId: other!.id },
+      where: { courseId: other.id },
     });
 
     const res = await agent

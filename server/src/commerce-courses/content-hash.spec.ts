@@ -132,6 +132,39 @@ describe('contentHash', () => {
     expect(contentHash(b, byId)).toBe(contentHash(a, byId));
   });
 
+  it('ignores the learning point stamps the server writes on text headings', () => {
+    const plain = lesson();
+    plain.localizations[0].textHtml = '<h1>1.1 Why models</h1><p>Text</p>';
+    const stamped = lesson();
+    stamped.localizations[0].textHtml =
+      '<h1 data-lp="T1">1.1 Why models</h1><p>Text</p>';
+    const restamped = lesson();
+    restamped.localizations[0].textHtml =
+      "<h1 class='k' data-lp='T7'>1.1 Why models</h1><p>Text</p>";
+    expect(contentHash(snapshot([stamped]), byId)).toBe(
+      contentHash(snapshot([plain]), byId),
+    );
+    expect(contentHash(snapshot([restamped]), byId)).not.toBe(
+      contentHash(snapshot([plain]), byId),
+    );
+    const sameWithClass = lesson();
+    sameWithClass.localizations[0].textHtml =
+      "<h1 class='k'>1.1 Why models</h1><p>Text</p>";
+    expect(contentHash(snapshot([restamped]), byId)).toBe(
+      contentHash(snapshot([sameWithClass]), byId),
+    );
+  });
+
+  it('still sees a change in the heading text itself', () => {
+    const a = lesson();
+    a.localizations[0].textHtml = '<h1 data-lp="T1">One</h1><p>Text</p>';
+    const b = lesson();
+    b.localizations[0].textHtml = '<h1 data-lp="T1">Two</h1><p>Text</p>';
+    expect(contentHash(snapshot([a]), byId)).not.toBe(
+      contentHash(snapshot([b]), byId),
+    );
+  });
+
   it('ignores the order rows come back from the database', () => {
     const base = lesson();
     const shuffled = lesson({
@@ -142,6 +175,36 @@ describe('contentHash', () => {
     });
     expect(contentHash(snapshot([shuffled]), byId)).toBe(
       contentHash(snapshot([base]), byId),
+    );
+  });
+
+  it('sees a change in the order of the exhibits of a lesson', () => {
+    const ordered = (first: string, second: string) => {
+      const base = lesson();
+      return lesson({
+        exhibits: [
+          { ...base.exhibits[0], sortOrder: first === 'E01' ? 1 : 2 },
+          { ...base.exhibits[1], sortOrder: second === 'E02' ? 2 : 1 },
+        ],
+      });
+    };
+    const inCodeOrder = contentHash(snapshot([ordered('E01', 'E02')]), byId);
+    const reordered = contentHash(snapshot([ordered('E02', 'E01')]), byId);
+    expect(reordered).not.toBe(inCodeOrder);
+  });
+
+  it('gives an exhibit list in code order the same fingerprint as before it had an order', () => {
+    // A version published before exhibits had an order has no sortOrder in its snapshot;
+    // the same content, now carrying the order the migration gave it, must not look like a draft.
+    const legacy = lesson();
+    const withOrder = lesson({
+      exhibits: legacy.exhibits.map((exhibit, index) => ({
+        ...exhibit,
+        sortOrder: index + 1,
+      })),
+    });
+    expect(contentHash(snapshot([withOrder]), byId)).toBe(
+      contentHash(snapshot([legacy]), byId),
     );
   });
 

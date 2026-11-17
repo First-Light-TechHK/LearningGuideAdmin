@@ -19,6 +19,12 @@ import type {
 
 const LANG = 'en-GB';
 
+/**
+ * 原始素材里的学习点标题常常只是加粗的编号段落（`1.1 …`），这里把它们当作 H1；
+ * 编辑器里的 .docx 导入不这样做（只认 Word 的「标题 1」样式）。
+ */
+const RAW_DOCX_OPTIONS = { promoteBoldNumbered: true } as const;
+
 function sha(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
 }
@@ -721,7 +727,9 @@ async function buildNewTemplatePackage(
         lessonNameMatch(n, lessonId, def.no) &&
         isZhName(n) === false,
     );
-    const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
+    const converted = docx
+      ? await convertDocxToHtml(docx.bytes, RAW_DOCX_OPTIONS)
+      : null;
     const html = converted?.html ?? '';
     if (!docx) warnings.push(`Lesson ${def.no} 缺少文本课件 DOCX`);
     if (converted)
@@ -1092,7 +1100,9 @@ async function buildLegacyPackage(
           n.includes('文本') &&
           n.endsWith('.docx'),
       );
-    const converted = docx ? await convertDocxToHtml(docx.bytes) : null;
+    const converted = docx
+      ? await convertDocxToHtml(docx.bytes, RAW_DOCX_OPTIONS)
+      : null;
     const html = converted?.html ?? '';
     if (!docx) warnings.push(`Lesson ${lesson.no} 缺少文本课件 DOCX`);
     if (converted)

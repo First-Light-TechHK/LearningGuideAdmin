@@ -23,6 +23,7 @@ interface AiForm {
   systemPrompt: string
   welcomeMsg: string
   llmModel: string
+  runningSolution: 'grounded-jack' | 'dialogue-yong'
 }
 
 interface AiState {
@@ -82,26 +83,28 @@ interface AiState {
 }
 
 /** 版本和员工都属于会话边界；无归属的旧 key 不自动迁入。 */
-const chatKey = (ownerId: string, courseId: string, releaseId: string | null) =>
-  `aitutor.chat.v2.${JSON.stringify([ownerId, courseId, releaseId])}`
+const chatKey = (ownerId: string, courseId: string, releaseId: string | null, _runningSolution?: AiForm['runningSolution']) =>
+  `aitutor.chat.v4.${JSON.stringify([ownerId, courseId, releaseId])}`
 
-function loadChat(ownerId: string | null, courseId: string, releaseId: string | null): ChatMessage[] | null {
+function loadChat(ownerId: string | null, courseId: string, releaseId: string | null, runningSolution: AiForm['runningSolution'] = 'grounded-jack'): ChatMessage[] | null {
   if (!ownerId) return null
   try {
-    const raw = localStorage.getItem(chatKey(ownerId, courseId, releaseId))
+    const raw = localStorage.getItem(chatKey(ownerId, courseId, releaseId)) ?? localStorage.getItem(`aitutor.chat.v3.${JSON.stringify([ownerId, courseId, releaseId, runningSolution])}`)
     const parsed: unknown = raw ? JSON.parse(raw) : null
     if (!Array.isArray(parsed)) return null
-    return parsed.filter((m): m is ChatMessage => Boolean(m &&
+    const messages: ChatMessage[] = parsed.filter((m): m is ChatMessage => Boolean(m &&
       (m.role === 'user' || m.role === 'ai') && typeof m.content === 'string' &&
       typeof m.createdAt === 'string' && (m.status === undefined ||
       ['streaming', 'complete', 'error', 'aborted'].includes(m.status))))
       .map((m) => m.status === 'streaming' ? { ...m, status: 'aborted' } : m)
+    persistChat(ownerId, courseId, releaseId, messages)
+    return messages
   } catch { return null }
 }
 
-function persistChat(ownerId: string | null, courseId: string, releaseId: string | null, messages: ChatMessage[]) {
+function persistChat(ownerId: string | null, courseId: string, releaseId: string | null, messages: ChatMessage[], runningSolution: AiForm['runningSolution'] = 'grounded-jack') {
   if (!ownerId) return
-  try { localStorage.setItem(chatKey(ownerId, courseId, releaseId), JSON.stringify(messages)) }
+  try { localStorage.setItem(chatKey(ownerId, courseId, releaseId, runningSolution), JSON.stringify(messages)) }
   catch { /* 存储满等异常不影响会话 */ }
 }
 
@@ -143,6 +146,7 @@ function buildForm(
       systemPrompt: config?.main.systemPrompt ?? config?.defaultMainSystemPrompt ?? '',
       welcomeMsg: config?.welcomeMsg || templates.LECTURE?.welcomeMsg || '',
       llmModel: config?.model || '',
+      runningSolution: config?.runningSolution ?? 'grounded-jack',
     }
   }
   const t = templates[editMode]
@@ -156,6 +160,7 @@ function buildForm(
     systemPrompt: view?.systemPrompt || t?.systemPrompt || '',
     welcomeMsg: config?.welcomeMsg || templates.LECTURE?.welcomeMsg || '',
     llmModel: config?.model || '',
+    runningSolution: config?.runningSolution ?? 'grounded-jack',
   }
 }
 
@@ -170,7 +175,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   models: [],
   templates: {},
   config: null,
-  form: { systemPrompt: '', welcomeMsg: '', llmModel: '' },
+  form: { systemPrompt: '', welcomeMsg: '', llmModel: '', runningSolution: 'grounded-jack' },
   initialForm: null,
   saving: false,
   messages: [],
@@ -187,7 +192,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (get().ownerId !== ownerId) {
       get().cancel()
       set({ ownerId, selectedCourseId: null, config: null, messages: [], error: null,
-        form: { systemPrompt: '', welcomeMsg: '', llmModel: '' }, initialForm: null,
+        form: { systemPrompt: '', welcomeMsg: '', llmModel: '', runningSolution: 'grounded-jack' }, initialForm: null,
         courses: [], models: [], templates: {}, releases: [], tutors: [], tutorManagerOpen: false,
         controller: null, streaming: false, selectionId: get().selectionId + 1 })
     }
@@ -232,7 +237,7 @@ export const useAiStore = create<AiState>((set, get) => ({
           form,
           initialForm: { ...form },
           ...(config.releaseId !== previousConfig?.releaseId ? {
-            messages: loadChat(ownerId, selectedCourseId, config.releaseId) ?? freshChat(config.welcomeMsg || templates.LECTURE?.welcomeMsg),
+            messages: loadChat(ownerId, selectedCourseId, config.releaseId, config.runningSolution) ?? freshChat(config.welcomeMsg || templates.LECTURE?.welcomeMsg),
           } : {}),
           error: null,
         })
@@ -255,7 +260,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       ])
       if (get().ownerId !== ownerId || get().selectionId !== selectionId) return
       const form = buildForm(config, templates, editMode)
-      const stored = loadChat(ownerId, courseId, config.releaseId)
+      const stored = loadChat(ownerId, courseId, config.releaseId, config.runningSolution)
       set({
         selectedCourseId: courseId,
         config,
@@ -303,13 +308,14 @@ export const useAiStore = create<AiState>((set, get) => ({
     return (
       form.systemPrompt !== initialForm.systemPrompt ||
       form.welcomeMsg !== initialForm.welcomeMsg ||
-      form.llmModel !== initialForm.llmModel
+      form.llmModel !== initialForm.llmModel ||
+      form.runningSolution !== initialForm.runningSolution
     )
   },
 
   async save() {
     const { selectedCourseId, form, editMode, config, templates } = get()
-    if (!selectedCourseId) return false
+    if (!selectedCourseId || get().streaming || get().saving) return false
     set({ saving: true })
     try {
       // 2026-10-29：System Prompt 按 editMode 写入；Welcome / Model 写入课程级共享列。
@@ -325,6 +331,7 @@ export const useAiStore = create<AiState>((set, get) => ({
         mode: editMode,
         llmProvider: 'openrouter',
         llmModel: form.llmModel,
+        runningSolution: form.runningSolution,
         systemPrompt: isMain
           ? form.systemPrompt === mainDefault ? '' : form.systemPrompt
           : form.systemPrompt === templates[editMode]?.systemPrompt
@@ -336,8 +343,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       set({
         config: next,
         initialForm: { ...form },
+
         error: null,
       })
+      persistChat(get().ownerId, selectedCourseId, next.releaseId, get().messages)
       return true
     } catch (e) {
       set({ error: (e as Error).message })
@@ -415,7 +424,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       const { editMode, templates } = get()
       const form = buildForm(next, templates, editMode)
       set({ config: next, form, initialForm: { ...form }, error: null,
-        messages: loadChat(get().ownerId, selectedCourseId, next.releaseId) ?? freshChat(form.welcomeMsg) })
+        messages: loadChat(get().ownerId, selectedCourseId, next.releaseId, next.runningSolution) ?? freshChat(form.welcomeMsg) })
     } catch (e) {
       set({ error: (e as Error).message })
       throw e
@@ -444,21 +453,23 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (!selectedCourseId || streaming) return
     const fresh = freshChat(config?.welcomeMsg || get().templates.LECTURE?.welcomeMsg)
     set({ messages: fresh, error: null })
-    persistChat(ownerId, selectedCourseId, config?.releaseId ?? null, fresh)
+    persistChat(ownerId, selectedCourseId, config?.releaseId ?? null, fresh, config?.runningSolution)
   },
 
   async send(text) {
     const { ownerId, selectedCourseId, config, mode, messages, streaming } = get()
     const content = text.trim()
-    if (!ownerId || !selectedCourseId || !config?.releaseId || !content || streaming) return
+    if (!ownerId || !selectedCourseId || !config?.releaseId || !content || streaming || get().saving) return
     const releaseId = config.releaseId
+    const runningSolution = config.runningSolution
     const history = completeHistory(messages, mode === 'SOCRATIC' ? 10 : 6)
     const controller = new AbortController()
     let msgs: ChatMessage[] = [...messages,
       { role: 'user', content, createdAt: now() },
       { role: 'ai', content: '', createdAt: now(), status: 'streaming' }]
     const stillHere = () => get().controller === controller && get().ownerId === ownerId &&
-      get().selectedCourseId === selectedCourseId && get().config?.releaseId === releaseId
+      get().selectedCourseId === selectedCourseId && get().config?.releaseId === releaseId &&
+      get().config?.runningSolution === runningSolution
     const updateLast = (patch: Partial<ChatMessage>) => {
       msgs = [...msgs.slice(0, -1), { ...msgs[msgs.length - 1], ...patch }]
       if (stillHere()) set({ messages: msgs })
@@ -477,7 +488,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       if (stillHere() && !controller.signal.aborted) set({ error: (e as Error).message })
     } finally {
       if (get().controller === controller) {
-        persistChat(ownerId, selectedCourseId, releaseId, msgs)
+        persistChat(ownerId, selectedCourseId, releaseId, msgs, config.runningSolution)
         set({ streaming: false, controller: null })
       }
     }
@@ -492,7 +503,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (lastUserIdx === -1) return
     const trimmed = messages.slice(0, lastUserIdx)
     set({ messages: trimmed, error: null })
-    persistChat(get().ownerId, selectedCourseId, get().config?.releaseId ?? null, trimmed)
+    persistChat(get().ownerId, selectedCourseId, get().config?.releaseId ?? null, trimmed, get().config?.runningSolution)
   },
 
   /** 重新发送最后一条 user 消息：先删掉 user+ai，再 send 原文。
@@ -505,7 +516,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     const originalText = messages[lastUserIdx].content
     const trimmed = messages.slice(0, lastUserIdx)
     set({ messages: trimmed, error: null })
-    persistChat(get().ownerId, selectedCourseId, get().config?.releaseId ?? null, trimmed)
+    persistChat(get().ownerId, selectedCourseId, get().config?.releaseId ?? null, trimmed, get().config?.runningSolution)
     try {
       await get().send(originalText)
       return get().messages.at(-1)?.status === 'complete'

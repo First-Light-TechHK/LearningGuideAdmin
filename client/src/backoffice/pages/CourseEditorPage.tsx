@@ -2,7 +2,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 
 import type {
-  CourseCategory,
   CourseDetail,
   CourseVersion,
   HistoryPage,
@@ -11,7 +10,7 @@ import type {
 import { useEmployee } from '../employeeSession';
 import { boRequest } from '../lib/api';
 import { isActionAllowed } from '../rbac/permissions';
-import { localizedName } from '../lib/i18n/localized';
+import { categoryLabel } from '../lib/categoryLabel';
 
 import { CourseInfoSection } from './course-editor/CourseInfoSection';
 import { CourseContentSection } from './course-editor/CourseContentSection';
@@ -40,7 +39,7 @@ export function CourseEditorPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const [categories, setCategories] = useState<CourseCategory[]>([]);
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
 
   const fetchLoad = useCallback(() => {
     return Promise.all([
@@ -50,7 +49,7 @@ export function CourseEditorPage() {
       boRequest<HistoryPage>(
         `/api/backoffice/courses/${courseId}/history?page=${historyPage}&pageSize=20`,
       ),
-      boRequest<CourseCategory[]>(`/api/backoffice/courses/categories`),
+      boRequest<Array<{ id: string; name: string }>>(`/api/backoffice/courses/categories`),
     ]).then(([detail, trialResult, versionsResult, historyResult, categoriesResult]) => {
       setLoading(false);
       if (!detail.success) {
@@ -95,7 +94,7 @@ export function CourseEditorPage() {
 
   const liveVersion = useMemo(() => versions.find((version) => version.isLive), [versions]);
   const localizedCategories = useMemo(
-    () => categories.map((category) => ({ ...category, name: localizedName(locale, category) })),
+    () => categories.map((category) => ({ ...category, name: categoryLabel(locale, category.name) })),
     [categories, locale],
   );
   const stepLabel = (complete: boolean) => L(locale, complete ? '已完成' : '未完成', complete ? 'Complete' : 'Incomplete');
@@ -112,7 +111,7 @@ export function CourseEditorPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 24 }}>{course.localizations.find((item) => item.language === 'en-GB')?.title?.trim() || course.localizations.find((item) => item.title.trim())?.title || course.code}</h1>
             <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>
-              {course.code} · {course.category ? localizedName(locale, course.category) : L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
+              {course.code} · {course.category ? categoryLabel(locale, course.category.name) : L(locale, '未分类', 'Uncategorized')} · {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessons.length} {L(locale, '个课时', 'lessons')}
             </div>
           </div>
         </div>

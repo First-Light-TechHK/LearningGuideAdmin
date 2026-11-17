@@ -49,7 +49,7 @@ export interface AiChatLogEntry {
     answerChars: number;
     latencyMs: number;
     maxOutputTokens: number;
-    reasoningEffort?: 'low' | 'none';
+    reasoningEffort?: 'low' | 'none' | 'minimal';
   }>;
   question: string;
   answer: string;

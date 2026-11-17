@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useEmployee } from '../backoffice/employeeSession';
 import { ConfigPanel } from '../components/ai/ConfigPanel'
 import { ChatWindow } from '../components/ai/ChatWindow'
+import { EvaluationPanel } from '../components/ai/EvaluationPanel'
+import { Button } from '../components/ui'
 import { TutorManagerModal } from '../components/ai/TutorManagerModal'
 import { useAiStore } from '../stores/aiStore'
 import { useAiText } from '../components/ai/i18n'
@@ -16,14 +18,18 @@ import { tokens } from '../theme/tokens'
  * 2026-10-20：原右侧静态 Testing 徽章移除（改挂对话头部 versionTag 旁，见 `ChatWindow`）。
  * 经 `MainLayout` 的 `topBar` 槽位注入。
  */
-export function AITutorTopBar() {
+export type AITutorTab = 'tutor' | 'feedback'
+
+export function AITutorTopBar({ active = 'tutor', onChange }: { active?: AITutorTab; onChange?: (tab: AITutorTab) => void }) {
   const { text } = useAiText()
   return (
     <div
+      role="tablist"
+      aria-label={text('title')}
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacing.md,
+        gap: tokens.spacing['2xl'],
         height: 63,
         padding: `0 ${tokens.spacing.xl}px`,
         background: tokens.color.bg.container,
@@ -31,20 +37,27 @@ export function AITutorTopBar() {
         flexShrink: 0,
       }}
     >
-      {/* 模块标题：对齐 KnowledgeTabBar 激活态（主色 #145CFF / 16px / 600 / 底部 2px 下划线） */}
-      <span
+      {(['tutor', 'feedback'] as const).map((tab) => <button
+        key={tab}
+        type="button"
+        role="tab"
+        aria-selected={active === tab}
+        aria-controls={`ai-${tab}-panel`}
+        id={`ai-${tab}-tab`}
+        onClick={() => onChange?.(tab)}
         style={{
+          border: 'none', background: 'transparent', padding: 0, cursor: 'pointer',
           position: 'relative',
           height: '100%',
           display: 'inline-flex',
           alignItems: 'center',
           fontSize: tokens.fontSize['2xl'],
           fontWeight: tokens.fontWeight.semibold,
-          color: tokens.color.primaryDark,
+          color: active === tab ? tokens.color.primaryDark : tokens.color.text.primary,
         }}
       >
-        {text('title')}
-        <span
+        {text(tab === 'tutor' ? 'title' : 'feedback.tab')}
+        {active === tab && <span
           aria-hidden
           style={{
             position: 'absolute',
@@ -54,8 +67,8 @@ export function AITutorTopBar() {
             height: 2,
             background: tokens.color.primaryDark,
           }}
-        />
-      </span>
+        />}
+      </button>)}
     </div>
   )
 }
@@ -67,6 +80,8 @@ export function AITutorTopBar() {
  * 左右分栏比例（2026-10-20 改拍）：配置面板 40%、对话窗口 60%。
  */
 export function AITutor() {
+  const [testing, setTesting] = useState(false)
+  const { text } = useAiText()
   const init = useAiStore((s) => s.init)
   const cancel = useAiStore((s) => s.cancel)
   const ownerId = useAiStore((s) => s.ownerId)
@@ -87,8 +102,12 @@ export function AITutor() {
         <ConfigPanel />
       </div>
       <div style={{ flex: '1 1 0', minWidth: 0 }}>
-        <ChatWindow />
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: tokens.spacing.sm }}>
+          <Button onClick={() => setTesting((value) => !value)}>{text('evaluation.open')}</Button>
+          <div style={{ flex: 1, minHeight: 0 }}>{<ChatWindow />}</div>
+        </div>
       </div>
+      <EvaluationPanel open={testing} close={() => setTesting(false)} />
       <TutorManagerModal />
     </div>
   )

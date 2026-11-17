@@ -147,6 +147,11 @@ LIMIT $3
 
 参数：topK=6，score_threshold=0.35
 
+2026-11-16 修复：当前实现同时从同一 Release 的正文和标题召回中英文关键词命中，
+与通过阈值的向量结果做 reciprocal rank fusion（RRF），去重后返回 topK。
+关键词通过 `Intl.Segmenter` 分词并移除常见问句词，SQL 使用参数绑定，不新增索引或扩展。
+因此即使“什么是积分？”的向量候选偏向向量运算，仍能召回摘要中的积分定义。
+
 ### 5.2 上下文格式
 
 ```
@@ -163,7 +168,23 @@ LIMIT $3
 
 ### 5.3 Token 预算控制
 
-总预算 8k tokens，累加 chunks 的 tokenCount，超出时按 score 从高到低截断。
+总预算 8k tokens，累加 chunks 的 tokenCount，按融合排名选取预算内的完整片段，最多 5 个。
+
+2026-11-16：大包检索正文预算从 1100 恢复为上述 8000，最多 5 个完整片段，按融合排名选入；
+小包全文发送阈值仍为 6000。生成输出预算继续由 `tutor/model-policy.ts` 按模型及 LEC/SOC 控制，
+与检索预算分开。两种运行方案及 backoffice/portal 共用这一检索逻辑。
+
+本次修复验证（在 `server/` 执行）：
+
+```powershell
+node node_modules/eslint/bin/eslint.js src/ks/keyword-retrieval.ts src/ks/keyword-retrieval.spec.ts src/ks/prisma-knowledge.client.ts src/ks/prisma-knowledge.client.spec.ts src/ks/contract/knowledge-client.ts src/ai/tutor/course-context.ts src/ai/tutor/course-context.spec.ts src/ai/ai-chat.service.spec.ts
+node node_modules/typescript/bin/tsc --noEmit --incremental false
+node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand ks/keyword-retrieval.spec.ts ks/prisma-knowledge.client.spec.ts ai/ai-chat.service.spec.ts ai/ai-chat-yong.service.spec.ts ai/tutor/course-context.spec.ts ai/tutor/motherbase-dialogue.spec.ts ai/providers/openrouter.provider.spec.ts
+```
+
+结果：lint、类型检查通过，7 suites / 171 tests passed。另对当前 Release 做只读 SQL 验证：
+使用已存的 Lesson 1 向量模拟偏题召回，最终上下文仍包含摘要中的积分定义和 `course_digest` 来源层级；
+不存在的 Release 返回 0 条片段。这不是一次真实 embedding/生成模型端到端测试，未重启或部署服务。
 
 ### 5.4 Prompt 引用规则
 

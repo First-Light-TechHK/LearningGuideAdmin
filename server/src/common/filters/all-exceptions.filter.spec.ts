@@ -1,6 +1,7 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  ConflictException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
@@ -61,6 +62,63 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
     const error = body.error as { code: string; message: string };
     expect(error.code).toBe('VALIDATION_ERROR');
     expect(error.message).toBe('title 不能为空; sortOrder 必须是数字');
+  });
+
+  it('异常响应体里的其余字段放进 error.details（如 COURSE_STALE.revision）', () => {
+    filter.catch(
+      new ConflictException({
+        code: 'COURSE_STALE',
+        message:
+          'This course was updated by anna. Reload to see the latest changes.',
+        revision: 7,
+      }),
+      mockHost,
+    );
+    expect(mockResponse.status).toHaveBeenCalledWith(409);
+    expect(getBody().error).toEqual({
+      code: 'COURSE_STALE',
+      message:
+        'This course was updated by anna. Reload to see the latest changes.',
+      details: { revision: 7 },
+    });
+  });
+
+  it('显式 details 与其余字段合并；Nest 自带的 statusCode/error 不进 details', () => {
+    filter.catch(
+      new BadRequestException({
+        code: 'INVALID_TIME',
+        message: 'Enter a time as mm:ss.',
+        details: { row: 3 },
+        field: 'timeSeconds',
+      }),
+      mockHost,
+    );
+    expect(getBody().error).toEqual({
+      code: 'INVALID_TIME',
+      message: 'Enter a time as mm:ss.',
+      details: { row: 3, field: 'timeSeconds' },
+    });
+    filter.catch(new BadRequestException('参数校验失败'), mockHost);
+    const plain = mockResponse.json.mock.calls[1][0].error as Record<
+      string,
+      unknown
+    >;
+    expect(plain).not.toHaveProperty('details');
+  });
+
+  it('Prisma P2002 仍是不带 details 的通用 409', () => {
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        meta: { target: ['code'] },
+        clientVersion: '6.19.3',
+      }),
+      mockHost,
+    );
+    expect(getBody().error).toEqual({
+      code: 'CONFLICT',
+      message: '数据已存在（唯一约束冲突）',
+    });
   });
 
   it('NotFoundException 应映射为 404 + NOT_FOUND', () => {

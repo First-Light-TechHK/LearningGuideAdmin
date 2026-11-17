@@ -259,3 +259,91 @@ describe('buildPackageFromRawZip video times (Modeling life)', () => {
     expect(readings['en-GB']?.[0]?.type).toBe('OTHER');
   });
 });
+
+/** 一个 .docx：Word 的「标题 1」段落一个，加粗的编号段落一个。 */
+async function docxWithBoldNumbered(): Promise<Buffer> {
+  const zip = new JSZip();
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>';
+  const rels =
+    'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  zip.file(
+    '[Content_Types].xml',
+    `${xml}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      '</Types>',
+  );
+  zip.file(
+    '_rels/.rels',
+    `${xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${rels}/officeDocument" Target="word/document.xml"/></Relationships>`,
+  );
+  zip.file(
+    'word/_rels/document.xml.rels',
+    `${xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${rels}/styles" Target="styles.xml"/></Relationships>`,
+  );
+  zip.file(
+    'word/styles.xml',
+    `${xml}<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+      '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>',
+  );
+  zip.file(
+    'word/document.xml',
+    `${xml}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+      '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Real heading</w:t></w:r></w:p>' +
+      '<w:p><w:r><w:t>Body text.</w:t></w:r></w:p>' +
+      '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>1.1 Bold numbered line</w:t></w:r></w:p>' +
+      '<w:p><w:r><w:t>More text.</w:t></w:r></w:p>' +
+      '</w:body></w:document>',
+  );
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
+/** 旧版模板：只有 course info / Lessons 和三张必需的空表。 */
+function legacyWorkbook(): Buffer {
+  const wb = XLSX.utils.book_new();
+  const sheet = (rows: unknown[][], name: string) =>
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+  sheet([['课程标题', 'Modeling life']], 'course info');
+  sheet([['Lesson 1'], ['标题', 'Lesson one']], 'Lessons');
+  sheet([['Lesson', 'Title']], 'exploration-reading list');
+  sheet([['Lesson', 'Question']], 'knowledge test');
+  sheet([['Lesson', 'Question']], 'application test');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+
+describe('buildPackageFromRawZip text courseware (.docx)', () => {
+  it('still turns the bold numbered paragraph into a heading (new template)', async () => {
+    const zip = new JSZip();
+    zip.file(
+      'Course_Content_Template_modeling_life.xlsx',
+      timedWorkbook(['00:10'], '00:37', 'Other'),
+    );
+    zip.file('lesson 1.docx', await docxWithBoldNumbered());
+    const built = await buildPackageFromRawZip(
+      await zip.generateAsync({ type: 'nodebuffer' }),
+    );
+    const html =
+      (await readManifest(built.bytes)).course.lessons[0].localized['en-GB']
+        .text?.html ?? '';
+    expect(html.match(/<h1\b/g)).toHaveLength(2);
+    expect(html).toContain('<h1>Bold numbered line</h1>');
+  });
+
+  it('still turns the bold numbered paragraph into a heading (old template)', async () => {
+    const zip = new JSZip();
+    zip.file('Legacy.xlsx', legacyWorkbook());
+    zip.file('Lesson 1文本课件.docx', await docxWithBoldNumbered());
+    const built = await buildPackageFromRawZip(
+      await zip.generateAsync({ type: 'nodebuffer' }),
+    );
+    const html =
+      (await readManifest(built.bytes)).course.lessons[0].localized['en-GB']
+        .text?.html ?? '';
+    expect(html.match(/<h1\b/g)).toHaveLength(2);
+    expect(html).toContain('<h1>Bold numbered line</h1>');
+  });
+});

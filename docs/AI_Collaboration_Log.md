@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-11-13 ｜ AI Tutor Feedback 阶段 3/4 完整页面交付
+
+- 用户授权继续直到管理页面开发结束。增加诊断、落实、关闭和重开、原因/证据校验、处理历史与员工隔离本地演示保存；VIEW 无写控件，失败不更新页面，损坏覆盖层不自动覆盖。
+- 数据仍为 mock，修改仅为浏览器员工覆盖层，不是正式共享审计；未接真实课程/Portal/API/数据库。详情采用响应式分栏及长文本换行，未保存关闭需确认。
+- 验证：lint/tsc 通过；24 项相关测试与完整 550 项单测通过；build 通过并保留 chunk 体积警告。独立审查 REQUEST_CHANGES 后修复重开原因复用与存储语义验证，复审 APPROVE。
+- 首次全量 Helpdesk 焦点测试失败；单独 21 项和后续全量通过，原因未确定，未改无关代码。手动界面验收待用户执行，无 commit/push/部署。
+- 文件清单与完整测试步骤见 docs/AI_tutor/Feedback_Staged_Delivery.md。
+
+## 2026-11-13 ｜ AI Tutor Feedback 阶段 1
+
+- 本阶段验收调整：用户要求将 Feedback / AI Tutor 间距对齐 Knowledge。`AITutor.tsx` 顶部 gap 改为 `tokens.spacing['2xl']`（48px）；课程来源不变，仍从 mock 反馈记录去重。已核对当前课程映射表，但本轮不接课程接口。
+- 本轮验证：lint、tsc 通过，Feedback 定向测试 7 passed，build 通过（原有 chunk 体积警告）；独立增量审查 APPROVE。按用户要求等待回复，不继续阶段 2。
+
+- 用户授权：按阶段交付可测试内容，先做 Backoffice 管理页面，Portal 暂不接入；允许独立只读 Review Agent。
+- 变更：增加 Feedback Tab、6 条示例数据、课程/类型/模式/状态/时间/关键词组合筛选、分页与空结果；中英文文案。Tutor 保持挂载，切换 Tab 保留未保存草稿和聊天。
+- 文档与清单：见 [Feedback 分阶段交付](AI_tutor/Feedback_Staged_Delivery.md)。原表八个核心字段保留在记录类型，阶段 2 展示详情。
+- 验证：client 的 lint、tsc 通过；新增 7 tests 通过；完整 npm test 533 passed / 0 failed；build 通过但存在 chunk 体积警告，未改构建配置。
+- 审查：独立 Review Agent APPROVE，无 Blocking / Non-blocking。未启动浏览器，手动 UI 验收待用户执行。
+- Git / 集成：未 commit / push / 部署；未新增依赖、API、Schema 或 Portal 改动。
+- 下一步：交付阶段 1 测试；阶段 2 为反馈详情与对话上下文，后续为 Triage 状态和权限异常验收。
+
 ## 2026-11-02 ｜ Portal 投影 v1.2：试看截止点 + Range 媒体 + 「在 Portal 中预览」可试播
 
 - **用户拍板**：（1）「在 Portal 中预览」必须严格走 `docs/Portal_Projection_API.md` 定义的 Admin 课程投影接口，
@@ -1604,3 +1625,7 @@
 - 拆开组件/工具导出以支持 Fast Refresh；表单与目录树按输入变化重置，异步结果在请求回调采用，工具栏订阅 CodeMirror。补离线回归并清除测试 act 警告。
 - lint → types → tests 通过：后端 1784 passed / 166 skipped；前端 503 passed；两端 build 通过。完整命令与文件清单见 docs/AI_tutor/Motherbase_Refactor.md §8。
 - 用户确认后已加入 vite.config.ts 的 app/vendor 分包规则（maxSize 750000）；实际构建为 34 个 JS 文件，最大 293019 bytes，无构建警告，原 500 kB 阈值保留。再次执行前端 lint、types、完整测试（503 passed）和 build 均通过。独立 Review、数据库 e2e、手动 UI/真实模型验收仍待执行。无 commit / push / 部署。
+
+## 2026-11-13 Feedback 阶段 2
+
+只读详情抽屉交付，保留 mock 课程。显示目标问答、上下文、建议、用途与 Trace 未采集空态；无 Triage 写操作。lint/tsc 通过，定向 9 tests 与完整 535 tests 通过，build 通过（chunk 警告），独立 Review APPROVE。手动 UI 验收待用户执行，未 commit/push/部署。

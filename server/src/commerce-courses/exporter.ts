@@ -16,7 +16,23 @@ import {
   type PackageManifest,
   type PackageReading,
 } from './contracts/manifest';
+import { defaultLanguageRows, defaultLanguageTest } from './lesson-tests';
 import type { VersionSnapshot } from './version-snapshot';
+
+type AggregateLesson = CourseAggregate['lessons'][number];
+/** 草稿读出来的聚合：测试按语言存，落成包之前先取默认内容语言的那一份。 */
+type DraftAggregate = Omit<CourseAggregate, 'lessons'> & {
+  lessons: Array<
+    Omit<AggregateLesson, 'applicationTest' | 'questions'> & {
+      questions: Array<
+        AggregateLesson['questions'][number] & { language: string }
+      >;
+      applicationTests: Array<
+        NonNullable<AggregateLesson['applicationTest']> & { language: string }
+      >;
+    }
+  >;
+};
 
 /**
  * 从课程聚合生成 .lgcourse.zip（导出）。见设计文档 §4/§5.6。
@@ -28,7 +44,7 @@ export async function buildCoursePackage(
   courseId: string,
   sourceVersion: string,
 ): Promise<Buffer> {
-  const agg = (await prisma.commerceCourse.findUnique({
+  const draft = (await prisma.commerceCourse.findUnique({
     where: { id: courseId },
     include: {
       category: true,
@@ -40,17 +56,35 @@ export async function buildCoursePackage(
         orderBy: { sortOrder: 'asc' },
         include: {
           localizations: { include: { video: true } },
-          exhibits: { include: { media: true, thumbnail: true } },
+          exhibits: {
+            include: { media: true, thumbnail: true },
+            orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
+          },
           readings: { orderBy: { sortOrder: 'asc' } },
           questions: { orderBy: { sortOrder: 'asc' } },
-          applicationTest: true,
+          applicationTests: true,
           learningPoints: { orderBy: { sortOrder: 'asc' } },
           triggers: true,
         },
       },
     },
-  })) as unknown as CourseAggregate | null;
-  if (!agg) throw new Error('Course not found');
+  })) as unknown as DraftAggregate | null;
+  if (!draft) throw new Error('Course not found');
+  // 测试按语言存；包格式在 B14 之前仍只带默认内容语言的那一份。
+  const agg: CourseAggregate = {
+    ...draft,
+    lessons: draft.lessons.map((lesson) => ({
+      ...lesson,
+      questions: defaultLanguageRows(
+        lesson.questions,
+        draft.defaultContentLanguage,
+      ),
+      applicationTest: defaultLanguageTest(
+        lesson.applicationTests,
+        draft.defaultContentLanguage,
+      ),
+    })),
+  };
 
   const { course, media } = buildCourseSnapshot(agg);
   const zip = new JSZip();
@@ -178,10 +212,15 @@ export async function buildCoursePackageFromSnapshot(
                     title: lp.title,
                   })),
                 exhibitTriggers: lesson.triggers
-                  .filter((trigger) => trigger.language === loc.language)
+                  .filter(
+                    (trigger) =>
+                      trigger.language === loc.language &&
+                      trigger.exhibitCode !== null &&
+                      trigger.timeSeconds !== null,
+                  )
                   .map((trigger) => ({
-                    timeSeconds: trigger.timeSeconds,
-                    exhibitRef: trigger.exhibitCode,
+                    timeSeconds: trigger.timeSeconds as number,
+                    exhibitRef: trigger.exhibitCode as string,
                   })),
               }
             : null;

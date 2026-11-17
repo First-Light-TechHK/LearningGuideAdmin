@@ -17,7 +17,13 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import JSZip from 'jszip';
 import type { Response } from 'express';
 
-import { CommerceCoursesService } from './commerce-courses.service';
+import {
+  CommerceCoursesService,
+  type CourseCreateBody,
+  type CourseUpdateBody,
+  type LessonCreateBody,
+  type LessonUpdateBody,
+} from './commerce-courses.service';
 import { PackageJobsService } from './package-jobs.service';
 import { PackageWorker } from './package-worker';
 import { PackageError } from './package-inspector';
@@ -89,22 +95,14 @@ export class CommerceCoursesController {
 
   @Post()
   @HttpCode(201)
-  create(
-    @Body()
-    body: {
-      code: string;
-      slug?: string;
-      title: string;
-      language?: string;
-      learningMode?: string;
-      defaultContentLanguage?: string;
-      learningLanguages?: string[];
-      subtitle?: string | null;
-      categoryId?: string | null;
-    },
-    @Req() request: BackofficeRequest,
-  ) {
+  create(@Body() body: CourseCreateBody, @Req() request: BackofficeRequest) {
     return this.courses.createCourse(body, actor(request));
+  }
+
+  /** 创建对话框显示的下一个 Course ID（只看不占）。需声明在 :id 之前；GET 属 VIEW。 */
+  @Get('next-code')
+  nextCode() {
+    return this.courses.nextCode();
   }
 
   @Get('categories')
@@ -277,35 +275,32 @@ export class CommerceCoursesController {
   @HttpCode(200)
   updateCourse(
     @Param('id') id: string,
-    @Body()
-    body: {
-      code?: string;
-      slug?: string;
-      learningMode?: string;
-      defaultContentLanguage?: string;
-      learningLanguages?: string[];
-      subtitle?: string | null;
-      level?: string | null;
-      categoryId?: string | null;
-    },
+    @Body() body: CourseUpdateBody,
+    @Req() request: BackofficeRequest,
   ) {
-    return this.courses.updateCourse(id, body);
+    return this.courses.updateCourse(id, body, actor(request));
   }
 
+  /** 第一步（Course Information）整体保存：分类、两种语言的基本信息、追加学习语言，一个事务。 */
+  @Put(':id/information')
+  @UseInterceptors(DraftRevisionInterceptor)
+  @HttpCode(200)
+  updateInformation(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() request: BackofficeRequest,
+  ) {
+    return this.courses.updateInformation(id, body, actor(request));
+  }
+
+  /** 只改这次发来的键：没发的课程名、概述、条目列表保持原样。 */
   @Put(':id/localizations/:language')
   @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(200)
   updateLocalization(
     @Param('id') id: string,
     @Param('language') language: string,
-    @Body()
-    body: {
-      title: string;
-      shortDescription?: string | null;
-      overview?: string | null;
-      whatYouLearn?: unknown;
-      provides?: unknown;
-    },
+    @Body() body: unknown,
   ) {
     return this.courses.updateLocalization(id, language, body);
   }
@@ -313,10 +308,7 @@ export class CommerceCoursesController {
   @Post(':id/lessons')
   @UseInterceptors(DraftRevisionInterceptor)
   @HttpCode(201)
-  createLesson(
-    @Param('id') id: string,
-    @Body() body: { code?: string; language?: string; title: string },
-  ) {
+  createLesson(@Param('id') id: string, @Body() body: LessonCreateBody) {
     return this.courses.createLesson(id, body);
   }
 
@@ -336,15 +328,7 @@ export class CommerceCoursesController {
   updateLesson(
     @Param('id') id: string,
     @Param('lessonId') lessonId: string,
-    @Body()
-    body: {
-      code?: string;
-      sortOrder?: number;
-      language?: string;
-      title?: string;
-      description?: string | null;
-      textHtml?: string | null;
-    },
+    @Body() body: LessonUpdateBody,
   ) {
     return this.courses.updateLesson(id, lessonId, body);
   }
@@ -465,7 +449,8 @@ export class CommerceCoursesController {
     @Body()
     body: {
       language: string;
-      points: Array<{ code?: string; title: string; timeSeconds: number }>;
+      /** 每行：id、code（认已有的行）、title、timeSeconds（可以空）。 */
+      points?: unknown;
     },
   ) {
     return this.authoring.saveVideoLearningPoints(
@@ -485,7 +470,8 @@ export class CommerceCoursesController {
     @Body()
     body: {
       language: string;
-      triggers: Array<{ exhibitId: string; timeSeconds: number }>;
+      /** 每行：exhibitId（可以还没选）、timeSeconds（可以空）。 */
+      triggers?: unknown;
     },
   ) {
     return this.authoring.saveTriggers(
@@ -504,6 +490,7 @@ export class CommerceCoursesController {
     @Param('lessonId') lessonId: string,
     @Body()
     body: {
+      /** 已忽略：展品编号由服务器分配（E001、E002……）。 */
       code?: string;
       type: string;
       mediaAssetId?: string | null;
@@ -513,6 +500,22 @@ export class CommerceCoursesController {
     },
   ) {
     return this.authoring.createExhibit(id, lessonId, body);
+  }
+
+  /** 必须写在 `:exhibitId` 之前，否则 `order` 会被当成展品 id。 */
+  @Put(':id/lessons/:lessonId/exhibits/order')
+  @UseInterceptors(DraftRevisionInterceptor)
+  @HttpCode(200)
+  reorderExhibits(
+    @Param('id') id: string,
+    @Param('lessonId') lessonId: string,
+    @Body()
+    body: {
+      /** 本课时全部展品的新顺序。 */
+      exhibitIds?: unknown;
+    },
+  ) {
+    return this.authoring.reorderExhibits(id, lessonId, body.exhibitIds);
   }
 
   @Put(':id/lessons/:lessonId/exhibits/:exhibitId')
@@ -553,13 +556,10 @@ export class CommerceCoursesController {
     @Param('lessonId') lessonId: string,
     @Body()
     body: {
-      language: string;
-      readings: Array<{
-        type: string;
-        title: string;
-        author: string;
-        whyRecommended: string;
-      }>;
+      /** 已忽略：推荐阅读只有一份英文列表，存成 en-GB。 */
+      language?: string;
+      /** 每行：id（已有的行）、type（Book / Article / Paper / Other）、title、author、whyRecommended。 */
+      readings?: unknown;
     },
   ) {
     return this.authoring.saveReadings(
@@ -589,6 +589,17 @@ export class CommerceCoursesController {
     @UploadedFile() file: { originalname: string; buffer: Buffer } | undefined,
   ) {
     return this.authoring.importReadings(id, file);
+  }
+
+  @Get(':id/readings/template')
+  async readingsTemplate(@Param('id') id: string, @Res() res: Response) {
+    const csv = await this.authoring.downloadReadingTemplate(id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="readings-template.csv"',
+    );
+    res.send(csv);
   }
 
   @Put(':id/lessons/:lessonId/knowledge-test')

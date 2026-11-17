@@ -128,6 +128,7 @@ describe('Portal projection contract (e2e)', () => {
         },
         exhibits: {
           create: {
+            courseId,
             code: 'E0101',
             type: 'IMAGE',
             mediaAssetId: exhibitAssetId,

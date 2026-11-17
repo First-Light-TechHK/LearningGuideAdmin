@@ -12,6 +12,7 @@ import type { Response } from 'express';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
+import { DialogueTestStreamDto } from './dto/dialogue-test-stream.dto';
 import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
 import { pipeSseWithAbort } from './sse-stream';
 import { SaveAiConfigDto } from './dto/save-config.dto';
@@ -93,6 +94,17 @@ export class AiController {
   @Post('chat-stream')
   async chatStream(@Body() dto: ChatStreamDto, @Res() res: Response) {
     await pipeSseWithAbort((signal) => this.chat.streamChat(dto, signal), res);
+  }
+
+  @Post('dialogue-test-stream')
+  async dialogueTestStream(
+    @Body() dto: DialogueTestStreamDto,
+    @Res() res: Response,
+  ) {
+    await pipeSseWithAbort(
+      (signal) => this.chat.streamDialogueTest(dto, signal),
+      res,
+    );
   }
 }
 

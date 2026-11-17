@@ -99,6 +99,7 @@ const COURSE_PUBLISH_SEGMENTS = new Set([
 ]);
 const COURSE_COMMERCIAL_SEGMENTS = new Set(['plans', 'trial', 'sync-stripe']);
 const COURSE_CONTENT_SEGMENTS = new Set([
+  'information',
   'localizations',
   'lessons',
   'media',

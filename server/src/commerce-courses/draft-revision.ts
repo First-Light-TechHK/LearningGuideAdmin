@@ -11,6 +11,7 @@ import { catchError, mergeMap, tap } from 'rxjs/operators';
 
 import { PrismaService } from '../prisma/prisma.service';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
+import { employeeNames } from './employee-names';
 
 /**
  * 草稿乐观并发（PRD §23："他人已更新，请刷新"）。
@@ -23,8 +24,10 @@ import type { BackofficeRequest } from '../backoffice/nest/request-context';
  * - 处理失败时把 revision 退回，不让失败的请求制造假冲突。
  */
 
-export const COURSE_STALE_MESSAGE =
-  'This course was changed by someone else after you opened it. Refresh to see the changes.';
+/** PRD L727。`name` 是上一位保存的人；没有记录时读作 someone else。 */
+export function courseStaleMessage(name: string | null): string {
+  return `This course was updated by ${name ?? 'someone else'}. Reload to see the latest changes.`;
+}
 
 const ETAG = /^(?:W\/)?"r(\d+)"$/;
 
@@ -109,13 +112,21 @@ export class DraftRevisionInterceptor implements NestInterceptor {
 
     const current = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
-      select: { revision: true },
+      select: { revision: true, revisionBy: true },
     });
     if (!current) return null;
+    const names = await employeeNames(this.prisma, [current.revisionBy]);
+    const updatedByName = current.revisionBy
+      ? (names.get(current.revisionBy) ?? null)
+      : null;
     throw new ConflictException({
       code: 'COURSE_STALE',
-      message: COURSE_STALE_MESSAGE,
-      revision: current.revision,
+      message: courseStaleMessage(updatedByName),
+      details: {
+        revision: current.revision,
+        updatedBy: current.revisionBy,
+        updatedByName,
+      },
     });
   }
 

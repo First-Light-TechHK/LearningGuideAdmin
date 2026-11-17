@@ -11,8 +11,10 @@ import mammoth from 'mammoth';
  *
  * 另一个关键点：内容团队交来的 DOCX 里，学习点标题常常只是「加粗段落」而不是
  * Word 的「标题 1」样式（如 `1.1 状态变量与状态空间`）。PRD 规定正文中的 H1
- * 即 Learning Point，因此这里把「整段加粗且以编号开头」的段落提升为 `<h1>`，
- * 并按编号去重（同一编号的中英文两行只把第一行升级为标题）。
+ * 即 Learning Point，因此原始素材导入（`promoteBoldNumbered: true`）把「整段加粗
+ * 且以编号开头」的段落提升为 `<h1>`，并按编号去重（同一编号的中英文两行只把第一行
+ * 升级为标题）。编辑器里的「Import .docx」不开这个选项：只有 Word 的「标题 1」样式
+ * 变成 `<h1>`，加粗的编号段落保持普通段落（PRD 12.5.2：只有 Heading 1 是学习点）。
  */
 
 export interface DocxHeading {
@@ -55,27 +57,41 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+export interface DocxConvertOptions {
+  /**
+   * 把「整段加粗且以编号开头」的段落提升为 `<h1>`。默认 false：编辑器导入只认 Word 的
+   * 「标题 1」样式；原始素材导入传 true。
+   */
+  promoteBoldNumbered?: boolean;
+}
+
 /**
  * 规范 mammoth 输出的 HTML：
  * 1) 单行单格表格（DOCX 里放图片+图注的容器）拆成普通段落，避免编辑器里出现表格；
- * 2) 整段加粗且以编号开头的段落提升为 `<h1>`（同一编号只提升第一处）；
+ * 2) 选项 `promoteBoldNumbered` 打开时，整段加粗且以编号开头的段落提升为 `<h1>`
+ *    （同一编号只提升第一处）；
  * 3) 去掉转换后遗留的空段落。
  */
-export function normalizeDocxHtml(html: string): string {
+export function normalizeDocxHtml(
+  html: string,
+  options: DocxConvertOptions = {},
+): string {
   let out = html.replace(SINGLE_CELL_TABLE, '$1');
 
-  const seenNumbers = new Set<string>();
-  out = out.replace(BOLD_ONLY_PARAGRAPH, (full, inner: string) => {
-    const text = stripTags(inner);
-    const match = NUMBERED_HEADING.exec(text);
-    if (!match) return full;
-    const code = match[1];
-    if (seenNumbers.has(code)) return full;
-    seenNumbers.add(code);
-    const title = match[2].trim();
-    if (!title) return full;
-    return `<h1>${escapeHtml(title)}</h1>`;
-  });
+  if (options.promoteBoldNumbered) {
+    const seenNumbers = new Set<string>();
+    out = out.replace(BOLD_ONLY_PARAGRAPH, (full, inner: string) => {
+      const text = stripTags(inner);
+      const match = NUMBERED_HEADING.exec(text);
+      if (!match) return full;
+      const code = match[1];
+      if (seenNumbers.has(code)) return full;
+      seenNumbers.add(code);
+      const title = match[2].trim();
+      if (!title) return full;
+      return `<h1>${escapeHtml(title)}</h1>`;
+    });
+  }
 
   out = out.replace(EMPTY_PARAGRAPH, '').trim();
   return out || '<p></p>';
@@ -99,12 +115,13 @@ export function extractDocxHeadings(html: string): DocxHeading[] {
 
 export async function convertDocxToHtml(
   bytes: Buffer,
+  options: DocxConvertOptions = {},
 ): Promise<DocxHtmlResult> {
   let html: string;
   const warnings: string[] = [];
   try {
     const result = await mammoth.convertToHtml({ buffer: bytes });
-    html = normalizeDocxHtml(result.value);
+    html = normalizeDocxHtml(result.value, options);
     for (const message of result.messages) {
       if (message.type === 'warning') warnings.push(message.message);
     }

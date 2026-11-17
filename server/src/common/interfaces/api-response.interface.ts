@@ -17,5 +17,11 @@ export interface ApiErrorResponse {
   error: {
     code: string;
     message: string;
+    /**
+     * 抛出方显式放进异常响应体里的结构化业务数据（例如 COURSE_STALE 的 revision 与
+     * updatedByName、PUBLISH_BLOCKED 的 blockers），前端据此原地说明；没有就不出现。
+     * 不放任何实现细节：Prisma 与未知错误从不带 details。
+     */
+    details?: Record<string, unknown>;
   };
 }

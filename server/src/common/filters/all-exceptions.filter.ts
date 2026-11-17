@@ -14,6 +14,9 @@ import { ProblemJsonFilter } from './problem-json.filter';
 /** Portal → Admin 的 Helpdesk 集成接口：错误一律 RFC 9457（即使在进入控制器前就失败）。 */
 const HELPDESK_INTEGRATION_PATH = /^\/api\/integration\/helpdesk(\/|$)/i;
 
+/** 异常响应体里已有固定去处的键，不再放进 details。 */
+const RESERVED_BODY_KEYS = new Set(['code', 'message', 'error', 'statusCode']);
+
 /**
  * 全局异常过滤器（开发文档 §5.3、§7 Phase 2 第 5 项、§9 安全注意事项）。
  * 在 AppModule 中通过 APP_FILTER 全局注册，输出统一错误信封
@@ -95,12 +98,39 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.warn(logMsg);
     }
 
+    const details =
+      exception instanceof HttpException
+        ? this.extractHttpExceptionDetails(exception)
+        : undefined;
     const body: ApiErrorResponse = {
       success: false,
       data: null,
-      error: { code, message },
+      error: details ? { code, message, details } : { code, message },
     };
     response.status(status).json(body);
+  }
+
+  /**
+   * 异常响应体里除 code / message / details / Nest 自带的 error、statusCode 之外的字段，
+   * 连同显式给出的 details 对象，一起放进 error.details（如 COURSE_STALE.revision、
+   * PUBLISH_BLOCKED.blockers）。只来自抛出方显式写进异常的对象，Prisma 与未知错误不走这里，
+   * 所以 meta / SQL 不会泄露。
+   */
+  private extractHttpExceptionDetails(
+    exception: HttpException,
+  ): Record<string, unknown> | undefined {
+    const res = exception.getResponse();
+    if (!res || typeof res !== 'object' || Array.isArray(res)) return undefined;
+    const { details: explicit, ...rest } = res as Record<string, unknown>;
+    const merged: Record<string, unknown> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? { ...(explicit as Record<string, unknown>) }
+        : {};
+    for (const [key, value] of Object.entries(rest)) {
+      if (RESERVED_BODY_KEYS.has(key) || value === undefined) continue;
+      merged[key] = value;
+    }
+    return Object.keys(merged).length > 0 ? merged : undefined;
   }
 
   /**

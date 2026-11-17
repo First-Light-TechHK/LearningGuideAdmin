@@ -1,0 +1,39 @@
+.ai-testing-shell, .ai-comparison, .ai-batch-pane, .ai-task-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+}
+.ai-testing-shell > .ant-alert, .ai-comparison > .ant-space,
+.ai-batch-config, .ai-tutor-config, .ai-tutor-heading { flex-shrink: 0; }
+.ai-testing-tabs, .ai-testing-tabs > .ant-tabs-content-holder,
+.ai-testing-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.ai-testing-tabs > .ant-tabs-content-holder > .ant-tabs-content { height: 100%; }
+.ai-testing-tabs .ant-tabs-tabpane-active { height: 100%; min-height: 0; overflow: hidden; }
+.ai-tutor-grid { display: grid; gap: 16px; flex: 1; min-height: 0; }
+.ai-tutor-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; }
+.ai-tutor-heading { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
+.ai-tutor-config, .ai-batch-config { display: grid; gap: 8px 12px; grid-template-columns: minmax(100px, .7fr) minmax(160px, 1.4fr) minmax(160px, 1.4fr) minmax(110px, .7fr); }
+.ai-tutor-grid[data-count="2"] .ai-tutor-config { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.ai-tutor-grid[data-count="2"] .ai-tutor-config > :nth-child(1), .ai-tutor-grid[data-count="2"] .ai-tutor-config > :nth-child(4) { grid-column: span 4; }
+.ai-tutor-grid[data-count="2"] .ai-tutor-config > :nth-child(2), .ai-tutor-grid[data-count="2"] .ai-tutor-config > :nth-child(3) { grid-column: span 8; }
+.ai-tutor-config > .ant-select, .ai-batch-config > .ant-select { min-width: 0; width: 100%; }
+.ai-test-scroll { overflow: auto; min-height: 0; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.ai-tutor-answers { flex: 1; }
+.ai-question-preview { flex: 1; }
+.ai-task-list { flex: 0 1 25%; display: flex; flex-direction: column; gap: 8px; }
+.ai-task-results { flex: 1; }
+.ai-composer { display: flex; gap: 12px; align-items: flex-end; flex-shrink: 0; }
+.ai-composer > textarea { flex: 1; min-height: 54px; max-height: 90px; resize: none; }
+@media (max-width: 700px) {
+  .ai-tutor-config, .ai-batch-config { overflow-x: auto; }
+  .ai-tutor-grid { gap: 8px; }
+  .ai-tutor-panel { padding: 8px; }
+}

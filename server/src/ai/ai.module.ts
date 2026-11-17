@@ -1,8 +1,13 @@
+import { EvaluationController } from './evaluation.controller';
+import { ApplicationAssessmentController } from './application-assessment.controller';
+import { ApplicationAssessmentService } from './application-assessment.service';
+import { EvaluationService } from './evaluation.service';
 import { DynamicModule, Module, Provider } from '@nestjs/common';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { LearnerImageController } from './learner-image.controller';
 import { AiChatLogger } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
+import { AiChatYongService } from './ai-chat-yong.service';
 import { AiConfigService } from './ai-config.service';
 import { AiController, UserAiController } from './ai.controller';
 import { CryptoService } from './crypto.service';
@@ -35,6 +40,7 @@ export class AiModule {
   static register(options: {
     /** 员工侧：配置接口与后台测试对话（/api/ai/**） */
     adminApi: boolean;
+    evaluationDb?: Provider;
     /** 学员侧：Portal 与学习小组调用的对话（/api/user/**） */
     learnerApi: boolean;
     /** KNOWLEDGE_CLIENT 的提供方 */
@@ -52,9 +58,18 @@ export class AiModule {
       // 提供 EmbeddingService（PrismaKnowledgeClient 的构造依赖）
       imports: [KnowledgeModule, ...(options.files ? [options.files] : [])],
       controllers: [
-        ...(options.adminApi ? [AiController] : []),
+        ...(options.adminApi
+          ? [
+              AiController,
+              ...(options.evaluationDb ? [EvaluationController] : []),
+            ]
+          : []),
         ...(options.learnerApi
-          ? [UserAiController, LearnerImageController]
+          ? [
+              UserAiController,
+              LearnerImageController,
+              ApplicationAssessmentController,
+            ]
           : []),
         ...(helpdesk ? [HelpdeskSuggestController] : []),
       ],
@@ -70,8 +85,13 @@ export class AiModule {
           inject: [PrismaRateLimitStore],
         },
         AiConfigService,
+        ApplicationAssessmentService,
         AiChatLogger,
+        ...(options.adminApi && options.evaluationDb
+          ? [options.evaluationDb, EvaluationService]
+          : []),
         AiChatService,
+        AiChatYongService,
         options.knowledge,
         ...(helpdesk && options.helpdeskQa
           ? [

@@ -7,7 +7,7 @@ import { MainLayout } from './components/layout/MainLayout'
 import { Sidebar } from './components/layout/Sidebar'
 import { KnowledgeTabBar, type KnowledgeTabKey } from './components/knowledge/KnowledgeTabBar'
 import { KnowledgeSystem } from './pages/KnowledgeSystem'
-import { AITutor, AITutorTopBar } from './pages/AITutor'
+import { AITutorWorkspace } from './pages/AITutorWorkspace'
 import { tokens } from './theme/tokens'
 import { ShellRoute } from './backoffice/ShellRoute'
 import ActivatePage from './backoffice/pages/ActivatePage'
@@ -76,15 +76,6 @@ function KnowledgeWorkspace() {
       sidebar={knowledgeTab === 'pages' ? <Sidebar /> : undefined}
     >
       <KnowledgeSystem tab={knowledgeTab} />
-    </MainLayout>
-  )
-}
-
-/** AI Tutor 工作区：与 Knowledge 展示方式一致的课程标题栏（2026-10-20） */
-function AITutorWorkspace() {
-  return (
-    <MainLayout topBar={<AITutorTopBar />}>
-      <AITutor />
     </MainLayout>
   )
 }

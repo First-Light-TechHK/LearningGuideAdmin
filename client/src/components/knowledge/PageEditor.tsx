@@ -19,6 +19,7 @@ import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 import { knowledgeApi } from '../../api/knowledge'
 import { formatDateTime } from '../../backoffice/lib/i18n/format'
+import { extractWikiSources } from './wikiSources'
 
 /**
  * Page 编辑器（2026-10-29 改版：Markdown 源码编辑 + 预览）。
@@ -309,6 +310,7 @@ export function PageEditor() {
     error: { text: text('editor.saveState.error'), color: 'red' },
   }
   const save = saveStateText[draft.saveState]
+  const sourceRefs = extractWikiSources({ id: draft.pageId, title: draft.title, contentMd: draft.contentMd })
   const borderStyle: React.CSSProperties = {
     border: `1px solid ${tokens.color.border}`,
     borderRadius: tokens.radius.md,
@@ -579,6 +581,18 @@ export function PageEditor() {
           </div>
         </div>
       )}
+      <details style={{ flexShrink: 0, marginTop: tokens.spacing.sm }}>
+        <summary>{text('editor.sourceReferences', { count: sourceRefs.length })}</summary>
+        <div style={{ padding: tokens.spacing.sm }}>
+          <div>{text('editor.sourceEditHint')}</div>
+          {sourceRefs.map((source, index) => (
+            <div key={`${source.url}-${index}`}>
+              <a href={source.url} target="_blank" rel="noopener noreferrer">{source.linkText}</a>
+              <span style={{ marginLeft: tokens.spacing.sm, color: tokens.color.text.tertiary }}>{source.url}</span>
+            </div>
+          ))}
+        </div>
+      </details>
       {/* P2: 插入表格弹窗 — 用户选行列数后生成 GFM 表格插入光标位置 */}
       <Modal
         open={insertTableOpen}

@@ -200,6 +200,11 @@ describeDb('helpdesk demo data (PostgreSQL)', () => {
   });
 
   it('seeds every table once, then a re-run adds nothing', async () => {
+    // Keep sub-millisecond database precision that JavaScript Date cannot retain.
+    await pool.query(
+      `UPDATE helpdesk_faqs SET updated_at = $1::timestamptz + interval '123 microseconds'`,
+      [seededAt],
+    );
     const first = await seedDemoRows(db, seededAt);
     expect(first.turns).toBeGreaterThan(1000);
     expect(first.candidates).toBe(DEMO_CANDIDATES.length);
