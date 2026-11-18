@@ -245,7 +245,7 @@
       "textPointNew": "新增（保存时分配编号）",
       "timeInvalidLocal": "时间请按 mm:ss 填写，例如 3:15。",
       "readingRowLesson": "第 {row} 行：课时 ID {code} 不存在。",
-      "readingRowType": "第 {row} 行：类型必须是 Book、Article、Paper 或 Other。",
+      "readingRowType": "第 {row} 行：类型必须是图书、文章、论文或其他，请按模板填写。",
       "readingRowOther": "第 {row} 行：{message}"
     }
   },
