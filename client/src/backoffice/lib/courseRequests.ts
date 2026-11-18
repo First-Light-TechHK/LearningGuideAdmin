@@ -53,6 +53,18 @@ export function informationBody(draft: InfoDraft, addLearningLanguages: string[]
   };
 }
 
+/**
+ * 理解测试导入（POST /courses/:id/understanding/import）：服务器从表单字段读 language 和 lessonId，不读地址里的参数。
+ * 不带 lessonId = 导入到所有课时。
+ */
+export function understandingImportForm(file: Blob, language: string, lessonId?: string): FormData {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('language', language);
+  if (lessonId) form.append('lessonId', lessonId);
+  return form;
+}
+
 export type PointDraft = { id?: string; code?: string; title: string; timeText: string };
 
 /**

@@ -4,7 +4,7 @@ import type { CourseDetail, Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
 import { courseErrorText, rowFailure } from '../../lib/courseErrors';
 import { issueLine } from '../../lib/courseIssues';
-import { exhibitOrderBody, lessonCreateBody, lessonInfoBody, lessonOrderBody, lessonTextBody, movedIds, readingsBody, triggersBody, videoPointsBody, type PointDraft, type ReadingDraft, type TriggerDraft } from '../../lib/courseRequests';
+import { exhibitOrderBody, lessonCreateBody, lessonInfoBody, lessonOrderBody, lessonTextBody, movedIds, readingsBody, triggersBody, understandingImportForm, videoPointsBody, type PointDraft, type ReadingDraft, type TriggerDraft } from '../../lib/courseRequests';
 import { t } from '../../lib/i18n/messages';
 import { useReportFailure } from './feedback';
 import { formatBytes, uploadFileWithProgress, uploadMediaInChunks } from '../../lib/upload';
@@ -508,11 +508,9 @@ export function CourseContentSection({
   async function runAllUnderstandingImport() {
     if (!allImportFile) return;
     setImportBusy(true);
-    const form = new FormData();
-    form.append('file', allImportFile);
     const result = await boRequest<{ added: number; byLesson: Record<string, number>; errors: Array<{ row: number; message: string }> }>(
-      `/api/backoffice/courses/${course.id}/understanding/import?language=${encodeURIComponent(allImportLanguage)}`,
-      { method: 'POST', body: form },
+      `/api/backoffice/courses/${course.id}/understanding/import`,
+      { method: 'POST', body: understandingImportForm(allImportFile, allImportLanguage) },
     );
     setImportBusy(false);
     if (result.success) {

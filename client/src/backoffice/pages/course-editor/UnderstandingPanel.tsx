@@ -2,7 +2,9 @@ import { useState } from 'react';
 
 import type { Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
-import { courseErrorText, courseFailureNotice } from '../../lib/courseErrors';
+import { courseErrorText } from '../../lib/courseErrors';
+import { understandingImportForm } from '../../lib/courseRequests';
+import { useReportFailure } from './feedback';
 import { Field, Modal } from './shared';
 import { L, buttonStyle, card, inputStyle, languageLabel, primaryBtn } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
@@ -38,6 +40,7 @@ export function UnderstandingPanel({
   const [singleFile, setSingleFile] = useState<File | null>(null);
   const [singleResult, setSingleResult] = useState<{ added: number; errors: Array<{ row: number; message: string }> } | null>(null);
   const [singleBusy, setSingleBusy] = useState(false);
+  const reportFailure = useReportFailure();
 
   const [source, setSource] = useState<{ lesson: Lesson; language: string } | null>(null);
   if (source?.lesson !== lesson || source?.language !== language) {
@@ -76,7 +79,7 @@ export function UnderstandingPanel({
       onNotice(L(locale, '知识测试已保存。', 'Knowledge Test saved.'));
       await onSaved();
     } else {
-      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), result));
+      reportFailure(L(locale, '保存失败', 'Save failed'), result);
     }
   }
 
@@ -96,7 +99,7 @@ export function UnderstandingPanel({
       onNotice(L(locale, '应用测试已保存。', 'Application Test saved.'));
       await onSaved();
     } else {
-      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), result));
+      reportFailure(L(locale, '保存失败', 'Save failed'), result);
     }
   }
 
@@ -118,11 +121,9 @@ export function UnderstandingPanel({
   async function runSingleImport() {
     if (!singleFile) return;
     setSingleBusy(true);
-    const form = new FormData();
-    form.append('file', singleFile);
     const result = await boRequest<{ added: number; byLesson: Record<string, number>; errors: Array<{ row: number; message: string }> }>(
-      `/api/backoffice/courses/${courseId}/understanding/import?language=${encodeURIComponent(language)}&lessonId=${encodeURIComponent(lesson.id)}`,
-      { method: 'POST', body: form },
+      `/api/backoffice/courses/${courseId}/understanding/import`,
+      { method: 'POST', body: understandingImportForm(singleFile, language, lesson.id) },
     );
     setSingleBusy(false);
     if (result.success) {

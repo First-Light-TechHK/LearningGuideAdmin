@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  createCourseBody,
   exhibitOrderBody,
+  informationBody,
+  understandingImportForm,
   lessonInfoBody,
   lessonOrderBody,
   lessonTextBody,
@@ -12,6 +15,86 @@ import {
   triggersBody,
   videoPointsBody,
 } from '../src/backoffice/lib/courseRequests'
+
+describe('informationBody', () => {
+  const draft = {
+    categoryId: 'cat-1',
+    titleEn: ' Title ',
+    titleZh: '标题',
+    descEn: 'Short',
+    descZh: '简介',
+    overviewEn: 'Overview',
+    overviewZh: '概述',
+    learnRows: [
+      { en: 'Learn A', zh: '学 A' },
+      { en: '', zh: '学 B' },
+      { en: 'Learn C', zh: '' },
+    ],
+    providesRows: [
+      { en: 'Provide A', zh: '提供 A' },
+      { en: 'Provide B', zh: ' ' },
+    ],
+  }
+
+  test('sends both languages with provides and whatYouLearn as plain string arrays', () => {
+    const body = informationBody(draft)
+    assert.equal(body.categoryId, 'cat-1')
+    assert.deepEqual(Object.keys(body.localizations).sort(), ['en-GB', 'zh-CN'])
+    assert.equal(body.localizations['en-GB'].title, 'Title')
+    assert.deepEqual(body.localizations['en-GB'].provides, ['Provide A', 'Provide B'])
+    assert.deepEqual(body.localizations['zh-CN'].provides, ['提供 A', ''])
+    for (const side of Object.values(body.localizations)) {
+      assert.ok(side.provides.every((item) => typeof item === 'string'))
+      assert.ok(side.whatYouLearn.every((item) => typeof item === 'string'))
+    }
+  })
+
+  test('keeps an empty half at its position so the two lists stay aligned', () => {
+    const body = informationBody(draft)
+    assert.deepEqual(body.localizations['en-GB'].whatYouLearn, ['Learn A', '', 'Learn C'])
+    assert.deepEqual(body.localizations['zh-CN'].whatYouLearn, ['学 A', '学 B', ''])
+  })
+
+  test('an empty category is sent as null, and added languages only when there are some', () => {
+    assert.equal(informationBody({ ...draft, categoryId: '' }).categoryId, null)
+    assert.equal('addLearningLanguages' in informationBody(draft), false)
+    assert.deepEqual(informationBody(draft, ['zh-CN']).addLearningLanguages, ['zh-CN'])
+  })
+})
+
+describe('createCourseBody', () => {
+  const input = { titleEn: ' English ', titleZh: ' 中文 ', languages: ['zh-CN', 'en-GB'], mode: 'VIDEO', categoryId: '' }
+
+  test('sends the title of both languages and leaves the Course ID and slug to the server', () => {
+    const body = createCourseBody(input)
+    assert.deepEqual(body.titles, { 'en-GB': 'English', 'zh-CN': '中文' })
+    assert.equal('code' in body, false)
+    assert.equal('slug' in body, false)
+    assert.equal(body.categoryId, null)
+    assert.equal(body.learningMode, 'VIDEO')
+    assert.deepEqual(body.learningLanguages, ['zh-CN', 'en-GB'])
+  })
+
+  test('the default content language is English when it is learned, else the first language', () => {
+    assert.equal(createCourseBody(input).defaultContentLanguage, 'en-GB')
+    assert.equal(createCourseBody({ ...input, languages: ['zh-CN'] }).defaultContentLanguage, 'zh-CN')
+  })
+})
+
+describe('understandingImportForm', () => {
+  test('puts language and lessonId in the form body, never in a URL', () => {
+    const form = understandingImportForm(new Blob(['x']), 'en-GB', 'lesson-uuid')
+    assert.equal(form.get('language'), 'en-GB')
+    assert.equal(form.get('lessonId'), 'lesson-uuid')
+    assert.ok(form.get('file') instanceof Blob)
+  })
+
+  test('without a lesson the form carries no lessonId (all lessons)', () => {
+    const form = understandingImportForm(new Blob(['x']), 'zh-CN')
+    assert.equal(form.get('lessonId'), null)
+    assert.equal(form.get('language'), 'zh-CN')
+  })
+})
 
 describe('timeToSend', () => {
   test('mm:ss, h:mm:ss and bare seconds become integer seconds', () => {
