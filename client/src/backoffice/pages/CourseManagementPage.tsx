@@ -8,6 +8,8 @@ import { Pagination } from '../components/Pagination';
 import { usePageSize } from '../components/paginationState';
 import { boRequest } from '../lib/api'
 import { categoryLabel } from '../lib/categoryLabel'
+import { courseErrorText, courseFailureNotice, type CourseFailure } from '../lib/courseErrors'
+import { createCourseBody } from '../lib/courseRequests'
 import { uploadFileWithProgress } from '../lib/upload'
 import { t } from '../lib/i18n/messages'
 import type { Locale } from '../lib/i18n/config'
@@ -38,8 +40,12 @@ type ConfirmOutcome = {
   message?: string
 }
 
-function uploadErrorText(locale: string, code: string, detail?: string): string {
+function uploadErrorText(locale: string, code: string, detail?: string, failure?: CourseFailure): string {
   const zh = locale.startsWith('zh')
+  // 服务器给了课程错误码（如 EXPORT_REQUIRES_LIVE_VERSION）：按码写成当前语言，不用服务器的英文句子。
+  if (failure?.code && t(locale as Locale, `course.errors.${failure.code}`) !== `course.errors.${failure.code}`) {
+    return `${zh ? '失败' : 'Failed'}: ${courseErrorText(locale, failure)}`
+  }
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
     return zh ? '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。' : 'The upload was interrupted (unstable network or a service restart). Check them and try again.'
   }
@@ -84,6 +90,8 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  // null = 正在读取；'' = 读取失败；其余是服务器给的下一个 Course ID。
+  const [nextCode, setNextCode] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
   const [actionMenuId, setActionMenuId] = useState<string | null>(null)
   const [statusCourse, setStatusCourse] = useState<CourseList['courses'][number] | null>(null)
@@ -148,6 +156,19 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     })()
   }, [])
 
+  // 创建对话框打开时向服务器要"下一个 Course ID"（只看不占，真正的编号在创建时分配）。
+  useEffect(() => {
+    if (!showCreate) return
+    let cancelled = false
+    setNextCode(null)
+    void boRequest<{ code: string }>('/api/backoffice/courses/next-code').then((result) => {
+      if (!cancelled) setNextCode(result.success ? result.data.code : '')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [showCreate])
+
   const categories = useMemo(() => {
     const map = new Map<string, string>()
     for (const category of catalogCategories) map.set(category.id, categoryLabel(locale, category.name))
@@ -173,35 +194,18 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       setMessage(L('请至少选择一种学习语言。', 'Select at least one learning language.'))
       return
     }
-    const defaultLanguage = createLanguages.includes('en-GB') ? 'en-GB' : createLanguages[0]
-    const defaultTitle = defaultLanguage === 'zh-CN' ? titleZh : titleEn
     setBusy(true)
+    // 一次请求建好课程和两种语言的课程名；Course ID 和短名由服务器分配，这里不发。
     const result = await boRequest<{ id: string }>('/api/backoffice/courses', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        code: String(form.get('code') || '').trim() || undefined,
-        title: defaultTitle,
-        slug: String(form.get('slug') || ''),
-        language: defaultLanguage,
-        defaultContentLanguage: defaultLanguage,
-        learningLanguages: createLanguages,
-        learningMode: createMode,
-        categoryId: createCategoryId,
-      }),
+      body: JSON.stringify(createCourseBody({ titleEn, titleZh, languages: createLanguages, mode: createMode, categoryId: createCategoryId })),
     })
     if (!result.success) {
       setBusy(false)
-      setMessage(L(`新建失败：${result.error}`, `Create failed: ${result.error}`))
+      setMessage(courseFailureNotice(locale, L('新建失败', 'Create failed'), result))
       return
     }
-    const otherLanguage = defaultLanguage === 'zh-CN' ? 'en-GB' : 'zh-CN'
-    const otherTitle = otherLanguage === 'zh-CN' ? titleZh : titleEn
-    await boRequest(`/api/backoffice/courses/${result.data.id}/localizations/${otherLanguage}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: otherTitle }),
-    })
     setBusy(false)
     setShowCreate(false)
     await load()
@@ -297,7 +301,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     })
     if (!result.success) {
       setBusy(false)
-      setMessage(uploadErrorText(locale, result.error, result.message))
+      setMessage(uploadErrorText(locale, result.error, result.message, result))
       return
     }
     setMessage(L('已提交，正在后台解析素材…', 'Submitted. Parsing materials in the background…'))
@@ -322,7 +326,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     if (!start.success && course.liveVersionId) start = await startExport('working')
     if (!start.success) {
       setExportingId(null)
-      setMessage(uploadErrorText(locale, start.error, start.message))
+      setMessage(uploadErrorText(locale, start.error, start.message, start))
       return
     }
     for (let attempt = 0; attempt < 120; attempt++) {
@@ -541,8 +545,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（英文）', 'Course title (English)')} *<input name="titleEn" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（中文）', 'Course title (Chinese)')} *<input name="titleZh" required style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程 ID（留空自动生成）', 'Course ID (auto if blank)')}<input name="code" pattern="[A-Za-z0-9_-]+" title={L('仅限字母、数字、下划线和连字符', 'Letters, numbers, underscores and hyphens only')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
-              <label style={{ fontSize: 13, fontWeight: 600 }}>{L('短名', 'Slug')}<input name="slug" style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>{t(locale, 'course.ui.createCourseId')}<input data-testid="create-course-id" readOnly aria-readonly="true" value={nextCode === null ? t(locale, 'course.ui.createCourseIdLoading') : nextCode || t(locale, 'course.ui.createCourseIdUnavailable')} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8', background: '#F5F7FA', boxSizing: 'border-box' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('学习模式', 'Learning mode')}<select value={createMode} onChange={(e) => setCreateMode(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="VIDEO_ONLY">{L('仅视频', 'Video only')}</option><option value="TEXT_ONLY">{L('仅文字', 'Text only')}</option><option value="VIDEO_AND_TEXT">{L('视频和文字', 'Video and text')}</option></select></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('分类', 'Category')} *<select required value={createCategoryId} onChange={(e) => setCreateCategoryId(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }}><option value="">{L('请选择分类', 'Select a category')}</option>{catalogCategories.map((cat) => <option key={cat.id} value={cat.id}>{categoryLabel(locale, cat.name)}</option>)}</select></label>
             </div>
