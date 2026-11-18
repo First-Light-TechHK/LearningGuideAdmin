@@ -6,8 +6,8 @@ import { t } from './i18n/messages';
  * 课程页面共用的错误文案（服务器是唯一的判断方）。
  *
  * 服务器的错误是 { code, message, details }：code 稳定，message 是英文句子，details 带行号、名字、展品位置等。
- * 页面按 code 取本地化文案，用 details 填空；绝不拿 message 当界面文字（中文界面会变成英文句子或通用提示）。
- * 认不出的 code 退回通用提示。
+ * 页面按 code 取本地化文案，用 details 填空。认不出的 code 用 failure.message：
+ * 请求层已经把它转成页面语言（英文界面是服务器的英文句子，中文界面是译文或通用提示）。
  */
 
 export type CourseFailure = Pick<ApiFailure, 'error' | 'message' | 'code' | 'details' | 'status'>;
@@ -52,6 +52,8 @@ export function exhibitUsagePlaces(locale: string, usages: unknown): string {
   return more > 0 ? `${shown.join(', ')} ${t(l, 'course.ui.usageMore', { count: more })}` : shown.join(', ');
 }
 
+const MESSAGE_FIRST = new Set(['REQUIRED', 'TRIAL_CUTOFF_INVALID', 'PLAN_LOOKUP_KEY_DUPLICATE', 'VERSION_INCOMPLETE']);
+
 /** 一条失败的原因，按页面语言写成一句话。 */
 export function courseErrorText(locale: string, failure: CourseFailure): string {
   const l = asLocale(locale);
@@ -61,10 +63,14 @@ export function courseErrorText(locale: string, failure: CourseFailure): string 
   const key = `course.errors.${code}`;
   const known = t(l, key) !== key;
   if (!known) {
-    // 登录类错误码有自己的文案（NOT_AUTHORISED、RATE_LIMITED……）；其余通用提示。
+    // 登录类错误码有自己的文案（NOT_AUTHORISED、RATE_LIMITED……）。
     const generic = t(l, `errors.${failure.error}`);
-    return generic === `errors.${failure.error}` ? t(l, 'errors.serverGeneric') : generic;
+    if (generic !== `errors.${failure.error}`) return generic;
+    // 其余：请求层已经把服务器句子转成页面语言（英文界面是服务器的英文句子，中文界面是译文或通用提示），直接用。
+    return failure.message?.trim() || t(l, 'errors.serverGeneric');
   }
+  // 这几种的服务器句子带具体的位置或名字（"Question 1 is required."），英文界面直接用；中文界面用本地句子。
+  if (l === 'en-GB' && MESSAGE_FIRST.has(code) && failure.message?.trim()) return failure.message.trim();
   switch (code) {
     case 'COURSE_STALE': {
       const name = typeof details.updatedByName === 'string' && details.updatedByName.trim() ? details.updatedByName.trim() : null;

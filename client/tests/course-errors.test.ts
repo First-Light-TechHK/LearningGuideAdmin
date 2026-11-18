@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { courseErrorText, courseFailureNotice, failureNeedsReload, isStale, rowFailure } from '../src/backoffice/lib/courseErrors'
+import { t } from '../src/backoffice/lib/i18n/messages'
 
 const fail = (code: string, details: Record<string, unknown> = {}, message = 'An English sentence from the server') =>
   ({ error: code, code, message, details, status: 409 }) as Parameters<typeof courseErrorText>[1]
@@ -15,18 +16,19 @@ describe('course errors read the code and details, never the server sentence', (
     assert.equal(isStale(stale), true)
   })
 
-  test('COURSE_STALE without a name still reads as a sentence', () => {
-    const text = courseErrorText('en-GB', fail('COURSE_STALE'))
-    assert.ok(text.length > 10)
-    assert.doesNotMatch(text, /undefined|\{name\}/)
+  test('COURSE_STALE without a name reads as the unknown-person sentence', () => {
+    for (const locale of ['en-GB', 'zh-CN'] as const) {
+      assert.equal(courseErrorText(locale, fail('COURSE_STALE')), t(locale, 'course.errors.COURSE_STALE_UNKNOWN'))
+      assert.equal(courseErrorText(locale, fail('COURSE_STALE', { updatedByName: '  ' })), t(locale, 'course.errors.COURSE_STALE_UNKNOWN'))
+    }
   })
 
   test('INVALID_TIME carries the 1-based row', () => {
-    const invalid = fail('INVALID_TIME', { row: 3 })
-    assert.match(courseErrorText('en-GB', invalid), /3/)
-    assert.match(courseErrorText('zh-CN', invalid), /3/)
+    const invalid = fail('INVALID_TIME', { row: 7 })
+    assert.match(courseErrorText('en-GB', invalid), /Row 7/)
+    assert.match(courseErrorText('zh-CN', invalid), /第 7 行/)
     const placed = rowFailure('en-GB', invalid)
-    assert.equal(placed?.row, 3)
+    assert.equal(placed?.row, 7)
     assert.equal(placed?.code, 'INVALID_TIME')
   })
 
@@ -53,19 +55,37 @@ describe('course errors read the code and details, never the server sentence', (
   })
 
   test('PUBLISH_BLOCKED, LESSON_ID_IMMUTABLE and LESSON_ORDER_INCOMPLETE have local sentences', () => {
-    for (const code of ['PUBLISH_BLOCKED', 'LESSON_ID_IMMUTABLE']) {
-      assert.doesNotMatch(courseErrorText('zh-CN', fail(code)), /English sentence/)
-      assert.doesNotMatch(courseErrorText('en-GB', fail(code)), /English sentence/)
+    for (const locale of ['en-GB', 'zh-CN'] as const) {
+      for (const code of ['PUBLISH_BLOCKED', 'LESSON_ID_IMMUTABLE', 'REASON_REQUIRED', 'TRIAL_NOT_CONTIGUOUS', 'DOCX_INVALID', 'FILE_REQUIRED', 'VIDEO_REQUIRED']) {
+        const expected = t(locale, `course.errors.${code}`)
+        assert.notEqual(expected, `course.errors.${code}`, `${code} has a ${locale} sentence`)
+        assert.equal(courseErrorText(locale, fail(code)), expected)
+      }
     }
     const order = courseErrorText('en-GB', fail('LESSON_ORDER_INCOMPLETE', { expected: 3, received: 2 }))
-    assert.match(order, /3/)
-    assert.match(order, /2/)
+    assert.equal(order, t('en-GB', 'course.errors.LESSON_ORDER_INCOMPLETE', { expected: '3', received: '2' }))
   })
 
-  test('an unknown code falls back to a generic sentence, not the server message', () => {
-    const text = courseErrorText('zh-CN', fail('SOMETHING_NEW'))
-    assert.doesNotMatch(text, /English sentence/)
-    assert.ok(text.length > 0)
+  test('a code without a local sentence shows the server sentence passed through (English page)', () => {
+    assert.equal(courseErrorText('en-GB', fail('SOMETHING_NEW')), 'An English sentence from the server')
+  })
+
+  test('a code without a local sentence and without a message falls back to the generic line', () => {
+    const bare = { error: 'SOMETHING_NEW', code: 'SOMETHING_NEW', status: 400 } as Parameters<typeof courseErrorText>[1]
+    assert.equal(courseErrorText('en-GB', bare), t('en-GB', 'errors.serverGeneric'))
+    assert.equal(courseErrorText('zh-CN', bare), t('zh-CN', 'errors.serverGeneric'))
+  })
+
+  test('codes whose server sentence names the place (REQUIRED, TRIAL_CUTOFF_INVALID, VERSION_INCOMPLETE) show it in English and the local line in Chinese', () => {
+    for (const code of ['REQUIRED', 'TRIAL_CUTOFF_INVALID', 'VERSION_INCOMPLETE']) {
+      assert.equal(courseErrorText('en-GB', fail(code, {}, 'Question 1 is required.')), 'Question 1 is required.')
+      // The request layer has already turned an English sentence into the generic line on a Chinese page.
+      assert.equal(courseErrorText('zh-CN', fail(code, {}, t('zh-CN', 'errors.serverGeneric'))), t('zh-CN', `course.errors.${code}`))
+    }
+  })
+
+  test('a sign-in style code keeps its own sentence', () => {
+    assert.equal(courseErrorText('en-GB', fail('NOT_AUTHORISED')), t('en-GB', 'errors.NOT_AUTHORISED'))
   })
 
   test('a notice reads "action: reason"; missing-lesson codes ask for a reload', () => {
