@@ -1,7 +1,10 @@
 import { useState } from 'react';
 
 import type { Exhibit, Lesson } from '../../contracts/course';
-import { boRequest } from '../../lib/api';
+import { boRequest, type ApiFailure } from '../../lib/api';
+import { courseErrorText, failureNeedsReload, isStale } from '../../lib/courseErrors';
+import { useReportFailure } from './feedback';
+import { t } from '../../lib/i18n/messages';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
@@ -52,6 +55,13 @@ export function ExhibitDrawer({
   const [error, setError] = useState('');
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const mediaLimits = useMediaLimits();
+  const reportFailure = useReportFailure();
+
+  /** 失败写在抽屉里；课程已被别人保存或展品/课时已不存在时，同时让页面显示"重新载入"。 */
+  function showFailure(action: string, failure: ApiFailure) {
+    setError(courseErrorText(locale, failure));
+    if (isStale(failure) || failureNeedsReload(failure)) reportFailure(action, failure);
+  }
 
   function kindToType(kind?: string) {
     if (kind === 'VIDEO') return 'VIDEO';
@@ -134,7 +144,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      setError(result.message ?? L(locale, '保存展品失败。', 'Could not save the exhibit.'));
+      showFailure(t(locale.startsWith('zh') ? 'zh-CN' : 'en-GB', 'course.ui.exhibitSaveFailed'), result);
     }
   }
 
@@ -149,7 +159,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      setError(result.message ?? L(locale, '删除失败。', 'Delete failed.'));
+      showFailure(t(locale.startsWith('zh') ? 'zh-CN' : 'en-GB', 'course.ui.exhibitDeleteFailed'), result);
     }
   }
 
@@ -231,7 +241,7 @@ export function ExhibitDrawer({
             pct={uploadPct}
           />
         )}
-        {error && <p style={{ color: '#b42318', background: '#FDECEC', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>{error}</p>}
+        {error && <p data-testid="exhibit-error" style={{ color: '#b42318', background: '#FDECEC', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>{error}</p>}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button type="button" style={primaryBtn} disabled={busy} onClick={() => void save()}>{L(locale, '保存展品', 'Save exhibit')}</button>

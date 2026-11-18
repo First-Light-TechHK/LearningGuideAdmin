@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import type {
@@ -8,9 +8,13 @@ import type {
   TrialSettings,
 } from '../contracts/course';
 import { useEmployee } from '../employeeSession';
-import { boRequest } from '../lib/api';
+import { boRequest, type ApiFailure } from '../lib/api';
+import { courseErrorText, courseFailureNotice, failureNeedsReload, isStale } from '../lib/courseErrors';
+import { t } from '../lib/i18n/messages';
+import type { Locale } from '../lib/i18n/config';
 import { isActionAllowed } from '../rbac/permissions';
 import { categoryLabel } from '../lib/categoryLabel';
+import { FailureProvider } from './course-editor/feedback';
 
 import { CourseInfoSection } from './course-editor/CourseInfoSection';
 import { CourseContentSection } from './course-editor/CourseContentSection';
@@ -39,7 +43,25 @@ export function CourseEditorPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  // 失败提示按服务器的错误码写成当前语言；stale = 别人在你打开后保存过（页面上已输入的内容保持不动，由用户决定是否重新载入）。
+  const [failure, setFailure] = useState<{ text: string; stale: boolean } | null>(null);
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const languageInitFor = useRef('');
+
+  const showNotice = useCallback((message: string) => {
+    setFailure(null);
+    setNotice(message);
+  }, []);
+  const reportFailure = useCallback(
+    (action: string, result: ApiFailure) => {
+      setNotice('');
+      setFailure({
+        text: isStale(result) ? courseErrorText(locale, result) : courseFailureNotice(locale, action, result),
+        stale: isStale(result) || failureNeedsReload(result),
+      });
+    },
+    [locale],
+  );
 
   const fetchLoad = useCallback(() => {
     return Promise.all([
@@ -53,14 +75,18 @@ export function CourseEditorPage() {
     ]).then(([detail, trialResult, versionsResult, historyResult, categoriesResult]) => {
       setLoading(false);
       if (!detail.success) {
-        setNotice(
-          `${L(locale, '课程加载失败', 'Could not load course')}: ${detail.message ?? detail.error}`,
-        );
+        reportFailure(L(locale, '课程加载失败', 'Could not load course'), detail);
         return;
       }
+      setFailure(null);
       setCourse(detail.data);
-      setContentLanguage(
-        detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB',
+      // 保存后会重新载入：正在编辑的内容语言保持不变，只有它已不在学习语言里才回到默认语言。
+      const firstLoad = languageInitFor.current !== detail.data.id;
+      languageInitFor.current = detail.data.id;
+      setContentLanguage((current) =>
+        !firstLoad && detail.data.learningLanguages.includes(current)
+          ? current
+          : detail.data.defaultContentLanguage || detail.data.learningLanguages[0] || 'en-GB',
       );
       setActiveLessonId((current) =>
         detail.data.lessons.some((lesson) => lesson.id === current)
@@ -72,7 +98,7 @@ export function CourseEditorPage() {
       if (historyResult.success) setHistory(historyResult.data);
       if (categoriesResult.success) setCategories(categoriesResult.data);
     });
-  }, [courseId, historyPage, locale]);
+  }, [courseId, historyPage, locale, reportFailure]);
 
   const [loadSource, setLoadSource] = useState(() => ({ courseId, historyPage, locale }));
   if (
@@ -83,10 +109,11 @@ export function CourseEditorPage() {
     setLoadSource({ courseId, historyPage, locale });
     setLoading(true);
   }
+  // 已经打开的课程重新载入时留在原页面（不闪"加载中"）：否则每次保存后，正在看的部分、视频/文字标签都会被重置。
   const load = useCallback(() => {
-    setLoading(true);
+    if (!course) setLoading(true);
     return fetchLoad();
-  }, [fetchLoad]);
+  }, [course, fetchLoad]);
 
   useEffect(() => {
     void fetchLoad();
@@ -100,10 +127,11 @@ export function CourseEditorPage() {
   const stepLabel = (complete: boolean) => L(locale, complete ? '已完成' : '未完成', complete ? 'Complete' : 'Incomplete');
 
   if (loading || !course) {
-    return <section className="card cardGrow"><p style={{ margin: 0, opacity: 0.7 }}>{L(locale, '加载中…', 'Loading…')}</p>{notice && <p style={{ color: '#b42318' }}>{notice}</p>}</section>;
+    return <section className="card cardGrow"><p style={{ margin: 0, opacity: 0.7 }}>{L(locale, '加载中…', 'Loading…')}</p>{(failure || notice) && <p style={{ color: '#b42318' }}>{failure?.text ?? notice}</p>}</section>;
   }
 
   return (
+    <FailureProvider value={reportFailure}>
     <section className="card cardGrow" style={{ overflow: 'auto' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -170,14 +198,26 @@ export function CourseEditorPage() {
         )}
       </div>
 
-      {notice && <p role="status" style={{ padding: 10, background: /fail|error|invalid/i.test(notice) ? '#FDECEC' : '#F3F7FF', borderRadius: 8, marginTop: 14 }}>{notice}</p>}
+      {failure && (
+        <div role="alert" data-testid="course-failure" data-stale={failure.stale ? 'true' : 'false'} style={{ padding: 10, background: failure.stale ? '#FFF6E5' : '#FDECEC', border: failure.stale ? '1px solid #F2D49B' : undefined, borderRadius: 8, marginTop: 14, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: 240 }}>{failure.text}</span>
+          {failure.stale && (
+            <>
+              <button type="button" data-testid="course-failure-reload" style={primaryBtn} onClick={() => void load()}>{t(locale as Locale, 'course.ui.staleReload')}</button>
+              <button type="button" style={buttonStyle} onClick={() => setFailure(null)}>{t(locale as Locale, 'course.ui.staleKeep')}</button>
+            </>
+          )}
+        </div>
+      )}
+      {notice && <p role="status" style={{ padding: 10, background: '#F3F7FF', borderRadius: 8, marginTop: 14 }}>{notice}</p>}
 
       <div style={{ marginTop: 16 }}>
-        {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} onNext={() => setTab('content')} />}
-        {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
-        {tab === 'trial' && trial && <CourseTrialSection canManage={canManageCommerce} locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} contentLanguage={contentLanguage} />}
-        {tab === 'versions' && <CourseVersionsSection canPublish={canPublish} locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={setNotice} />}
+        {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} onNext={() => setTab('content')} />}
+        {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} />}
+        {tab === 'trial' && trial && <CourseTrialSection canManage={canManageCommerce} locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} contentLanguage={contentLanguage} />}
+        {tab === 'versions' && <CourseVersionsSection canPublish={canPublish} locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} />}
       </div>
     </section>
+    </FailureProvider>
   );
 }

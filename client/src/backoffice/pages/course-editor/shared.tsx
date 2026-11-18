@@ -42,6 +42,43 @@ export const Chip = ({
 );
 
 
+/** 服务器报告的"没填完 / 无效"，红字放在对应的字段或行下面。没有就不显示。 */
+export function IssueText({ children }: { children: string | null | undefined }) {
+  if (!children) return null;
+  return <div data-testid="field-issue" style={{ fontSize: 12, color: '#b42318', marginTop: 4 }}>{children}</div>;
+}
+
+/**
+ * 时间输入框（受控文本）：保留用户输入的原文，不在输入框里解析、不静默改成 0。
+ * 能读成 mm:ss 的由请求层转成秒，读不懂的原样交给服务器，服务器回 INVALID_TIME 和行号，错误挂在这一行。
+ */
+export function TypedTimeInput({
+  text,
+  onText,
+  placeholder = 'mm:ss',
+  invalid,
+  style,
+  testId,
+}: {
+  text: string;
+  onText: (text: string) => void;
+  placeholder?: string;
+  invalid?: boolean;
+  style?: React.CSSProperties;
+  testId?: string;
+}) {
+  return (
+    <input
+      data-testid={testId}
+      value={text}
+      placeholder={placeholder}
+      aria-invalid={invalid ? true : undefined}
+      onChange={(event) => onText(event.target.value)}
+      style={{ ...style, ...(invalid ? { borderColor: '#b42318' } : {}) }}
+    />
+  );
+}
+
 /** 时间输入框：编辑时保留原文，失焦/回车时才解析，避免边打字边重排格式。 */
 export function TimeInput({
   seconds,

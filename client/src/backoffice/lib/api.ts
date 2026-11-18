@@ -21,9 +21,22 @@ const KNOWN_ERRORS: ReadonlySet<string> = new Set<ErrorCode>([
   'INTERNAL_ERROR',
 ])
 
-export type ApiResult<T> =
-  | { success: true; data: T; error: null }
-  | { success: false; data: null; error: ErrorCode; message?: string }
+/**
+ * 失败结果：`error` 仍是收敛后的 ErrorCode（旧页面照用），
+ * `code` 是服务器原样的错误码，`details` 是服务器的 error.details（行号、名字、冲突项……），
+ * 课程页面靠这两项告诉用户具体哪里出了问题（lib/courseErrors.ts）。
+ */
+export type ApiFailure = {
+  success: false
+  data: null
+  error: ErrorCode
+  message?: string
+  code?: string
+  details?: Record<string, unknown>
+  status?: number
+}
+
+export type ApiResult<T> = { success: true; data: T; error: null } | ApiFailure
 
 /**
  * 后端统一信封是 { success, data, error: { code, message } }；
@@ -65,15 +78,19 @@ export async function boRequest<T>(url: string, init?: RequestInit): Promise<Api
     const body = (await response.json().catch(() => null)) as {
       success?: boolean
       data?: T
-      error?: { code?: string; message?: string } | null
+      error?: { code?: string; message?: string; details?: unknown } | null
     } | null
     if (body?.success === true) return { success: true, data: body.data as T, error: null }
     const code = body?.error?.code
+    const details = body?.error?.details
     return {
       success: false,
       data: null,
       error: code && KNOWN_ERRORS.has(code) ? (code as ErrorCode) : 'INTERNAL_ERROR',
       message: body?.error?.message ? serverText(body.error.message) : undefined,
+      status: response.status,
+      ...(code ? { code } : {}),
+      ...(details && typeof details === 'object' && !Array.isArray(details) ? { details: details as Record<string, unknown> } : {}),
     }
   } catch {
     return { success: false, data: null, error: 'INTERNAL_ERROR' }

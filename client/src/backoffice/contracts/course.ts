@@ -2,12 +2,37 @@ import type { Localized } from '../lib/i18n/localized';
 
 export type StepCompleteness = { complete: boolean; missing: string[] };
 
+/** 服务器按字段报告的"没填完"（completeness.issues）：页面只放置和翻译，不自己判断。 */
+export type CourseIssue = {
+  code: string;
+  step: 'COURSE_INFORMATION' | 'COURSE_CONTENT' | 'TRIAL';
+  part?: 'LESSON_INFO' | 'STUDY' | 'UNDERSTANDING';
+  lessonId?: string;
+  lessonCode?: string;
+  lessonPosition?: number;
+  language?: string;
+  /** 稳定的字段路径，如 `title`、`learn[3]`、`videoLearningPoints[V3].timeSeconds`、`readings[0].title`。 */
+  field: string;
+  rowKey?: string;
+  message: string;
+};
+
 export type LessonCompleteness = {
   lessonId: string;
   code: string;
+  position?: number;
+  infoComplete?: boolean;
   studyComplete: boolean;
   understandingComplete: boolean;
   missing: string[];
+  issues?: CourseIssue[];
+};
+
+export type IncompleteLesson = {
+  lessonId: string;
+  code: string;
+  position: number;
+  parts: Array<'LESSON_INFO' | 'STUDY' | 'UNDERSTANDING'>;
 };
 
 export type CourseCompleteness = {
@@ -19,6 +44,9 @@ export type CourseCompleteness = {
   completedSteps: number;
   canPublish: boolean;
   publishBlockers: string[];
+  publishBlockerCodes?: Array<'COURSE_INFORMATION' | 'LESSON_STUDY'>;
+  issues?: CourseIssue[];
+  incompleteLessons?: IncompleteLesson[];
 };
 
 export type CourseLocalization = {
@@ -59,6 +87,7 @@ export type ExhibitMedia = {
 export type Exhibit = {
   id: string;
   code: string;
+  sortOrder?: number;
   type: string;
   mediaAssetId?: string | null;
   thumbnailAssetId?: string | null;
@@ -68,7 +97,7 @@ export type Exhibit = {
   localized: Localized<'title' | 'description'>;
 };
 
-export type Reading = { type: string; title: string; author: string | null; whyRecommended: string | null; language?: string };
+export type Reading = { id?: string; type: string; title: string; author: string | null; whyRecommended: string | null; language?: string; sortOrder?: number };
 export type Question = { id?: string; code: string; question: string; referenceAnswer: string | null; enabled?: boolean };
 export type ApplicationTest = { scenario: string; referenceAnswer: string | null; enabled?: boolean };
 
