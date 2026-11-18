@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { courseErrorText, courseFailureNotice } from '../../lib/courseErrors';
 import { Field, Modal } from './shared';
 import { L, buttonStyle, card, inputStyle, languageLabel, primaryBtn } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
@@ -75,7 +76,7 @@ export function UnderstandingPanel({
       onNotice(L(locale, '知识测试已保存。', 'Knowledge Test saved.'));
       await onSaved();
     } else {
-      onNotice(`${L(locale, '保存失败', 'Save failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), result));
     }
   }
 
@@ -95,7 +96,7 @@ export function UnderstandingPanel({
       onNotice(L(locale, '应用测试已保存。', 'Application Test saved.'));
       await onSaved();
     } else {
-      onNotice(`${L(locale, '保存失败', 'Save failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), result));
     }
   }
 
@@ -128,7 +129,7 @@ export function UnderstandingPanel({
       setSingleResult({ added: result.data.added, errors: result.data.errors ?? [] });
       if (result.data.added > 0) await onSaved();
     } else {
-      setSingleResult({ added: 0, errors: [{ row: 0, message: result.message ?? result.error }] });
+      setSingleResult({ added: 0, errors: [{ row: 0, message: courseErrorText(locale, result) }] });
     }
   }
 

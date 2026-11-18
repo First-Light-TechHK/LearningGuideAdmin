@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { CourseDetail, TrialSettings, TrialRow } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { courseFailureNotice } from '../../lib/courseErrors';
 import { Chip, TimeInput } from './shared';
 import { L, buttonStyle, card, languageLabel, primaryBtn, trialStatusLabel } from './shared-utils';
 
@@ -141,7 +142,7 @@ export function CourseTrialSection({
       onNotice(L(locale, '试看设置已保存，立即在本环境网站生效（不生成版本）。', 'Trial settings saved and effective immediately (no version created).'));
       await onReload();
     } else {
-      onNotice(`${L(locale, '保存失败', 'Save failed')}: ${saved.message ?? saved.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), saved));
     }
   }
 
@@ -206,7 +207,7 @@ export function CourseTrialSection({
       );
       await onReload();
     } else {
-      onNotice(`${L(locale, '保存失败', 'Save failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), result));
     }
   }
 

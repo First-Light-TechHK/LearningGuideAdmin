@@ -2,14 +2,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CourseDetail, Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { courseErrorText, rowFailure } from '../../lib/courseErrors';
+import { issueLine } from '../../lib/courseIssues';
+import { exhibitOrderBody, lessonCreateBody, lessonInfoBody, lessonOrderBody, lessonTextBody, movedIds, readingsBody, triggersBody, videoPointsBody, type PointDraft, type ReadingDraft, type TriggerDraft } from '../../lib/courseRequests';
+import { t } from '../../lib/i18n/messages';
+import { useReportFailure } from './feedback';
 import { formatBytes, uploadFileWithProgress, uploadMediaInChunks } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
 import { UnderstandingPanel } from './UnderstandingPanel';
 import { ExhibitDrawer } from './ExhibitDrawer';
 import { TextEditor } from './TextEditor';
-import { Chip, Field, Modal, TimeInput } from './shared';
-import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel } from './shared-utils';
+import { Chip, Field, IssueText, Modal, TypedTimeInput } from './shared';
+import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, fmtTimeInput, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
 import { serverText } from '../../lib/i18n/serverText';
 
@@ -40,15 +45,21 @@ function loc(lesson: Lesson | undefined, language: string) {
   return lesson.localizations.find((item) => item.language === language) ?? lesson.localizations[0];
 }
 
-function parseTextLearningPoints(html: string) {
-  const matches = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
-  return matches.map((match, index) => {
-    const heading = match[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    const start = (match.index ?? 0) + match[0].length;
-    const end = index + 1 < matches.length ? (matches[index + 1].index ?? html.length) : html.length;
-    const body = html.slice(start, end).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
-    return { heading, hasBody: Boolean(body) };
-  });
+/** 推荐阅读只有一份英文列表；旧数据里没有英文行时，服务器按全部行算，这里也一样。 */
+export function readingsOf(lesson: Lesson) {
+  const english = lesson.readings.filter((reading) => reading.language === 'en-GB');
+  return english.length > 0 ? english : lesson.readings;
+}
+
+/**
+ * 正文里的一级标题（H1）和服务器盖在它身上的学习点编号（data-lp）。
+ * 只用来在编辑器旁边列出标题；标题下有没有正文、标题是不是空的，由服务器的 completeness.issues 判断。
+ */
+export function parseTextLearningPoints(html: string): Array<{ heading: string; code: string | null }> {
+  return [...html.matchAll(/<h1\b([^>]*)>([\s\S]*?)<\/h1>/gi)].map((match) => ({
+    heading: match[2].replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim(),
+    code: match[1].match(/\bdata-lp\s*=\s*"([^"]*)"/i)?.[1] ?? null,
+  }));
 }
 
 export function CourseContentSection({
@@ -74,14 +85,17 @@ export function CourseContentSection({
 }) {
   const [part, setPart] = useState<'study' | 'understanding'>('study');
   const [studyTab, setStudyTab] = useState<'video' | 'text'>('video');
-  const [lessonCode, setLessonCode] = useState('');
+  const reportFailure = useReportFailure();
   const [lessonTitleEn, setLessonTitleEn] = useState('');
   const [lessonTitleZh, setLessonTitleZh] = useState('');
   const [lessonDescEn, setLessonDescEn] = useState('');
   const [lessonDescZh, setLessonDescZh] = useState('');
-  const [videoLps, setVideoLps] = useState<Array<{ code: string; title: string; timeSeconds: number }>>([]);
-  const [triggerRows, setTriggerRows] = useState<Array<{ exhibitId: string; timeSeconds: number }>>([]);
-  const [readingRows, setReadingRows] = useState<Array<{ type: string; title: string; author: string; whyRecommended: string }>>([]);
+  // 视频学习点、触发点、阅读：已有的行带服务器给的 id / 编号（保存后行的身份不变），时间保留用户输入的原文。
+  const [videoLps, setVideoLps] = useState<PointDraft[]>([]);
+  const [triggerRows, setTriggerRows] = useState<TriggerDraft[]>([]);
+  const [readingRows, setReadingRows] = useState<ReadingDraft[]>([]);
+  // 服务器退回的行级错误（details.row 从 1 起），挂在对应的那一行上。
+  const [rowErrors, setRowErrors] = useState<{ points: Record<number, string>; triggers: Record<number, string>; readings: Record<number, string> }>({ points: {}, triggers: {}, readings: {} });
   const [textHtml, setTextHtml] = useState('');
   const [exhibitDrawer, setExhibitDrawer] = useState<'new' | string | null>(null);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
@@ -91,7 +105,13 @@ export function CourseContentSection({
   const [allImportLanguage, setAllImportLanguage] = useState(contentLanguage);
   const [allImportResult, setAllImportResult] = useState<{ added: number; errors: Array<{ row: number; message: string }>; byLesson?: Record<string, number> } | null>(null);
   const [readingImportFile, setReadingImportFile] = useState<File | null>(null);
-  const [readingImportResult, setReadingImportResult] = useState<{ added: number; errors: Array<{ row: number; message: string }> } | null>(null);
+  const [readingImportResult, setReadingImportResult] = useState<{
+    rowsRead: number | null;
+    added: number;
+    byLesson: Array<{ lessonCode: string; added: number }>;
+    errors: Array<{ row: number; message: string }>;
+    failure?: string;
+  } | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [videoUpload, setVideoUpload] = useState<VideoUploadState | null>(null);
   const [exhibitUpload, setExhibitUpload] = useState<ExhibitUploadState>(null);
@@ -119,8 +139,8 @@ export function CourseContentSection({
     if (activeLesson) {
       const en = loc(activeLesson, 'en-GB');
       const zh = loc(activeLesson, 'zh-CN');
-      setLessonCode(activeLesson.code);
-      setLessonTitleEn(en?.title ?? activeLesson.code);
+      // 课时名没填时服务器存空；这里也显示空，不替用户编一个（完整性由服务器报）。
+      setLessonTitleEn(en?.title ?? '');
       setLessonTitleZh(zh?.title ?? '');
       setLessonDescEn(en?.description ?? '');
       setLessonDescZh(zh?.description ?? '');
@@ -130,26 +150,26 @@ export function CourseContentSection({
           .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
           .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
           .map((point) => ({
+            id: point.id,
             code: point.code,
             title: point.title,
-            timeSeconds: point.timeSeconds ?? 0,
+            timeText: fmtTimeInput(point.timeSeconds),
           })),
       );
+      // 触发点按服务器给的顺序（先按时间）；没选展品、没填时间的保持为空。
       setTriggerRows(
         (activeLesson.triggers ?? [])
           .filter((trigger) => trigger.language === contentLanguage)
-          .map((trigger) => ({ exhibitId: trigger.exhibitId, timeSeconds: trigger.timeSeconds })),
+          .map((trigger) => ({ exhibitId: trigger.exhibitId ?? '', timeText: fmtTimeInput(trigger.timeSeconds) })),
       );
-      setReadingRows(
-        activeLesson.readings
-          .filter((reading) => reading.language === 'en-GB' || reading.language === contentLanguage)
-          .map((reading) => ({
-            type: reading.type,
-            title: reading.title,
-            author: reading.author ?? '',
-            whyRecommended: reading.whyRecommended ?? '',
-          })),
-      );
+      setReadingRows(readingsOf(activeLesson).map((reading) => ({
+        id: reading.id,
+        type: reading.type,
+        title: reading.title ?? '',
+        author: reading.author ?? '',
+        whyRecommended: reading.whyRecommended ?? '',
+      })));
+      setRowErrors({ points: {}, triggers: {}, readings: {} });
       setTextHtml(currentLoc?.textHtml ?? '');
     }
   }
@@ -178,9 +198,23 @@ export function CourseContentSection({
     videoAbortRef.current?.abort();
   }, [selectedLessonId]);
 
+  const asLocale = (value: string): Locale => (value.startsWith('zh') ? 'zh-CN' : 'en-GB');
+  /** 服务器的导入行错误是 "Row 3 · ..." 的英文句子：行号只写一次，已知句子写成当前语言。 */
+  function readingImportErrorText(error: { row: number; message: string }): string {
+    const l = asLocale(locale);
+    const body = error.message.replace(/^Row\s+\d+\s*·\s*/i, '');
+    const row = String(error.row);
+    const lesson = body.match(/^Lesson ID (.*) doesn't exist$/);
+    if (lesson) return t(l, 'course.ui.readingRowLesson', { row, code: lesson[1] });
+    if (/^Type must be/.test(body)) return t(l, 'course.ui.readingRowType', { row });
+    return t(l, 'course.ui.readingRowOther', { row, message: serverText(body, l) });
+  }
+
   const textLps = useMemo(() => parseTextLearningPoints(textHtml), [textHtml]);
-  const videoDuration = loc(activeLesson, contentLanguage)?.videoDurationSeconds ?? null;
   const exhibits = activeLesson?.exhibits ?? [];
+  // 哪里没填完、缺什么，全部来自服务器（detail.completeness.issues，保存后重新载入）；页面不自己判断。
+  const lessonIssues = (course.completeness.issues ?? []).filter((issue) => issue.step === 'COURSE_CONTENT' && issue.lessonId === activeLesson?.id);
+  const lessonLine = (field: string, language?: string | null) => issueLine(locale, lessonIssues, { language, field });
 
   async function importDocx(file: File): Promise<string | null> {
     setBusy(true);
@@ -189,88 +223,68 @@ export function CourseContentSection({
     const result = await boRequest<{ html: string }>(`/api/backoffice/courses/${course.id}/docx`, { method: 'POST', body: form });
     setBusy(false);
     if (!result.success) {
-      onNotice(`${L(locale, '导入 Word 失败', 'Word import failed')}: ${result.message ?? result.error}`);
+      reportFailure(L(locale, '导入 Word 失败', 'Word import failed'), result);
       return null;
     }
     return result.data.html;
   }
 
-  async function saveLessonInfo() {
-    if (!activeLesson) return;
-    setBusy(true);
-    // 同一语言的课时信息与正文必须顺序保存：并发写同一条 LessonLocalization
-    // 会互相覆盖（后写入的请求用旧值把 textHtml 清空，导致文本学习点丢失）。
-    const requests = [
-      () => boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ language: 'en-GB', code: lessonCode, title: lessonTitleEn, description: lessonDescEn }),
-      }),
-      () => boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ language: 'zh-CN', code: lessonCode, title: lessonTitleZh, description: lessonDescZh }),
-      }),
-    ];
-    if (hasText) {
-      requests.push(() =>
-        boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`, {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ language: contentLanguage, textHtml }),
-        }),
-      );
-    }
-    const results = [];
-    for (const request of requests) results.push(await request());
-    setBusy(false);
-    if (results.every((result) => result.success)) {
-      onNotice(L(locale, '课时信息已保存。', 'Lesson information saved.'));
-      await onReload();
-    } else {
-      const failed = results.find((result) => !result.success);
-      onNotice(`${L(locale, '保存失败', 'Save failed')}: ${failed?.message ?? failed?.error}`);
-    }
+  /** 保存时服务器退回的行错误（details.row 从 1 起）挂到对应的那一行。 */
+  function placeRowError(kind: 'points' | 'triggers' | 'readings', failure: Parameters<typeof rowFailure>[1]) {
+    const found = rowFailure(locale, failure);
+    if (found) setRowErrors((current) => ({ ...current, [kind]: { ...current[kind], [found.row - 1]: found.text } }));
   }
 
+  /**
+   * 保存"学习与探索"：按顺序一项一项存（同一语言的课时信息与正文不能并发写，会互相覆盖），
+   * 全部成功后才重新载入一次。中途失败：停下，已输入的行全部保留，错误放在对应的行上，页面顶部写明哪一步失败。
+   * 保存后行的 id / 编号（学习点、阅读）记在行上，再次保存时行的身份不变；正文换成服务器盖过章（data-lp）的那份。
+   */
   async function saveStudy() {
     if (!activeLesson) return;
-    await saveLessonInfo();
+    const base = `/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`;
+    const json = (method: string, body: unknown) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     setBusy(true);
+    setRowErrors({ points: {}, triggers: {}, readings: {} });
+    const fail = (action: string, failure: Parameters<typeof reportFailure>[1]) => {
+      setBusy(false);
+      reportFailure(action, failure);
+    };
+
+    const infoAction = L(locale, '课时信息保存失败', 'Lesson info could not be saved');
+    for (const [language, title, description] of [['en-GB', lessonTitleEn, lessonDescEn], ['zh-CN', lessonTitleZh, lessonDescZh]] as const) {
+      const result = await boRequest<CourseDetail>(base, json('PUT', lessonInfoBody(language, title, description)));
+      if (!result.success) return fail(infoAction, result);
+    }
+    if (hasText) {
+      const result = await boRequest<CourseDetail>(base, json('PUT', lessonTextBody(contentLanguage, textHtml)));
+      if (!result.success) return fail(L(locale, '正文保存失败', 'Text could not be saved'), result);
+      // 服务器给每个 H1 盖了学习点编号；编辑器此后持有的是这份（再保存时标题改了名字、挪了位置，编号也跟着走）。
+      const stamped = result.data.lessons.find((lesson) => lesson.id === activeLesson.id)?.localizations.find((item) => item.language === contentLanguage)?.textHtml;
+      if (typeof stamped === 'string') setTextHtml(stamped);
+    }
     if (hasVideo) {
-      const lpResult = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/learning-points`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ language: contentLanguage, points: videoLps }),
-      });
-      if (!lpResult.success) {
-        setBusy(false);
-        onNotice(`${L(locale, '学习点保存失败', 'Learning point save failed')}: ${lpResult.message ?? lpResult.error}`);
-        return;
+      const points = await boRequest<{ points: Array<{ id: string; code: string }> }>(`${base}/learning-points`, json('PUT', videoPointsBody(contentLanguage, videoLps)));
+      if (!points.success) {
+        placeRowError('points', points);
+        return fail(L(locale, '学习点保存失败', 'Learning points could not be saved'), points);
       }
-      const triggerResult = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/triggers`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ language: contentLanguage, triggers: triggerRows }),
-      });
-      if (!triggerResult.success) {
-        setBusy(false);
-        onNotice(`${L(locale, '触发点保存失败', 'Trigger save failed')}: ${triggerResult.message ?? triggerResult.error}`);
-        return;
+      // 返回的行与发出的行一一对应：记下 id 和编号。
+      setVideoLps((rows) => rows.map((row, index) => ({ ...row, id: points.data.points[index]?.id ?? row.id, code: points.data.points[index]?.code ?? row.code })));
+      const triggers = await boRequest(`${base}/triggers`, json('PUT', triggersBody(contentLanguage, triggerRows)));
+      if (!triggers.success) {
+        placeRowError('triggers', triggers);
+        return fail(L(locale, '触发点保存失败', 'Triggers could not be saved'), triggers);
       }
     }
-    const readingResult = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/readings`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ language: 'en-GB', readings: readingRows }),
-    });
+    const readings = await boRequest<{ readings: Array<{ id: string }> }>(`${base}/readings`, json('PUT', readingsBody(readingRows)));
+    if (!readings.success) {
+      placeRowError('readings', readings);
+      return fail(L(locale, '阅读保存失败', 'Readings could not be saved'), readings);
+    }
     setBusy(false);
-    if (readingResult.success) {
-      onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
-      await onReload();
-    } else {
-      onNotice(`${L(locale, '阅读保存失败', 'Reading save failed')}: ${readingResult.message ?? readingResult.error}`);
-    }
+    onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
+    await onReload();
   }
 
   function uploadFailureText(code: string, detail?: string) {
@@ -360,7 +374,7 @@ export function CourseContentSection({
       },
     );
     if (!assigned.success) {
-      const message = `${L(locale, '视频已上传，但绑定到课时失败', 'Video uploaded, but assigning it to the lesson failed')}: ${assigned.message ?? assigned.error}`;
+      const message = `${L(locale, '视频已上传，但绑定到课时失败', 'Video uploaded, but assigning it to the lesson failed')}: ${courseErrorText(locale, assigned)}`;
       setVideoUpload((prev) => prev && { ...prev, phase: 'error', error: message });
       onNotice(message);
       return;
@@ -404,7 +418,7 @@ export function CourseContentSection({
         body: JSON.stringify({ type, mediaAssetId: uploaded.data.id, localized: {} }),
       });
       if (!created.success) {
-        failures.push(`${file.name}（${created.message ?? created.error}）`);
+        failures.push(`${file.name}（${courseErrorText(locale, created)}）`);
         continue;
       }
       uploadedCount += 1;
@@ -429,10 +443,11 @@ export function CourseContentSection({
     const title = window.prompt(L(locale, '课时标题', 'Lesson title'))?.trim();
     if (!title) return;
     setBusy(true);
+    // Lesson ID 由服务器分配，这里只发课时名。
     const result = await boRequest<CourseDetail>(`/api/backoffice/courses/${course.id}/lessons`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title, language: contentLanguage }),
+      body: JSON.stringify(lessonCreateBody(contentLanguage, title)),
     });
     setBusy(false);
     if (result.success) {
@@ -440,7 +455,7 @@ export function CourseContentSection({
       if (newest) setActiveLessonId(newest.id);
       await onReload();
     } else {
-      onNotice(`${L(locale, '添加课时失败', 'Could not add lesson')}: ${result.message ?? result.error}`);
+      reportFailure(L(locale, '添加课时失败', 'Could not add lesson'), result);
     }
   }
 
@@ -454,26 +469,40 @@ export function CourseContentSection({
       setActiveLessonId(result.data.lessons[0]?.id ?? '');
       await onReload();
     } else {
-      onNotice(`${L(locale, '删除失败', 'Delete failed')}: ${result.message ?? result.error}`);
+      reportFailure(L(locale, '删除失败', 'Delete failed'), result);
     }
   }
 
   async function moveLesson(direction: -1 | 1) {
     if (!activeLesson) return;
-    const ordered = [...sortedLessons];
-    const index = ordered.findIndex((lesson) => lesson.id === activeLesson.id);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= ordered.length) return;
-    [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+    // 顺序接口要的是全部课时的新顺序（缺一个就整批拒绝），所以发完整列表。
+    const ordered = movedIds(sortedLessons.map((lesson) => lesson.id), activeLesson.id, direction);
+    if (!ordered) return;
     setBusy(true);
     const result = await boRequest<CourseDetail>(`/api/backoffice/courses/${course.id}/lessons/reorder`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ lessonIds: ordered.map((lesson) => lesson.id) }),
+      body: JSON.stringify(lessonOrderBody(ordered)),
     });
     setBusy(false);
     if (result.success) await onReload();
-    else onNotice(`${L(locale, '排序失败', 'Reorder failed')}: ${result.message ?? result.error}`);
+    else reportFailure(L(locale, '排序失败', 'Reorder failed'), result);
+  }
+
+  /** 展品排序：把这个展品和相邻的换位置，发本课时全部展品的新顺序。 */
+  async function moveExhibit(exhibitId: string, direction: -1 | 1) {
+    if (!activeLesson) return;
+    const ordered = movedIds(exhibits.map((exhibit) => exhibit.id), exhibitId, direction);
+    if (!ordered) return;
+    setBusy(true);
+    const result = await boRequest(`/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}/exhibits/order`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(exhibitOrderBody(ordered)),
+    });
+    setBusy(false);
+    if (result.success) await onReload();
+    else reportFailure(L(locale, '展品排序失败', 'Exhibit reorder failed'), result);
   }
 
   async function runAllUnderstandingImport() {
@@ -490,7 +519,7 @@ export function CourseContentSection({
       setAllImportResult({ added: result.data.added, byLesson: result.data.byLesson, errors: result.data.errors ?? [] });
       if (result.data.added > 0) await onReload();
     } else {
-      setAllImportResult({ added: 0, errors: [{ row: 0, message: result.message ?? result.error }] });
+      setAllImportResult({ added: 0, errors: [{ row: 0, message: courseErrorText(locale, result) }] });
     }
   }
 
@@ -499,13 +528,14 @@ export function CourseContentSection({
     setImportBusy(true);
     const form = new FormData();
     form.append('file', readingImportFile);
-    const result = await boRequest<{ added: number; errors: Array<{ row: number; message: string }> }>(`/api/backoffice/courses/${course.id}/readings/import`, { method: 'POST', body: form });
+    const result = await boRequest<{ rowsRead?: number; added: number; byLesson?: Array<{ lessonCode: string; added: number }>; errors?: Array<{ row: number; message: string }> }>(`/api/backoffice/courses/${course.id}/readings/import`, { method: 'POST', body: form });
     setImportBusy(false);
     if (result.success) {
-      setReadingImportResult({ added: result.data.added, errors: result.data.errors ?? [] });
+      setReadingImportResult({ rowsRead: result.data.rowsRead ?? null, added: result.data.added, byLesson: result.data.byLesson ?? [], errors: result.data.errors ?? [] });
       if (result.data.added > 0) await onReload();
     } else {
-      setReadingImportResult({ added: 0, errors: [{ row: 0, message: result.message ?? result.error }] });
+      // 文件列不对（READING_COLUMNS_INVALID，details.missing 列出缺的列）等：按错误码写，不用服务器的英文句子。
+      setReadingImportResult({ rowsRead: null, added: 0, byLesson: [], errors: [], failure: courseErrorText(locale, result) });
     }
   }
 
@@ -539,7 +569,7 @@ export function CourseContentSection({
         )}
         {sortedLessons.map((lesson) => {
           const completeness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === lesson.id);
-          const title = loc(lesson, contentLanguage)?.title ?? lesson.code;
+          const title = loc(lesson, contentLanguage)?.title?.trim() || lesson.code;
           const meta = part === 'study'
             ? `${loc(lesson, contentLanguage)?.videoDurationSeconds ? `${Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) / 60)}:${String(Math.round((loc(lesson, contentLanguage)?.videoDurationSeconds ?? 0) % 60)).padStart(2, '0')}` : '—'} · ${lesson.learningPoints.filter((point) => point.language === contentLanguage && point.source === 'VIDEO').length} ${L(locale, '学习点', 'LPs')} · ${lesson.exhibits.length} ${L(locale, '个展品', 'exhibits')}`
             : `${lesson.questions.length} ${L(locale, '题', 'questions')} · ${lesson.applicationTest ? L(locale, '有应用测试', 'App test') : L(locale, '无应用测试', 'no App test')}`;
@@ -593,14 +623,14 @@ export function CourseContentSection({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 10 }}>
               <div>
                 <label style={labelStyle}>{L(locale, '英文', 'English')}</label>
-                <Field label={L(locale, '课时 ID', 'Lesson ID')}><input value={lessonCode} onChange={(event) => setLessonCode(event.target.value)} style={inputStyle} /></Field>
-                <Field label={L(locale, '课时标题 *', 'Lesson title *')}><input value={lessonTitleEn} onChange={(event) => setLessonTitleEn(event.target.value)} style={inputStyle} /></Field>
-                <Field label={L(locale, '课时简介 *', 'Lesson description *')}><textarea rows={2} value={lessonDescEn} onChange={(event) => setLessonDescEn(event.target.value)} style={inputStyle} /></Field>
+                <Field label={L(locale, '课时 ID', 'Lesson ID')} hint={t(locale as Locale, 'course.ui.lessonIdFixed')}><input data-testid="lesson-id" readOnly aria-readonly="true" value={activeLesson.code} style={{ ...inputStyle, background: '#F5F7FA' }} /></Field>
+                <Field label={L(locale, '课时标题 *', 'Lesson title *')}><input data-testid="lesson-title-en" value={lessonTitleEn} onChange={(event) => setLessonTitleEn(event.target.value)} style={inputStyle} /><IssueText>{lessonLine('title', 'en-GB')}</IssueText></Field>
+                <Field label={L(locale, '课时简介 *', 'Lesson description *')}><textarea data-testid="lesson-desc-en" rows={2} value={lessonDescEn} onChange={(event) => setLessonDescEn(event.target.value)} style={inputStyle} /><IssueText>{lessonLine('description', 'en-GB')}</IssueText></Field>
               </div>
               <div>
                 <label style={labelStyle}>{L(locale, '中文', 'Chinese')}</label>
-                <Field label={L(locale, '课时标题 *', 'Lesson title *')}><input value={lessonTitleZh} onChange={(event) => setLessonTitleZh(event.target.value)} style={inputStyle} /></Field>
-                <Field label={L(locale, '课时简介 *', 'Lesson description *')}><textarea rows={2} value={lessonDescZh} onChange={(event) => setLessonDescZh(event.target.value)} style={inputStyle} /></Field>
+                <Field label={L(locale, '课时标题 *', 'Lesson title *')}><input data-testid="lesson-title-zh" value={lessonTitleZh} onChange={(event) => setLessonTitleZh(event.target.value)} style={inputStyle} /><IssueText>{lessonLine('title', 'zh-CN')}</IssueText></Field>
+                <Field label={L(locale, '课时简介 *', 'Lesson description *')}><textarea data-testid="lesson-desc-zh" rows={2} value={lessonDescZh} onChange={(event) => setLessonDescZh(event.target.value)} style={inputStyle} /><IssueText>{lessonLine('description', 'zh-CN')}</IssueText></Field>
               </div>
             </div>
           </div>
@@ -642,11 +672,12 @@ export function CourseContentSection({
                   />
                 )}
                 <div style={{ marginTop: 10 }}>
-                  {exhibits.map((exhibit) => {
-                    const title = exhibit.localized?.[contentLanguage]?.title ?? exhibit.localized?.['en-GB']?.title ?? exhibit.code;
-                    const complete = Boolean(exhibit.media && exhibit.thumbnail && (exhibit.localized?.[contentLanguage]?.title || exhibit.localized?.['en-GB']?.title) && (exhibit.localized?.[contentLanguage]?.description || exhibit.localized?.['en-GB']?.description));
+                  {exhibits.map((exhibit, exhibitIndex) => {
+                    const title = exhibit.localized?.[contentLanguage]?.title || exhibit.localized?.['en-GB']?.title || exhibit.code;
+                    // 展品齐不齐由服务器判断（completeness.issues 里 exhibits[E001].* 的各项）。
+                    const complete = !lessonIssues.some((issue) => issue.field.startsWith(`exhibits[${exhibit.code}].`));
                     return (
-                      <div key={exhibit.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', border: `1px solid ${complete ? '#E8EDF5' : '#F5C7A8'}`, borderRadius: 10, padding: 10, marginTop: 8, background: complete ? '#fff' : '#FFF8F2' }}>
+                      <div key={exhibit.id} data-testid="exhibit-row" data-exhibit-code={exhibit.code} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', border: `1px solid ${complete ? '#E8EDF5' : '#F5C7A8'}`, borderRadius: 10, padding: 10, marginTop: 8, background: complete ? '#fff' : '#FFF8F2' }}>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                           {exhibit.thumbnail ? <img src={`/api/backoffice/courses/${course.id}/media/${exhibit.thumbnail.id}`} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }} /> : <div style={{ width: 44, height: 44, borderRadius: 6, background: '#EEF1F6' }} />}
                           <div>
@@ -654,7 +685,11 @@ export function CourseContentSection({
                             <div style={{ fontSize: 11, color: '#5A6577' }}>{exhibit.code} · {exhibitTypeLabel(locale, exhibit.type)}</div>
                           </div>
                         </div>
-                        <button type="button" style={buttonStyle} onClick={() => setExhibitDrawer(exhibit.id)}>{complete ? L(locale, '编辑', 'Edit') : L(locale, '补全', 'Complete')}</button>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <button type="button" data-testid="exhibit-up" aria-label={t(locale as Locale, 'course.ui.moveUp')} title={t(locale as Locale, 'course.ui.moveUp')} style={{ ...buttonStyle, padding: '4px 8px' }} disabled={busy || exhibitIndex === 0} onClick={() => void moveExhibit(exhibit.id, -1)}>↑</button>
+                          <button type="button" data-testid="exhibit-down" aria-label={t(locale as Locale, 'course.ui.moveDown')} title={t(locale as Locale, 'course.ui.moveDown')} style={{ ...buttonStyle, padding: '4px 8px' }} disabled={busy || exhibitIndex === exhibits.length - 1} onClick={() => void moveExhibit(exhibit.id, 1)}>↓</button>
+                          <button type="button" style={buttonStyle} onClick={() => setExhibitDrawer(exhibit.id)}>{complete ? L(locale, '编辑', 'Edit') : L(locale, '补全', 'Complete')}</button>
+                        </div>
                       </div>
                     );
                   })}
@@ -832,18 +867,23 @@ export function CourseContentSection({
                     <div style={{ marginTop: 14 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <strong style={{ fontSize: 14 }}>{L(locale, '学习点', 'Learning points')}</strong>
-                        <button type="button" style={buttonStyle} onClick={() => setVideoLps((rows) => [...rows, { code: `V${rows.length + 1}`, title: '', timeSeconds: 0 }])}>+ {L(locale, '添加学习点', 'Add learning point')}</button>
+                        <button type="button" data-testid="add-point" style={buttonStyle} onClick={() => setVideoLps((rows) => [...rows, { title: '', timeText: '' }])}>+ {L(locale, '添加学习点', 'Add learning point')}</button>
                       </div>
                       <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{L(locale, '时间（mm:ss）+ 标题', 'Time (mm:ss) + title')}</div>
+                      <IssueText>{lessonLine('videoLearningPoints') ?? lessonLine('video') ?? lessonLine('video.duration')}</IssueText>
                       {videoLps.map((point, index) => {
-                        const beyond = videoDuration !== null && point.timeSeconds > videoDuration;
+                        const titleIssue = point.code ? lessonLine(`videoLearningPoints[${point.code}].title`) : null;
+                        const timeIssue = point.code ? lessonLine(`videoLearningPoints[${point.code}].timeSeconds`) : null;
+                        const rowError = rowErrors.points[index] ?? null;
                         return (
-                          <div key={index} style={{ display: 'grid', gridTemplateColumns: '70px 1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
-                            <span style={{ fontSize: 12, color: '#5A6577' }}>{activeLesson.sortOrder}.{index + 1}</span>
-                            <input value={point.title} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '学习点标题', 'Learning point title')} style={inputStyle} />
-                            <TimeInput seconds={point.timeSeconds} onChange={(seconds) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: seconds ?? 0 } : item))} placeholder="mm:ss" style={{ ...inputStyle, borderColor: beyond ? '#b42318' : '#d9e0ea' }} />
+                          <div key={point.id ?? `new-${index}`} data-testid="point-row" style={{ display: 'grid', gridTemplateColumns: '70px 1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                            <span style={{ fontSize: 12, color: '#5A6577' }}>{point.code ?? `${activeLesson.sortOrder}.${index + 1}`}</span>
+                            <input data-testid="point-title" value={point.title} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '学习点标题', 'Learning point title')} style={{ ...inputStyle, ...(titleIssue ? { borderColor: '#b42318' } : {}) }} />
+                            <TypedTimeInput testId="point-time" text={point.timeText} onText={(text) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeText: text } : item))} invalid={Boolean(rowError || timeIssue)} style={inputStyle} />
                             <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setVideoLps((rows) => rows.filter((_, i) => i !== index))}>×</button>
-                            {beyond && <div style={{ gridColumn: '1 / -1', fontSize: 11, color: '#b42318' }}>{L(locale, '超出视频时长', 'Beyond video length')} ({fmtDuration(videoDuration)})</div>}
+                            <div style={{ gridColumn: '1 / -1' }}>
+                              <IssueText>{rowError ?? titleIssue ?? timeIssue}</IssueText>
+                            </div>
                           </div>
                         );
                       })}
@@ -852,18 +892,23 @@ export function CourseContentSection({
                     <div style={{ marginTop: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <strong style={{ fontSize: 14 }}>{L(locale, '展品触发点', 'Exhibit triggers')}</strong>
-                        <button type="button" style={buttonStyle} onClick={() => setTriggerRows((rows) => [...rows, { exhibitId: exhibits[0]?.id ?? '', timeSeconds: 0 }])}>+ {L(locale, '添加触发点', 'Add trigger')}</button>
+                        <button type="button" style={buttonStyle} onClick={() => setTriggerRows((rows) => [...rows, { exhibitId: '', timeText: '' }])}>+ {L(locale, '添加触发点', 'Add trigger')}</button>
                       </div>
-                      {triggerRows.map((trigger, index) => (
-                        <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                      {triggerRows.map((trigger, index) => {
+                        const rowError = rowErrors.triggers[index] ?? null;
+                        const issue = lessonLine(`triggers[${index}].exhibitId`) ?? lessonLine(`triggers[${index}].timeSeconds`);
+                        return (
+                        <div key={index} data-testid="trigger-row" style={{ display: 'grid', gridTemplateColumns: '1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                           <select value={trigger.exhibitId} onChange={(event) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, exhibitId: event.target.value } : item))} style={inputStyle}>
                             <option value="">{L(locale, '选择展品', 'Choose an exhibit')}</option>
                             {exhibits.map((exhibit) => <option key={exhibit.id} value={exhibit.id}>{exhibit.localized?.[contentLanguage]?.title ?? exhibit.code}</option>)}
                           </select>
-                          <TimeInput seconds={trigger.timeSeconds} onChange={(seconds) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, timeSeconds: seconds ?? 0 } : item))} placeholder="mm:ss" style={inputStyle} />
+                          <TypedTimeInput testId="trigger-time" text={trigger.timeText} onText={(text) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, timeText: text } : item))} invalid={Boolean(rowError || issue)} style={inputStyle} />
                           <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setTriggerRows((rows) => rows.filter((_, i) => i !== index))}>×</button>
+                          <div style={{ gridColumn: '1 / -1' }}><IssueText>{rowError ?? issue}</IssueText></div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -882,16 +927,20 @@ export function CourseContentSection({
                     <div style={{ marginTop: 12, fontSize: 13 }}>
                       <strong>{L(locale, '学习点识别区', 'Learning points')}</strong>
                       <p style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{L(locale, '仅一级标题识别为学习点；一级标题文本即学习点标题。', 'Only Heading 1 becomes a learning point; its text is the title.')}</p>
-                      {textLps.length === 0 ? (
-                        <p style={{ color: '#b42318', marginTop: 6 }}>{L(locale, '未识别到学习点。请把每个学习点标题设置为一级标题（H1）。', 'No learning points found. Set each learning point title as Heading 1 (H1).')}</p>
-                      ) : (
-                        textLps.map((point, index) => (
-                          <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', border: `1px solid ${point.heading && point.hasBody ? '#E8EDF5' : '#F5C7A8'}`, borderRadius: 6, marginTop: 6 }}>
-                            <span style={{ fontSize: 12 }}>{activeLesson.sortOrder}.{index + 1} {point.heading || L(locale, '标题文本', 'Heading text')}</span>
-                            <span style={{ fontSize: 11, color: point.hasBody ? '#1E7A3C' : '#b42318' }}>{point.hasBody ? L(locale, '正常', 'OK') : L(locale, '该标题下没有正文', 'No text under this heading')}</span>
+                      <IssueText>{lessonLine('text', contentLanguage) ?? lessonLine('textLearningPoints', contentLanguage)}</IssueText>
+                      {textLps.map((point, index) => {
+                        // 服务器按编号（已保存的）或"#第几个标题"（还没盖章的）报问题。
+                        const key = point.code ?? `#${index + 1}`;
+                        const issue = lessonLine(`textLearningPoints[${key}].title`, contentLanguage) ?? lessonLine(`textLearningPoints[${key}].body`, contentLanguage);
+                        return (
+                          <div key={index} data-testid="text-point" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', border: `1px solid ${issue ? '#F5C7A8' : '#E8EDF5'}`, borderRadius: 6, marginTop: 6 }}>
+                            <span style={{ fontSize: 12 }}>
+                              <span data-testid="text-point-code">{point.code ?? L(locale, '新', 'New')}</span> {point.heading || L(locale, '标题文本', 'Heading text')}
+                            </span>
+                            <span style={{ fontSize: 11, color: issue ? '#b42318' : '#1E7A3C' }}>{issue ?? L(locale, '正常', 'OK')}</span>
                           </div>
-                        ))
-                      )}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -903,22 +952,31 @@ export function CourseContentSection({
                     <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, '推荐阅读', 'Recommended reading')}</h3>
                     <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '只有英文一份列表；所有学员看到同一份。', 'One English list only; all learners see the same list.')}</p>
                   </div>
-                  <button type="button" style={buttonStyle} onClick={() => setReadingRows((rows) => [...rows, { type: 'BOOK', title: '', author: '', whyRecommended: '' }])}>+ {L(locale, '添加阅读', 'Add reading')}</button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <a data-testid="readings-template" href={`/api/backoffice/courses/${course.id}/readings/template`} style={{ ...buttonStyle, textDecoration: 'none', display: 'inline-block' }}>{t(asLocale(locale), 'course.ui.readingsTemplate')}</a>
+                    <button type="button" data-testid="add-reading" style={buttonStyle} onClick={() => setReadingRows((rows) => [...rows, { type: 'BOOK', title: '', author: '', whyRecommended: '' }])}>+ {L(locale, '添加阅读', 'Add reading')}</button>
+                  </div>
                 </div>
-                {readingRows.map((reading, index) => (
-                  <div key={index} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1.4fr 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                {readingRows.map((reading, index) => {
+                  const cellIssue = (name: string) => lessonLine(`readings[${index}].${name}`);
+                  const rowIssue = rowErrors.readings[index] ?? cellIssue('title') ?? cellIssue('type') ?? cellIssue('author') ?? cellIssue('whyRecommended');
+                  const red = (name: string) => (cellIssue(name) || rowErrors.readings[index] ? { borderColor: '#b42318' } : {});
+                  return (
+                  <div key={reading.id ?? `new-${index}`} data-testid="reading-row" style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1.4fr 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                     <select value={reading.type} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, type: event.target.value } : item))} style={inputStyle}>
                       <option value="BOOK">{readingTypeLabel(locale, 'BOOK')}</option>
                       <option value="ARTICLE">{readingTypeLabel(locale, 'ARTICLE')}</option>
                       <option value="PAPER">{readingTypeLabel(locale, 'PAPER')}</option>
                       <option value="OTHER">{readingTypeLabel(locale, 'OTHER')}</option>
                     </select>
-                    <input value={reading.title} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '标题', 'Title')} style={inputStyle} />
-                    <input value={reading.author} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, author: event.target.value } : item))} placeholder={L(locale, '作者', 'Author')} style={inputStyle} />
-                    <input value={reading.whyRecommended} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, whyRecommended: event.target.value } : item))} placeholder={L(locale, '推荐理由', 'Why we recommend it')} style={inputStyle} />
+                    <input data-testid="reading-title" value={reading.title} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '标题', 'Title')} style={{ ...inputStyle, ...red('title') }} />
+                    <input value={reading.author} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, author: event.target.value } : item))} placeholder={L(locale, '作者', 'Author')} style={{ ...inputStyle, ...red('author') }} />
+                    <input value={reading.whyRecommended} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, whyRecommended: event.target.value } : item))} placeholder={L(locale, '推荐理由', 'Why we recommend it')} style={{ ...inputStyle, ...red('whyRecommended') }} />
                     <button type="button" style={{ ...dangerBtn, padding: '6px 8px' }} onClick={() => setReadingRows((rows) => rows.filter((_, i) => i !== index))}>×</button>
+                    <div style={{ gridColumn: '1 / -1' }}><IssueText>{rowIssue}</IssueText></div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
@@ -1001,10 +1059,21 @@ export function CourseContentSection({
           </div>
           {readingImportResult && (
             <div style={{ marginTop: 12, fontSize: 13 }}>
-              <p style={{ fontWeight: 600 }}>{L(locale, '已导入', 'Imported')} {readingImportResult.added} {L(locale, '条', 'readings')}</p>
-              {readingImportResult.errors.map((error, index) => (
-                <p key={index} style={{ color: '#b42318' }}>{L(locale, '第', 'Row')} {error.row} · {serverText(error.message, locale as Locale)}</p>
-              ))}
+              {readingImportResult.failure ? (
+                <p data-testid="reading-import-failure" style={{ color: '#b42318' }}>{readingImportResult.failure}</p>
+              ) : (
+                <>
+                  <p data-testid="reading-import-summary" style={{ fontWeight: 600 }}>
+                    {t(asLocale(locale), 'course.ui.readingsImportSummary', { rowsRead: String(readingImportResult.rowsRead ?? '-'), added: String(readingImportResult.added) })}
+                  </p>
+                  {readingImportResult.byLesson.map((item) => (
+                    <p key={item.lessonCode}>{t(asLocale(locale), 'course.ui.readingsImportLesson', { code: item.lessonCode, added: String(item.added) })}</p>
+                  ))}
+                  {readingImportResult.errors.map((error, index) => (
+                    <p key={index} data-testid="reading-import-error" style={{ color: '#b42318' }}>{readingImportErrorText(error)}</p>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </Modal>

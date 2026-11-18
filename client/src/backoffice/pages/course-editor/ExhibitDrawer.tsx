@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { Exhibit, Lesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { courseErrorText } from '../../lib/courseErrors';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
@@ -134,7 +135,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      setError(result.message ?? L(locale, '保存展品失败。', 'Could not save the exhibit.'));
+      setError(courseErrorText(locale, result));
     }
   }
 
@@ -149,7 +150,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      setError(result.message ?? L(locale, '删除失败。', 'Delete failed.'));
+      setError(courseErrorText(locale, result));
     }
   }
 
@@ -231,7 +232,7 @@ export function ExhibitDrawer({
             pct={uploadPct}
           />
         )}
-        {error && <p style={{ color: '#b42318', background: '#FDECEC', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>{error}</p>}
+        {error && <p data-testid="exhibit-error" style={{ color: '#b42318', background: '#FDECEC', padding: '8px 12px', borderRadius: 8, fontSize: 13 }}>{error}</p>}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
           <button type="button" style={primaryBtn} disabled={busy} onClick={() => void save()}>{L(locale, '保存展品', 'Save exhibit')}</button>
