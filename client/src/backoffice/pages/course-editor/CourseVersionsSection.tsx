@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { CourseDetail, CourseVersion, HistoryPage } from '../../contracts/course';
+import type { CourseDetail, CourseVersion, HistoryPage, IncompleteLesson } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
+import { courseFailureNotice, failureCode } from '../../lib/courseErrors';
+import { t } from '../../lib/i18n/messages';
 import { useResizableColumns } from '../../components/resizableColumns';
 import { Field, Modal } from './shared';
 import { L, buttonStyle, card, dangerBtn, fmtDate, inputStyle, liveStatusLabel, primaryBtn } from './shared-utils';
 import { historyActionLabel, historyDetailText } from './versionHistory';
 
 
+
+const asLoc = (locale: string): 'zh-CN' | 'en-GB' => (locale.startsWith('zh') ? 'zh-CN' : 'en-GB');
 
 export function CourseVersionsSection({
   locale,
@@ -37,6 +41,7 @@ export function CourseVersionsSection({
 }) {
   const navigate = useNavigate();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [blocked, setBlocked] = useState<{ codes: string[]; lessons: IncompleteLesson[] } | null>(null);
   const [notifyLearners, setNotifyLearners] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [restoreVersion, setRestoreVersion] = useState<CourseVersion | null>(null);
@@ -56,11 +61,9 @@ export function CourseVersionsSection({
 
 
   async function publish() {
-    if (!course.completeness.canPublish) {
-      onNotice(course.completeness.publishBlockers.join('\n'));
-      return;
-    }
+    // 能不能发布由服务器说了算：点了就发请求，被拒时（PUBLISH_BLOCKED）按服务器给的原因列出来。
     setBusy(true);
+    setBlocked(null);
     const result = await boRequest(`/api/backoffice/courses/${course.id}/publish`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -71,8 +74,13 @@ export function CourseVersionsSection({
       setPublishOpen(false);
       onNotice(L(locale, '发布成功。', 'Published successfully.'));
       await onReload();
+    } else if (failureCode(result) === 'PUBLISH_BLOCKED') {
+      const details = result.details ?? {};
+      const codes = Array.isArray(details.blockerCodes) ? (details.blockerCodes as string[]) : (course.completeness.publishBlockerCodes ?? []);
+      const lessons = Array.isArray(details.incompleteLessons) ? (details.incompleteLessons as IncompleteLesson[]) : (course.completeness.incompleteLessons ?? []);
+      setBlocked({ codes, lessons });
     } else {
-      onNotice(`${L(locale, '发布失败', 'Publish failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '发布失败', 'Publish failed'), result));
     }
   }
 
@@ -85,7 +93,7 @@ export function CourseVersionsSection({
       onNotice(L(locale, '草稿已删除。', 'Draft deleted.'));
       await onReload();
     } else {
-      onNotice(`${L(locale, '删除草稿失败', 'Delete draft failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '删除草稿失败', 'Delete draft failed'), result));
     }
   }
 
@@ -103,7 +111,7 @@ export function CourseVersionsSection({
       onNotice(L(locale, '版本已恢复到草稿。', 'Version restored to the draft.'));
       await onReload();
     } else {
-      onNotice(`${L(locale, '恢复失败', 'Restore failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '恢复失败', 'Restore failed'), result));
     }
   }
 
@@ -125,7 +133,7 @@ export function CourseVersionsSection({
       onNotice(L(locale, '状态已更新。', 'Status updated.'));
       await onReload();
     } else {
-      onNotice(`${L(locale, '状态更新失败', 'Status update failed')}: ${result.message ?? result.error}`);
+      onNotice(courseFailureNotice(locale, L(locale, '状态更新失败', 'Status update failed'), result));
     }
   }
 
@@ -213,7 +221,7 @@ export function CourseVersionsSection({
               {course.hasDraft ? ` · ${L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}` : ''}
             </div>
             {canPublish && <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button type="button" style={primaryBtn} disabled={busy || !course.hasDraft || !course.completeness.canPublish} onClick={() => setPublishOpen(true)}>
+              <button type="button" style={primaryBtn} data-testid="publish-open" disabled={busy || !course.hasDraft} onClick={() => { setBlocked(null); setPublishOpen(true); }}>
                 {L(locale, '发布', 'Publish')}
               </button>
               <button type="button" style={dangerBtn} disabled={busy || !course.hasDraft || !liveVersion} onClick={() => setDeleteOpen(true)}>
@@ -322,6 +330,25 @@ export function CourseVersionsSection({
               <strong>{L(locale, '部分字段为空', 'Some fields are empty')}</strong>
               {gaps.map((gap) => <div key={gap}>{gap}</div>)}
               <div style={{ marginTop: 4 }}>{L(locale, '仍可发布。', 'You can still publish.')}</div>
+            </div>
+          )}
+          {blocked && (
+            <div data-testid="publish-blocked" style={{ marginTop: 10, background: '#FDECEC', color: '#b42318', padding: 10, borderRadius: 8, fontSize: 13 }}>
+              <strong>{t(asLoc(locale), 'course.ui.publishBlockedTitle')}</strong>
+              {blocked.codes.map((code) => {
+                const key = `course.ui.blocker${code}`;
+                return <div key={code} data-testid="publish-blocker">{t(asLoc(locale), key) === key ? code : t(asLoc(locale), key)}</div>;
+              })}
+              {blocked.lessons.length > 0 && <div style={{ marginTop: 6, fontWeight: 600 }}>{t(asLoc(locale), 'course.ui.blockedLessonsTitle')}</div>}
+              {blocked.lessons.map((lesson) => (
+                <div key={lesson.lessonId} data-testid="publish-blocked-lesson">
+                  {t(asLoc(locale), 'course.ui.blockedLesson', {
+                    position: String(lesson.position),
+                    code: lesson.code,
+                    parts: lesson.parts.map((part) => t(asLoc(locale), `course.ui.part${part}`)).join(locale.startsWith('zh') ? '、' : ', '),
+                  })}
+                </div>
+              ))}
             </div>
           )}
           <label style={{ display: 'block', marginTop: 12, fontSize: 13 }}>
