@@ -109,10 +109,11 @@ export function CourseEditorPage() {
     setLoadSource({ courseId, historyPage, locale });
     setLoading(true);
   }
+  // 已经打开的课程重新载入时留在原页面（不闪"加载中"）：否则每次保存后，正在看的部分、视频/文字标签都会被重置。
   const load = useCallback(() => {
-    setLoading(true);
+    if (!course) setLoading(true);
     return fetchLoad();
-  }, [fetchLoad]);
+  }, [course, fetchLoad]);
 
   useEffect(() => {
     void fetchLoad();
