@@ -5,6 +5,7 @@ import { boRequest } from '../../lib/api';
 import { failureCode } from '../../lib/courseErrors';
 import { useReportFailure } from './feedback';
 import { t } from '../../lib/i18n/messages';
+import { serverText } from '../../lib/i18n/serverText';
 import { useResizableColumns } from '../../components/resizableColumns';
 import { Field, Modal } from './shared';
 import { L, buttonStyle, card, dangerBtn, fmtDate, inputStyle, liveStatusLabel, primaryBtn } from './shared-utils';
@@ -196,7 +197,7 @@ export function CourseVersionsSection({
       }
       if (status.data.status === 'FAILED') {
         setExportBusy(false);
-        reportFailure(L(locale, '导出失败', 'Export failed'), { success: false, data: null, error: 'INTERNAL_ERROR', message: status.data.error, status: 500 });
+        reportFailure(L(locale, '导出失败', 'Export failed'), { success: false, data: null, error: 'INTERNAL_ERROR', message: status.data.error ? serverText(status.data.error, locale.startsWith('zh') ? 'zh-CN' : 'en-GB') : undefined, status: 500 });
         return;
       }
     }

@@ -44,7 +44,7 @@ function uploadErrorText(locale: string, code: string, detail?: string, failure?
   const zh = locale.startsWith('zh')
   // 服务器给了课程错误码（如 EXPORT_REQUIRES_LIVE_VERSION）：按码写成当前语言，不用服务器的英文句子。
   if (failure?.code && t(locale as Locale, `course.errors.${failure.code}`) !== `course.errors.${failure.code}`) {
-    return `${zh ? '失败' : 'Failed'}: ${courseErrorText(locale, failure)}`
+    return t(locale as Locale, 'course.ui.failedWithReason', { reason: courseErrorText(locale, failure) })
   }
   if (code === 'NETWORK_ERROR' || code === 'ABORTED') {
     return zh ? '上传中断（网络不稳定或服务被重启）。请确认网络与服务稳定后重试。' : 'The upload was interrupted (unstable network or a service restart). Check them and try again.'

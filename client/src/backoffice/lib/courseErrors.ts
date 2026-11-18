@@ -63,6 +63,8 @@ export function courseErrorText(locale: string, failure: CourseFailure): string 
   const key = `course.errors.${code}`;
   const known = t(l, key) !== key;
   if (!known) {
+    // 没有服务器错误码、只有一句话（如导出任务自己的失败原因）：直接用这句话，不套通用提示。
+    if (!failure.code && failure.message?.trim()) return failure.message.trim();
     // 登录类错误码有自己的文案（NOT_AUTHORISED、RATE_LIMITED……）。
     const generic = t(l, `errors.${failure.error}`);
     if (generic !== `errors.${failure.error}`) return generic;

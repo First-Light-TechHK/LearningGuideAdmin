@@ -45,10 +45,12 @@ function loc(lesson: Lesson | undefined, language: string) {
   return lesson.localizations.find((item) => item.language === language) ?? lesson.localizations[0];
 }
 
-/** 推荐阅读只有一份英文列表；旧数据里没有英文行时，服务器按全部行算，这里也一样。 */
+/**
+ * 推荐阅读只有一份列表。服务器保存时把没出现在请求里的行都删掉（别的语言的旧行本应并入这一份），
+ * 所以这里要列出全部行，保存时才不会把其他语言的行误删。
+ */
 export function readingsOf(lesson: Lesson) {
-  const english = lesson.readings.filter((reading) => reading.language === 'en-GB');
-  return english.length > 0 ? english : lesson.readings;
+  return lesson.readings;
 }
 
 /**
@@ -933,7 +935,7 @@ export function CourseContentSection({
                         return (
                           <div key={index} data-testid="text-point" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '6px 8px', border: `1px solid ${issue ? '#F5C7A8' : '#E8EDF5'}`, borderRadius: 6, marginTop: 6 }}>
                             <span style={{ fontSize: 12 }}>
-                              <span data-testid="text-point-code">{point.code ?? L(locale, '新', 'New')}</span> {point.heading || L(locale, '标题文本', 'Heading text')}
+                              <span data-testid="text-point-code">{point.code ?? t(asLocale(locale), 'course.ui.textPointNewShort')}</span> {point.heading || L(locale, '标题文本', 'Heading text')}
                             </span>
                             <span style={{ fontSize: 11, color: issue ? '#b42318' : '#1E7A3C' }}>{issue ?? L(locale, '正常', 'OK')}</span>
                           </div>

@@ -196,7 +196,7 @@
       "TRIAL_LESSON_INVALID": "A trial lesson does not belong to this course.",
       "TRIAL_NOT_CONTIGUOUS": "Trial lessons must start from Lesson 1 and be consecutive.",
       "REASON_REQUIRED": "Enter a reason to change the status.",
-      "VERSION_INCOMPLETE": "This version is incomplete and cannot be restored.",
+      "VERSION_INCOMPLETE": "The live version is incomplete, so it cannot be exported. Complete all 3 steps, publish again, then export.",
       "VERSION_NOT_FOUND": "This version no longer exists. Reload the course.",
       "NOT_PUBLISHED": "Publish the course first.",
       "DOCX_INVALID": "The Word document could not be read. Use a .docx file.",
@@ -266,7 +266,11 @@
       "timeInvalidLocal": "Enter the time as mm:ss, for example 3:15.",
       "readingRowLesson": "Row {row}: Lesson ID {code} does not exist.",
       "readingRowType": "Row {row}: Type must be Book, Article, Paper or Other.",
-      "readingRowOther": "Row {row}: {message}"
+      "readingRowOther": "Row {row}: {message}",
+      "textPointNewShort": "New",
+      "exhibitSaveFailed": "Could not save the exhibit",
+      "exhibitDeleteFailed": "Could not delete the exhibit",
+      "failedWithReason": "Failed: {reason}"
     }
   },
   "operations": {

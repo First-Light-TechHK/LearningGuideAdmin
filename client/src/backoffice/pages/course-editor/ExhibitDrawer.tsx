@@ -4,6 +4,7 @@ import type { Exhibit, Lesson } from '../../contracts/course';
 import { boRequest, type ApiFailure } from '../../lib/api';
 import { courseErrorText, failureNeedsReload, isStale } from '../../lib/courseErrors';
 import { useReportFailure } from './feedback';
+import { t } from '../../lib/i18n/messages';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
@@ -143,7 +144,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      showFailure(L(locale, '保存展品失败', 'Could not save the exhibit'), result);
+      showFailure(t(locale.startsWith('zh') ? 'zh-CN' : 'en-GB', 'course.ui.exhibitSaveFailed'), result);
     }
   }
 
@@ -158,7 +159,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      showFailure(L(locale, '删除展品失败', 'Could not delete the exhibit'), result);
+      showFailure(t(locale.startsWith('zh') ? 'zh-CN' : 'en-GB', 'course.ui.exhibitDeleteFailed'), result);
     }
   }
 

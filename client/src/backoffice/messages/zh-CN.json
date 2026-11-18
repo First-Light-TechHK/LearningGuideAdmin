@@ -196,7 +196,7 @@
       "TRIAL_LESSON_INVALID": "有试看课时不属于这门课程。",
       "TRIAL_NOT_CONTIGUOUS": "试看课时必须从第 1 课开始且连续。",
       "REASON_REQUIRED": "变更状态需要填写原因。",
-      "VERSION_INCOMPLETE": "这个版本内容不完整，不能恢复。",
+      "VERSION_INCOMPLETE": "线上版本内容不完整，不能导出。请先完成全部 3 步，重新发布后再导出。",
       "VERSION_NOT_FOUND": "这个版本已不存在，请重新载入课程。",
       "NOT_PUBLISHED": "请先发布课程。",
       "DOCX_INVALID": "无法读取这份 Word 文档，请使用 .docx 文件。",
@@ -265,8 +265,12 @@
       "textPointNew": "新增（保存时分配编号）",
       "timeInvalidLocal": "时间请按 mm:ss 填写，例如 3:15。",
       "readingRowLesson": "第 {row} 行：课时 ID {code} 不存在。",
-      "readingRowType": "第 {row} 行：类型必须是图书、文章、论文或其他，请按模板填写。",
-      "readingRowOther": "第 {row} 行：{message}"
+      "readingRowType": "第 {row} 行：类型必须是图书、文章、论文或其他。",
+      "readingRowOther": "第 {row} 行：{message}",
+      "textPointNewShort": "新增",
+      "exhibitSaveFailed": "保存展品失败",
+      "exhibitDeleteFailed": "删除展品失败",
+      "failedWithReason": "失败：{reason}"
     }
   },
   "operations": {
