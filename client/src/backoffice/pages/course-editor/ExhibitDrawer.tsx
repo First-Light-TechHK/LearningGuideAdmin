@@ -1,8 +1,9 @@
 import { useState } from 'react';
 
 import type { Exhibit, Lesson } from '../../contracts/course';
-import { boRequest } from '../../lib/api';
-import { courseErrorText } from '../../lib/courseErrors';
+import { boRequest, type ApiFailure } from '../../lib/api';
+import { courseErrorText, failureNeedsReload, isStale } from '../../lib/courseErrors';
+import { useReportFailure } from './feedback';
 import { formatBytes, uploadFileWithProgress } from '../../lib/upload';
 import { useMediaLimits } from '../../lib/mediaLimits';
 import { UploadProgress } from '../../components/UploadProgress';
@@ -53,6 +54,13 @@ export function ExhibitDrawer({
   const [error, setError] = useState('');
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const mediaLimits = useMediaLimits();
+  const reportFailure = useReportFailure();
+
+  /** 失败写在抽屉里；课程已被别人保存或展品/课时已不存在时，同时让页面显示"重新载入"。 */
+  function showFailure(action: string, failure: ApiFailure) {
+    setError(courseErrorText(locale, failure));
+    if (isStale(failure) || failureNeedsReload(failure)) reportFailure(action, failure);
+  }
 
   function kindToType(kind?: string) {
     if (kind === 'VIDEO') return 'VIDEO';
@@ -135,7 +143,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      setError(courseErrorText(locale, result));
+      showFailure(L(locale, '保存展品失败', 'Could not save the exhibit'), result);
     }
   }
 
@@ -150,7 +158,7 @@ export function ExhibitDrawer({
       await onSaved();
       onClose();
     } else {
-      setError(courseErrorText(locale, result));
+      showFailure(L(locale, '删除展品失败', 'Could not delete the exhibit'), result);
     }
   }
 

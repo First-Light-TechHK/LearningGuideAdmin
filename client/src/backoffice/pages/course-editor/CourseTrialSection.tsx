@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import type { CourseDetail, TrialSettings, TrialRow } from '../../contracts/course';
 import { boRequest } from '../../lib/api';
-import { courseFailureNotice } from '../../lib/courseErrors';
+import { useReportFailure } from './feedback';
 import { Chip, TimeInput } from './shared';
 import { L, buttonStyle, card, languageLabel, primaryBtn, trialStatusLabel } from './shared-utils';
 
@@ -38,6 +38,7 @@ export function CourseTrialSection({
   /** REQ-0236：试看与价格属商业配置，只给 Course=Full；其他角色只读。 */
   canManage?: boolean;
 }) {
+  const reportFailure = useReportFailure();
   const [enabled, setEnabled] = useState(trial.enabled);
   const [rows, setRows] = useState<TrialRow[]>(trial.rows);
   const [localPlans, setLocalPlans] = useState(course.plans ?? []);
@@ -142,7 +143,7 @@ export function CourseTrialSection({
       onNotice(L(locale, '试看设置已保存，立即在本环境网站生效（不生成版本）。', 'Trial settings saved and effective immediately (no version created).'));
       await onReload();
     } else {
-      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), saved));
+      reportFailure(L(locale, '保存失败', 'Save failed'), saved);
     }
   }
 
@@ -207,7 +208,7 @@ export function CourseTrialSection({
       );
       await onReload();
     } else {
-      onNotice(courseFailureNotice(locale, L(locale, '保存失败', 'Save failed'), result));
+      reportFailure(L(locale, '保存失败', 'Save failed'), result);
     }
   }
 
@@ -215,8 +216,14 @@ export function CourseTrialSection({
     setBusy(true);
     const result = await boRequest<{ status: string; error?: string }>(`/api/backoffice/courses/${courseId}/plans/${planId}/sync-stripe`, { method: 'POST' });
     setBusy(false);
-    onNotice(result.success ? `${L(locale, 'Stripe 同步：', 'Stripe sync: ')}${result.data.status}${result.data.error ? ` — ${result.data.error}` : ''}` : `${L(locale, '同步失败', 'Sync failed')}: ${result.error}`);
-    await onReload();
+    if (result.success) {
+      onNotice(`${L(locale, 'Stripe 同步：', 'Stripe sync: ')}${result.data.status}${result.data.error ? ` — ${result.data.error}` : ''}`);
+      await onReload();
+    } else {
+      // 重新载入会清掉页面上的失败提示，所以先载入、再报告。
+      await onReload();
+      reportFailure(L(locale, '同步失败', 'Sync failed'), result);
+    }
   }
 
   return (
