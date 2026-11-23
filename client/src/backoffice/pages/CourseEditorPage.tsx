@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import type {
   CourseDetail,
+  CourseIssue,
   CourseVersion,
   HistoryPage,
   PortalPreviewLink,
@@ -47,6 +48,8 @@ export function CourseEditorPage() {
   const [notice, setNotice] = useState('');
   // 失败提示按服务器的错误码写成当前语言；stale = 别人在你打开后保存过（页面上已输入的内容保持不动，由用户决定是否重新载入）。
   const [failure, setFailure] = useState<{ text: string; stale: boolean } | null>(null);
+  // 就近反馈：保存/操作结果显示在右下角 toast，不再只显示在页面顶部（长页面在底部操作时看不到）。
+  const [toast, setToast] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
   const languageInitFor = useRef('');
 
@@ -64,6 +67,17 @@ export function CourseEditorPage() {
     },
     [locale],
   );
+
+  // 失败一直显示到手动关闭；成功 4 秒后自动消失。顶部条保留（stale 时需要“重新载入”按钮）。
+  useEffect(() => {
+    if (failure) setToast({ kind: 'error', text: failure.text });
+  }, [failure]);
+  useEffect(() => {
+    if (!notice) return;
+    setToast({ kind: 'success', text: notice });
+    const timer = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   // 预览入口（PREVIEW_ENTRY）：learner = 上游学员视角预览页；portal = 生产投影渲染草稿（一次点击生成链接并打开）。
   const previewEntry = cachedPreviewEntry();
@@ -167,11 +181,18 @@ export function CourseEditorPage() {
   }
 
   // 页签只表达名称与完成标记；状态（草稿 / 线上）只在头部摘要出现一次。
+  // 未完成时把服务器给的缺项挂到页签 title 上：保存成功 ≠ 内容完整，用户需要知道缺什么。
+  const stepIssues = (step: CourseIssue['step']): string[] => {
+    const lines = (course.completeness.issues ?? [])
+      .filter((issue) => issue.step === step)
+      .map((issue) => issue.message);
+    return [...new Set(lines)];
+  };
   const steps = [
-    { id: 'info' as Tab, index: 1, label: L(locale, '课程信息', 'Course Information'), complete: course.completeness.steps.courseInformation.complete },
-    { id: 'content' as Tab, index: 2, label: L(locale, '课程内容', 'Course Content'), complete: course.completeness.steps.content.complete },
-    { id: 'trial' as Tab, index: 3, label: L(locale, '试看设置', 'Trial'), complete: course.completeness.steps.trial.complete },
-    { id: 'versions' as Tab, index: null, label: L(locale, '版本与发布', 'Versions & publishing'), complete: true },
+    { id: 'info' as Tab, index: 1, label: L(locale, '课程信息', 'Course Information'), complete: course.completeness.steps.courseInformation.complete, missing: stepIssues('COURSE_INFORMATION') },
+    { id: 'content' as Tab, index: 2, label: L(locale, '课程内容', 'Course Content'), complete: course.completeness.steps.content.complete, missing: stepIssues('COURSE_CONTENT') },
+    { id: 'trial' as Tab, index: 3, label: L(locale, '试看设置', 'Trial'), complete: course.completeness.steps.trial.complete, missing: stepIssues('TRIAL') },
+    { id: 'versions' as Tab, index: null, label: L(locale, '版本与发布', 'Versions & publishing'), complete: true, missing: [] as string[] },
   ];
   const liveDotClass = course.liveStatus === 'ONLINE' ? 'isOnline' : course.liveStatus === 'HIDDEN' ? 'isHidden' : course.liveStatus === 'OFFLINE' ? 'isOffline' : '';
 
@@ -253,10 +274,17 @@ export function CourseEditorPage() {
             aria-pressed={tab === item.id}
             data-testid={`course-tab-${item.id}`}
             data-complete={item.complete ? 'true' : 'false'}
+            data-missing-count={item.missing.length}
+            title={item.missing.length ? item.missing.join(locale.startsWith('zh') ? '；' : '; ') : undefined}
             onClick={() => setTab(item.id)}
           >
             {item.index !== null && <span className="course-ui-tabIndex">{item.index}</span>}
             <span>{item.label}</span>
+            {item.missing.length > 0 && (
+              <span className="course-ui-tabMissing" data-testid={`course-tab-missing-${item.id}`} aria-label={L(locale, `缺 ${item.missing.length} 项`, `${item.missing.length} missing`)}>
+                {item.missing.length}
+              </span>
+            )}
             <span
               className={item.complete ? 'course-ui-tabMark isComplete' : 'course-ui-tabMark'}
               role="img"
@@ -304,6 +332,16 @@ export function CourseEditorPage() {
           {tab === 'versions' && <CourseVersionsSection locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} />}
         </div>
       </div>
+      {toast && (
+        <div
+          className={`course-ui-toast ${toast.kind === 'error' ? 'isError' : 'isSuccess'}`}
+          role={toast.kind === 'error' ? 'alert' : 'status'}
+          data-testid="course-toast"
+        >
+          <span>{toast.text}</span>
+          <button type="button" aria-label={L(locale, '关闭', 'Dismiss')} onClick={() => setToast(null)}>×</button>
+        </div>
+      )}
     </section>
     </FailureProvider>
   );

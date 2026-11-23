@@ -161,6 +161,8 @@ export function CourseContentSection({
   const [readingRows, setReadingRows] = useState<ReadingDraft[]>([]);
   // 服务器退回的行级错误（details.row 从 1 起），挂在对应的那一行上。
   const [rowErrors, setRowErrors] = useState<{ points: Record<number, string>; triggers: Record<number, string>; readings: Record<number, string> }>({ points: {}, triggers: {}, readings: {} });
+  // 保存结果就近显示在“保存”按钮旁（长页面顶部提示在底部看不到）。
+  const [saveStatus, setSaveStatus] = useState<{ kind: 'saving' | 'saved' | 'error'; text: string } | null>(null);
   const [textHtml, setTextHtml] = useState('');
   const [exhibitDrawer, setExhibitDrawer] = useState<'new' | string | null>(null);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
@@ -306,9 +308,12 @@ export function CourseContentSection({
     const base = `/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`;
     const json = (method: string, body: unknown) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     setBusy(true);
+    setSaveStatus({ kind: 'saving', text: L(locale, '保存中…', 'Saving…') });
     setRowErrors({ points: {}, triggers: {}, readings: {} });
     const fail = (action: string, failure: Parameters<typeof reportFailure>[1]) => {
       setBusy(false);
+      const detail = failure.message ?? failure.error;
+      setSaveStatus({ kind: 'error', text: detail ? `${action}: ${detail}` : action });
       reportFailure(action, failure);
     };
 
@@ -346,6 +351,8 @@ export function CourseContentSection({
     // 返回的行与发出的行一一对应：记下 id，再次保存时行身份不变（重载不再整份覆盖草稿后靠这里保持）。
     setReadingRows((rows) => rows.map((row, index) => ({ ...row, id: readings.data.readings[index]?.id ?? row.id })));
     setBusy(false);
+    const time = new Date().toLocaleTimeString(locale.startsWith('zh') ? 'zh-CN' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    setSaveStatus({ kind: 'saved', text: L(locale, `已保存 ${time}`, `Saved ${time}`) });
     onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
     await onReload();
   }
@@ -1052,8 +1059,18 @@ export function CourseContentSection({
                 })}
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button type="button" style={primaryBtn} disabled={busy} onClick={() => void saveStudy()}>{L(locale, '保存', 'Save')}</button>
+                {saveStatus && (
+                  <span
+                    role={saveStatus.kind === 'error' ? 'alert' : 'status'}
+                    data-testid="content-save-status"
+                    data-state={saveStatus.kind}
+                    style={{ fontSize: 12, color: saveStatus.kind === 'error' ? '#b42318' : saveStatus.kind === 'saved' ? '#0f7b48' : '#5A6577' }}
+                  >
+                    {saveStatus.text}
+                  </span>
+                )}
               </div>
             </>
           )}
