@@ -238,10 +238,53 @@ describe('Portal notifications client', () => {
 });
 
 describe('notification service', () => {
-  it('rejects an unknown variable and names the right one (NTF-BO-017)', async () => {
-    const { portal } = fakePortal();
-    const { audit } = fakeAudit();
-    const service = createNotificationsService({ portal, audit });
+  const savedEnv = {
+    base: process.env.PORTAL_NOTIFICATIONS_BASE_URL,
+    token: process.env.PORTAL_NOTIFICATIONS_TOKEN,
+  };
+  afterEach(() => {
+    for (const [name, value] of [
+      ['PORTAL_NOTIFICATIONS_BASE_URL', savedEnv.base],
+      ['PORTAL_NOTIFICATIONS_TOKEN', savedEnv.token],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  /** The real client over a fake Portal that answers every request with `status` and `body`. */
+  function serviceOverPortal(status: number, body: unknown) {
+    process.env.PORTAL_NOTIFICATIONS_BASE_URL = 'https://portal.example.com';
+    process.env.PORTAL_NOTIFICATIONS_TOKEN = 'service-token';
+    const fetches: string[] = [];
+    const portal = createPortalNotificationsClient({
+      fetchImpl: ((url: string) => {
+        fetches.push(url);
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }) as typeof fetch,
+    });
+    const { events, audit } = fakeAudit();
+    return {
+      service: createNotificationsService({ portal, audit }),
+      fetches,
+      events,
+    };
+  }
+
+  it('passes a Portal validation_failed message through as 400 INVALID_INPUT (NTF-BO-017)', async () => {
+    const message =
+      'Unknown variable {{amount_due}}. Use {{renewal_amount}} instead.';
+    const { service } = serviceOverPortal(400, {
+      ok: false,
+      code: 'validation_failed',
+      error: message,
+      issues: [{ field: 'en.message', message }],
+    });
     await assert.rejects(
       () =>
         service.updateTemplate(employee, template.id, {
@@ -250,38 +293,69 @@ describe('notification service', () => {
       (error: unknown) =>
         error instanceof NotificationsError &&
         error.status === 400 &&
-        /Use \{\{renewal_amount\}\} instead/.test(error.message),
+        error.code === 'INVALID_INPUT' &&
+        error.message === message &&
+        Array.isArray(error.details?.issues),
     );
   });
 
-  it('rejects partial Chinese copy (NTF-BO-013)', async () => {
-    const { portal } = fakePortal();
-    const { audit } = fakeAudit();
-    const service = createNotificationsService({ portal, audit });
-    await assert.rejects(
-      () =>
-        service.updateTemplate(employee, template.id, {
-          zh: { title: '只有标题' },
-        }),
-      (error: unknown) =>
-        error instanceof NotificationsError && error.status === 400,
-    );
-  });
-
-  it('refuses to turn off a locked subscription notification', async () => {
-    const { portal, calls } = fakePortal();
-    const { audit } = fakeAudit();
-    const service = createNotificationsService({ portal, audit });
+  it('passes a Portal locked answer through as 400 TEMPLATE_LOCKED', async () => {
+    const { service } = serviceOverPortal(400, {
+      ok: false,
+      code: 'locked',
+      error: 'Subscription notifications always stay on',
+    });
     await assert.rejects(
       () => service.updateTemplate(employee, template.id, { enabled: false }),
       (error: unknown) =>
-        error instanceof NotificationsError && error.code === 'TEMPLATE_LOCKED',
+        error instanceof NotificationsError &&
+        error.status === 400 &&
+        error.code === 'TEMPLATE_LOCKED',
     );
-    assert.equal(
-      calls.filter((call) => call.method === 'PUT').length,
-      0,
-      'no write is sent to Portal',
-    );
+  });
+
+  it('rejects an id with a path in it before any request is made', async () => {
+    const { service, fetches } = serviceOverPortal(200, { ok: true });
+    for (const id of ['..', 'a/b', '', 'x'.repeat(81)]) {
+      for (const call of [
+        () => service.updateTemplate(employee, id, { enabled: true }),
+        () =>
+          service.testTemplate(employee, id, {
+            channel: 'email',
+            language: 'en',
+          }),
+        () => service.patchBroadcast(employee, id, { action: 'send' }),
+        () => service.broadcastDetail(id),
+      ]) {
+        await assert.rejects(
+          call,
+          (error: unknown) =>
+            error instanceof NotificationsError &&
+            error.status === 400 &&
+            error.code === 'INVALID_INPUT',
+        );
+      }
+    }
+    await assert.rejects(() => service.sendLogDetail('..'));
+    assert.deepEqual(fetches, []);
+  });
+
+  it('ignores an operator sent in the body and uses the signed-in employee', async () => {
+    const { portal, calls } = fakePortal();
+    const { audit } = fakeAudit();
+    const service = createNotificationsService({ portal, audit });
+    await service.updateTemplate(employee, template.id, {
+      enabled: true,
+      operator: 'mallory',
+    });
+    await service.createBroadcast(employee, {
+      titleEn: 'Hello',
+      bodyEn: 'World',
+      audience: 'all',
+      operator: 'mallory',
+    });
+    for (const write of calls.filter((call) => call.method !== 'GET'))
+      assert.equal((write.body as { operator?: string }).operator, 'Jack');
   });
 
   it('injects the operator and records before/after for a template save', async () => {
@@ -341,35 +415,6 @@ describe('notification service', () => {
     );
     assert.equal((test?.body as { operator?: string }).operator, 'Jack');
     assert.equal(events[0].eventName, 'test_sent');
-  });
-
-  it('validates a broadcast button pair and link prefix (NTF-BC-012)', async () => {
-    const { portal } = fakePortal();
-    const { audit } = fakeAudit();
-    const service = createNotificationsService({ portal, audit });
-    await assert.rejects(
-      () =>
-        service.createBroadcast(employee, {
-          titleEn: 'Maintenance',
-          bodyEn: 'Tonight',
-          audience: 'all',
-          buttonText: 'Details',
-        }),
-      (error: unknown) =>
-        error instanceof NotificationsError && error.status === 400,
-    );
-    await assert.rejects(
-      () =>
-        service.createBroadcast(employee, {
-          titleEn: 'Maintenance',
-          bodyEn: 'Tonight',
-          audience: 'all',
-          buttonText: 'Details',
-          buttonLink: 'javascript:alert(1)',
-        }),
-      (error: unknown) =>
-        error instanceof NotificationsError && error.status === 400,
-    );
   });
 
   it('records broadcast_sent and injects the operator', async () => {

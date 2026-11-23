@@ -38,17 +38,10 @@ export type NotificationCopy = {
   emailButtonText?: string;
 };
 
-export const NOTIFICATION_COPY_FIELDS = [
-  'title',
-  'message',
-  'buttonText',
-  'subject',
-  'emailBody',
-  'emailButtonText',
-] as const;
-
 export type NotificationTemplate = {
   id: string;
+  /** Fixed catalogue name from the Portal; read-only. */
+  name?: string;
   category: NotificationCategory;
   channels: NotificationChannel[];
   locked: boolean;
@@ -126,15 +119,3 @@ export type NotificationSendLogDetail = {
   }>;
   isTest: boolean;
 };
-
-/** 字段限长（PRD NTF-BO-014/015、NTF-BC-012）。 */
-export const TEMPLATE_LIMITS = {
-  in_app: { title: 60, message: 300, buttonText: 24 },
-  email: { subject: 100, emailBody: 2000, emailButtonText: 24 },
-} as const;
-
-export const BROADCAST_LIMITS = {
-  title: 60,
-  body: 300,
-  buttonText: 24,
-} as const;
