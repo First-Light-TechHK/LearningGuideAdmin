@@ -31,13 +31,6 @@ import { snapshotContentHash, versionContentHash } from './content-hash';
 import { employeeNames, operatorName } from './employee-names';
 import { oneOf } from './input';
 
-/** Notification P0：首次发布 = 发布前没有线上版本（重新发布不触发 COURSE_NEW_LAUNCH）。 */
-export function isFirstCoursePublish(course: {
-  liveVersionId: string | null;
-}): boolean {
-  return !course.liveVersionId;
-}
-
 export interface VersionLabelResult {
   label: string;
   series: number;
@@ -332,18 +325,6 @@ export class PublishingService {
       });
     }
 
-    // Notification P0（设计 §4）：首次发布才发 COURSE_NEW_LAUNCH；重新发布不算。
-    // 事件写入失败不能影响已经提交的发布，因此不 await 主流程，只记录告警。
-    if (isFirstCoursePublish(course)) {
-      void this.emitCourseNewLaunch(courseId, version.id).catch((error) => {
-        this.logger.warn(
-          `COURSE_NEW_LAUNCH event could not be prepared: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
-    }
-
     return {
       versionId: version.id,
       versionLabel: version.versionLabel,
@@ -352,13 +333,33 @@ export class PublishingService {
   }
 
   /**
-   * 课程首次发布事件需要的课程标题/分类/深链（eventKey=course+version）。
-   * 只在首次发布后异步读取，不阻塞发布；Portal 会向所有有效订阅者扇出。
+   * Notification P0：课程第一次变为 ONLINE 时发 COURSE_NEW_LAUNCH（eventKey=course+线上版本）。
+   * 只有最近一次发布勾选了 notifyLearners 才发送。异步执行，不阻塞状态变更。
    */
-  private async emitCourseNewLaunch(
+  private async emitCourseNewLaunchIfFirstOnline(
     courseId: string,
     versionId: string,
   ): Promise<void> {
+    const onlineCount = await this.prisma.courseAuthoringActivity.count({
+      where: {
+        courseId,
+        action: HISTORY_ACTIONS.CHANGE_STATUS,
+        detail: { path: ['to'], equals: 'ONLINE' },
+      },
+    });
+    if (onlineCount !== 1) return;
+    const lastPublish = await this.prisma.courseAuthoringActivity.findFirst({
+      where: { courseId, action: HISTORY_ACTIONS.PUBLISH },
+      orderBy: { createdAt: 'desc' },
+      select: { detail: true },
+    });
+    const detail = lastPublish?.detail as { notifyLearners?: unknown } | null;
+    if (detail?.notifyLearners !== true) {
+      this.logger.debug(
+        'COURSE_NEW_LAUNCH not sent: notifyLearners is off',
+      );
+      return;
+    }
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
       select: {
@@ -557,6 +558,18 @@ export class PublishingService {
         },
       }),
     ]);
+    if (status === 'ONLINE' && from !== 'ONLINE') {
+      void this.emitCourseNewLaunchIfFirstOnline(
+        courseId,
+        course.liveVersionId,
+      ).catch((error) => {
+        this.logger.warn(
+          `COURSE_NEW_LAUNCH event could not be prepared: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }
     return { from, to: status, reason };
   }
 

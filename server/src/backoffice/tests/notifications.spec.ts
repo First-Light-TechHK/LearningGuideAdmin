@@ -2,10 +2,7 @@ import assert from 'node:assert/strict';
 
 import type { SessionEmployee } from '../contracts/employee';
 import type { AuditEventInput } from '../repositories/auditRepository';
-import {
-  courseLaunchEventParams,
-  isFirstCoursePublish,
-} from '../../commerce-courses/publishing.service';
+import { courseLaunchEventParams } from '../../commerce-courses/publishing.service';
 import { visibleReplyEventFor } from '../modules/helpdesk/helpdeskService';
 import type { EnquiryDetail } from '../modules/helpdesk/contracts';
 import { NOTIFICATIONS_SERVICE } from '../nest/notifications.controller';
@@ -392,11 +389,6 @@ describe('notification service', () => {
 });
 
 describe('notification event hooks', () => {
-  it('only treats a course with no live version as a first publish', () => {
-    assert.equal(isFirstCoursePublish({ liveVersionId: null }), true);
-    assert.equal(isFirstCoursePublish({ liveVersionId: 'v1' }), false);
-  });
-
   it('maps a first-published course to COURSE_NEW_LAUNCH params (title/category/deep link)', () => {
     assert.deepEqual(
       courseLaunchEventParams({

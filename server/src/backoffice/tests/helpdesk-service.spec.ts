@@ -410,6 +410,92 @@ describe('HelpDesk service', () => {
       expect(result.available).toBeDefined();
     });
 
+    describe('notification event', () => {
+      const realFetch = globalThis.fetch;
+      const saved = {
+        base: process.env.PORTAL_NOTIFICATIONS_BASE_URL,
+        token: process.env.PORTAL_NOTIFICATIONS_TOKEN,
+      };
+      let fetchStub: jest.Mock;
+
+      function withAgentReply(internal: boolean): jest.Mocked<PortalHelpdeskClient> {
+        const portal = fakeClient();
+        portal.postMessage.mockResolvedValue(
+          detail({
+            sequence: 2,
+            student: {
+              id: 'u1',
+              name: 'Lena',
+              accountEmail: 'lena@example.com',
+              contactEmail: null,
+              joinedAt: null,
+              totalEnquiries: null,
+              currentCourse: null,
+            },
+            messages: [
+              {
+                id: 'reply-1',
+                authorKind: 'agent',
+                authorName: 'alice',
+                body: 'Hello',
+                internal,
+                attachments: [],
+                createdAt: 't',
+              },
+            ],
+          }),
+        );
+        return portal;
+      }
+
+      beforeEach(() => {
+        process.env.PORTAL_NOTIFICATIONS_BASE_URL = 'http://portal.test';
+        process.env.PORTAL_NOTIFICATIONS_TOKEN = 'test-token';
+        fetchStub = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+        globalThis.fetch = fetchStub as unknown as typeof fetch;
+      });
+
+      afterEach(() => {
+        globalThis.fetch = realFetch;
+        for (const [name, value] of [
+          ['PORTAL_NOTIFICATIONS_BASE_URL', saved.base],
+          ['PORTAL_NOTIFICATIONS_TOKEN', saved.token],
+        ] as const) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+      });
+
+      it('sends HELPDESK_TICKET_REPLIED for a learner-visible reply', async () => {
+        await createHelpdeskService(withAgentReply(false)).reply(
+          employee,
+          TICKET_ID,
+          { body: 'Hello', internal: false, expectedSequence: 1 },
+          KEY,
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(fetchStub).toHaveBeenCalledTimes(1);
+        const [url, init] = fetchStub.mock.calls[0] as [string, RequestInit];
+        expect(url).toBe('http://portal.test/api/integration/notifications/events');
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          eventType: 'HELPDESK_TICKET_REPLIED',
+          eventKey: `ticket:${TICKET_ID}:reply-1`,
+          email: 'lena@example.com',
+        });
+      });
+
+      it('sends nothing for an internal note', async () => {
+        await createHelpdeskService(withAgentReply(true)).reply(
+          employee,
+          TICKET_ID,
+          { body: 'Hello', internal: true, expectedSequence: 1 },
+          KEY,
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(fetchStub).not.toHaveBeenCalled();
+      });
+    });
+
     it('marks internal notes', async () => {
       const portal = fakeClient();
       await createHelpdeskService(portal).reply(
