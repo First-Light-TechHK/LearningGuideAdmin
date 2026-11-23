@@ -1,3 +1,5 @@
+import { ArgumentsHost, Logger } from '@nestjs/common';
+import { AllExceptionsFilter } from '../common/filters/all-exceptions.filter';
 import {
   assertExportSelectorBody,
   encodeJobByteTotal,
@@ -370,5 +372,208 @@ describe('PackageJobsService.startExport — 只导出当前线上版本（PRD �
       code: 'EXPORT_REQUIRES_LIVE_VERSION',
     });
     expect(prisma.coursePackageJob.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('PackageJobsService — staging 存储故障（导入同步链路）', () => {
+  const STORAGE_MESSAGE =
+    '课程存储不可用，请联系运维检查课程存储桶与实例角色权限';
+
+  function make() {
+    const prisma = {
+      coursePackageJob: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({}),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const storage = {
+      stagingKey: (jobId: string, name: string) => `${jobId}/${name}`,
+      putStaging: jest.fn().mockResolvedValue(undefined),
+      hasStaging: jest.fn().mockResolvedValue(true),
+      getStaging: jest.fn(),
+      removeStaging: jest.fn().mockResolvedValue(undefined),
+    };
+    const config = {
+      packageMaxBytes: 8 * GB,
+      packageDirectUploadBytes: 200 * MB,
+    };
+    const svc = new PackageJobsService(
+      prisma as never,
+      storage as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      config as never,
+    );
+    return { svc, prisma, storage };
+  }
+
+  /** 与线上 NoSuchBucket 同形的 S3 SDK 错误（非 HttpException）。 */
+  function noSuchBucket(): Error {
+    return Object.assign(new Error('The specified bucket does not exist'), {
+      name: 'NoSuchBucket',
+      $metadata: { httpStatusCode: 404 },
+    });
+  }
+
+  /** 走真实的全局异常过滤器，断言最终 HTTP 响应。 */
+  function renderThroughFilter(error: unknown): {
+    status: number;
+    body: Record<string, unknown>;
+  } {
+    const response = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn<void, [Record<string, unknown>]>(),
+    };
+    const host = {
+      switchToHttp: () => ({ getResponse: () => response }),
+    } as unknown as ArgumentsHost;
+    new AllExceptionsFilter().catch(error, host);
+    const statusCalls = response.status.mock.calls as unknown as Array<
+      [number]
+    >;
+    return {
+      status: statusCalls[0][0],
+      body: response.json.mock.calls[0][0],
+    };
+  }
+
+  let errorSpy: jest.SpyInstance<
+    void,
+    [message: unknown, ...optionalParams: unknown[]]
+  >;
+
+  beforeEach(() => {
+    errorSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('把课程包直传 putStaging 的 S3 故障映射为 503 + STORAGE_UNAVAILABLE（不再 500 服务器内部错误）', async () => {
+    const { svc, storage } = make();
+    const storageError = noSuchBucket();
+    storage.putStaging.mockRejectedValue(storageError);
+
+    let caught: unknown;
+    try {
+      await svc.createImportJob(
+        { name: 'European civilisation.zip', bytes: Buffer.from('zip-bytes') },
+        null,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    const { status, body } = renderThroughFilter(caught);
+    expect(status).toBe(503);
+    expect(body).toEqual({
+      success: false,
+      data: null,
+      error: {
+        code: 'STORAGE_UNAVAILABLE',
+        message: STORAGE_MESSAGE,
+      },
+    });
+
+    // 响应不泄露桶名/凭证/SDK 错误；原始错误栈只进服务器日志
+    const serialised = JSON.stringify(body);
+    expect(serialised).not.toContain('bucket');
+    expect(serialised).not.toContain('NoSuchBucket');
+    expect(serialised).not.toContain('AWS');
+    expect(
+      errorSpy.mock.calls.some((call) => call[1] === storageError.stack),
+    ).toBe(true);
+  });
+
+  it('把原始素材分块 PUT 的 putStaging 故障映射为 503 + STORAGE_UNAVAILABLE', async () => {
+    const { svc, prisma, storage } = make();
+    prisma.coursePackageJob.findUnique.mockResolvedValue({
+      id: 'j1',
+      stage: 'UPLOADING',
+      bytesTotal: 10,
+      requestId: null,
+    });
+    storage.putStaging.mockRejectedValue(noSuchBucket());
+
+    await expect(
+      svc.appendRawChunk('j1', 0, Buffer.from('chunk')),
+    ).rejects.toMatchObject({
+      code: 'STORAGE_UNAVAILABLE',
+      httpStatus: 503,
+      message: STORAGE_MESSAGE,
+    });
+  });
+
+  it('把单次原始素材 POST 的 putStaging 故障映射为 503 + STORAGE_UNAVAILABLE', async () => {
+    const { svc, storage } = make();
+    storage.putStaging.mockRejectedValue(noSuchBucket());
+
+    await expect(
+      svc.createRawImportJob(
+        { name: 'raw.zip', bytes: Buffer.from('raw') },
+        null,
+      ),
+    ).rejects.toMatchObject({
+      code: 'STORAGE_UNAVAILABLE',
+      httpStatus: 503,
+      message: STORAGE_MESSAGE,
+    });
+  });
+
+  it('complete 阶段 hasStaging 探测失败时返回 503，而不是误报 400 Missing chunk', async () => {
+    const { svc, prisma, storage } = make();
+    prisma.coursePackageJob.findUnique.mockResolvedValue({
+      id: 'j1',
+      stage: 'UPLOADING',
+      bytesTotal: 10,
+      requestId: null,
+    });
+    storage.hasStaging.mockRejectedValue(noSuchBucket());
+
+    await expect(svc.completeRawUpload('j1')).rejects.toMatchObject({
+      code: 'STORAGE_UNAVAILABLE',
+      httpStatus: 503,
+      message: STORAGE_MESSAGE,
+    });
+  });
+
+  it('课程包分块 complete 的 hasStaging 故障同样返回 503', async () => {
+    const { svc, prisma, storage } = make();
+    prisma.coursePackageJob.findUnique.mockResolvedValue({
+      id: 'j1',
+      stage: 'UPLOADING_PACKAGE',
+      bytesTotal: 10,
+      requestId: null,
+    });
+    storage.hasStaging.mockRejectedValue(noSuchBucket());
+
+    await expect(svc.completePackageUpload('j1')).rejects.toMatchObject({
+      code: 'STORAGE_UNAVAILABLE',
+      httpStatus: 503,
+      message: STORAGE_MESSAGE,
+    });
+  });
+
+  it('分块确实缺失时仍保持 400 RAW_UPLOAD_INCOMPLETE（不弱化既有校验）', async () => {
+    const { svc, prisma, storage } = make();
+    prisma.coursePackageJob.findUnique.mockResolvedValue({
+      id: 'j1',
+      stage: 'UPLOADING',
+      bytesTotal: 10,
+      requestId: null,
+    });
+    storage.hasStaging.mockResolvedValue(false);
+
+    await expect(svc.completeRawUpload('j1')).rejects.toMatchObject({
+      code: 'RAW_UPLOAD_INCOMPLETE',
+      httpStatus: 400,
+    });
   });
 });
