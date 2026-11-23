@@ -2446,6 +2446,15 @@
     "ageRange": "年龄段",
     "education": "学历",
     "interests": "兴趣领域",
+    "interestLabel": {
+      "Humanities": "人文",
+      "Science": "科学",
+      "History": "历史",
+      "Philosophy": "哲学",
+      "Mathematics": "数学",
+      "Literature": "文学",
+      "Arts": "艺术"
+    },
     "language": "语言",
     "signIn": "登录方式",
     "notProvided": "未填写",
@@ -2571,6 +2580,9 @@
     "change_email": "邮箱已修改，验证链接已发送。",
     "change_email_exempt": "邮箱已修改并标记为人工核验。",
     "change_email_unsent": "邮箱已修改，但验证邮件没发出去。请点「重发验证邮件」。",
+    "email_pending": "已受理，邮件正在发送。",
+    "email_unsent": "邮件未送达，请重试。",
+    "action_recovered": "操作已生效，已显示最新状态。",
     "resend_verification": "验证邮件已发送。",
     "send_password_link": "密码链接已发送。"
   },
