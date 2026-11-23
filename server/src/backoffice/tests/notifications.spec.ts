@@ -105,7 +105,7 @@ function fakeAudit() {
 }
 
 describe('notification route access', () => {
-  it('maps every /api/backoffice/notifications route to settingsAdmin', () => {
+  it('maps every /api/backoffice/notifications route to the Settings menu, Admin only', () => {
     const cases: Array<[string, string, string]> = [
       ['GET', '/api/backoffice/notifications/templates', 'VIEW'],
       ['PUT', '/api/backoffice/notifications/templates/SUB_SUCCESS', 'PUBLISH'],
@@ -123,8 +123,10 @@ describe('notification route access', () => {
     ];
     for (const [method, path, action] of cases) {
       assert.deepEqual(routeAccess(method, path), {
-        kind: 'settingsAdmin',
+        kind: 'menu',
+        menus: ['settings'],
         action,
+        adminOnly: true,
       });
     }
   });

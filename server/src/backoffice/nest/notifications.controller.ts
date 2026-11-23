@@ -42,7 +42,7 @@ async function run<T>(work: () => Promise<T>): Promise<T> {
 /**
  * Settings › Notification Configuration（PRD §6–§8、设计 §5）。
  *
- * 所有接口都是 Admin-only + Settings FULL（route-access 的 settingsAdmin）；
+ * 所有接口都是 Admin-only + Settings FULL（route-access 的 menu + adminOnly）；
  * 写操作在这里由服务层注入操作人并记 BackOffice 审计。
  */
 @Controller('backoffice/notifications')

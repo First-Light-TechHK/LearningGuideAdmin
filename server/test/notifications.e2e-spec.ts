@@ -158,6 +158,19 @@ describe('Notification Configuration access (e2e)', () => {
       .get('/api/backoffice/notifications/templates')
       .expect(403)) as ErrorResponse;
     expect(financeResponse.body.error.code).toBe('NOT_AUTHORISED');
+    // Every verb is refused, not only reads.
+    await finance
+      .post('/api/backoffice/notifications/broadcasts')
+      .send({ titleEn: 'x', bodyEn: 'y', audience: 'all' })
+      .expect(403);
+    await finance
+      .patch('/api/backoffice/notifications/broadcasts/b1')
+      .send({ action: 'send' })
+      .expect(403);
+    await finance
+      .put('/api/backoffice/notifications/templates/SUB_SUCCESS')
+      .send({ enabled: true })
+      .expect(403);
 
     const operations = await signInAs(app, 'OPERATION_ADMIN');
     const operationsResponse = (await operations
@@ -258,9 +271,7 @@ describe('Notification Configuration capability gate (e2e)', () => {
         password: 'e2e-password-123',
       })
       .expect(200);
-    const response = (await agent
-      .get('/api/backoffice/notifications/templates')
-      .expect(403)) as ErrorResponse;
-    expect(response.body.error.code).toBe('NOT_AUTHORISED');
+    // The capability gate answers first, like every other governed module: 404, not 403.
+    await agent.get('/api/backoffice/notifications/templates').expect(404);
   });
 });

@@ -26,12 +26,6 @@ export type RouteAccess =
   /** 其余 /api/admin/**：PRD §3.3 仅 Admin。 */
   | { kind: 'employeeAdmin' }
   /**
-   * Settings › Notification Configuration（PRD §3/§11.3）：只有 Admin 角色，
-   * 且 Settings 在该账号生效级别下允许（环境能力 settings ∩ 角色 ∩ 账号开关）。
-   * 读 = VIEW；任何写（模板保存/开关、测试发送、广播、撤回）= PUBLISH（需要 FULL）。
-   */
-  | { kind: 'settingsAdmin'; action: ActionKind }
-  /**
    * 员工账号管理（/api/admin/employees/**）：归 accounts 能力；
    * VIEW = 账号列表（仅 Admin 基线），写 = FULL；
    * 功能权限 GET/PUT 用 PUBLISH（只有 Full/Admin 可读可改，避免泄露他人 grants）。
@@ -45,6 +39,8 @@ export type RouteAccess =
       feature?: FeatureKey;
       /** 任一功能键生效即放行（用于作业列表这类「导入或导出都该能看」的路径）。 */
       featuresAny?: FeatureKey[];
+      /** 菜单检查之外还要求 Admin 角色（Notification Configuration，PRD §3/§11.3）。 */
+      adminOnly?: boolean;
     };
 
 const PUBLIC_AUTH = new Set([
@@ -228,8 +224,10 @@ export function routeAccess(method: string, path: string): RouteAccess {
     // 读 = VIEW，写（保存/开关/测试/广播/撤回）= PUBLISH（Settings 必须 FULL）
     if (second === 'notifications') {
       return {
-        kind: 'settingsAdmin',
+        kind: 'menu',
+        menus: ['settings'],
         action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+        adminOnly: true,
       };
     }
     // 运营位（/api/backoffice/operations/**）：读 = VIEW；保存/发布 = PUBLISH；
