@@ -71,5 +71,6 @@ export type PaginationProps = {
   /** null 表示首次加载中，摘要显示"加载中" */
   total: number | null
   onPageChange: (page: number) => void
-  onPageSizeChange: (size: number) => void
+  /** 不传则不显示每页条数选择（固定页大小的列表）。 */
+  onPageSizeChange?: (size: number) => void
 }

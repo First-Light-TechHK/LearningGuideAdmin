@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { CloseIcon } from '../../components/icons'
+import { Pagination } from '../../components/Pagination'
 import type {
   AudienceResponse,
   BroadcastDetailResponse,
@@ -20,7 +21,7 @@ import {
   readRateLabel,
   validateBroadcastDraft,
 } from '../../lib/notificationFormat'
-import { NotificationDialog, NotificationPager } from './NotificationDialog'
+import { NotificationDialog } from './NotificationDialog'
 import { NotificationPreview } from './NotificationPreview'
 
 function errorText(
@@ -137,12 +138,12 @@ export function BroadcastsTab({
       <div className="tableWrap">
         <table className="table notificationTable notificationBroadcastTable" data-testid="broadcast-table">
           <colgroup>
-            <col style={{ width: '26%' }} />
+            <col style={{ width: '27%' }} />
+            <col style={{ width: '16%' }} />
+            <col style={{ width: '10%' }} />
             <col style={{ width: '15%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '14%' }} />
-            <col style={{ width: '13%' }} />
-            <col style={{ width: '10%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '9%' }} />
             <col style={{ width: '12%' }} />
           </colgroup>
           <thead>
@@ -153,7 +154,7 @@ export function BroadcastsTab({
               <th>{t(locale, 'notification.broadcasts.sentAt')}</th>
               <th>{t(locale, 'notification.broadcasts.recipientsRead')}</th>
               <th>{t(locale, 'notification.broadcasts.createdBy')}</th>
-              <th>{t(locale, 'notification.columns.actions')}</th>
+              <th aria-label={t(locale, 'notification.columns.actions')} />
             </tr>
           </thead>
           <tbody>
@@ -161,17 +162,18 @@ export function BroadcastsTab({
               <tr key={broadcast.id} data-testid={`broadcast-row-${broadcast.id}`}>
                 <td className="notificationNameCell">
                   <span className="notificationName">{broadcast.titleEn}</span>
-                  <span className="notificationId">{broadcastLanguageLabel(broadcast)}</span>
-                  {broadcast.status === 'withdrawn' && broadcast.withdrawnAt ? (
-                    <span className="notificationWithdrawnLine">
+                  {broadcast.status === 'withdrawn' ? (
+                    <span className="notificationId">
                       {t(locale, 'notification.broadcasts.withdrawnBy', {
-                        date: formatHktDateTime(broadcast.withdrawnAt, true),
+                        date: broadcast.withdrawnAt ? formatHktDateTime(broadcast.withdrawnAt, true) : '—',
                         name: broadcast.withdrawnBy || '—',
                       })}
                     </span>
-                  ) : null}
+                  ) : (
+                    <span className="notificationId">{broadcastLanguageLabel(broadcast)}</span>
+                  )}
                 </td>
-                <td>
+                <td className="notificationNoWrap">
                   {broadcast.audience === 'paid'
                     ? t(locale, 'notification.broadcasts.audiencePaid')
                     : t(locale, 'notification.broadcasts.audienceAll')}
@@ -181,9 +183,11 @@ export function BroadcastsTab({
                     {statusLabel(locale, broadcast.status)}
                   </span>
                 </td>
-                <td>{broadcast.sentAt ? formatHktDateTime(broadcast.sentAt) : '—'}</td>
+                <td className={broadcast.status === 'withdrawn' ? 'notificationNoWrap notificationMutedCell' : 'notificationNoWrap'}>
+                  {broadcast.sentAt ? formatHktDateTime(broadcast.sentAt) : '—'}
+                </td>
                 <td>
-                  {broadcast.status === 'draft' ? (
+                  {broadcast.status === 'draft' || broadcast.status === 'withdrawn' ? (
                     '—'
                   ) : (
                     <span className="notificationReadCell">
@@ -196,7 +200,7 @@ export function BroadcastsTab({
                 </td>
                 <td>{broadcast.createdBy || '—'}</td>
                 <td>
-                  <span className="notificationRowActions">
+                  <div className="notificationRowActions">
                     {broadcast.status === 'draft' ? (
                       <>
                         <button type="button" className="linkButton" onClick={() => onEdit(broadcast)}>
@@ -226,7 +230,7 @@ export function BroadcastsTab({
                         ) : null}
                       </>
                     )}
-                  </span>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -237,7 +241,7 @@ export function BroadcastsTab({
         ) : null}
       </div>
 
-      <NotificationPager page={page} total={total} pageSize={20} onChange={setPage} />
+      <Pagination locale={locale} page={page} pageSize={20} total={total} onPageChange={setPage} />
       <div className="notificationInlineNote" role="note">
         <span aria-hidden="true">ⓘ</span>
         <span>{t(locale, 'notification.broadcasts.footer')}</span>
@@ -245,6 +249,7 @@ export function BroadcastsTab({
 
       {pending ? (
         <NotificationDialog
+          locale={locale}
           title={t(
             locale,
             pending.kind === 'withdraw'
@@ -303,7 +308,7 @@ function BroadcastDetailDrawer({
               <span>{broadcastLanguageLabel(broadcast)}</span>
             </div>
           </div>
-          <button type="button" className="modalClose" aria-label="Close" onClick={onClose}>
+          <button type="button" className="modalClose" aria-label={t(locale, 'common.close')} onClick={onClose}>
             <CloseIcon size={16} />
           </button>
         </div>
@@ -351,7 +356,9 @@ function BroadcastDetailDrawer({
           <NotificationPreview
             copy={copy}
             channel="in_app"
-            label="Announcement"
+            label={t(locale, 'notification.broadcasts.announcement')}
+            locale={locale}
+            sample={false}
           />
         </div>
       </div>
@@ -699,11 +706,14 @@ export function BroadcastEditor({
           copy={copy}
           channel="in_app"
           label={t(locale, 'notification.broadcasts.announcement')}
+          locale={locale}
+          sample={false}
         />
       </div>
 
       {confirmSend ? (
         <NotificationDialog
+          locale={locale}
           title={t(locale, 'notification.broadcasts.sendConfirmTitle')}
           confirmLabel={t(locale, 'notification.broadcasts.sendNow')}
           busy={busy}

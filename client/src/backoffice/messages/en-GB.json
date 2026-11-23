@@ -57,7 +57,23 @@
   },
   "notification": {
     "title": "Notification Configuration",
-    "subtitle": "System notifications are sent automatically when something happens. You can change the wording and turn some of them off; triggers and timing are set by the system.",
+    "subtitle": {
+      "system": "System notifications are sent automatically when something happens. You can change the wording and turn some of them off; triggers and timing are set by the system.",
+      "broadcasts": "Broadcasts are messages you write and send yourself, such as maintenance notices or news. They are sent immediately as in-app messages.",
+      "sendLog": "See what was sent to whom and whether it arrived. Emails sent by Stripe are not included."
+    },
+    "preview": {
+      "title": "Preview",
+      "sampleData": "Sample data",
+      "asLearnersSee": "As learners will see it",
+      "sampleValues": "Sample values; plan = Everything · 12 months, renewal date = 16 Nov 2026, amount = US$149.00",
+      "centerTitle": "Notifications",
+      "justNow": "Just now",
+      "titlePlaceholder": "Title",
+      "messagePlaceholder": "Message",
+      "subjectPlaceholder": "Subject",
+      "emailBodyPlaceholder": "Email body"
+    },
     "tabs": {
       "system": "System notifications",
       "broadcasts": "Broadcasts",
@@ -106,11 +122,6 @@
       "emailBody": "Email body",
       "insertVariable": "Insert variable",
       "available": "Available:",
-      "sampleData": "Sample data",
-      "preview": "Preview",
-      "previewInApp": "In-app message",
-      "previewEmail": "Email",
-      "previewFooter": "You're receiving this email because you have a Learning Guide subscription. Learning Guide Ltd · Privacy policy",
       "unsaved": "Unsaved changes",
       "leaveConfirm": "You have unsaved changes. Leave this page?",
       "saved": "Saved. New messages use the new wording.",
@@ -131,7 +142,6 @@
       "readOnly": "Your account can view this page but not change it."
     },
     "broadcasts": {
-      "subtitle": "Broadcasts are messages you write and send yourself, such as maintenance notices or news. They are sent immediately as in-app messages.",
       "count": "{count} broadcasts",
       "new": "+ New broadcast",
       "newTitle": "New broadcast",
@@ -161,8 +171,6 @@
       "buttonLink": "Button link (optional)",
       "buttonPlaceholder": "e.g. Learn more",
       "linkPlaceholder": "https://…",
-      "preview": "Preview",
-      "previewHint": "As learners will see it",
       "announcement": "ANNOUNCEMENT",
       "sendNowNote": "“Send now” sends the in-app message straight away to everyone in the audience at that moment. You can withdraw it later from the Broadcasts list.",
       "sendConfirmTitle": "Send this broadcast now?",
@@ -184,7 +192,6 @@
       "footer": "Withdraw removes a sent broadcast from every learner's notification centre. It can't be undone. Read rate = learners who opened it ÷ learners it was sent to."
     },
     "sendLog": {
-      "subtitle": "Look up what was sent to whom and whether it arrived.",
       "searchPlaceholder": "Search by recipient email",
       "allNotifications": "All notifications",
       "allChannels": "All channels",

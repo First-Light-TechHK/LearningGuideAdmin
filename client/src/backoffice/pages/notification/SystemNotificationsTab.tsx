@@ -109,12 +109,11 @@ export function SystemNotificationsTab({
       <div className="tableWrap">
         <table className="table notificationTable" data-testid="system-notifications-table">
           <colgroup>
-            <col style={{ width: '30%' }} />
-            <col style={{ width: '34%' }} />
-            <col style={{ width: '11%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '11%' }} />
-            <col style={{ width: '4%' }} />
+            <col style={{ width: '24%' }} />
+            <col />
+            <col style={{ width: '124px' }} />
+            <col style={{ width: '150px' }} />
+            <col style={{ width: '200px' }} />
           </colgroup>
           <thead>
             <tr>
@@ -123,7 +122,6 @@ export function SystemNotificationsTab({
               <th>{t(locale, 'notification.columns.channels')}</th>
               <th>{t(locale, 'notification.columns.languages')}</th>
               <th>{t(locale, 'notification.columns.status')}</th>
-              <th>{t(locale, 'notification.columns.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -155,6 +153,7 @@ export function SystemNotificationsTab({
 
       {pendingOff ? (
         <NotificationDialog
+          locale={locale}
           title={t(locale, 'notification.editor.confirmOff')}
           confirmLabel={t(locale, 'notification.editor.turnOff')}
           danger
@@ -193,19 +192,24 @@ function NotificationGroup({
   return (
     <>
       <tr className="notificationGroupRow">
-        <td colSpan={6}>
+        <td colSpan={5}>
           {label.toUpperCase()} · {count}
         </td>
       </tr>
       {templates.map((template) => {
         const missing = chineseCopyMissing(template)
+        const name = template.name ?? template.en.title ?? template.id
         return (
           <tr key={template.id} data-testid={`notification-row-${template.id}`}>
             <td className="notificationNameCell">
-              <span className="notificationName">{template.en.title || template.id}</span>
+              <span className="notificationName">{name}</span>
               <span className="notificationId">{template.id}</span>
             </td>
-            <td className="notificationTriggerCell">{template.triggerText}</td>
+            <td className="notificationTriggerCell">
+              <div className="notificationTriggerClamp" title={template.triggerText}>
+                {template.triggerText}
+              </div>
+            </td>
             <td>
               <span className="notificationTagList">
                 {template.channels.map((channel) => (
@@ -213,8 +217,8 @@ function NotificationGroup({
                     key={channel}
                     className={
                       channel === 'email'
-                        ? 'smPill smPillEmail'
-                        : 'smPill smPillBlue'
+                        ? 'notificationTag notificationTagEmail'
+                        : 'notificationTag notificationTagInApp'
                     }
                   >
                     {channelLabel(channel)}
@@ -224,12 +228,12 @@ function NotificationGroup({
             </td>
             <td>
               <span className="notificationTagList">
-                <span className="notificationLangTag">EN</span>
+                <span className="notificationTag notificationTagLang">EN</span>
                 <span
                   className={
                     missing
-                      ? 'notificationLangTag notificationLangMissing'
-                      : 'notificationLangTag'
+                      ? 'notificationTag notificationTagLang notificationTagMissing'
+                      : 'notificationTag notificationTagLang'
                   }
                   data-testid={`language-tag-${template.id}`}
                 >
@@ -238,38 +242,38 @@ function NotificationGroup({
               </span>
             </td>
             <td>
-              <span className="notificationToggleCell">
+              <div className="notificationStatusCell">
+                <span className="notificationToggleCell">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={template.enabled}
+                    aria-label={name}
+                    className={template.enabled ? 'smSwitch smSwitchOn' : 'smSwitch'}
+                    disabled={template.locked || busy}
+                    onClick={() => onToggle(template)}
+                  />
+                  <span className="notificationToggleText">
+                    {template.locked ? (
+                      <>
+                        <LockIcon size={13} /> {t(locale, 'notification.alwaysOn')}
+                      </>
+                    ) : template.enabled ? (
+                      t(locale, 'notification.on')
+                    ) : (
+                      t(locale, 'notification.off')
+                    )}
+                  </span>
+                </span>
                 <button
                   type="button"
-                  role="switch"
-                  aria-checked={template.enabled}
-                  aria-label={template.en.title || template.id}
-                  className={template.enabled ? 'smSwitch smSwitchOn' : 'smSwitch'}
-                  disabled={template.locked || busy}
-                  onClick={() => onToggle(template)}
-                />
-                <span className="notificationToggleText">
-                  {template.locked ? (
-                    <>
-                      <LockIcon size={13} /> {t(locale, 'notification.alwaysOn')}
-                    </>
-                  ) : template.enabled ? (
-                    t(locale, 'notification.on')
-                  ) : (
-                    t(locale, 'notification.off')
-                  )}
-                </span>
-              </span>
-            </td>
-            <td>
-              <button
-                type="button"
-                className="linkButton"
-                onClick={() => onEdit(template.id)}
-                data-testid={`notification-edit-${template.id}`}
-              >
-                {t(locale, 'notification.edit')}
-              </button>
+                  className="linkButton"
+                  onClick={() => onEdit(template.id)}
+                  data-testid={`notification-edit-${template.id}`}
+                >
+                  {t(locale, 'notification.edit')}
+                </button>
+              </div>
             </td>
           </tr>
         )
@@ -754,7 +758,7 @@ export function NotificationEditor({
           </div>
         </div>
 
-        <NotificationPreview template={template} copy={copy} channel={channel} />
+        <NotificationPreview template={template} copy={copy} channel={channel} locale={locale} />
       </div>
     </div>
   )

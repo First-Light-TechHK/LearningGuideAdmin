@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { CloseIcon, SearchIcon } from '../../components/icons'
+import { Pagination } from '../../components/Pagination'
 import type {
   NotificationBroadcast,
   NotificationLogStatus,
@@ -17,7 +18,6 @@ import {
   formatHktDateTime,
   notificationErrorText,
 } from '../../lib/notificationFormat'
-import { NotificationPager } from './NotificationDialog'
 
 function errorText(
   locale: ReturnType<typeof useLocale>,
@@ -134,7 +134,7 @@ export function SendLogTab({
           <option value="">{t(locale, 'notification.sendLog.allNotifications')}</option>
           {templates.map((template) => (
             <option key={template.id} value={`template:${template.id}`}>
-              {template.en.title || template.id}
+              {template.name ?? template.en.title ?? template.id}
             </option>
           ))}
           {broadcasts.map((broadcast) => (
@@ -200,12 +200,12 @@ export function SendLogTab({
       <div className="tableWrap">
         <table className="table notificationTable notificationLogTable" data-testid="send-log-table">
           <colgroup>
-            <col style={{ width: '15%' }} />
-            <col style={{ width: '20%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '25%' }} />
             <col style={{ width: '25%' }} />
             <col style={{ width: '9%' }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: '9%' }} />
+            <col style={{ width: '16%' }} />
+            <col style={{ width: '8%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -214,20 +214,23 @@ export function SendLogTab({
               <th>{t(locale, 'notification.sendLog.notification')}</th>
               <th>{t(locale, 'notification.sendLog.channel')}</th>
               <th>{t(locale, 'notification.sendLog.status')}</th>
-              <th>{t(locale, 'notification.columns.actions')}</th>
+              <th aria-label={t(locale, 'notification.columns.actions')} />
             </tr>
           </thead>
           <tbody>
             {items.map((item) => (
               <tr key={item.id} data-testid={`send-log-row-${item.id}`}>
-                <td>{formatHktDateTime(item.occurredAt)}</td>
+                <td className="notificationNoWrap">{formatHktDateTime(item.occurredAt)}</td>
                 <td className="notificationRecipientCell">
                   <span>{item.recipientEmail || '—'}</span>
                   {item.recipientName ? <span className="notificationId">{item.recipientName}</span> : null}
                 </td>
                 <td className="notificationLogNotificationCell">
-                  <span>{item.notificationName}</span>
-                  {item.isTest ? <span className="smPill smPillWarn">{t(locale, 'notification.sendLog.test')}</span> : null}
+                  <div>
+                    <span>{item.notificationName}</span>
+                    {item.isTest ? <span className="smPill smPillWarn notificationTestTag">{t(locale, 'notification.sendLog.test')}</span> : null}
+                  </div>
+                  {item.templateId ? <div className="notificationId">{item.templateId}</div> : null}
                 </td>
                 <td>{channelLabel(item.channel)}</td>
                 <td>
@@ -252,7 +255,7 @@ export function SendLogTab({
 
       <div className="notificationLogFooter">
         <span>{t(locale, 'notification.sendLog.footer')}</span>
-        <NotificationPager page={page} total={total} pageSize={20} onChange={(next) => void load(next)} />
+        <Pagination locale={locale} page={page} pageSize={20} total={total} onPageChange={(next) => void load(next)} />
       </div>
 
       {detail ? <SendLogDrawer detail={detail} onClose={() => setDetail(null)} /> : null}
@@ -280,7 +283,7 @@ function SendLogDrawer({
               {detail.isTest ? <span className="smPill smPillWarn">{t(locale, 'notification.sendLog.test')}</span> : null}
             </div>
           </div>
-          <button type="button" className="modalClose" aria-label="Close" onClick={onClose}>
+          <button type="button" className="modalClose" aria-label={t(locale, 'common.close')} onClick={onClose}>
             <CloseIcon size={16} />
           </button>
         </div>

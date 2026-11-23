@@ -57,7 +57,23 @@
   },
   "notification": {
     "title": "通知配置",
-    "subtitle": "系统通知会在事件发生时自动发送。你可以修改文案并关闭部分通知；触发条件与时间由系统设定。",
+    "subtitle": {
+      "system": "系统通知会在事件发生时自动发送。你可以修改文案并关闭其中一部分；触发条件和时间由系统决定。",
+      "broadcasts": "广播是由你撰写并发送的消息，例如维护公告或新闻，会立即以站内消息发送。",
+      "sendLog": "查看发给了谁、是否送达。Stripe 发送的邮件不在此列。"
+    },
+    "preview": {
+      "title": "预览",
+      "sampleData": "示例数据",
+      "asLearnersSee": "用户看到的样子",
+      "sampleValues": "示例值：套餐 = 全部课程 · 12 个月，续费日期 = 2026 年 11 月 16 日，金额 = 149.00 美元",
+      "centerTitle": "通知",
+      "justNow": "刚刚",
+      "titlePlaceholder": "标题",
+      "messagePlaceholder": "消息",
+      "subjectPlaceholder": "主题",
+      "emailBodyPlaceholder": "邮件正文"
+    },
     "tabs": {
       "system": "系统通知",
       "broadcasts": "广播",
@@ -106,11 +122,6 @@
       "emailBody": "邮件正文",
       "insertVariable": "插入变量",
       "available": "可用变量：",
-      "sampleData": "示例数据",
-      "preview": "预览",
-      "previewInApp": "站内消息",
-      "previewEmail": "邮件",
-      "previewFooter": "你收到这封邮件是因为你拥有 Learning Guide 订阅。Learning Guide 有限公司 · 隐私政策",
       "unsaved": "有未保存的修改",
       "leaveConfirm": "有未保存的修改，确定离开此页面？",
       "saved": "已保存。之后的新消息会使用新文案。",
@@ -131,7 +142,6 @@
       "readOnly": "你的账号可以查看此页面，但不能修改。"
     },
     "broadcasts": {
-      "subtitle": "广播是你自己撰写并发送的消息，例如维护通知或新闻，会立即以站内消息发送。",
       "count": "{count} 条广播",
       "new": "+ 新建广播",
       "newTitle": "新建广播",
@@ -161,8 +171,6 @@
       "buttonLink": "按钮链接（选填）",
       "buttonPlaceholder": "例如：了解更多",
       "linkPlaceholder": "https://…",
-      "preview": "预览",
-      "previewHint": "学习者将看到的样子",
       "announcement": "公告",
       "sendNowNote": "“立即发送”会把站内消息立刻发给当时该接收人范围内的所有人。之后可以在广播列表中撤回。",
       "sendConfirmTitle": "立即发送这条广播？",
@@ -184,7 +192,6 @@
       "footer": "撤回会把已发送的广播从每位学习者的通知中心移除，且不可撤销。阅读率 = 打开人数 ÷ 发送人数。"
     },
     "sendLog": {
-      "subtitle": "查询谁收到了什么、是否送达。",
       "searchPlaceholder": "按接收人邮箱搜索",
       "allNotifications": "全部通知",
       "allChannels": "全部渠道",

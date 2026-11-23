@@ -39,6 +39,8 @@ export const NOTIFICATION_COPY_FIELDS = [
 
 export type NotificationTemplate = {
   id: string
+  /** Fixed catalogue name from the Portal; read-only. */
+  name?: string
   category: NotificationCategory
   channels: NotificationChannel[]
   locked: boolean

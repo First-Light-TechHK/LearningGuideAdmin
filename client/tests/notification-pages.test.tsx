@@ -245,6 +245,52 @@ test('broadcast list shows status-specific actions and read rate (B04)', async (
   assert.equal(within(draftRow).queryByText('Withdraw'), null)
   const withdrawnRow = screen.getByTestId('broadcast-row-b3')
   assert.equal(within(withdrawnRow).queryByText('Withdraw'), null)
+  // a withdrawn row shows who withdrew it, a dash for recipients, and no read rate or language line
+  assert.ok(within(withdrawnRow).getByText(/Withdrawn .* by Mia Chen/))
+  assert.ok(within(withdrawnRow).getByText('—'))
+  assert.equal(within(withdrawnRow).queryByText(/read$/), null)
+  assert.equal(within(withdrawnRow).queryByText(/EN · |EN only/), null)
+})
+
+test('system notification rows use the fixed catalogue name when the Portal sends one (B01)', () => {
+  render(
+    <MemoryRouter>
+      <SystemNotificationsTab
+        templates={[template({ name: 'Renewal reminder (D-5)' })]}
+        loading={false}
+        errorMessage={null}
+        onReload={() => {}}
+        onEdit={() => {}}
+      />
+    </MemoryRouter>,
+  )
+  const row = screen.getByTestId('notification-row-SUB_RENEWAL_REMINDER')
+  assert.ok(within(row).getByText('Renewal reminder (D-5)'))
+  assert.equal(within(row).queryByText('Your subscription renews soon'), null)
+  // five columns, Edit lives in the status cell
+  assert.equal(row.querySelectorAll('td').length, 5)
+  assert.ok(row.querySelector('.notificationStatusCell [data-testid="notification-edit-SUB_RENEWAL_REMINDER"]'))
+})
+
+test('the broadcast preview has no sample-values note, the system preview has one (B05)', () => {
+  globalThis.fetch = (() => ok({ ok: true, all: 1, paid: 1 })) as typeof fetch
+  const { unmount } = render(
+    <MemoryRouter>
+      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+    </MemoryRouter>,
+  )
+  const preview = screen.getByTestId('notification-preview')
+  assert.equal(within(preview).queryByText(/Sample values/), null)
+  assert.ok(within(preview).getByText('As learners will see it'))
+  unmount()
+  render(
+    <MemoryRouter>
+      <EmployeeContext.Provider value={employee}>
+        <NotificationEditor template={template()} onBack={() => {}} onReload={() => {}} onSaved={() => {}} />
+      </EmployeeContext.Provider>
+    </MemoryRouter>,
+  )
+  assert.ok(within(screen.getByTestId('notification-preview')).getByText(/Sample values/))
 })
 
 test('new broadcast validates the button pair and shows an announcement preview (B05)', () => {
@@ -277,7 +323,7 @@ test('send log renders statuses, failure reasons, Test tags and filters (B06)', 
           notificationId: 'n1',
           templateId: 'SUB_RENEWAL_REMINDER',
           broadcastId: null,
-          notificationName: 'Renewal reminder (D-5) · SUB_RENEWAL_REMINDER',
+          notificationName: 'Renewal reminder (D-5)',
           channel: 'email',
           status: 'delivered',
           failureReason: null,
@@ -292,7 +338,7 @@ test('send log renders statuses, failure reasons, Test tags and filters (B06)', 
           notificationId: 'n2',
           templateId: 'SUB_RENEWAL_FAILED',
           broadcastId: null,
-          notificationName: 'Renewal payment failed · SUB_RENEWAL_FAILED',
+          notificationName: 'Renewal payment failed',
           channel: 'email',
           status: 'failed',
           failureReason: 'Bounced: mailbox not found',
@@ -316,6 +362,12 @@ test('send log renders statuses, failure reasons, Test tags and filters (B06)', 
   assert.ok(screen.getAllByText('Failed').length > 0)
   assert.ok(screen.getByText('Bounced: mailbox not found'))
   assert.ok(screen.getByText('Test'))
+  // name and template ID are separate elements (NTF-LOG-002); the Test tag sits on the name line
+  const nameLine = screen.getByText('Renewal reminder (D-5)').parentElement as HTMLElement
+  assert.equal(nameLine.querySelector('.smPill'), null)
+  assert.equal(nameLine.nextElementSibling?.textContent, 'SUB_RENEWAL_REMINDER')
+  const testLine = screen.getByText('Renewal payment failed').parentElement as HTMLElement
+  assert.equal(within(testLine).getByText('Test').closest('div'), testLine)
   assert.match(requested, /send-log\?/)
   assert.match(requested, /from=\d{4}-\d{2}-\d{2}/)
   assert.match(requested, /to=\d{4}-\d{2}-\d{2}/)

@@ -173,7 +173,7 @@ function NotificationConfigurationInner() {
       <div className="pageHead notificationPageHead">
         <div>
           <h1 className="cardTitle">{t(locale, 'notification.title')}</h1>
-          <p className="cardSubtitle">{t(locale, 'notification.subtitle')}</p>
+          <p className="cardSubtitle">{t(locale, `notification.subtitle.${tab}`)}</p>
         </div>
       </div>
 
