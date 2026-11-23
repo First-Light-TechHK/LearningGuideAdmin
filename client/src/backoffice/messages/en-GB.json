@@ -271,7 +271,10 @@
       "textPointNewShort": "New",
       "exhibitSaveFailed": "Could not save the exhibit",
       "exhibitDeleteFailed": "Could not delete the exhibit",
-      "failedWithReason": "Failed: {reason}"
+      "failedWithReason": "Failed: {reason}",
+      "draftRestored": "Restored unsaved draft (not saved to the server yet)",
+      "draftServerChanged": "The server content changed in the meantime; only fields you edited kept your draft.",
+      "draftDiscard": "Discard draft"
     }
   },
   "operations": {

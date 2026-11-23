@@ -271,7 +271,10 @@
       "textPointNewShort": "新增",
       "exhibitSaveFailed": "保存展品失败",
       "exhibitDeleteFailed": "删除展品失败",
-      "failedWithReason": "失败：{reason}"
+      "failedWithReason": "失败：{reason}",
+      "draftRestored": "已恢复未保存的草稿（尚未保存到服务器）",
+      "draftServerChanged": "服务器上的内容在此期间有更新；只有你改过的字段保留了你的草稿。",
+      "draftDiscard": "丢弃草稿"
     }
   },
   "operations": {

@@ -14,9 +14,13 @@ import { UnderstandingPanel } from './UnderstandingPanel';
 import { ExhibitDrawer } from './ExhibitDrawer';
 import { TextEditor } from './TextEditor';
 import { Chip, Field, IssueText, Modal, TypedTimeInput } from './shared';
-import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, fmtTimeInput, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel, useNarrowLayout } from './shared-utils';
+import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel, useNarrowLayout } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
 import { serverText } from '../../lib/i18n/serverText';
+import { lessonDraftOf, mergeLessonDraft, parseLessonDraft, type LessonDraft } from './drafts/lessonDraft';
+import { isDirty } from './drafts/merge';
+import { restoreDraft, useDraftAutosave } from './useDraftPersistence';
+import { removeDraft, type DraftIdentity } from '../../lib/editorDraftStore';
 
 type UploadResult = { id: string; kind?: string; originalName?: string };
 
@@ -43,69 +47,6 @@ type ExhibitUploadState = {
 function loc(lesson: Lesson | undefined, language: string) {
   if (!lesson || !Array.isArray(lesson.localizations)) return undefined;
   return lesson.localizations.find((item) => item.language === language) ?? lesson.localizations[0];
-}
-
-/** 课时编辑器的全部本地草稿，与页面上的输入一一对应。 */
-type LessonDraft = {
-  titleEn: string;
-  titleZh: string;
-  descEn: string;
-  descZh: string;
-  videoLps: PointDraft[];
-  triggerRows: TriggerDraft[];
-  readingRows: ReadingDraft[];
-  textHtml: string;
-};
-
-function emptyDraft(): LessonDraft {
-  return { titleEn: '', titleZh: '', descEn: '', descZh: '', videoLps: [], triggerRows: [], readingRows: [], textHtml: '' };
-}
-
-/** 服务器快照 → 当前内容语言下的完整草稿。 */
-function lessonDraftOf(lesson: Lesson | undefined, language: string): LessonDraft {
-  if (!lesson) return emptyDraft();
-  const en = loc(lesson, 'en-GB');
-  const zh = loc(lesson, 'zh-CN');
-  const currentLoc = loc(lesson, language);
-  return {
-    titleEn: en?.title ?? '',
-    titleZh: zh?.title ?? '',
-    descEn: en?.description ?? '',
-    descZh: zh?.description ?? '',
-    videoLps: lesson.learningPoints
-      .filter((point) => point.language === language && point.source === 'VIDEO')
-      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-      .map((point) => ({ id: point.id, code: point.code, title: point.title, timeText: fmtTimeInput(point.timeSeconds) })),
-    triggerRows: (lesson.triggers ?? [])
-      .filter((trigger) => trigger.language === language)
-      .map((trigger) => ({ exhibitId: trigger.exhibitId ?? '', timeText: fmtTimeInput(trigger.timeSeconds) })),
-    readingRows: readingsOf(lesson).map((reading) => ({
-      id: reading.id,
-      type: reading.type,
-      title: reading.title ?? '',
-      author: reading.author ?? '',
-      whyRecommended: reading.whyRecommended ?? '',
-    })),
-    textHtml: currentLoc?.textHtml ?? '',
-  };
-}
-
-/**
- * 重载后的草稿合并：用户改过（与上次服务器快照不同）的字段保留，没改过的跟随服务器。
- * GET 详情每次都是新对象；不合并就会把未保存的输入（正文、课时标题/简介等）静默重置成服务器值。
- */
-function mergeDraft(current: LessonDraft, snapshot: LessonDraft, server: LessonDraft): LessonDraft {
-  const keep = <T,>(mine: T, before: T, fresh: T): T => (JSON.stringify(mine) === JSON.stringify(before) ? fresh : mine);
-  return {
-    titleEn: keep(current.titleEn, snapshot.titleEn, server.titleEn),
-    titleZh: keep(current.titleZh, snapshot.titleZh, server.titleZh),
-    descEn: keep(current.descEn, snapshot.descEn, server.descEn),
-    descZh: keep(current.descZh, snapshot.descZh, server.descZh),
-    videoLps: keep(current.videoLps, snapshot.videoLps, server.videoLps),
-    triggerRows: keep(current.triggerRows, snapshot.triggerRows, server.triggerRows),
-    readingRows: keep(current.readingRows, snapshot.readingRows, server.readingRows),
-    textHtml: keep(current.textHtml, snapshot.textHtml, server.textHtml),
-  };
 }
 
 /**
@@ -137,6 +78,7 @@ export function CourseContentSection({
   setBusy,
   onReload,
   onNotice,
+  canEdit,
 }: {
   locale: string;
   course: CourseDetail;
@@ -147,6 +89,7 @@ export function CourseContentSection({
   setBusy: (value: boolean) => void;
   onReload: () => Promise<void>;
   onNotice: (message: string) => void;
+  canEdit: boolean;
 }) {
   const [part, setPart] = useState<'study' | 'understanding'>('study');
   const [studyTab, setStudyTab] = useState<'video' | 'text'>('video');
@@ -210,15 +153,29 @@ export function CourseContentSection({
     setRowErrors({ points: {}, triggers: {}, readings: {} });
   };
   const serverDraft = lessonDraftOf(activeLesson, contentLanguage);
+  // 草稿身份与 6a833b2 一致：课程 + 课时 + 内容语言；只读账号不读不写不提示。
+  const draftIdentity: DraftIdentity | null = activeLesson
+    ? { courseId: course.id, step: 'study', lessonId: activeLesson.id, language: contentLanguage }
+    : null;
+  const draftStorageIdentity = canEdit ? draftIdentity : null;
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftServerChanged, setDraftServerChanged] = useState(false);
   if (
     !draftSource ||
     draftSource.courseId !== course.id ||
     draftSource.lessonId !== activeLesson?.id ||
     draftSource.language !== contentLanguage
   ) {
-    // 换课程 / 换课时 / 换内容语言：草稿没有跨身份的意义，整份从服务器重新取。
+    // 换课程 / 换课时 / 换内容语言：整份从服务器重新取；本地有该身份的未保存草稿就先合并恢复（三路合并）。
+    const restored = restoreDraft(draftStorageIdentity, serverDraft, {
+      parse: parseLessonDraft,
+      merge: mergeLessonDraft,
+      dirty: isDirty,
+    });
     setDraftSource({ courseId: course.id, lessonId: activeLesson?.id, language: contentLanguage, course, lesson: activeLesson, snapshot: serverDraft });
-    applyDraft(serverDraft);
+    applyDraft(restored.value);
+    setDraftRestored(restored.restored);
+    setDraftServerChanged(restored.restored && restored.serverChanged);
   } else if (draftSource.course !== course || draftSource.lesson !== activeLesson) {
     // 同一课时被重新载入（保存成功、上传展品等）：保留用户改过但还没保存的字段，其余跟随服务器。
     const currentDraft: LessonDraft = {
@@ -232,7 +189,26 @@ export function CourseContentSection({
       textHtml,
     };
     setDraftSource({ ...draftSource, course, lesson: activeLesson, snapshot: serverDraft });
-    applyDraft(mergeDraft(currentDraft, draftSource.snapshot, serverDraft));
+    applyDraft(mergeLessonDraft(currentDraft, draftSource.snapshot, serverDraft));
+  }
+
+  const currentDraft: LessonDraft = {
+    titleEn: lessonTitleEn,
+    titleZh: lessonTitleZh,
+    descEn: lessonDescEn,
+    descZh: lessonDescZh,
+    videoLps,
+    triggerRows,
+    readingRows,
+    textHtml,
+  };
+  const draftBase = draftSource?.snapshot ?? serverDraft;
+  useDraftAutosave(draftStorageIdentity, currentDraft, draftBase, isDirty);
+  // 草稿回到与服务器一致（保存后重载合并 / 用户改回原值）时视为无草稿，恢复提示随之消失。
+  const draftDirty = isDirty(currentDraft, draftBase);
+  if (draftRestored && !draftDirty) {
+    setDraftRestored(false);
+    setDraftServerChanged(false);
   }
 
   const [studyMode, setStudyMode] = useState<boolean | null>(null);
@@ -345,6 +321,13 @@ export function CourseContentSection({
     }
     // 返回的行与发出的行一一对应：记下 id，再次保存时行身份不变（重载不再整份覆盖草稿后靠这里保持）。
     setReadingRows((rows) => rows.map((row, index) => ({ ...row, id: readings.data.readings[index]?.id ?? row.id })));
+    // 一次保存写两种语言的课时标题/简介和唯一一份阅读列表：其它语言身份下的同课时草稿一并清掉，
+    // 避免旧副本在下次切语言时把刚保存的共享字段又盖回去。当前语言由重载合并为 clean 后自动清除。
+    for (const language of course.learningLanguages) {
+      if (language !== contentLanguage) {
+        removeDraft({ courseId: course.id, step: 'study', lessonId: activeLesson.id, language });
+      }
+    }
     setBusy(false);
     onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
     await onReload();
@@ -613,6 +596,14 @@ export function CourseContentSection({
     videoUpload?.phase === 'assigning';
 
   const narrow = useNarrowLayout();
+  /** 丢弃本地草稿：删掉存储记录，把当前 section 重置到最新服务器快照（不发任何服务器请求）。 */
+  function discardDraft() {
+    if (draftIdentity) removeDraft(draftIdentity);
+    applyDraft(serverDraft);
+    setDraftSource((current) => (current ? { ...current, snapshot: serverDraft } : current));
+    setDraftRestored(false);
+    setDraftServerChanged(false);
+  }
   return (
     <>
     <div
@@ -661,6 +652,20 @@ export function CourseContentSection({
 
       {activeLesson ? (
         <div data-testid="content-detail" data-panel="content-detail" style={{ overflow: 'auto', minWidth: 0, minHeight: 0 }}>
+          {draftRestored && (
+            <div
+              data-testid="draft-restored"
+              role="status"
+              aria-live="polite"
+              style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F3F7FF', border: '1px solid #D6E2F8', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 10 }}
+            >
+              <span>{t(asLocale(locale), 'course.ui.draftRestored')}</span>
+              {draftServerChanged && <span data-testid="draft-server-changed" style={{ color: '#5A6577' }}>{t(asLocale(locale), 'course.ui.draftServerChanged')}</span>}
+              <button type="button" data-testid="draft-discard" style={{ ...buttonStyle, padding: '4px 10px' }} onClick={discardDraft}>
+                {t(asLocale(locale), 'course.ui.draftDiscard')}
+              </button>
+            </div>
+          )}
           <div style={{ ...card, marginTop: 0, padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <div>
@@ -1068,6 +1073,7 @@ export function CourseContentSection({
               setBusy={setBusy}
               onSaved={onReload}
               onNotice={onNotice}
+              canEdit={canEdit}
             />
           )}
         </div>
