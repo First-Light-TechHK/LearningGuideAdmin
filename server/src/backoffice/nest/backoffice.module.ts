@@ -71,6 +71,8 @@ import {
 } from '../modules/helpdesk/flywheel/flywheelService';
 import { createPgInsightRepository } from '../modules/helpdesk/flywheel/insightRepository';
 import { createPortalHelpdeskClient } from '../modules/helpdesk/portalHelpdeskClient';
+import { createPortalNotificationsClient } from '../modules/notification/portalNotificationsClient';
+import { createNotificationsService } from '../modules/notification/notificationsService';
 import { createPortalStudentsClient } from '../modules/students/portalStudentsClient';
 import { createStudentsService } from '../modules/students/studentsService';
 import {
@@ -116,6 +118,10 @@ import {
   BackofficeStudentsController,
   STUDENTS_SERVICE,
 } from './students.controller';
+import {
+  BackofficeNotificationsController,
+  NOTIFICATIONS_SERVICE,
+} from './notifications.controller';
 import {
   BackofficeHelpdeskFaqReviewController,
   HELPDESK_FAQ_REVIEW_SERVICE,
@@ -237,6 +243,7 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
         BackofficeHelpdeskFaqReviewController,
         BackofficeStudentsController,
         BackofficeLearningAccessController,
+        BackofficeNotificationsController,
       ],
       providers: [
         // 学生管理（Student Management PRD v1.0）：数据与判定在 Portal，这里经集成接口读写并记审计
@@ -245,6 +252,16 @@ export class BackofficeModule implements OnModuleInit, OnApplicationShutdown {
           useFactory: () =>
             createStudentsService({
               portal: createPortalStudentsClient(),
+              audit: tryRecordAuditEvent,
+            }),
+        },
+        // Notification P0（设计 §1/§5）：运营界面经服务令牌调用 Portal 通知集成接口。
+        // 读写都不在 Admin 落库；模板/广播/日志的唯一事实来源在 Portal。
+        {
+          provide: NOTIFICATIONS_SERVICE,
+          useFactory: () =>
+            createNotificationsService({
+              portal: createPortalNotificationsClient(),
               audit: tryRecordAuditEvent,
             }),
         },

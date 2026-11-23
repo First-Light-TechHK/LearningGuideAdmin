@@ -26,6 +26,12 @@ export type RouteAccess =
   /** 其余 /api/admin/**：PRD §3.3 仅 Admin。 */
   | { kind: 'employeeAdmin' }
   /**
+   * Settings › Notification Configuration（PRD §3/§11.3）：只有 Admin 角色，
+   * 且 Settings 在该账号生效级别下允许（环境能力 settings ∩ 角色 ∩ 账号开关）。
+   * 读 = VIEW；任何写（模板保存/开关、测试发送、广播、撤回）= PUBLISH（需要 FULL）。
+   */
+  | { kind: 'settingsAdmin'; action: ActionKind }
+  /**
    * 员工账号管理（/api/admin/employees/**）：归 accounts 能力；
    * VIEW = 账号列表（仅 Admin 基线），写 = FULL；
    * 功能权限 GET/PUT 用 PUBLISH（只有 Full/Admin 可读可改，避免泄露他人 grants）。
@@ -218,6 +224,14 @@ export function routeAccess(method: string, path: string): RouteAccess {
   if (first === 'backoffice') {
     // 环境标识是所有后台页面的公共信息
     if (second === 'environment') return { kind: 'signedIn' };
+    // Notification Configuration（Settings 子页）：仅 Admin 且 Settings 生效；
+    // 读 = VIEW，写（保存/开关/测试/广播/撤回）= PUBLISH（Settings 必须 FULL）
+    if (second === 'notifications') {
+      return {
+        kind: 'settingsAdmin',
+        action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+      };
+    }
     // 运营位（/api/backoffice/operations/**）：读 = VIEW；保存/发布 = PUBLISH；
     // 独立 module.operations 开关（账号级），环境能力另由 operations 能力门管
     if (second === 'operations') {

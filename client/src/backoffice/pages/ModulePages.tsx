@@ -14,6 +14,7 @@ import {
 } from '../rbac/permissions'
 import { useEmployee } from '../employeeSession';
 import { EmployeeAccountClient } from './EmployeeAccountPage'
+import { NotificationConfigurationPage } from './notification/NotificationConfigurationPage'
 
 const MENU_LABEL: Record<MenuKey, string> = {
   course: 'nav.course',
@@ -99,6 +100,7 @@ export function EmployeeAccountSettingsPage() {
 export function SettingsEntryPage({ section }: { section: 'paymentGateway' | 'notificationConfiguration' }) {
   const locale = useLocale()
   const employee = useEmployee()
+  if (section === 'notificationConfiguration') return <NotificationConfigurationPage />
   return (
     <MenuGuard menu="settings">
       <SettingsSubNav role={employee.role} />

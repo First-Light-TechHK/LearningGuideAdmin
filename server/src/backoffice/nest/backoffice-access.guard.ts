@@ -130,6 +130,30 @@ export class BackofficeAccessGuard implements CanActivate {
         'Employee account management is not available for this account',
       );
     }
+    if (access.kind === 'settingsAdmin') {
+      // PRD §3/§11.3：Notification Configuration 只有 Admin 角色可用；
+      // 还要 Settings 在该账号下生效（环境能力 ∩ 角色 ∩ 账号开关），写操作需要 FULL。
+      if (!decideEmployeeAccountAccess(employee).allowed)
+        throw backofficeError(
+          'NOT_AUTHORISED',
+          'Notification Configuration is available to Admin only',
+        );
+      const level = effectiveModuleLevel(
+        employee.role,
+        'module.settings',
+        grants,
+        this.enabledCapabilities,
+      );
+      const allowed =
+        access.action === 'VIEW' ? level !== 'NONE' : level === 'FULL';
+      if (allowed) return true;
+      throw backofficeError(
+        'NOT_AUTHORISED',
+        level === 'NONE'
+          ? 'Settings is not available for this account'
+          : 'Your role can only view this setting',
+      );
+    }
     // PRD §1.4：菜单可见之外，还要看该角色/账号开关在此菜单的级别是否允许这种操作
     if (
       access.feature &&
