@@ -382,7 +382,6 @@ export function BroadcastEditor({
   const [buttonLink, setButtonLink] = useState(broadcast?.buttonLink ?? '')
   const [issues, setIssues] = useState<Array<{ field: string; message: string }>>([])
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmSend, setConfirmSend] = useState(false)
 
@@ -465,13 +464,13 @@ export function BroadcastEditor({
     return true
   }
 
-  async function saveDraft(): Promise<string | null> {
+  async function saveDraft(keepBusy = false): Promise<string | null> {
     if (!validate()) return null
     setBusy(true)
     const result = broadcast
       ? await notificationsApi.patchBroadcast(broadcast.id, { action: 'update', ...draftPatch(draft) })
       : await notificationsApi.createBroadcast(draft)
-    setBusy(false)
+    if (!keepBusy || !result.success) setBusy(false)
     if (result.success) return broadcast?.id ?? extractBroadcastId(result.data)
     setError(errorText(locale, result))
     return null
@@ -488,22 +487,11 @@ export function BroadcastEditor({
   }
 
   async function confirmSendNow() {
+    // Save what is on screen first, so the broadcast that goes out is the one the operator confirmed.
     setBusy(true)
-    let id = broadcast?.id ?? null
+    const id = await saveDraft(true)
     if (!id) {
-      const created = await notificationsApi.createBroadcast(draft)
-      if (!created.success) {
-        setBusy(false)
-        setConfirmSend(false)
-        setError(errorText(locale, created))
-        return
-      }
-      id = extractBroadcastId(created.data)
-    }
-    if (!id) {
-      setBusy(false)
       setConfirmSend(false)
-      setError('The draft could not be created.')
       return
     }
     const result = await notificationsApi.patchBroadcast(id, { action: 'send' })
@@ -550,14 +538,6 @@ export function BroadcastEditor({
           <button type="button" className="button buttonGhost buttonCompact" onClick={() => void onSaveDraft()} disabled={busy}>
             {t(locale, 'notification.broadcasts.saveDraft')}
           </button>
-          <button
-            type="button"
-            className="button buttonGhost buttonCompact"
-            onClick={() => setNotice(t(locale, 'notification.broadcasts.testUnavailable'))}
-            disabled={busy}
-          >
-            {t(locale, 'notification.broadcasts.sendTest')}
-          </button>
           <button type="button" className="button buttonCompact" onClick={() => void sendNow()} disabled={busy} data-testid="broadcast-send-now">
             {t(locale, 'notification.broadcasts.sendNow')}
           </button>
@@ -565,7 +545,6 @@ export function BroadcastEditor({
       </div>
 
       {error ? <div className="alert alertError" role="alert">{error}</div> : null}
-      {notice ? <div className="alert alertInfo" role="status">{notice}</div> : null}
 
       <div className="notificationEditorGrid notificationBroadcastEditor">
         <div className="notificationEditorForm">

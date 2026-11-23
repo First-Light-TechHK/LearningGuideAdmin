@@ -18,6 +18,7 @@ import {
   formatHktDateTime,
   groupTemplates,
   insertVariable,
+  notificationErrorText,
   unknownVariables,
   validateTemplateDraft,
   variableErrorMessage,
@@ -31,12 +32,7 @@ function errorText(
   locale: ReturnType<typeof useLocale>,
   result: { code?: string; error?: string; message?: string },
 ): string {
-  const code = result.code ?? result.error ?? ''
-  const key = `notification.errors.${code}`
-  const translated = t(locale, key)
-  return translated === key
-    ? result.message ?? 'Request failed'
-    : translated
+  return notificationErrorText((key) => t(locale, key), result)
 }
 
 function cleanCopy(copy: NotificationCopy): NotificationCopy {

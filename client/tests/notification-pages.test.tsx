@@ -320,3 +320,103 @@ test('send log renders statuses, failure reasons, Test tags and filters (B06)', 
   assert.match(requested, /from=\d{4}-\d{2}-\d{2}/)
   assert.match(requested, /to=\d{4}-\d{2}-\d{2}/)
 })
+
+type Recorded = { method: string; url: string; body: Record<string, unknown> | null }
+
+function recordFetch(answer: (request: Recorded) => Response | Promise<Response>): Recorded[] {
+  const requests: Recorded[] = []
+  globalThis.fetch = ((url: string, init?: RequestInit) => {
+    const request = {
+      method: init?.method ?? 'GET',
+      url: String(url),
+      body: typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null,
+    }
+    requests.push(request)
+    return Promise.resolve(answer(request))
+  }) as typeof fetch
+  return requests
+}
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+const okBody = (data: unknown) => json(200, { success: true, data, error: null, message: 'OK' })
+
+async function sendEditedDraft() {
+  render(
+    <MemoryRouter>
+      <BroadcastEditor
+        broadcast={broadcast({ id: 'b2', status: 'draft', sentAt: null })}
+        onBack={() => {}}
+        onSaved={() => {}}
+      />
+    </MemoryRouter>,
+  )
+  fireEvent.change(screen.getByDisplayValue('Scheduled maintenance on 15 Nov'), {
+    target: { value: 'Edited maintenance notice' },
+  })
+  fireEvent.click(screen.getByTestId('broadcast-send-now'))
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Send now' }))
+}
+
+test('Send now saves the edited draft first, then sends (REV-15)', async () => {
+  const requests = recordFetch((request) =>
+    request.method === 'GET' ? okBody({ all: 12500, paid: 3200 }) : okBody({ ok: true, recipients: 12500 }),
+  )
+  await sendEditedDraft()
+  await waitFor(() => assert.equal(requests.filter((r) => r.method === 'PATCH').length, 2))
+  const writes = requests.filter((r) => r.method === 'PATCH')
+  assert.match(writes[0].url, /broadcasts\/b2$/)
+  assert.equal(writes[0].body?.action, 'update')
+  assert.equal(writes[0].body?.titleEn, 'Edited maintenance notice')
+  assert.deepEqual(writes[1].body, { action: 'send' })
+})
+
+test('Send now does not send when saving the draft fails', async () => {
+  const requests = recordFetch((request) =>
+    request.method === 'GET'
+      ? okBody({ all: 12500, paid: 3200 })
+      : json(400, { success: false, data: null, error: { code: 'INVALID_INPUT', message: 'Title is too long.' } }),
+  )
+  await sendEditedDraft()
+  assert.ok(await screen.findByText('Title is too long.'))
+  assert.equal(requests.filter((r) => r.method === 'PATCH' && r.body?.action === 'send').length, 0)
+  assert.equal(screen.queryByRole('dialog'), null)
+})
+
+test('Send now on a new broadcast creates the draft, then sends', async () => {
+  const requests = recordFetch((request) => {
+    if (request.method === 'GET') return okBody({ all: 12500, paid: 3200 })
+    if (request.method === 'POST') return okBody({ ok: true, broadcast: { id: 'new-1' } })
+    return okBody({ ok: true, recipients: 12500 })
+  })
+  render(
+    <MemoryRouter>
+      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+    </MemoryRouter>,
+  )
+  const inputs = screen.getAllByRole('textbox')
+  fireEvent.change(inputs[0], { target: { value: 'Hello' } })
+  fireEvent.change(inputs[1], { target: { value: 'World' } })
+  fireEvent.click(screen.getByTestId('broadcast-send-now'))
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Send now' }))
+  await waitFor(() => assert.equal(requests.filter((r) => r.method === 'PATCH').length, 1))
+  const writes = requests.filter((r) => r.method !== 'GET')
+  assert.deepEqual(writes.map((r) => r.method), ['POST', 'PATCH'])
+  assert.match(writes[1].url, /broadcasts\/new-1$/)
+  assert.deepEqual(writes[1].body, { action: 'send' })
+})
+
+test('the broadcast editor has no "Send test to me" control (NTF-BC-014 not delivered in P0)', () => {
+  globalThis.fetch = (() => ok({ ok: true, all: 1, paid: 1 })) as typeof fetch
+  render(
+    <MemoryRouter>
+      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+    </MemoryRouter>,
+  )
+  assert.equal(screen.queryByRole('button', { name: /Send test|发送测试/ }), null)
+  assert.ok(screen.getByRole('button', { name: 'Send now' }))
+})

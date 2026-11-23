@@ -386,12 +386,16 @@ export function countLabel(value: number): string {
   return new Intl.NumberFormat('en-GB').format(value)
 }
 
-/** 服务端稳定错误码 → 界面文案（缺翻译时回退服务器 message）。 */
+/**
+ * 服务端稳定错误码 → 界面文案（缺翻译时回退服务器 message）。
+ * INVALID_INPUT 由 Portal 给出具体原因和建议（例如应改用哪个变量），直接显示。
+ */
 export function notificationErrorText(
   translate: (key: string) => string,
   result: { code?: string; error?: string; message?: string },
 ): string {
   const code = result.code ?? result.error ?? ''
+  if (code === 'INVALID_INPUT' && result.message) return result.message
   const key = `notification.errors.${code}`
   const translated = translate(key)
   return translated === key ? result.message ?? 'Request failed' : translated
