@@ -26,6 +26,7 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["AI 回答未完成，请重试", "AI response was not completed"],
   ["AI 响应格式错误，请重试", "Invalid AI stream event"],
   ["服务器内部错误", "Internal server error."],
+  ["课程存储不可用，请联系运维检查课程存储桶与实例角色权限", "Course storage is unavailable. Ask operations to check the course storage bucket and instance role permissions."],
   ["文件大小超过 15MB 限制", "The file is larger than the 15 MB limit."],
   ["请求内容过大，请拆分文档后重试", "The request is too large. Split the document and try again."],
   ["数据校验失败", "The data could not be validated."],

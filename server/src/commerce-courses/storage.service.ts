@@ -25,9 +25,28 @@ export interface StorageDriver {
   getRange(key: string, start: number, length: number): Promise<Buffer>;
   /** 对象字节数；不存在返回 null。 */
   size(key: string): Promise<number | null>;
+  /** 对象是否存在；只有“确实不存在”才返回 false，基础设施故障必须抛出。 */
   has(key: string): Promise<boolean>;
   remove(key: string): Promise<void>;
   removePrefix(prefix: string): Promise<void>;
+}
+
+/**
+ * HeadObject 错误的判定：只有“对象确实不存在”才算 false。
+ * NoSuchBucket / AccessDenied / 凭证 / 网络错误同样是 HeadObject 的失败，
+ * 但它们是存储不可用，不能伪装成“对象不存在”——否则导入 complete 会把
+ * 存储故障误报成 400「Missing chunk」。
+ * 注意：NoSuchBucket 也常带 HTTP 404，所以不能按状态码判定。
+ */
+export function isObjectNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const e = error as { name?: unknown; Code?: unknown; code?: unknown };
+  return (
+    e.name === 'NotFound' ||
+    e.name === 'NoSuchKey' ||
+    e.Code === 'NoSuchKey' ||
+    e.code === 'NoSuchKey'
+  );
 }
 
 class LocalDriver implements StorageDriver {
@@ -84,8 +103,11 @@ class LocalDriver implements StorageDriver {
     try {
       await fs.access(this.resolve(key));
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // 只有“确实不存在”才返回 false；EACCES/ENOSPC/非法 key 等是存储故障，必须上抛。
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+      throw error;
     }
   }
 
@@ -184,8 +206,10 @@ class S3Driver implements StorageDriver {
         new HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) }),
       );
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // NoSuchBucket/AccessDenied/凭证/网络错误不能被当成“对象不存在”
+      if (isObjectNotFoundError(error)) return false;
+      throw error;
     }
   }
 

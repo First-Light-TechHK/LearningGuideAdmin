@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -22,6 +22,14 @@ import { PublishingService } from './publishing.service';
 const JOB_BYTE_TOTAL_MAX = 2_147_483_647;
 /** 超过 Int 上限的声明体积存在 requestId（本子系统此前未使用该列），读取时还原。 */
 const RAW_BYTES_TOTAL_MARKER = 'raw-bytes-total:';
+
+/**
+ * staging 存储（S3 桶 / 本地盘）不可用时给操作员看的文案。
+ * 具体是桶不存在、无权限、凭证或网络问题由服务器日志里的原始错误栈定位；
+ * 响应体不泄露桶名、端点或 SDK 细节。
+ */
+export const STORAGE_UNAVAILABLE_MESSAGE =
+  '课程存储不可用，请联系运维检查课程存储桶与实例角色权限';
 
 /** 人类可读的字节数：8 GB / 200 MB / 512 KB。 */
 export function formatBytes(bytes: number): string {
@@ -233,6 +241,46 @@ export class PackageJobsService {
     return this.storage.describe();
   }
 
+  /**
+   * staging 存储是导入同步链路唯一的共享外部依赖。驱动/SDK 抛出的原始错误
+   * 不是 HttpException，若不转换会被全局过滤器兜底成 500「服务器内部错误」。
+   * 这里统一映射为 503 STORAGE_UNAVAILABLE（操作员可读），原始错误（含堆栈）
+   * 只写服务器日志，供运维定位桶/角色/网络问题。
+   */
+  private storageUnavailable(
+    error: unknown,
+    operation: string,
+    key: string,
+  ): PackageError {
+    this.logger.error(
+      `Course staging storage ${operation} failed for ${key}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      error instanceof Error ? error.stack : undefined,
+    );
+    return new PackageError(
+      'STORAGE_UNAVAILABLE',
+      HttpStatus.SERVICE_UNAVAILABLE,
+      STORAGE_UNAVAILABLE_MESSAGE,
+    );
+  }
+
+  private async writeStaging(key: string, bytes: Buffer): Promise<void> {
+    try {
+      await this.storage.putStaging(key, bytes);
+    } catch (error) {
+      throw this.storageUnavailable(error, 'put', key);
+    }
+  }
+
+  private async stagingExists(key: string): Promise<boolean> {
+    try {
+      return await this.storage.hasStaging(key);
+    } catch (error) {
+      throw this.storageUnavailable(error, 'probe', key);
+    }
+  }
+
   // ===== 导入 =====
   async createImportJob(
     file: { name: string; bytes: Buffer },
@@ -257,7 +305,7 @@ export class PackageJobsService {
     }
     const jobId = randomUUID();
     const storageKey = this.storage.stagingKey(jobId, 'package.zip');
-    await this.storage.putStaging(storageKey, file.bytes);
+    await this.writeStaging(storageKey, file.bytes);
     await this.prisma.coursePackageJob.create({
       data: {
         id: jobId,
@@ -305,7 +353,7 @@ export class PackageJobsService {
     }
     const jobId = randomUUID();
     const rawKey = this.storage.stagingKey(jobId, 'raw.zip');
-    await this.storage.putStaging(rawKey, file.bytes);
+    await this.writeStaging(rawKey, file.bytes);
     const encodedTotal = encodeJobByteTotal(file.bytes.length);
     await this.prisma.coursePackageJob.create({
       data: {
@@ -480,7 +528,7 @@ export class PackageJobsService {
         )}).`,
       );
     }
-    await this.storage.putStaging(this.rawChunkKey(jobId, index), bytes);
+    await this.writeStaging(this.rawChunkKey(jobId, index), bytes);
     const total = jobDeclaredBytes(job);
     const expected = this.chunkCountFor(total);
     const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
@@ -507,7 +555,7 @@ export class PackageJobsService {
     }
     const count = this.chunkCountFor(total);
     for (let i = 0; i < count; i++) {
-      const present = await this.storage.hasStaging(this.rawChunkKey(jobId, i));
+      const present = await this.stagingExists(this.rawChunkKey(jobId, i));
       if (!present) {
         throw new PackageError(
           'RAW_UPLOAD_INCOMPLETE',
@@ -635,7 +683,7 @@ export class PackageJobsService {
         )}).`,
       );
     }
-    await this.storage.putStaging(this.rawChunkKey(jobId, index), bytes);
+    await this.writeStaging(this.rawChunkKey(jobId, index), bytes);
     const total = jobDeclaredBytes(job);
     const expected = this.chunkCountFor(total);
     const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
@@ -661,7 +709,7 @@ export class PackageJobsService {
     }
     const count = this.chunkCountFor(total);
     for (let i = 0; i < count; i++) {
-      const present = await this.storage.hasStaging(this.rawChunkKey(jobId, i));
+      const present = await this.stagingExists(this.rawChunkKey(jobId, i));
       if (!present) {
         throw new PackageError(
           'RAW_UPLOAD_INCOMPLETE',
