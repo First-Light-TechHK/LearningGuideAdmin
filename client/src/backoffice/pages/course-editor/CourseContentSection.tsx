@@ -45,6 +45,69 @@ function loc(lesson: Lesson | undefined, language: string) {
   return lesson.localizations.find((item) => item.language === language) ?? lesson.localizations[0];
 }
 
+/** 课时编辑器的全部本地草稿，与页面上的输入一一对应。 */
+type LessonDraft = {
+  titleEn: string;
+  titleZh: string;
+  descEn: string;
+  descZh: string;
+  videoLps: PointDraft[];
+  triggerRows: TriggerDraft[];
+  readingRows: ReadingDraft[];
+  textHtml: string;
+};
+
+function emptyDraft(): LessonDraft {
+  return { titleEn: '', titleZh: '', descEn: '', descZh: '', videoLps: [], triggerRows: [], readingRows: [], textHtml: '' };
+}
+
+/** 服务器快照 → 当前内容语言下的完整草稿。 */
+function lessonDraftOf(lesson: Lesson | undefined, language: string): LessonDraft {
+  if (!lesson) return emptyDraft();
+  const en = loc(lesson, 'en-GB');
+  const zh = loc(lesson, 'zh-CN');
+  const currentLoc = loc(lesson, language);
+  return {
+    titleEn: en?.title ?? '',
+    titleZh: zh?.title ?? '',
+    descEn: en?.description ?? '',
+    descZh: zh?.description ?? '',
+    videoLps: lesson.learningPoints
+      .filter((point) => point.language === language && point.source === 'VIDEO')
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((point) => ({ id: point.id, code: point.code, title: point.title, timeText: fmtTimeInput(point.timeSeconds) })),
+    triggerRows: (lesson.triggers ?? [])
+      .filter((trigger) => trigger.language === language)
+      .map((trigger) => ({ exhibitId: trigger.exhibitId ?? '', timeText: fmtTimeInput(trigger.timeSeconds) })),
+    readingRows: readingsOf(lesson).map((reading) => ({
+      id: reading.id,
+      type: reading.type,
+      title: reading.title ?? '',
+      author: reading.author ?? '',
+      whyRecommended: reading.whyRecommended ?? '',
+    })),
+    textHtml: currentLoc?.textHtml ?? '',
+  };
+}
+
+/**
+ * 重载后的草稿合并：用户改过（与上次服务器快照不同）的字段保留，没改过的跟随服务器。
+ * GET 详情每次都是新对象；不合并就会把未保存的输入（正文、课时标题/简介等）静默重置成服务器值。
+ */
+function mergeDraft(current: LessonDraft, snapshot: LessonDraft, server: LessonDraft): LessonDraft {
+  const keep = <T,>(mine: T, before: T, fresh: T): T => (JSON.stringify(mine) === JSON.stringify(before) ? fresh : mine);
+  return {
+    titleEn: keep(current.titleEn, snapshot.titleEn, server.titleEn),
+    titleZh: keep(current.titleZh, snapshot.titleZh, server.titleZh),
+    descEn: keep(current.descEn, snapshot.descEn, server.descEn),
+    descZh: keep(current.descZh, snapshot.descZh, server.descZh),
+    videoLps: keep(current.videoLps, snapshot.videoLps, server.videoLps),
+    triggerRows: keep(current.triggerRows, snapshot.triggerRows, server.triggerRows),
+    readingRows: keep(current.readingRows, snapshot.readingRows, server.readingRows),
+    textHtml: keep(current.textHtml, snapshot.textHtml, server.textHtml),
+  };
+}
+
 /**
  * 推荐阅读只有一份列表。服务器保存时把没出现在请求里的行都删掉（别的语言的旧行本应并入这一份），
  * 所以这里要列出全部行，保存时才不会把其他语言的行误删。
@@ -128,52 +191,48 @@ export function CourseContentSection({
   const lessonCompleteness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === activeLesson?.id);
 
   const [draftSource, setDraftSource] = useState<{
-    lesson: Lesson | undefined;
-    course: CourseDetail;
+    courseId: string;
+    lessonId: string | undefined;
     language: string;
+    course: CourseDetail;
+    lesson: Lesson | undefined;
+    snapshot: LessonDraft;
   } | null>(null);
+  const applyDraft = (draft: LessonDraft) => {
+    setLessonTitleEn(draft.titleEn);
+    setLessonTitleZh(draft.titleZh);
+    setLessonDescEn(draft.descEn);
+    setLessonDescZh(draft.descZh);
+    setVideoLps(draft.videoLps);
+    setTriggerRows(draft.triggerRows);
+    setReadingRows(draft.readingRows);
+    setTextHtml(draft.textHtml);
+    setRowErrors({ points: {}, triggers: {}, readings: {} });
+  };
+  const serverDraft = lessonDraftOf(activeLesson, contentLanguage);
   if (
-    draftSource?.lesson !== activeLesson ||
-    draftSource?.course !== course ||
-    draftSource?.language !== contentLanguage
+    !draftSource ||
+    draftSource.courseId !== course.id ||
+    draftSource.lessonId !== activeLesson?.id ||
+    draftSource.language !== contentLanguage
   ) {
-    setDraftSource({ lesson: activeLesson, course, language: contentLanguage });
-    if (activeLesson) {
-      const en = loc(activeLesson, 'en-GB');
-      const zh = loc(activeLesson, 'zh-CN');
-      // 课时名没填时服务器存空；这里也显示空，不替用户编一个（完整性由服务器报）。
-      setLessonTitleEn(en?.title ?? '');
-      setLessonTitleZh(zh?.title ?? '');
-      setLessonDescEn(en?.description ?? '');
-      setLessonDescZh(zh?.description ?? '');
-      const currentLoc = loc(activeLesson, contentLanguage);
-      setVideoLps(
-        activeLesson.learningPoints
-          .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
-          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-          .map((point) => ({
-            id: point.id,
-            code: point.code,
-            title: point.title,
-            timeText: fmtTimeInput(point.timeSeconds),
-          })),
-      );
-      // 触发点按服务器给的顺序（先按时间）；没选展品、没填时间的保持为空。
-      setTriggerRows(
-        (activeLesson.triggers ?? [])
-          .filter((trigger) => trigger.language === contentLanguage)
-          .map((trigger) => ({ exhibitId: trigger.exhibitId ?? '', timeText: fmtTimeInput(trigger.timeSeconds) })),
-      );
-      setReadingRows(readingsOf(activeLesson).map((reading) => ({
-        id: reading.id,
-        type: reading.type,
-        title: reading.title ?? '',
-        author: reading.author ?? '',
-        whyRecommended: reading.whyRecommended ?? '',
-      })));
-      setRowErrors({ points: {}, triggers: {}, readings: {} });
-      setTextHtml(currentLoc?.textHtml ?? '');
-    }
+    // 换课程 / 换课时 / 换内容语言：草稿没有跨身份的意义，整份从服务器重新取。
+    setDraftSource({ courseId: course.id, lessonId: activeLesson?.id, language: contentLanguage, course, lesson: activeLesson, snapshot: serverDraft });
+    applyDraft(serverDraft);
+  } else if (draftSource.course !== course || draftSource.lesson !== activeLesson) {
+    // 同一课时被重新载入（保存成功、上传展品等）：保留用户改过但还没保存的字段，其余跟随服务器。
+    const currentDraft: LessonDraft = {
+      titleEn: lessonTitleEn,
+      titleZh: lessonTitleZh,
+      descEn: lessonDescEn,
+      descZh: lessonDescZh,
+      videoLps,
+      triggerRows,
+      readingRows,
+      textHtml,
+    };
+    setDraftSource({ ...draftSource, course, lesson: activeLesson, snapshot: serverDraft });
+    applyDraft(mergeDraft(currentDraft, draftSource.snapshot, serverDraft));
   }
 
   const [studyMode, setStudyMode] = useState<boolean | null>(null);
@@ -284,6 +343,8 @@ export function CourseContentSection({
       placeRowError('readings', readings);
       return fail(L(locale, '阅读保存失败', 'Readings could not be saved'), readings);
     }
+    // 返回的行与发出的行一一对应：记下 id，再次保存时行身份不变（重载不再整份覆盖草稿后靠这里保持）。
+    setReadingRows((rows) => rows.map((row, index) => ({ ...row, id: readings.data.readings[index]?.id ?? row.id })));
     setBusy(false);
     onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
     await onReload();
