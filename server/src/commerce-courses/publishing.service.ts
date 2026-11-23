@@ -355,9 +355,7 @@ export class PublishingService {
     });
     const detail = lastPublish?.detail as { notifyLearners?: unknown } | null;
     if (detail?.notifyLearners !== true) {
-      this.logger.debug(
-        'COURSE_NEW_LAUNCH not sent: notifyLearners is off',
-      );
+      this.logger.debug('COURSE_NEW_LAUNCH not sent: notifyLearners is off');
       return;
     }
     const course = await this.prisma.commerceCourse.findUnique({

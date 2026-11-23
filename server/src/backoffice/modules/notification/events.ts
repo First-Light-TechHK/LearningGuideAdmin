@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 
-import { portalNotificationsConfig } from './portalNotificationsClient';
+import { createPortalNotificationsClient } from './portalNotificationsClient';
 
 /**
  * Admin 侧事件 → Portal `/api/integration/notifications/events`（设计 §4）。
@@ -10,7 +10,6 @@ import { portalNotificationsConfig } from './portalNotificationsClient';
  */
 
 const logger = new Logger('NotificationEvents');
-const TIMEOUT_MS = 5_000;
 
 export type NotificationEventInput = {
   eventType: 'COURSE_NEW_LAUNCH' | 'HELPDESK_TICKET_REPLIED';
@@ -39,47 +38,25 @@ export function ticketReplyEventKey(ticketId: string, replyId: string): string {
 }
 
 /**
- * 发一条通知事件。返回是否被 Portal 接受；未配置或网络失败返回 false（不抛）。
- * 供事件钩子使用，也供单测注入 fetch。
+ * 发一条通知事件（经唯一的 Portal 客户端：地址、令牌、超时、错误映射都在那里）。
+ * 返回是否被 Portal 接受；未配置、被拒或网络失败只记一条告警并返回 false（不抛）。
+ * P0 事件是发了就不管：Portal 不可用时丢失的事件不会补发。
  */
 export async function emitNotificationEvent(
   input: NotificationEventInput,
   options: NotificationEventOptions = {},
 ): Promise<boolean> {
-  const config = portalNotificationsConfig();
-  if (!config) {
-    logger.warn(
-      `Notification event ${input.eventType} skipped: notifications are not configured`,
-    );
-    return false;
-  }
-  const fetchImpl: typeof fetch =
-    options.fetchImpl ?? ((request, init) => fetch(request, init));
-  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
   try {
-    const response = await fetchImpl(
-      `${config.baseUrl}/api/integration/notifications/events`,
-      {
-        method: 'POST',
-        headers: {
-          'x-notifications-token': config.token,
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify(input),
-        signal: AbortSignal.timeout(timeoutMs),
-        redirect: 'error',
-      },
-    );
-    if (!response.ok) {
-      logger.warn(
-        `Notification event ${input.eventType} rejected (${response.status})`,
-      );
-      return false;
-    }
+    await createPortalNotificationsClient(options).send('POST', '/events', {
+      ...input,
+    });
     return true;
-  } catch {
-    logger.warn(`Notification event ${input.eventType} could not be delivered`);
+  } catch (error) {
+    logger.warn(
+      `Notification event ${input.eventType} was not delivered: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return false;
   }
 }

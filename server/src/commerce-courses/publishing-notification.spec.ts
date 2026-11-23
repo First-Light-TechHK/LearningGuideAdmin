@@ -74,7 +74,9 @@ describe('COURSE_NEW_LAUNCH hook on the first ONLINE', () => {
   beforeEach(() => {
     process.env.PORTAL_NOTIFICATIONS_BASE_URL = 'http://portal.test';
     process.env.PORTAL_NOTIFICATIONS_TOKEN = 'test-token';
-    fetchStub = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+    fetchStub = jest.fn(() =>
+      Promise.resolve(new Response('{"ok":true}', { status: 200 })),
+    );
     globalThis.fetch = fetchStub as unknown as typeof fetch;
   });
 

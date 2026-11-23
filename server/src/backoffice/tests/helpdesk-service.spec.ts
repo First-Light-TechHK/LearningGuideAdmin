@@ -418,7 +418,9 @@ describe('HelpDesk service', () => {
       };
       let fetchStub: jest.Mock;
 
-      function withAgentReply(internal: boolean): jest.Mocked<PortalHelpdeskClient> {
+      function withAgentReply(
+        internal: boolean,
+      ): jest.Mocked<PortalHelpdeskClient> {
         const portal = fakeClient();
         portal.postMessage.mockResolvedValue(
           detail({
@@ -451,7 +453,9 @@ describe('HelpDesk service', () => {
       beforeEach(() => {
         process.env.PORTAL_NOTIFICATIONS_BASE_URL = 'http://portal.test';
         process.env.PORTAL_NOTIFICATIONS_TOKEN = 'test-token';
-        fetchStub = jest.fn().mockResolvedValue({ ok: true, status: 200 });
+        fetchStub = jest.fn(() =>
+          Promise.resolve(new Response('{"ok":true}', { status: 200 })),
+        );
         globalThis.fetch = fetchStub as unknown as typeof fetch;
       });
 
@@ -476,7 +480,9 @@ describe('HelpDesk service', () => {
         await new Promise((resolve) => setImmediate(resolve));
         expect(fetchStub).toHaveBeenCalledTimes(1);
         const [url, init] = fetchStub.mock.calls[0] as [string, RequestInit];
-        expect(url).toBe('http://portal.test/api/integration/notifications/events');
+        expect(url).toBe(
+          'http://portal.test/api/integration/notifications/events',
+        );
         expect(JSON.parse(String(init.body))).toMatchObject({
           eventType: 'HELPDESK_TICKET_REPLIED',
           eventKey: `ticket:${TICKET_ID}:reply-1`,

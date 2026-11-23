@@ -264,7 +264,9 @@ describe('Commerce course workflow (e2e)', () => {
     process.env.PORTAL_NOTIFICATIONS_TOKEN = 'test-token';
     const fetchSpy = jest
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue({ ok: true, status: 200 } as Response);
+      .mockImplementation(() =>
+        Promise.resolve(new Response('{"ok":true}', { status: 200 })),
+      );
     try {
       await agent
         .post(`/api/backoffice/courses/${id}/publish`)
