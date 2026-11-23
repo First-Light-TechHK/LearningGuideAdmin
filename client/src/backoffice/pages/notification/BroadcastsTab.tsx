@@ -138,13 +138,13 @@ export function BroadcastsTab({
       <div className="tableWrap">
         <table className="table notificationTable notificationBroadcastTable" data-testid="broadcast-table">
           <colgroup>
-            <col style={{ width: '27%' }} />
-            <col style={{ width: '16%' }} />
+            <col style={{ width: '25%' }} />
+            <col style={{ width: '15%' }} />
             <col style={{ width: '10%' }} />
             <col style={{ width: '15%' }} />
             <col style={{ width: '11%' }} />
             <col style={{ width: '9%' }} />
-            <col style={{ width: '12%' }} />
+            <col style={{ width: '15%' }} />
           </colgroup>
           <thead>
             <tr>

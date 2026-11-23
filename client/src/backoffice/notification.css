@@ -89,7 +89,6 @@
   border-bottom: 1px solid var(--lg-line-soft);
 }
 
-.notificationNameCell { display: table-cell; }
 .notificationName {
   display: block;
   font-weight: 600;
@@ -513,8 +512,8 @@
 }
 .notificationListCount { font-size: 13px; color: var(--lg-muted); }
 .notificationBroadcastTable td { vertical-align: top; }
-.notificationNoWrap { white-space: nowrap; }
-.notificationMutedCell { color: #98a2b3; }
+.notificationTable td.notificationNoWrap { white-space: nowrap; }
+.notificationTable td.notificationMutedCell { color: #98a2b3; }
 .notificationReadCell { display: flex; flex-direction: column; gap: 2px; }
 .notificationReadRate { font-size: 11px; color: var(--lg-muted); }
 .notificationRowActions { display: flex; gap: 12px; white-space: nowrap; }
@@ -582,7 +581,6 @@
 .notificationChannelFilter { width: 150px; flex: 0 0 150px; }
 .notificationDateRange { display: inline-flex; align-items: center; gap: 6px; }
 .notificationDateInput { width: 140px; height: 34px; padding: 0 8px; font-size: 12px; }
-.notificationRecipientCell { display: table-cell; }
 .notificationRecipientCell > span { display: block; }
 .notificationTestTag { display: inline-flex; width: auto; margin-left: 8px; vertical-align: middle; }
 .notificationStatusBadge {
