@@ -2446,6 +2446,15 @@
     "ageRange": "Age range",
     "education": "Education",
     "interests": "Areas of interest",
+    "interestLabel": {
+      "Humanities": "Humanities",
+      "Science": "Science",
+      "History": "History",
+      "Philosophy": "Philosophy",
+      "Mathematics": "Mathematics",
+      "Literature": "Literature",
+      "Arts": "Arts"
+    },
     "language": "Language",
     "signIn": "Sign-in methods",
     "notProvided": "Not provided",
@@ -2571,6 +2580,9 @@
     "change_email": "Email changed. Verification link sent.",
     "change_email_exempt": "Email changed and marked Admin-exempt.",
     "change_email_unsent": "Email changed, but the verification email was not delivered. Use Resend Verification Email.",
+    "email_pending": "Request received. The email is being sent.",
+    "email_unsent": "The email was not delivered. Please try again.",
+    "action_recovered": "The action was applied. The latest details are shown.",
     "resend_verification": "Verification email sent.",
     "send_password_link": "Password link sent."
   },
