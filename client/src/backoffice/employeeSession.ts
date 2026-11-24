@@ -2,7 +2,12 @@ import { createContext, useContext } from 'react'
 import type { SessionEmployee } from './contracts/employee'
 import { type MenuKey } from './rbac/permissions'
 
-export type SessionPayload = { employee: SessionEmployee; sidebarState?: 'expanded' | 'collapsed' }
+export type SessionPayload = {
+  employee: SessionEmployee
+  sidebarState?: 'expanded' | 'collapsed'
+  /** 该员工生效的功能键集合（服务端 effective：环境 ∩ 角色 ∩ 账号开关）；旧服务端缺省。 */
+  features?: unknown
+}
 
 export type SessionState =
   | { kind: 'loading' }

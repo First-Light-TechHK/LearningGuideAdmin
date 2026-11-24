@@ -1,4 +1,6 @@
 import type { HistoryPage } from '../../contracts/course'
+import { languageLabel, learningModeLabel } from './shared-utils'
+import { versionName } from './versionNumbering'
 
 export function historyActionLabel(action: string, locale: string): string {
   const zh = locale.startsWith('zh')
@@ -28,36 +30,52 @@ export function historyDetailText(item: HistoryPage['items'][number], locale: st
   const zh = locale.startsWith('zh')
   const detail =
     item.detail && typeof item.detail === 'object' ? (item.detail as Record<string, unknown>) : null
-  if (!detail) return item.versionNo ? `v${item.versionNo}` : '—'
+  if (!detail) return '—'
   const text = (value: unknown) =>
     value === null || value === undefined || value === '' ? '—' : String(value)
+  // One version number everywhere: "Version 4.2" / "版本 4.2", never the internal sequence.
+  const vn = (value: unknown) =>
+    value === null || value === undefined || value === '' ? '—' : versionName(locale, String(value))
   switch (item.action) {
     case 'PUBLISH':
       return [
-        text(detail.versionLabel),
+        vn(detail.versionLabel),
         detail.sourceEnvironment
-          ? `${zh ? '来源' : 'from'} ${text(detail.sourceEnvironment)} ${text(detail.sourceVersionLabel)}`
+          ? `${zh ? '来源' : 'from'} ${text(detail.sourceEnvironment)} ${vn(detail.sourceVersionLabel)}`
           : null,
-        detail.notifyLearners ? (zh ? '已通知学员' : 'learners notified') : null,
+        detail.notifyLearners ? (zh ? '已通知用户' : 'learners notified') : null,
       ]
         .filter(Boolean)
         .join(' · ')
     case 'DELETE_DRAFT':
-      return zh ? `保留 ${text(detail.keptVersion)}` : `Kept ${text(detail.keptVersion)}`
+      return zh ? `保留 ${vn(detail.keptVersion)}` : `Kept ${vn(detail.keptVersion)}`
     case 'RESTORE':
       return zh
-        ? `从 ${text(detail.restoredFrom)} 恢复`
-        : `Restored from ${text(detail.restoredFrom)}`
+        ? `从 ${vn(detail.restoredFrom)} 恢复`
+        : `Restored from ${vn(detail.restoredFrom)}`
     case 'CHANGE_STATUS':
       return `${text(detail.from)} → ${text(detail.to)}${detail.reason ? ` · ${text(detail.reason)}` : ''}`
     case 'EXPORT_PACKAGE':
-      return `${zh ? '版本' : 'Version'} ${text(detail.versionLabel)}`
+      return vn(detail.versionLabel)
+    case 'CREATE_COURSE':
+      return (
+        [
+          detail.courseCode ? text(detail.courseCode) : null,
+          detail.learningMode ? learningModeLabel(locale, String(detail.learningMode)) : null,
+          Array.isArray(detail.learningLanguages) && detail.learningLanguages.length > 0
+            ? detail.learningLanguages.map((code) => languageLabel(locale, String(code))).join(' / ')
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || '—'
+      )
     case 'IMPORT_PACKAGE':
       return (
         [
-          detail.versionLabel ? `${zh ? '版本' : 'Version'} ${text(detail.versionLabel)}` : null,
+          detail.fileName ? text(detail.fileName) : null,
+          detail.versionLabel ? vn(detail.versionLabel) : null,
           detail.sourceVersionLabel
-            ? `${zh ? '来源' : 'from'} ${text(detail.sourceVersionLabel)}`
+            ? `${zh ? '来源' : 'from'} ${vn(detail.sourceVersionLabel)}`
             : null,
           detail.lessonCount !== undefined
             ? `${text(detail.lessonCount)} ${zh ? '课时' : 'lessons'}`

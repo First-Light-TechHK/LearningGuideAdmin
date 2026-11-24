@@ -1,11 +1,13 @@
 import type { SuccessResponse, ErrorResponse } from './helpers/http-response';
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import JSZip from 'jszip';
 import { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/common/app-setup';
 import { PublishingService } from '../src/commerce-courses/publishing.service';
+import { CourseStorageService } from '../src/commerce-courses/storage.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import request from 'supertest';
 import {
@@ -14,6 +16,36 @@ import {
   resetRateLimits,
   signInAs,
 } from './helpers/employee-session';
+
+/** 最小可导入的 v1 课程包：无媒体、无课时（导入校验只产生 warning，不阻断）。 */
+async function minimalPackage(
+  courseCode: string,
+  slug: string,
+): Promise<Buffer> {
+  const manifest = {
+    format: 'lg-course-package',
+    formatVersion: 1,
+    packageId: `pkg_${courseCode}`,
+    exportedAt: new Date().toISOString(),
+    source: { environment: 'E2E', courseCode, sourceVersion: 'working' },
+    incomplete: false,
+    course: {
+      code: courseCode,
+      slug,
+      category: 'E2E Science',
+      learningMode: 'VIDEO_ONLY',
+      learningLanguages: ['en-GB'],
+      defaultContentLanguage: 'en-GB',
+      localized: { 'en-GB': { title: 'Import once' } },
+      lessons: [],
+      trial: { enabled: false, lessons: [] },
+      pricing: [],
+    },
+  };
+  const zip = new JSZip();
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
 
 /**
  * 商品课程发布与课时编辑的幂等与原子性：重复点"发布""删除草稿"（或两人同时点）
@@ -25,7 +57,7 @@ describe('Commerce course workflow (e2e)', () => {
   const code = `E2E-WF-${Date.now()}`;
   // Course codes are handed out by the server now, so each course made here is
   // remembered by the id the create call returned (and removed again afterwards).
-  const ownIds: Partial<Record<'P' | 'H' | 'R' | 'L' | 'O', string>> = {};
+  const ownIds: Partial<Record<'P' | 'H' | 'R' | 'L' | 'O' | 'S', string>> = {};
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -197,6 +229,127 @@ describe('Commerce course workflow (e2e)', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('requires a valid status and a reason before changing live status (QA regression)', async () => {
+    const agent = await signInAs(app, 'ADMIN');
+    const created: SuccessResponse<{ id: string }> = await agent
+      .post('/api/backoffice/courses')
+      .send({ title: `${code} live status` });
+    const id: string = created.body.data.id;
+    ownIds.S = id;
+    await agent
+      .post(`/api/backoffice/courses/${id}/lessons`)
+      .send({ title: 'One' })
+      .expect(201);
+
+    // 没有线上版本时不能改状态：409 NOT_PUBLISHED（保持不变）
+    const unpublished: ErrorResponse = await agent
+      .post(`/api/backoffice/courses/${id}/live-status`)
+      .send({ status: 'ONLINE', reason: 'QA' });
+    expect(unpublished.status).toBe(409);
+    expect(unpublished.body.error.code).toBe('NOT_PUBLISHED');
+
+    // 发布后 liveStatus 为 OFFLINE
+    const publishing = app.get(PublishingService);
+    const spy = jest
+      .spyOn(publishing, 'completenessForDraft')
+      .mockResolvedValue({ canPublish: true, publishBlockers: [] } as never);
+    // Notification P0: the first publish leaves the course OFFLINE and must not announce it.
+    const savedEnv = {
+      base: process.env.PORTAL_NOTIFICATIONS_BASE_URL,
+      token: process.env.PORTAL_NOTIFICATIONS_TOKEN,
+    };
+    process.env.PORTAL_NOTIFICATIONS_BASE_URL = 'http://portal.test';
+    process.env.PORTAL_NOTIFICATIONS_TOKEN = 'test-token';
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() =>
+        Promise.resolve(new Response('{"ok":true}', { status: 200 })),
+      );
+    try {
+      await agent
+        .post(`/api/backoffice/courses/${id}/publish`)
+        .send({ notifyLearners: true })
+        .expect(200);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      fetchSpy.mockRestore();
+      for (const [name, value] of [
+        ['PORTAL_NOTIFICATIONS_BASE_URL', savedEnv.base],
+        ['PORTAL_NOTIFICATIONS_TOKEN', savedEnv.token],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(
+      (await prisma.commerceCourse.findUniqueOrThrow({ where: { id } }))
+        .liveStatus,
+    ).toBe('OFFLINE');
+
+    // QA 黑盒场景：body 里没有 status，旧实现返回 200 但什么都不改。现在必须 400。
+    const missingStatus: ErrorResponse = await agent
+      .post(`/api/backoffice/courses/${id}/live-status`)
+      .send({ reason: '缺少状态' });
+    expect(missingStatus.status).toBe(400);
+    expect(missingStatus.body.error.code).toBe('VALIDATION_ERROR');
+    expect(missingStatus.body.error.details?.field).toBe('status');
+    expect(
+      (await prisma.commerceCourse.findUniqueOrThrow({ where: { id } }))
+        .liveStatus,
+    ).toBe('OFFLINE');
+    expect(
+      await prisma.courseAuthoringActivity.count({
+        where: { courseId: id, action: 'CHANGE_STATUS' },
+      }),
+    ).toBe(0);
+
+    // status 不在三种状态里也是 400，不能静默成功
+    const invalidStatus: ErrorResponse = await agent
+      .post(`/api/backoffice/courses/${id}/live-status`)
+      .send({ status: 'LIVE', reason: '非法状态' });
+    expect(invalidStatus.status).toBe(400);
+    expect(invalidStatus.body.error.code).toBe('VALIDATION_ERROR');
+
+    // 缺 reason 仍是 409 REASON_REQUIRED
+    const noReason: ErrorResponse = await agent
+      .post(`/api/backoffice/courses/${id}/live-status`)
+      .send({ status: 'ONLINE' });
+    expect(noReason.status).toBe(409);
+    expect(noReason.body.error.code).toBe('REASON_REQUIRED');
+
+    // 正确 body：更新 liveStatus 并写一条 CHANGE_STATUS history（from/to/reason）
+    const changed: SuccessResponse<{
+      from: string;
+      to: string;
+      reason: string;
+    }> = await agent
+      .post(`/api/backoffice/courses/${id}/live-status`)
+      .send({ status: 'ONLINE', reason: '  Go online  ' });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data).toEqual({
+      from: 'OFFLINE',
+      to: 'ONLINE',
+      reason: 'Go online',
+    });
+    expect(
+      (await prisma.commerceCourse.findUniqueOrThrow({ where: { id } }))
+        .liveStatus,
+    ).toBe('ONLINE');
+    const events = await prisma.courseAuthoringActivity.findMany({
+      where: { courseId: id, action: 'CHANGE_STATUS' },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toEqual({
+      from: 'OFFLINE',
+      to: 'ONLINE',
+      reason: 'Go online',
+    });
+    expect(events[0].reason).toBe('Go online');
+    expect(events[0].actorEmployeeId).toBeTruthy();
   });
 
   it('keeps course events append-only, each with its transaction id', async () => {
@@ -416,16 +569,108 @@ describe('Commerce course workflow (e2e)', () => {
 
   it('imports a confirmed package at most once and never cancels one that is importing', async () => {
     const agent = await signInAs(app, 'ADMIN');
+    const suffix = Date.now();
+    const courseCode = `E2E-ONCE-${suffix}`;
+    const zip = await minimalPackage(courseCode, `e2e-once-${suffix}`);
+    const uploaded: SuccessResponse<{ jobId: string; status: string }> =
+      await agent
+        .post('/api/backoffice/courses/import')
+        .attach('file', zip, 'once.lgcourse.zip')
+        .expect(201);
+    const jobId = uploaded.body.data.jobId;
+    expect(uploaded.body.data.status).toBe('AWAITING_CONFIRM');
+
+    // 让两次确认都先读到 AWAITING_CONFIRM 再往下走：并发窗口在本机只有一两毫秒，
+    // 不卡住就很难撞上。只拦确认接口里的读（看调用栈），别的地方读同一任务照常放行。
+    const delegate = prisma.coursePackageJob;
+    const original: typeof delegate.findUnique =
+      delegate.findUnique.bind(delegate);
+    let arrived = 0;
+    let done = 0;
+    let release: () => void = () => undefined;
+    const bothRead = new Promise<void>((resolve) => (release = resolve));
+    const spy = jest.spyOn(delegate, 'findUnique').mockImplementation(((
+      args: Parameters<typeof original>[0],
+    ) => {
+      const read = original(args);
+      const fromConfirm = new Error().stack?.includes('confirmImport');
+      if (args.where.id !== jobId || !fromConfirm || arrived >= 2) return read;
+      arrived += 1;
+      // 两次读都拿到结果之后才一起放行，保证两边看到的都是 AWAITING_CONFIRM
+      return read.then(async (row) => {
+        done += 1;
+        if (done === 2) release();
+        await bothRead;
+        return row;
+      });
+    }) as unknown as typeof delegate.findUnique);
+    let courseId: string | null = null;
+    try {
+      const confirms = (await Promise.all([
+        agent
+          .post(`/api/backoffice/courses/import/${jobId}/confirm`)
+          .send({ onConflict: 'ABORT' }),
+        agent
+          .post(`/api/backoffice/courses/import/${jobId}/confirm`)
+          .send({ onConflict: 'ABORT' }),
+      ])) as unknown as Array<{
+        status: number;
+        body: {
+          data?: { status?: string; courseId?: string };
+          error?: { code?: string };
+        };
+      }>;
+      // 契约：恰一个确认成功（200 READY），另一个明确失败（409 PACKAGE_CONFLICT）
+      expect(arrived).toBe(2);
+      const succeeded = confirms.filter((r) => r.status === 200);
+      const failed = confirms.filter((r) => r.status === 409);
+      expect(succeeded).toHaveLength(1);
+      expect(failed).toHaveLength(1);
+      expect(failed[0].body.error?.code).toBe('PACKAGE_CONFLICT');
+      expect(succeeded[0].body.data?.status).toBe('READY');
+      courseId = succeeded[0].body.data?.courseId ?? null;
+      // 只导入一次：该 Course ID 只有一门课
+      expect(
+        await prisma.commerceCourse.count({ where: { code: courseCode } }),
+      ).toBe(1);
+      spy.mockRestore();
+
+      await prisma.coursePackageJob.update({
+        where: { id: jobId },
+        data: { status: 'IMPORTING' },
+      });
+      await agent
+        .post(`/api/backoffice/courses/import/${jobId}/cancel`)
+        .expect(409);
+      const after = await prisma.coursePackageJob.findUniqueOrThrow({
+        where: { id: jobId },
+      });
+      expect(after.status).toBe('IMPORTING');
+    } finally {
+      spy.mockRestore();
+      if (courseId) {
+        await prisma.commerceCourse
+          .update({ where: { id: courseId }, data: { liveVersionId: null } })
+          .catch(() => undefined);
+        await prisma.commerceCourse
+          .delete({ where: { id: courseId } })
+          .catch(() => undefined);
+      }
+      await prisma.coursePackageJob
+        .delete({ where: { id: jobId } })
+        .catch(() => undefined);
+    }
+  });
+
+  it('claims an import job before reading its staging manifest', async () => {
+    const agent = await signInAs(app, 'ADMIN');
     const job = await prisma.coursePackageJob.create({
       data: {
         kind: 'IMPORT',
         status: 'AWAITING_CONFIRM',
-        sourceFileName: 'e2e.zip',
+        sourceFileName: 'claim-first.zip',
       },
     });
-    // 让两次确认都先读到 AWAITING_CONFIRM 再往下走：并发窗口在本机只有一两毫秒，
-    // 不卡住就很难撞上。旧代码（先查再改）在这里会两次都开始导入，没有 409。
-    // 只拦确认接口里的读（看调用栈），别的地方读同一任务照常放行。
     const delegate = prisma.coursePackageJob;
     const original: typeof delegate.findUnique =
       delegate.findUnique.bind(delegate);
@@ -440,7 +685,6 @@ describe('Commerce course workflow (e2e)', () => {
       const fromConfirm = new Error().stack?.includes('confirmImport');
       if (args.where.id !== job.id || !fromConfirm || arrived >= 2) return read;
       arrived += 1;
-      // 两次读都拿到结果之后才一起放行，保证两边看到的都是 AWAITING_CONFIRM
       return read.then(async (row) => {
         done += 1;
         if (done === 2) release();
@@ -448,6 +692,18 @@ describe('Commerce course workflow (e2e)', () => {
         return row;
       });
     }) as unknown as typeof delegate.findUnique);
+    // 认领成功的一方在读 staging manifest 时才失败；把这次读拖慢，让认领失败的一方
+    // 先拿到 409，明确区分"认领失败"与"包已丢失"两个错误。
+    const storage = app.get(CourseStorageService);
+    const originalGetStaging = storage.getStaging.bind(storage);
+    const manifestSpy = jest
+      .spyOn(storage, 'getStaging')
+      .mockImplementation(async (key: string) => {
+        if (key.includes(job.id) && key.endsWith('__manifest.json')) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+        return originalGetStaging(key);
+      });
     try {
       const confirms = await Promise.all([
         agent
@@ -457,25 +713,26 @@ describe('Commerce course workflow (e2e)', () => {
           .post(`/api/backoffice/courses/import/${job.id}/confirm`)
           .send({ onConflict: 'ABORT' }),
       ]);
-      // 只有一次能认领任务；另一次 409。认领到的那次因为暂存文件不存在而失败，这里不关心
       expect(arrived).toBe(2);
-      expect(confirms.filter((r) => r.status === 409)).toHaveLength(1);
-      spy.mockRestore();
-
-      await prisma.coursePackageJob.update({
-        where: { id: job.id },
-        data: { status: 'IMPORTING' },
-      });
-      await agent
-        .post(`/api/backoffice/courses/import/${job.id}/cancel`)
-        .expect(409);
+      // 先条件认领：恰一方认领到（随后因包已丢失明确失败），另一方得到 PACKAGE_CONFLICT。
+      // 旧代码先读 manifest，两个请求都会得到 PACKAGE_MANIFEST_MISSING。
+      const codes = confirms
+        .map(
+          (r) => (r.body as { error?: { code?: string } }).error?.code ?? null,
+        )
+        .sort();
+      expect(codes).toEqual(['PACKAGE_CONFLICT', 'PACKAGE_MANIFEST_MISSING']);
       const after = await prisma.coursePackageJob.findUniqueOrThrow({
         where: { id: job.id },
       });
-      expect(after.status).toBe('IMPORTING');
+      // 认领失败后作业回到可重试/可取消的 AWAITING_CONFIRM
+      expect(after.status).toBe('AWAITING_CONFIRM');
     } finally {
       spy.mockRestore();
-      await prisma.coursePackageJob.delete({ where: { id: job.id } });
+      manifestSpy.mockRestore();
+      await prisma.coursePackageJob
+        .delete({ where: { id: job.id } })
+        .catch(() => undefined);
     }
   });
 });

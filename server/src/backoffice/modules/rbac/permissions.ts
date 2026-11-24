@@ -91,7 +91,14 @@ export const ROLE_MATRIX: Record<
 
 /** PRD §3.2 注释：Edit 只允许修改既有记录，不能创建、删除或发布。 */
 export type ActionKind =
-  'VIEW' | 'EDIT_EXISTING' | 'CREATE' | 'DELETE' | 'PUBLISH';
+  | 'VIEW'
+  | 'EDIT_EXISTING'
+  | 'CREATE'
+  | 'DELETE'
+  | 'PUBLISH'
+  /** 整包导入与课程导出是发布级动作，但账号级功能开关要求单独控制（owner 2026-11-20）。 */
+  | 'IMPORT'
+  | 'EXPORT';
 
 export function levelFor(role: EmployeeRole, menu: MenuKey): PermissionLevel {
   return ROLE_MATRIX[role][menu];
@@ -101,24 +108,34 @@ export function canViewMenu(role: EmployeeRole, menu: MenuKey): boolean {
   return levelFor(role, menu) !== 'NONE';
 }
 
-export function isActionAllowed(
-  role: EmployeeRole,
-  menu: MenuKey,
+/** 某一权限级别是否允许某种操作（菜单生效级别也可直接套用）。 */
+export function actionAllowedAtLevel(
+  level: PermissionLevel,
   action: ActionKind,
 ): boolean {
-  const level = levelFor(role, menu);
   switch (action) {
     case 'VIEW':
       return level !== 'NONE';
     case 'EDIT_EXISTING':
       return level === 'EDIT' || level === 'FULL';
+    // 导入/导出沿用发布级基线：角色层面只有 Full 可以，账号开关再单独加减。
     case 'CREATE':
     case 'DELETE':
     case 'PUBLISH':
+    case 'IMPORT':
+    case 'EXPORT':
       return level === 'FULL';
     default:
       return false;
   }
+}
+
+export function isActionAllowed(
+  role: EmployeeRole,
+  menu: MenuKey,
+  action: ActionKind,
+): boolean {
+  return actionAllowedAtLevel(levelFor(role, menu), action);
 }
 
 export function visibleMenus(role: EmployeeRole): MenuKey[] {

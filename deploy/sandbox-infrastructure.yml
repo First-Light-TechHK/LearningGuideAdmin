@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Learning Guide isolated Sandbox network, database and storage
+# 模板文件，仅供拿到 AWS 凭据后由 ops 执行；本仓库不运行任何 AWS 命令。
+# 2026-11-19 从 LearningGuideSandbox 仓库合并进 Admin 仓库（内容全部落在 Admin 仓库）。
+# 由 Portal deploy/uat-infrastructure.yml 改编，差异（有意为之）：
+#   1. 资源命名统一 sandbox；子网用 172.31.68.0/24 与 172.31.69.0/24
+#      （SIT 用 64/65、UAT 用 66/67，部署前务必核对 VPC 内无冲突）。
+#   2. VpcId 与 NAT 所在公有子网改为 Parameters，不再硬编码。
+#   3. 桶名用 !Sub 拼 AWS::AccountId（账号未定，见 docs/sandbox/provisioning-request.md §7 Q1）。
+#   4. 移除了 UAT 的 course-media-archive-read-only 策略：Sandbox 不允许
+#      读任何其它环境的桶（隔离要求，见 docs/sandbox/partitioning.md）。
+#   5. 备份保留默认 7 天。
+#   6. 本栈只 provisioning Portal 侧资源（网络/NAT/S3 Endpoint/SG/Portal RDS/Portal 桶/
+#      Portal 运行时角色/VPC Connector/伸缩配置）。Admin 的 RDS/课程桶/运行时角色/
+#      App Runner 由 Admin 仓库 scripts/provision-admin-dev.mjs（ADMIN_ENV=sandbox）
+#      或手工创建，不在本模板内；Admin RDS 复用本栈的私有子网与网络出口。
+#   7. 跨命名空间共享令牌：Portal 运行时角色除本命名空间外，还被精确授权读取
+#      Admin 命名空间的 admin_api_key（Portal 的 ADMIN_PORTAL_API_TOKEN 指向它，
+#      见 deploy/sandbox.example.env 第四部分）；Admin 运行时角色需对称地授权读取
+#      learning-guide/sandbox/ 下的 helpdesk 令牌（Helpdesk 已启用；令牌由 ops 创建后
+#      对称授权，未创建时接口按设计 503）。
+#      注意：Admin 的运行时角色与课程桶不是 provision 脚本自建的（脚本只建
+#      RDS/Secrets/App Runner，角色与桶是它的输入参数），需 ops 单独创建。
+# 执行命令（拿到凭据后）：
+#   aws cloudformation deploy --region ap-southeast-1 --stack-name learning-guide-sandbox \
+#     --template-file deploy/sandbox-infrastructure.yml \
+#     --parameter-overrides VpcId=<VPC_ID> NatSubnetId=<PUBLIC_SUBNET_ID> \
+#     --capabilities CAPABILITY_NAMED_IAM --tags Project=LearningGuide Environment=Sandbox
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing VPC to place the Sandbox private subnets in.
+  NatSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Existing public subnet in the VPC for the NAT gateway.
+  DatabaseInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues: [db.t4g.micro, db.t4g.small]
+  EngineVersion:
+    Type: String
+    Default: '16.13'
+    Description: Keep the same minor line as the other LG environments.
+  BackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+Resources:
+  PrivateA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: 172.31.68.0/24
+      AvailabilityZone: ap-southeast-1a
+      MapPublicIpOnLaunch: false
+      Tags: [{Key: Name, Value: learning-guide-sandbox-a}]
+  PrivateB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: 172.31.69.0/24
+      AvailabilityZone: ap-southeast-1b
+      MapPublicIpOnLaunch: false
+      Tags: [{Key: Name, Value: learning-guide-sandbox-b}]
+  NatAddress:
+    Type: AWS::EC2::EIP
+    Properties: {Domain: vpc}
+  Nat:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatAddress.AllocationId
+      SubnetId: !Ref NatSubnetId
+      Tags: [{Key: Name, Value: learning-guide-sandbox}]
+  Routes:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref VpcId}
+  Internet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref Routes
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref Nat
+  RouteA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PrivateA, RouteTableId: !Ref Routes}
+  RouteB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PrivateB, RouteTableId: !Ref Routes}
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: com.amazonaws.ap-southeast-1.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref Routes]
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Learning Guide Sandbox application outbound access
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 465, ToPort: 465, CidrIp: 0.0.0.0/0}
+        - {IpProtocol: tcp, FromPort: 5432, ToPort: 5432, CidrIp: 172.31.0.0/16}
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL only from the Sandbox application
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private Sandbox database subnets
+      SubnetIds: [!Ref PrivateA, !Ref PrivateB]
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: learning-guide-sandbox
+      DBName: learning_guide_sandbox
+      Engine: postgres
+      EngineVersion: !Ref EngineVersion
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      AllocatedStorage: '20'
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: lg_sandbox_admin
+      ManageMasterUserPassword: true
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PubliclyAccessible: false
+      MultiAZ: false
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
+      CopyTagsToSnapshot: true
+      Tags: [{Key: Project, Value: LearningGuide}, {Key: Environment, Value: Sandbox}]
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'learning-guide-sandbox-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: {Status: Enabled}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: OldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration: {NoncurrentDays: 30}
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 7}
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource: [!GetAtt Bucket.Arn, !Sub '${Bucket.Arn}/*']
+            Condition: {Bool: {'aws:SecureTransport': false}}
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: learning-guide-sandbox-runtime
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: tasks.apprunner.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: sandbox-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:learning-guide/sandbox/*'
+              - Effect: Allow
+                Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+                Resource: !Sub '${Bucket.Arn}/learning-guide/sandbox/*'
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Bucket.Arn
+                Condition: {StringLike: {'s3:prefix': ['learning-guide/sandbox/*']}}
+              - Effect: Allow
+                Action: ["ses:SendEmail", "ses:SendRawEmail"]
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: learningguide@163.com
+        - PolicyName: shared-admin-tokens-read
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:learning-guide/admin/sandbox/admin_api_key-*'
+  Connector:
+    Type: AWS::AppRunner::VpcConnector
+    Properties:
+      VpcConnectorName: learning-guide-sandbox
+      Subnets: [!Ref PrivateA, !Ref PrivateB]
+      SecurityGroups: [!Ref AppSecurityGroup]
+  Scaling:
+    Type: AWS::AppRunner::AutoScalingConfiguration
+    Properties:
+      AutoScalingConfigurationName: learning-guide-sandbox
+      MinSize: 1
+      MaxSize: 2
+      MaxConcurrency: 50
+Outputs:
+  DatabaseHost: {Value: !GetAtt Database.Endpoint.Address}
+  MasterSecret: {Value: !GetAtt Database.MasterUserSecret.SecretArn}
+  ConnectorArn: {Value: !GetAtt Connector.VpcConnectorArn}
+  AppRoleArn: {Value: !GetAtt AppRole.Arn}
+  ScalingArn: {Value: !GetAtt Scaling.AutoScalingConfigurationArn}
+  BucketName: {Value: !Ref Bucket}
+  AppSecurityGroup: {Value: !Ref AppSecurityGroup}
+  PrivateSubnet: {Value: !Ref PrivateA}

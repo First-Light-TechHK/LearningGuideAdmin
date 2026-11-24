@@ -181,6 +181,10 @@ export type CourseDetail = {
   liveStatus: string;
   liveVersionId: string | null;
   hasDraft: boolean;
+  /** 草稿来源（服务端 course detail 已有的标量字段）：IMPORT/RESTORE。 */
+  draftSourceType?: string | null;
+  draftSourceEnvironment?: string | null;
+  draftSourceVersionLabel?: string | null;
   trialEnabled: boolean;
   localizations: CourseLocalization[];
   lessons: Lesson[];
@@ -198,6 +202,8 @@ export type CourseVersion = {
   sourceEnvironment: string | null;
   sourceVersionLabel: string | null;
   wentLiveAt: string | null;
+  /** 发布操作人（无操作人 = System）；PRD §15.5 版本表 Published 列。 */
+  publishedBy?: string | null;
   exportedAt: string | null;
   createdAt: string;
   isLive: boolean;

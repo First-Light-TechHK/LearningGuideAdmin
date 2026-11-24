@@ -11,6 +11,7 @@ import { HealthController } from './health/health.controller';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { ModuleCapabilityGuard } from './common/guards/module-capability.guard';
 import { BackofficeModule } from './backoffice/nest/backoffice.module';
 import { CommerceCoursesModule } from './commerce-courses/commerce-courses.module';
 import { BackofficeAccessGuard } from './backoffice/nest/backoffice-access.guard';
@@ -188,6 +189,10 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
       { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
       // 全局错误处理（§5.3、§7 Phase 2 第 5 项）
       { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      // 模块能力门（ADMIN_CAPABILITIES）：必须排在会话/权限守卫之前，
+      // 让未启用的模块统一返回 404 MODULE_NOT_ENABLED，不先暴露 401/403 差异。
+      // 未配置 = 全部能力启用（既有环境行为不变）
+      { provide: APP_GUARD, useClass: ModuleCapabilityGuard },
       // 员工会话 + 菜单级权限；Portal 学员端 /api/user/** 仍走 X-API-Key（ApiKeyGuard 规则），
       // KS 内部接口 /api/ks/** 走 KS_SERVICE_TOKEN；Portal Helpdesk 集成 /api/integration/helpdesk/**
       // 走 ADMIN_HELPDESK_TOKEN

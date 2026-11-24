@@ -86,7 +86,14 @@ export type StudentDetails = {
   passwordLink: { available: true; kind: 'reset' | 'setup' } | { available: false; blockedBy: 'inactive' | 'no_email' | 'email_unverified' }
 }
 
-export type StudentActionResult = { student: StudentDetails; email: { sent: boolean } | null }
+/**
+ * 动作的邮件投递结果。旧 Portal 只回 { sent: boolean }；新契约在邮件异步发送时回
+ * { sent: null, pending: true }（请求已受理，尚未确认投递）。
+ */
+export type StudentActionEmail =
+  | { sent: boolean; pending?: false }
+  | { sent: null; pending: true }
+export type StudentActionResult = { student: StudentDetails; email: StudentActionEmail | null }
 
 export type FeatureSetting = {
   feature: FeatureKey

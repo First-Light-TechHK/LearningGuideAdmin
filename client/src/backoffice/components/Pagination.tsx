@@ -30,21 +30,23 @@ export function Pagination({
     <div className="pagination">
       <span className="paginationSummary">{summary}</span>
       <div className="paginationControls">
-        <label className="pageSizeLabel">
-          {t(locale, "pagination.pageSizeLabel")}
-          <select
-            className="pageSizeSelect"
-            value={pageSize}
-            onChange={(event) => onPageSizeChange(Number(event.target.value))}
-            aria-label={t(locale, "pagination.pageSizeLabel")}
-          >
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </label>
+        {onPageSizeChange ? (
+          <label className="pageSizeLabel">
+            {t(locale, "pagination.pageSizeLabel")}
+            <select
+              className="pageSizeSelect"
+              value={pageSize}
+              onChange={(event) => onPageSizeChange(Number(event.target.value))}
+              aria-label={t(locale, "pagination.pageSizeLabel")}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <span className="pageOf">
           {t(locale, "pagination.pageOf", { page, total: totalPages })}

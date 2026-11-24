@@ -1,3 +1,4 @@
+import type { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { consume } from '../lib/rateLimit';
 import { requestPasswordReset } from '../modules/user-authentication/services/passwordFlows';
@@ -9,7 +10,9 @@ jest.mock('../modules/user-authentication/services/passwordFlows', () => ({
 }));
 
 describe('forgot-password email rate limit', () => {
-  const controller = new BackofficeAuthController();
+  const controller = new BackofficeAuthController({
+    get: () => undefined,
+  } as unknown as ConfigService);
   const request = {
     ip: '127.0.0.1',
     headers: { origin: 'http://localhost' },

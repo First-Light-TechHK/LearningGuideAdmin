@@ -354,7 +354,7 @@ WORKING --publishToUat--> IN_UAT --approve--> APPROVED --goLive--> LIVE(新版�
 
 - `checksums.sha256`：每行 `<sha256>  <相对路径>`，覆盖 `manifest.json` 除外的所有文件。
 - 媒体类型白名单沿用 v1/Ṕortal：图片（jpg/png/gif/webp）、视频（mp4/mov/webm）、音频、PDF、3D（obj/glb）；导入时做**文件签名校验**（不仅看扩展名）。
-- 视频上限：与 Figma 一致（单视频 ≤500 MB，1080p）；整包上限可配（默认 2 GB，可调）。
+- 视频上限：与 Figma 一致（单视频 ≤500 MB，1080p）；整包上限可配（`PACKAGE_MAX_BYTES`，默认 8 GB，见 §19.1）。
 - 缩略图：视频/3D 必须有方形缩略图（≥400×400）；缺失时导入报错或自动生成（`sharp`，可配置）。
 
 ### 4.4 版本与来源
@@ -395,9 +395,11 @@ WORKING --publishToUat--> IN_UAT --approve--> APPROVED --goLive--> LIVE(新版�
 | `GET` | `/api/backoffice/courses/import/:jobId` | 作业状态/进度/校验报告 |
 | `POST` | `/api/backoffice/courses/import/:jobId/confirm` | 校验通过后确认导入（选择冲突策略/目标状态） |
 | `POST` | `/api/backoffice/courses/import/:jobId/cancel` | 取消并清理 |
-| `POST` | `/api/backoffice/courses/:id/export` | 创建导出作业（`version=working\|live\|version:N`） |
+| `POST` | `/api/backoffice/courses/:id/export` | 创建导出作业（**仅当前线上版本**） |
 | `GET` | `/api/backoffice/courses/export/:jobId` | 导出状态 |
 | `GET` | `/api/backoffice/courses/export/:jobId/download` | 下载生成的 ZIP（支持 `Range`） |
+
+> 导出实现现状（2026-11-20，PRD §16.2 为准）：只导出**当前线上版本**；`working`/`draft`/`version:N`/`versionId`/`sourceVersion` 等选择器已移除，传入返回 `400 VALIDATION_ERROR`。导出前必须通过发布完整性校验（三步完整）；未发布或不完整时 4xx。
 
 **请求示例（导入）：**
 
@@ -517,15 +519,18 @@ flowchart TD
 
 | 策略 | 行为 |
 |---|---|
-| `ABORT`（默认） | 存在同 code/slug 即拒绝 |
-| `CREATE_NEW_COURSE` | 生成新课程 code/slug（可加 `-imported-<ts>` 后缀），保留包内原始 code 于 `legacyCode` |
-| `NEW_VERSION` | 仅当目标存在同 code 课程：把包内容作为该课程的新版本导入到 Working copy（覆盖前需确认） |
+| `ABORT`（默认） | Course ID 已存在即拒绝，`confirm` 返回 `409 PACKAGE_CONFLICT`（slug 撞车会自动加序号，不视为冲突） |
+| `CREATE_NEW_COURSE` | **未实现（2026-11）**：无冲突时按普通导入处理；存在同 Course ID 时返回 `422 PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED`，不再静默按覆盖处理 |
+| `NEW_VERSION` | **未实现（2026-11）**：目标存在同 code 课程或不存在目标时都返回 `422 PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED` |
+
+显式传 `overwriteDraft: true` 时，同 Course ID 的既有**草稿**会被本包覆盖（原行为保留）；已上线课程仍拒绝（返回 `refused=COURSE_ALREADY_LIVE`，线上内容不受影响）。
 
 `reassignCodes=true` 时，包内 `L/E/K` 编号在目标冲突则重新分配，并在报告里给出映射表。
 
 ### 5.6 导出流程
 
-- `POST .../export` → 作业；读取课程快照（`working` 直接读当前，`live` 读 `liveVersionId` 的 `snapshotData`，`version:N` 读对应版本）。
+- `POST .../export` → 作业；只读取**当前线上版本**的快照（`liveVersionId` 的 `snapshotData`），先通过发布完整性校验（未发布/不完整时 4xx）。
+- 不再支持 `working`/`version:N`/`versionId`/`sourceVersion` 选择器（PRD §16.2）；传非线上选择器返回 `400 VALIDATION_ERROR`。
 - 生成 `manifest.json` → 打包媒体（从私有存储流式读取）→ 生成 `checksums.sha256` → 输出 ZIP 到 staging → `READY`，提供带一次性下载令牌的下载链接。
 - 导出默认**不含**运营位、员工/审计、内部 ID（只含 `code` 与相对路径）。
 - 媒体缺失时导出失败并列出缺失项（不允许生成"坏包"）。
@@ -746,6 +751,8 @@ Figma 的逐课时导入是**编辑期**能力，和"整包迁移"是两条通�
 | 422 | `PACKAGE_CHECKSUM_MISMATCH` | 文件校验和不符 |
 | 422 | `PACKAGE_MEDIA_INVALID` | 媒体类型/签名/缩略图不合规 |
 | 409 | `PACKAGE_CONFLICT` | code/slug 冲突且策略为 ABORT |
+| 422 | `PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED` | `CREATE_NEW_COURSE` / `NEW_VERSION` 尚未实现（见 §5.5） |
+| 404 | `PACKAGE_VERSION_NOT_FOUND` | 导出指定的版本不存在（见 §5.2） |
 | 413 | `PACKAGE_TOO_LARGE` | 超过整包/单文件上限 |
 | 403 | `PACKAGE_FORBIDDEN` | 非 FULL 或令牌 scope 不足 |
 | 404 | `PACKAGE_JOB_NOT_FOUND` | 作业不存在 |
@@ -1207,6 +1214,7 @@ model Course {
 ```
 
 - 失败：`409 PACKAGE_CONFLICT`（ABORT 且存在冲突）。
+- 实现现状（2026-11）：确认时先条件认领 `AWAITING_CONFIRM → IMPORTING` 再读 staging；同一作业被并发确认时只有一个成功，另一个返回 `409 PACKAGE_CONFLICT`。冲突处理见 §5.5：`ABORT` → 409；`overwriteDraft: true` 覆盖既有草稿；`CREATE_NEW_COURSE` / `NEW_VERSION` 未实现 → 422 `PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED`。
 
 `POST /api/backoffice/courses/import/:jobId/cancel`
 
@@ -1222,6 +1230,8 @@ model Course {
 ```json
 { "version": "working | live | version:4" }
 ```
+
+- `version:N` 的 `N` 为版本号或版本标签；兼容既有 `versionId`（快照 UUID）与 `sourceVersion`（同 `version` 语法）；解析不到版本返回 `404 PACKAGE_VERSION_NOT_FOUND`（见 §5.2、§5.6）。
 
 - 响应：
 
@@ -1246,10 +1256,11 @@ model Course {
 | `POST` | `/courses/:id/publish-uat` | `{ expectedUpdatedAt }` | PUBLISH |
 | `POST` | `/courses/:id/approve` | `{ expectedUpdatedAt }` | PUBLISH |
 | `POST` | `/courses/:id/go-live` | `{ expectedUpdatedAt, notifyLearners: boolean }` | PUBLISH |
-| `POST` | `/courses/:id/live-status` | `{ status: "ONLINE|HIDDEN|OFFLINE", reason?, expectedUpdatedAt }` | PUBLISH |
+| `POST` | `/courses/:id/live-status` | `{ status: "ONLINE|HIDDEN|OFFLINE", reason }`（status、reason 均必填） | PUBLISH |
 | `POST` | `/courses/:id/restore` | `{ versionId, expectedUpdatedAt }` | EDIT_EXISTING |
 
-- 均返回最新课程摘要；`expectedUpdatedAt` 不匹配返回 `409 COURSE_STALE_VERSION`。
+- **实现现状（2026-11，以代码为准）**：本节表格中的 `expectedUpdatedAt` 乐观锁未落地；草稿写入的并发保护改用 `If-Match: "r<revision>"`（不匹配返回 `409 COURSE_STALE`，见 `draft-revision.ts`）。`publish-uat` / `approve` / `go-live` 已按 PRD v2 合并为 `POST /courses/:id/publish`，`restore` 的 body 为 `{ versionId }`（见 `Course_Management_PRD_v2_Aligned_Design.md` §4.1）。
+- `live-status` 现行契约：body `{ status, reason }`，两项都必填。`status` 缺失或不在 `ONLINE / HIDDEN / OFFLINE` 内返回 `400 VALIDATION_ERROR`（`details.field=status`）；`reason` 缺失或空白返回 `409 REASON_REQUIRED`；课程还没有线上版本返回 `409 NOT_PUBLISHED`。成功时不生成版本，更新 `liveStatus` 并写一条 `CHANGE_STATUS` History（`from` / `to` / `reason`）。
 - `go-live` 生成新 `CourseVersion`（`snapshotData` 为当前 working copy），更新 `liveVersionId`，可选通知学员。
 - `approve` 前要求 `lifecycleStatus = IN_UAT` 且内容完整（§3.4）。
 
@@ -1295,11 +1306,11 @@ model Course {
 | `localized[lang].title` | 是 | ≤25 |
 | `description` | 否 | ≤60 |
 | `video.file` | 条件 | `learningMode` 含视频时必填 |
-| `video.durationSeconds` | 否 | 导入时可由文件读取校验 |
-| `video.learningPoints[].timeSeconds` | 是 | ≥0 且 ≤时长；`code` 唯一 |
+| `video.durationSeconds` | 否 | 省略时导入用 mp4/mov 容器 `mvhd` 探测真实时长并落库；探测失败保留 null 并产生 `VIDEO_DURATION_UNREADABLE` warning（导入继续，但该课时在补齐时长前不可发布） |
+| `video.learningPoints[].timeSeconds` | 是 | ≥0 且 ≤时长；同一语言同一课时内视频组 `code` 唯一 |
 | `video.exhibitTriggers[].exhibitRef` | 是 | 必须指向本课时展品 |
 | `text.html` | 条件 | `learningMode` 含文本时必填；≤ 内容限额 |
-| `text.learningPoints[].heading` | 是 | 必须是 HTML 中的 H1 |
+| `text.learningPoints[].heading` | 是 | 必须是 HTML 中的 H1；同一语言同一课时内文本组 `code` 唯一 |
 | `exhibits[].code` | 是 | `E\d{3,}`，课时内唯一 |
 | `exhibits[].type` | 是 | `IMAGE/VIDEO/MODEL3D` |
 | `exhibits[].thumbnail` | 条件 | 视频/3D 必填（除非允许自动生成） |
@@ -1308,7 +1319,9 @@ model Course {
 | `knowledgeTest.questions[].referenceAnswer` | 否 | 缺失仅 warning（导出保留） |
 | `applicationTest.scenario` | 条件 | `applicationTest.enabled=true` 时必填 |
 | `trial.lessons[].videoCutoffSeconds` | 否 | ≤ 视频时长 |
-| `trial.lessons[].textCutoffLearningPoint` | 否 | 必须指向存在的学习点 `code` |
+| `trial.lessons[].textCutoffLearningPoint` | 否 | 必须指向存在的学习点 `code`；解析到 TEXT 学习点，不会落到同编号的 VIDEO 学习点 |
+
+> 学习点身份 = 课时 + 语言 + 来源（VIDEO / TEXT）+ `code`。同一课时同一语言下，视频学习点与文本学习点可以使用相同 `code`（见 §4.2 的 `1.1`），两组各自编号唯一；导入/导出都原样保留 `code`。
 
 ### 16.3 完整性与导入结果
 
@@ -1544,6 +1557,8 @@ model Course {
 | 单次直传 | 200 MB | 超过则强制分块（8–16 MB/块） |
 
 环境变量建议：`MEDIA_MAX_IMAGE_BYTES`、`MEDIA_MAX_VIDEO_BYTES`、`MEDIA_MAX_AUDIO_BYTES`、`MEDIA_MAX_PDF_BYTES`、`MEDIA_MAX_MODEL_BYTES`、`PACKAGE_MAX_BYTES`、`PACKAGE_DIRECT_UPLOAD_BYTES`。
+
+> 上传路径超限统一返回 `400 VALIDATION_ERROR`，文案给出实际配置的上限（整包 `PACKAGE_MAX_BYTES` 默认 8 GB；直传 `PACKAGE_DIRECT_UPLOAD_BYTES` 默认 200 MB，超过请改用分块上传）。分块会话（`POST .../import/raw/session`）在创建时按扩展名校验（仅接受 `.zip`），声明体积可达 `PACKAGE_MAX_BYTES`（含 4 GiB 以上）而不会因整数溢出返回 500。
 
 ### 19.2 ZIP 安全
 

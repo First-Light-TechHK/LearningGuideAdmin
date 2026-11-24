@@ -14,9 +14,13 @@ import { UnderstandingPanel } from './UnderstandingPanel';
 import { ExhibitDrawer } from './ExhibitDrawer';
 import { TextEditor } from './TextEditor';
 import { Chip, Field, IssueText, Modal, TypedTimeInput } from './shared';
-import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, fmtTimeInput, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel } from './shared-utils';
+import { L, buttonStyle, card, dangerBtn, exhibitTypeLabel, inputStyle, labelStyle, languageLabel, localizeMissing, fmtDuration, fmtDate, primaryBtn, readingTypeLabel, useNarrowLayout } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
 import { serverText } from '../../lib/i18n/serverText';
+import { lessonDraftOf, mergeLessonDraft, parseLessonDraft, type LessonDraft } from './drafts/lessonDraft';
+import { isDirty } from './drafts/merge';
+import { restoreDraft, useDraftAutosave } from './useDraftPersistence';
+import { removeDraft, type DraftIdentity } from '../../lib/editorDraftStore';
 
 type UploadResult = { id: string; kind?: string; originalName?: string };
 
@@ -74,6 +78,7 @@ export function CourseContentSection({
   setBusy,
   onReload,
   onNotice,
+  canEdit,
 }: {
   locale: string;
   course: CourseDetail;
@@ -84,6 +89,7 @@ export function CourseContentSection({
   setBusy: (value: boolean) => void;
   onReload: () => Promise<void>;
   onNotice: (message: string) => void;
+  canEdit: boolean;
 }) {
   const [part, setPart] = useState<'study' | 'understanding'>('study');
   const [studyTab, setStudyTab] = useState<'video' | 'text'>('video');
@@ -98,6 +104,8 @@ export function CourseContentSection({
   const [readingRows, setReadingRows] = useState<ReadingDraft[]>([]);
   // 服务器退回的行级错误（details.row 从 1 起），挂在对应的那一行上。
   const [rowErrors, setRowErrors] = useState<{ points: Record<number, string>; triggers: Record<number, string>; readings: Record<number, string> }>({ points: {}, triggers: {}, readings: {} });
+  // 保存结果就近显示在“保存”按钮旁（长页面顶部提示在底部看不到）。
+  const [saveStatus, setSaveStatus] = useState<{ kind: 'saving' | 'saved' | 'error'; text: string } | null>(null);
   const [textHtml, setTextHtml] = useState('');
   const [exhibitDrawer, setExhibitDrawer] = useState<'new' | string | null>(null);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
@@ -128,52 +136,81 @@ export function CourseContentSection({
   const lessonCompleteness = (course.completeness.steps.content.lessons ?? []).find((item) => item.lessonId === activeLesson?.id);
 
   const [draftSource, setDraftSource] = useState<{
-    lesson: Lesson | undefined;
-    course: CourseDetail;
+    courseId: string;
+    lessonId: string | undefined;
     language: string;
+    course: CourseDetail;
+    lesson: Lesson | undefined;
+    snapshot: LessonDraft;
   } | null>(null);
+  const applyDraft = (draft: LessonDraft) => {
+    setLessonTitleEn(draft.titleEn);
+    setLessonTitleZh(draft.titleZh);
+    setLessonDescEn(draft.descEn);
+    setLessonDescZh(draft.descZh);
+    setVideoLps(draft.videoLps);
+    setTriggerRows(draft.triggerRows);
+    setReadingRows(draft.readingRows);
+    setTextHtml(draft.textHtml);
+    setRowErrors({ points: {}, triggers: {}, readings: {} });
+  };
+  const serverDraft = lessonDraftOf(activeLesson, contentLanguage);
+  // 草稿身份与 6a833b2 一致：课程 + 课时 + 内容语言；只读账号不读不写不提示。
+  const draftIdentity: DraftIdentity | null = activeLesson
+    ? { courseId: course.id, step: 'study', lessonId: activeLesson.id, language: contentLanguage }
+    : null;
+  const draftStorageIdentity = canEdit ? draftIdentity : null;
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftServerChanged, setDraftServerChanged] = useState(false);
   if (
-    draftSource?.lesson !== activeLesson ||
-    draftSource?.course !== course ||
-    draftSource?.language !== contentLanguage
+    !draftSource ||
+    draftSource.courseId !== course.id ||
+    draftSource.lessonId !== activeLesson?.id ||
+    draftSource.language !== contentLanguage
   ) {
-    setDraftSource({ lesson: activeLesson, course, language: contentLanguage });
-    if (activeLesson) {
-      const en = loc(activeLesson, 'en-GB');
-      const zh = loc(activeLesson, 'zh-CN');
-      // 课时名没填时服务器存空；这里也显示空，不替用户编一个（完整性由服务器报）。
-      setLessonTitleEn(en?.title ?? '');
-      setLessonTitleZh(zh?.title ?? '');
-      setLessonDescEn(en?.description ?? '');
-      setLessonDescZh(zh?.description ?? '');
-      const currentLoc = loc(activeLesson, contentLanguage);
-      setVideoLps(
-        activeLesson.learningPoints
-          .filter((point) => point.language === contentLanguage && point.source === 'VIDEO')
-          .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-          .map((point) => ({
-            id: point.id,
-            code: point.code,
-            title: point.title,
-            timeText: fmtTimeInput(point.timeSeconds),
-          })),
-      );
-      // 触发点按服务器给的顺序（先按时间）；没选展品、没填时间的保持为空。
-      setTriggerRows(
-        (activeLesson.triggers ?? [])
-          .filter((trigger) => trigger.language === contentLanguage)
-          .map((trigger) => ({ exhibitId: trigger.exhibitId ?? '', timeText: fmtTimeInput(trigger.timeSeconds) })),
-      );
-      setReadingRows(readingsOf(activeLesson).map((reading) => ({
-        id: reading.id,
-        type: reading.type,
-        title: reading.title ?? '',
-        author: reading.author ?? '',
-        whyRecommended: reading.whyRecommended ?? '',
-      })));
-      setRowErrors({ points: {}, triggers: {}, readings: {} });
-      setTextHtml(currentLoc?.textHtml ?? '');
-    }
+    // 换课程 / 换课时 / 换内容语言：整份从服务器重新取；本地有该身份的未保存草稿就先合并恢复（三路合并）。
+    const restored = restoreDraft(draftStorageIdentity, serverDraft, {
+      parse: parseLessonDraft,
+      merge: mergeLessonDraft,
+      dirty: isDirty,
+    });
+    setDraftSource({ courseId: course.id, lessonId: activeLesson?.id, language: contentLanguage, course, lesson: activeLesson, snapshot: serverDraft });
+    applyDraft(restored.value);
+    setDraftRestored(restored.restored);
+    setDraftServerChanged(restored.restored && restored.serverChanged);
+  } else if (draftSource.course !== course || draftSource.lesson !== activeLesson) {
+    // 同一课时被重新载入（保存成功、上传展品等）：保留用户改过但还没保存的字段，其余跟随服务器。
+    const currentDraft: LessonDraft = {
+      titleEn: lessonTitleEn,
+      titleZh: lessonTitleZh,
+      descEn: lessonDescEn,
+      descZh: lessonDescZh,
+      videoLps,
+      triggerRows,
+      readingRows,
+      textHtml,
+    };
+    setDraftSource({ ...draftSource, course, lesson: activeLesson, snapshot: serverDraft });
+    applyDraft(mergeLessonDraft(currentDraft, draftSource.snapshot, serverDraft));
+  }
+
+  const currentDraft: LessonDraft = {
+    titleEn: lessonTitleEn,
+    titleZh: lessonTitleZh,
+    descEn: lessonDescEn,
+    descZh: lessonDescZh,
+    videoLps,
+    triggerRows,
+    readingRows,
+    textHtml,
+  };
+  const draftBase = draftSource?.snapshot ?? serverDraft;
+  useDraftAutosave(draftStorageIdentity, currentDraft, draftBase, isDirty);
+  // 草稿回到与服务器一致（保存后重载合并 / 用户改回原值）时视为无草稿，恢复提示随之消失。
+  const draftDirty = isDirty(currentDraft, draftBase);
+  if (draftRestored && !draftDirty) {
+    setDraftRestored(false);
+    setDraftServerChanged(false);
   }
 
   const [studyMode, setStudyMode] = useState<boolean | null>(null);
@@ -247,9 +284,12 @@ export function CourseContentSection({
     const base = `/api/backoffice/courses/${course.id}/lessons/${activeLesson.id}`;
     const json = (method: string, body: unknown) => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     setBusy(true);
+    setSaveStatus({ kind: 'saving', text: L(locale, '保存中…', 'Saving…') });
     setRowErrors({ points: {}, triggers: {}, readings: {} });
     const fail = (action: string, failure: Parameters<typeof reportFailure>[1]) => {
       setBusy(false);
+      const detail = failure.message ?? failure.error;
+      setSaveStatus({ kind: 'error', text: detail ? `${action}: ${detail}` : action });
       reportFailure(action, failure);
     };
 
@@ -284,7 +324,18 @@ export function CourseContentSection({
       placeRowError('readings', readings);
       return fail(L(locale, '阅读保存失败', 'Readings could not be saved'), readings);
     }
+    // 返回的行与发出的行一一对应：记下 id，再次保存时行身份不变（重载不再整份覆盖草稿后靠这里保持）。
+    setReadingRows((rows) => rows.map((row, index) => ({ ...row, id: readings.data.readings[index]?.id ?? row.id })));
+    // 一次保存写两种语言的课时标题/简介和唯一一份阅读列表：其它语言身份下的同课时草稿一并清掉，
+    // 避免旧副本在下次切语言时把刚保存的共享字段又盖回去。当前语言由重载合并为 clean 后自动清除。
+    for (const language of course.learningLanguages) {
+      if (language !== contentLanguage) {
+        removeDraft({ courseId: course.id, step: 'study', lessonId: activeLesson.id, language });
+      }
+    }
     setBusy(false);
+    const time = new Date().toLocaleTimeString(locale.startsWith('zh') ? 'zh-CN' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    setSaveStatus({ kind: 'saved', text: L(locale, `已保存 ${time}`, `Saved ${time}`) });
     onNotice(L(locale, '学习与探索已保存。', 'Study & Exploration saved.'));
     await onReload();
   }
@@ -551,13 +602,33 @@ export function CourseContentSection({
     videoUpload?.phase === 'processing' ||
     videoUpload?.phase === 'assigning';
 
+  const narrow = useNarrowLayout();
+  /** 丢弃本地草稿：删掉存储记录，把当前 section 重置到最新服务器快照（不发任何服务器请求）。 */
+  function discardDraft() {
+    if (draftIdentity) removeDraft(draftIdentity);
+    applyDraft(serverDraft);
+    setDraftSource((current) => (current ? { ...current, snapshot: serverDraft } : current));
+    setDraftRestored(false);
+    setDraftServerChanged(false);
+  }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 20, marginTop: 18 }}>
-      <aside style={{ ...card, marginTop: 0, padding: 14 }}>
+    <>
+    <div
+      data-testid="content-root"
+      style={{
+        height: '100%',
+        minHeight: 0,
+        display: 'grid',
+        gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : '280px minmax(0, 1fr)',
+        gridTemplateRows: narrow ? 'minmax(0, 220px) minmax(0, 1fr)' : 'minmax(0, 1fr)',
+        gap: 16,
+      }}
+    >
+      <aside data-testid="content-lessons" data-panel="content-lessons" style={{ ...card, marginTop: 0, padding: 14, overflow: 'auto', minWidth: 0, minHeight: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>{L(locale, '课时', 'Lessons')}</h3>
+          <h3 className="course-ui-blockTitle">{L(locale, '课时', 'Lessons')}</h3>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => setImportMenuOpen((value) => !value)}>{L(locale, '导入', 'Import')}</button>
+            <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} aria-haspopup="menu" aria-expanded={importMenuOpen} onClick={() => setImportMenuOpen((value) => !value)}>{L(locale, '导入', 'Import')} ▾</button>
             <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => void addLesson()}>+ {L(locale, '添加', 'Add')}</button>
           </div>
         </div>
@@ -587,11 +658,25 @@ export function CourseContentSection({
       </aside>
 
       {activeLesson ? (
-        <div>
+        <div data-testid="content-detail" data-panel="content-detail" style={{ overflow: 'auto', minWidth: 0, minHeight: 0 }}>
+          {draftRestored && (
+            <div
+              data-testid="draft-restored"
+              role="status"
+              aria-live="polite"
+              style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F3F7FF', border: '1px solid #D6E2F8', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 10 }}
+            >
+              <span>{t(asLocale(locale), 'course.ui.draftRestored')}</span>
+              {draftServerChanged && <span data-testid="draft-server-changed" style={{ color: '#5A6577' }}>{t(asLocale(locale), 'course.ui.draftServerChanged')}</span>}
+              <button type="button" data-testid="draft-discard" style={{ ...buttonStyle, padding: '4px 10px' }} onClick={discardDraft}>
+                {t(asLocale(locale), 'course.ui.draftDiscard')}
+              </button>
+            </div>
+          )}
           <div style={{ ...card, marginTop: 0, padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '课时', 'Lesson')} {activeLesson.sortOrder} · {loc(activeLesson, contentLanguage)?.title ?? activeLesson.code}</h2>
+                <h2 className="course-ui-blockTitle">{L(locale, '课时', 'Lesson')} {activeLesson.sortOrder} · {loc(activeLesson, contentLanguage)?.title ?? activeLesson.code}</h2>
                 <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{activeLesson.code} · {activeLesson.id}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -620,7 +705,7 @@ export function CourseContentSection({
 
           <div style={{ ...card, marginTop: 14, padding: 16 }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>{L(locale, '课时信息', 'Lesson info')}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16, marginTop: 10 }}>
               <div>
                 <label style={labelStyle}>{L(locale, '英文', 'English')}</label>
                 <Field label={L(locale, '课时 ID', 'Lesson ID')} hint={t(locale as Locale, 'course.ui.lessonIdFixed')}><input data-testid="lesson-id" readOnly aria-readonly="true" value={activeLesson.code} style={{ ...inputStyle, background: '#F5F7FA' }} /></Field>
@@ -876,7 +961,7 @@ export function CourseContentSection({
                         const timeIssue = point.code ? lessonLine(`videoLearningPoints[${point.code}].timeSeconds`) : null;
                         const rowError = rowErrors.points[index] ?? null;
                         return (
-                          <div key={point.id ?? `new-${index}`} data-testid="point-row" style={{ display: 'grid', gridTemplateColumns: '70px 1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                          <div key={point.id ?? `new-${index}`} data-testid="point-row" style={{ display: 'grid', gridTemplateColumns: '70px minmax(0, 1fr) 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                             <span style={{ fontSize: 12, color: '#5A6577' }}>{point.code ?? `${activeLesson.sortOrder}.${index + 1}`}</span>
                             <input data-testid="point-title" value={point.title} onChange={(event) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder={L(locale, '学习点标题', 'Learning point title')} style={{ ...inputStyle, ...(titleIssue ? { borderColor: '#b42318' } : {}) }} />
                             <TypedTimeInput testId="point-time" text={point.timeText} onText={(text) => setVideoLps((rows) => rows.map((item, i) => i === index ? { ...item, timeText: text } : item))} invalid={Boolean(rowError || timeIssue)} style={inputStyle} />
@@ -898,7 +983,7 @@ export function CourseContentSection({
                         const rowError = rowErrors.triggers[index] ?? null;
                         const issue = lessonLine(`triggers[${index}].exhibitId`) ?? lessonLine(`triggers[${index}].timeSeconds`);
                         return (
-                        <div key={index} data-testid="trigger-row" style={{ display: 'grid', gridTemplateColumns: '1fr 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                        <div key={index} data-testid="trigger-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 110px 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                           <select value={trigger.exhibitId} onChange={(event) => setTriggerRows((rows) => rows.map((item, i) => i === index ? { ...item, exhibitId: event.target.value } : item))} style={inputStyle}>
                             <option value="">{L(locale, '选择展品', 'Choose an exhibit')}</option>
                             {exhibits.map((exhibit) => <option key={exhibit.id} value={exhibit.id}>{exhibit.localized?.[contentLanguage]?.title ?? exhibit.code}</option>)}
@@ -962,7 +1047,7 @@ export function CourseContentSection({
                   const rowIssue = rowErrors.readings[index] ?? cellIssue('title') ?? cellIssue('type') ?? cellIssue('author') ?? cellIssue('whyRecommended');
                   const red = (name: string) => (cellIssue(name) || rowErrors.readings[index] ? { borderColor: '#b42318' } : {});
                   return (
-                  <div key={reading.id ?? `new-${index}`} data-testid="reading-row" style={{ display: 'grid', gridTemplateColumns: '110px 1fr 1fr 1.4fr 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                  <div key={reading.id ?? `new-${index}`} data-testid="reading-row" style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr) 40px', gap: 8, marginTop: 8, alignItems: 'center' }}>
                     <select value={reading.type} onChange={(event) => setReadingRows((rows) => rows.map((item, i) => i === index ? { ...item, type: event.target.value } : item))} style={inputStyle}>
                       <option value="BOOK">{readingTypeLabel(locale, 'BOOK')}</option>
                       <option value="ARTICLE">{readingTypeLabel(locale, 'ARTICLE')}</option>
@@ -979,8 +1064,18 @@ export function CourseContentSection({
                 })}
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 18, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button type="button" style={primaryBtn} disabled={busy} onClick={() => void saveStudy()}>{L(locale, '保存', 'Save')}</button>
+                {saveStatus && (
+                  <span
+                    role={saveStatus.kind === 'error' ? 'alert' : 'status'}
+                    data-testid="content-save-status"
+                    data-state={saveStatus.kind}
+                    style={{ fontSize: 12, color: saveStatus.kind === 'error' ? '#b42318' : saveStatus.kind === 'saved' ? '#0f7b48' : '#5A6577' }}
+                  >
+                    {saveStatus.text}
+                  </span>
+                )}
               </div>
             </>
           )}
@@ -995,12 +1090,14 @@ export function CourseContentSection({
               setBusy={setBusy}
               onSaved={onReload}
               onNotice={onNotice}
+              canEdit={canEdit}
             />
           )}
         </div>
       ) : (
-        <div style={card}><p style={{ margin: 0, opacity: 0.7 }}>{L(locale, '添加一个课时开始编辑。', 'Add a lesson to start editing.')}</p></div>
+        <div style={{ ...card, marginTop: 0, overflow: 'auto', minWidth: 0, minHeight: 0 }}><p style={{ margin: 0, opacity: 0.7 }}>{L(locale, '添加一个课时开始编辑。', 'Add a lesson to start editing.')}</p></div>
       )}
+    </div>
 
       {exhibitDrawer && activeLesson && (
         <ExhibitDrawer
@@ -1078,6 +1175,6 @@ export function CourseContentSection({
           )}
         </Modal>
       )}
-    </div>
+    </>
   );
 }

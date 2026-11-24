@@ -1,0 +1,244 @@
+{
+  "id": "bc3947b3-5b7a-4c20-bb6a-2583db3cd705",
+  "code": "C001",
+  "slug": "complete-bilingual-course",
+  "categoryId": "1af7b16c-df43-44a4-982d-174ca1c79274",
+  "subjectId": null,
+  "learningMode": "TEXT_ONLY",
+  "defaultContentLanguage": "en-GB",
+  "learningLanguages": [
+    "en-GB",
+    "zh-CN"
+  ],
+  "coverAssetId": "46e8535b-b59f-4ab1-b64c-73965b43d617",
+  "lifecycleStatus": "WORKING",
+  "liveStatus": "HIDDEN",
+  "liveVersionId": null,
+  "currentUatVersionId": null,
+  "approvedAt": null,
+  "approvedBy": null,
+  "lastUatPublishedAt": null,
+  "archivedAt": null,
+  "hasDraft": true,
+  "draftSourceType": null,
+  "draftSourceEnvironment": null,
+  "draftSourceVersionLabel": null,
+  "trialEnabled": false,
+  "revision": 6,
+  "revisionBy": "77909254-8d6e-4f2d-b9c2-60c361d52247",
+  "subtitle": null,
+  "level": null,
+  "tags": null,
+  "referencePrice": null,
+  "discount": null,
+  "legacyCategory": null,
+  "legacyAuthorIds": null,
+  "createdAt": "2026-11-20T00:38:24.159Z",
+  "updatedAt": "2026-11-20T00:38:24.523Z",
+  "category": {
+    "id": "1af7b16c-df43-44a4-982d-174ca1c79274",
+    "name": "Science",
+    "localized": {
+      "en-GB": {
+        "name": "Science"
+      },
+      "zh-CN": {
+        "name": "科学"
+      }
+    }
+  },
+  "cover": {
+    "id": "46e8535b-b59f-4ab1-b64c-73965b43d617",
+    "courseId": "bc3947b3-5b7a-4c20-bb6a-2583db3cd705",
+    "kind": "IMAGE",
+    "originalName": "cover.png",
+    "mimeType": "image/png",
+    "extension": "png",
+    "size": 1774,
+    "storageKey": "course-media/bc3947b3-5b7a-4c20-bb6a-2583db3cd705/46e8535b-b59f-4ab1-b64c-73965b43d617.png",
+    "checksum": "e9699086845680a4c4ccae1e60dbc1207bda787ae7451b21adeaa96bc6d5a314",
+    "width": null,
+    "height": null,
+    "durationSeconds": null,
+    "brokenAt": null,
+    "brokenReason": null,
+    "createdBy": null,
+    "createdAt": "2026-11-20T00:38:24.269Z"
+  },
+  "localizations": [
+    {
+      "id": "8b820fc7-af0d-4b94-9499-4a4908825f80",
+      "courseId": "bc3947b3-5b7a-4c20-bb6a-2583db3cd705",
+      "language": "en-GB",
+      "title": "Complete bilingual course",
+      "shortDescription": "A complete course description for verification.",
+      "overview": "A complete course overview that explains what the course contains and who it is for.",
+      "whatYouLearn": [
+        "Learn one thing",
+        "Learn two things",
+        "Learn three things",
+        "Learn four things"
+      ],
+      "provides": [
+        "Video lessons",
+        "Reading material",
+        "Practice tests",
+        "Progress tracking"
+      ]
+    },
+    {
+      "id": "9c47491c-cd36-42fb-a01c-2d4fb3bc2669",
+      "courseId": "bc3947b3-5b7a-4c20-bb6a-2583db3cd705",
+      "language": "zh-CN",
+      "title": "完整课程",
+      "shortDescription": "这是一门完整的课程。",
+      "overview": "这是一段完整的课程概览，用来说明这门课程包含的全部内容。",
+      "whatYouLearn": [
+        "学会第一件事",
+        "学会第二件事",
+        "学会第三件事",
+        "学会第四件事"
+      ],
+      "provides": [
+        "视频课程",
+        "阅读材料",
+        "练习测试",
+        "进度跟踪"
+      ]
+    }
+  ],
+  "trialRows": [],
+  "plans": [],
+  "lessons": [
+    {
+      "id": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+      "courseId": "bc3947b3-5b7a-4c20-bb6a-2583db3cd705",
+      "code": "L001",
+      "sortOrder": 1,
+      "legacySectionId": null,
+      "legacySectionTitle": null,
+      "archivedAt": null,
+      "createdAt": "2026-11-20T00:38:24.309Z",
+      "updatedAt": "2026-11-20T00:38:24.309Z",
+      "localizations": [
+        {
+          "id": "aefdca06-348f-4a4e-865f-4e2c49222960",
+          "lessonId": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+          "language": "en-GB",
+          "title": "Lesson one",
+          "description": "What the first lesson covers in English.",
+          "videoAssetId": null,
+          "videoDurationSeconds": null,
+          "textHtml": "<h1 data-lp=\"T1\">Alpha heading</h1><p>Body text for the alpha heading.</p>",
+          "textLearningPoints": [
+            {
+              "code": "T1",
+              "level": 1,
+              "heading": "Alpha heading"
+            }
+          ],
+          "legacyContents": null,
+          "knowledgeTestEnabled": false,
+          "applicationTestEnabled": false,
+          "video": null
+        },
+        {
+          "id": "8cb92c54-318a-4ccd-8b7d-eae938093f59",
+          "lessonId": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+          "language": "zh-CN",
+          "title": "第一课",
+          "description": "第一课的中文说明。",
+          "videoAssetId": null,
+          "videoDurationSeconds": null,
+          "textHtml": "<h1 data-lp=\"T1\">贝塔标题</h1><p>贝塔标题下的正文。</p>",
+          "textLearningPoints": [
+            {
+              "code": "T1",
+              "level": 1,
+              "heading": "贝塔标题"
+            }
+          ],
+          "legacyContents": null,
+          "knowledgeTestEnabled": false,
+          "applicationTestEnabled": false,
+          "video": null
+        }
+      ],
+      "exhibits": [],
+      "readings": [
+        {
+          "id": "59ff66b1-bb9d-4200-99c0-2d4e4d28e101",
+          "lessonId": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+          "language": "en-GB",
+          "type": "BOOK",
+          "title": "A Good Book",
+          "author": "Ann Author",
+          "whyRecommended": "It is the best start.",
+          "sortOrder": 0
+        }
+      ],
+      "questions": [],
+      "applicationTests": [],
+      "learningPoints": [
+        {
+          "id": "56176117-74ed-4724-898b-4667816c1439",
+          "lessonId": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+          "language": "en-GB",
+          "code": "T1",
+          "title": "Alpha heading",
+          "source": "TEXT",
+          "timeSeconds": null,
+          "anchorHeading": "Alpha heading",
+          "sortOrder": 0
+        },
+        {
+          "id": "aa84b5cb-cd6b-44d0-a65b-8973b2646f23",
+          "lessonId": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+          "language": "zh-CN",
+          "code": "T1",
+          "title": "贝塔标题",
+          "source": "TEXT",
+          "timeSeconds": null,
+          "anchorHeading": "贝塔标题",
+          "sortOrder": 0
+        }
+      ],
+      "triggers": [],
+      "applicationTest": null
+    }
+  ],
+  "completeness": {
+    "steps": {
+      "courseInformation": {
+        "complete": true,
+        "missing": []
+      },
+      "content": {
+        "complete": true,
+        "missing": [],
+        "lessons": [
+          {
+            "lessonId": "9e32e98e-a15b-4bd4-b11b-7c38d19a8963",
+            "code": "L001",
+            "position": 1,
+            "infoComplete": true,
+            "studyComplete": true,
+            "understandingComplete": true,
+            "missing": [],
+            "issues": []
+          }
+        ]
+      },
+      "trial": {
+        "complete": true,
+        "missing": []
+      }
+    },
+    "completedSteps": 3,
+    "canPublish": true,
+    "publishBlockers": [],
+    "publishBlockerCodes": [],
+    "issues": [],
+    "incompleteLessons": []
+  }
+}

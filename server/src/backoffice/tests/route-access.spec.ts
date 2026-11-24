@@ -49,20 +49,34 @@ describe('route access classification', () => {
     });
   });
 
-  it('keeps employee accounts Admin-only', () => {
+  it('keeps employee accounts behind the accounts capability with action-aware access', () => {
     assert.deepEqual(routeAccess('GET', '/api/admin/employees'), {
-      kind: 'employeeAdmin',
+      kind: 'accountsAdmin',
+      action: 'VIEW',
     });
     assert.deepEqual(routeAccess('PATCH', '/api/admin/employees/x'), {
+      kind: 'accountsAdmin',
+      action: 'CREATE',
+    });
+    // 功能开关本身只有 Full（Admin 基线）可读可写
+    assert.deepEqual(routeAccess('GET', '/api/admin/employees/x/features'), {
+      kind: 'accountsAdmin',
+      action: 'PUBLISH',
+    });
+    assert.deepEqual(routeAccess('PUT', '/api/admin/employees/x/features'), {
+      kind: 'accountsAdmin',
+      action: 'PUBLISH',
+    });
+    // 其余 /api/admin/** 仍是既有的 Admin-only 入口
+    assert.deepEqual(routeAccess('GET', '/api/admin/other'), {
       kind: 'employeeAdmin',
     });
   });
 
-  const menu = (menus: string[], action: string) => ({
-    kind: 'menu',
-    menus,
-    action,
-  });
+  const menu = (menus: string[], action: string, feature?: string) =>
+    feature
+      ? { kind: 'menu', menus, action, feature }
+      : { kind: 'menu', menus, action };
 
   it('puts AI configuration behind the AI Tutor menu', () => {
     assert.deepEqual(
@@ -106,11 +120,17 @@ describe('route access classification', () => {
 
   it('lets Course=Edit change content inside an existing course, never create, publish or price one (REQ-0236)', () => {
     const c = ['course'];
+    // 新建/删除不在账号级功能词表里（只由角色矩阵控制），路由不带 feature。
+    const feature = (action: string) =>
+      action === 'CREATE' || action === 'DELETE'
+        ? undefined
+        : `course.${action.toLowerCase().replace('_existing', '')}`;
     const cases: [string, string, string][] = [
       ['GET', '/api/backoffice/courses', 'VIEW'],
       ['GET', '/api/backoffice/courses/c1/history', 'VIEW'],
       ['GET', '/api/backoffice/courses/next-code', 'VIEW'],
       ['POST', '/api/backoffice/courses', 'CREATE'],
+      ['DELETE', '/api/backoffice/courses/c1', 'DELETE'],
       ['PUT', '/api/backoffice/courses/c1', 'EDIT_EXISTING'],
       ['PUT', '/api/backoffice/courses/c1/information', 'EDIT_EXISTING'],
       [
@@ -178,12 +198,19 @@ describe('route access classification', () => {
       ['POST', '/api/backoffice/courses/c1/delete-draft', 'PUBLISH'],
       ['POST', '/api/backoffice/courses/c1/live-status', 'PUBLISH'],
       ['POST', '/api/backoffice/courses/c1/restore', 'PUBLISH'],
-      ['POST', '/api/backoffice/courses/c1/import', 'PUBLISH'],
-      ['POST', '/api/backoffice/courses/c1/export', 'PUBLISH'],
-      ['POST', '/api/backoffice/courses/import', 'PUBLISH'],
-      ['POST', '/api/backoffice/courses/import/raw/session', 'PUBLISH'],
-      ['PUT', '/api/backoffice/courses/import/j1/chunk', 'PUBLISH'],
-      ['POST', '/api/backoffice/courses/import/j1/confirm', 'PUBLISH'],
+      ['POST', '/api/backoffice/courses/c1/import', 'IMPORT'],
+      ['POST', '/api/backoffice/courses/c1/export', 'EXPORT'],
+      ['POST', '/api/backoffice/courses/import', 'IMPORT'],
+      ['POST', '/api/backoffice/courses/import/raw/session', 'IMPORT'],
+      ['PUT', '/api/backoffice/courses/import/j1/chunk', 'IMPORT'],
+      ['POST', '/api/backoffice/courses/import/j1/confirm', 'IMPORT'],
+      // 作业状态与下载同样受 import/export 开关约束（不能只凭 VIEW 下载导出包）
+      ['GET', '/api/backoffice/courses/import/j1', 'IMPORT'],
+      ['GET', '/api/backoffice/courses/export/j1', 'EXPORT'],
+      ['GET', '/api/backoffice/courses/export/j1/download', 'EXPORT'],
+      ['POST', '/api/backoffice/courses/import/package/session', 'IMPORT'],
+      ['PUT', '/api/backoffice/courses/import/package/j1/chunk', 'IMPORT'],
+      ['POST', '/api/backoffice/courses/import/package/j1/complete', 'IMPORT'],
       ['PUT', '/api/backoffice/courses/c1/trial', 'CREATE'],
       ['PUT', '/api/backoffice/courses/c1/plans', 'CREATE'],
       ['POST', '/api/backoffice/courses/c1/plans/p1/sync-stripe', 'CREATE'],
@@ -192,10 +219,28 @@ describe('route access classification', () => {
     for (const [method, path, action] of cases) {
       assert.deepEqual(
         routeAccess(method, path),
-        { kind: 'menu', menus: c, action },
+        menu(c, action, feature(action)),
         `${method} ${path}`,
       );
     }
+  });
+
+  it('tags operations routes with the operations module switch', () => {
+    assert.deepEqual(routeAccess('GET', '/api/backoffice/operations'), {
+      kind: 'menu',
+      menus: ['course'],
+      action: 'VIEW',
+      feature: 'module.operations',
+    });
+    assert.deepEqual(
+      routeAccess('PUT', '/api/backoffice/operations/popular-courses'),
+      {
+        kind: 'menu',
+        menus: ['course'],
+        action: 'PUBLISH',
+        feature: 'module.operations',
+      },
+    );
   });
 
   it('keeps every other knowledge endpoint behind the Knowledge menu with its action', () => {
@@ -243,7 +288,8 @@ describe('route access classification', () => {
       kind: 'service',
     });
     assert.deepEqual(routeAccess('GET', '/API/admin/employees'), {
-      kind: 'employeeAdmin',
+      kind: 'accountsAdmin',
+      action: 'VIEW',
     });
   });
 
@@ -318,6 +364,19 @@ describe('route access classification', () => {
   it('gives unregistered endpoints to Admin only', () => {
     assert.deepEqual(routeAccess('GET', '/api/something-new'), {
       kind: 'employeeAdmin',
+    });
+    // 未登记的 /api/backoffice/<x> 不能落到 course VIEW（fail-closed）
+    assert.deepEqual(routeAccess('GET', '/api/backoffice/helpdesk/x'), {
+      kind: 'employeeAdmin',
+    });
+  });
+
+  it('constrains the job list by IMPORT / EXPORT, not plain course.view', () => {
+    assert.deepEqual(routeAccess('GET', '/api/backoffice/courses/jobs/list'), {
+      kind: 'menu',
+      menus: ['course'],
+      action: 'VIEW',
+      featuresAny: ['course.import', 'course.export'],
     });
   });
 

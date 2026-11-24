@@ -1,0 +1,201 @@
+# =============================================================================
+# 模板：Portal Sandbox 部署工作流
+# 复制到 LearningGuidePortal fork 的 .github/workflows/sandbox-deploy.yml 使用。
+# 由上游 .github/workflows/dev-deploy.yml 改编。2026-11-19 从 LearningGuideSandbox
+# 仓库合并进 Admin 仓库 deploy/（F4 合并完整性；Portal 侧工作流，安装属 Portal 仓库任务）。
+# 前置：
+#   - ops 已创建 learning-guide-sandbox 服务；仓库变量 SANDBOX_APP_RUNNER_SERVICE_ARN、
+#     SANDBOX_ORIGIN、SANDBOX_ADMIN_ORIGIN 已设置。
+#   - 仓库 secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY 对应专用 IAM 用户
+#     （策略模板见本仓库 deploy/ci-iam-policy.json.template）。
+#   - 仓库变量需先设置（configure 步骤读取，缺了该步骤静默跳过）：
+#       SANDBOX_KS_TUTOR_BASE_URL   = https://admin.sandbox.ilovelearningguide.com
+#       SANDBOX_KS_TUTOR_TIMEOUT_MS（可选，默认走 KS_TUTOR_TIMEOUT_MS 语义，按需）
+#       SANDBOX_KS_TUTOR_API_KEY_SECRET_ARN = 指向 learning-guide/admin/sandbox/admin_api_key
+#         （注意：不是 ks_service_token——Portal 只调 /api/user/**，Admin 按
+#         X-API-Key == AUTH_TOKEN 校验；绑定错误则 AI Tutor 全 401 且健康检查仍报 ks）
+#       首期能力分区不启用 AI Tutor：以上 SANDBOX_KS_* 变量全部不设置，configure 步骤跳过。
+#   - Portal 的 isManagedEnvironment() 已把 SANDBOX 视为受管环境（D3/G6）：
+#     Portal 工作区已实现（services/runtimeConfig.ts），待提交/部署验证；
+#     否则 verify 阶段的 live e2e 与健康门禁语义不完整。
+#   - Portal scripts/release/environments.mjs 已注册 SANDBOX 条目（D10）：
+#     Portal 工作区已实现（scripts/release/environments.mjs），待提交/部署验证；
+#     release-verify 对未知环境抛 "Unknown release environment"。
+#   - **代码一致性契约（environments.md §3）**：本工作流只在 push 到 `sandbox`
+#     分支时触发；`sandbox` 分支必须快进到上游最近一次生产发布（UAT=当前生产）
+#     的 SHA，禁止把 dev/feature 代码部署进 Sandbox（Sandbox 是 UAT 同码的隔离
+#     容器）。修复合入上游 dev 后，随下一次生产发布进入 sandbox。
+# =============================================================================
+name: Deploy Sandbox
+
+on:
+  push:
+    branches: [sandbox]
+  workflow_dispatch:
+
+concurrency:
+  group: learning-guide-sandbox-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  configure:
+    name: Ensure AI Tutor runtime configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    if: github.repository == 'First-Light-TechHK/LearningGuidePortal' || github.repository == 'LibertychaserUS/LearningGuidePortal'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-1
+
+      - name: Merge KS Tutor variables into the service
+        if: vars.SANDBOX_KS_TUTOR_BASE_URL != ''
+        env:
+          APP_RUNNER_SERVICE_ARN: ${{ vars.SANDBOX_APP_RUNNER_SERVICE_ARN }}
+          KS_TUTOR_BASE_URL: ${{ vars.SANDBOX_KS_TUTOR_BASE_URL }}
+          KS_TUTOR_TIMEOUT_MS: ${{ vars.KS_TUTOR_TIMEOUT_MS }}
+          KS_TUTOR_API_KEY_SECRET_ARN: ${{ vars.SANDBOX_KS_TUTOR_API_KEY_SECRET_ARN }}
+        run: node scripts/apprunner-set-env.mjs
+
+  deploy:
+    name: Start Sandbox App Runner deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.repository == 'First-Light-TechHK/LearningGuidePortal' || github.repository == 'LibertychaserUS/LearningGuidePortal'
+    needs: configure
+    outputs:
+      previous_sha: ${{ steps.prev.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-1
+
+      - name: Build and deploy the sandbox branch
+        id: prev
+        env:
+          APP_RUNNER_SERVICE_ARN: ${{ vars.SANDBOX_APP_RUNNER_SERVICE_ARN }}
+        run: |
+          set -u
+          echo "Sandbox target: learning-guide-sandbox"
+          deadline=$((SECONDS + 1500))
+          sleep_s=15
+
+          describe_status() {
+            aws apprunner describe-service \
+              --service-arn "$APP_RUNNER_SERVICE_ARN" \
+              --query 'Service.Status' \
+              --output text
+          }
+
+          wait_until_running() {
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              status="$(describe_status || true)"
+              echo "App Runner Status=${status:-unknown}"
+              case "$status" in
+                RUNNING)
+                  return 0
+                  ;;
+                PAUSED|DELETED|DELETE_FAILED|CREATE_FAILED)
+                  echo "service is not deployable (Status=$status); not waiting further"
+                  return 1
+                  ;;
+              esac
+              echo "not RUNNING; queue/wait ${sleep_s}s"
+              sleep "$sleep_s"
+            done
+            echo "timeout: waited 25m for Status=RUNNING"
+            return 1
+          }
+
+          if ! wait_until_running; then
+            exit 1
+          fi
+
+          previous="$(aws apprunner describe-service \
+            --service-arn "$APP_RUNNER_SERVICE_ARN" \
+            --query 'Service.SourceConfiguration.CodeRepository.CodeConfiguration.CodeConfigurationValues.RuntimeEnvironmentVariables.APP_VERSION' \
+            --output text)"
+          echo "previous_sha=${previous}"
+          echo "sha=${previous}" >> "$GITHUB_OUTPUT"
+
+          operation_id=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if ! wait_until_running; then
+              exit 1
+            fi
+            if out="$(aws apprunner start-deployment --service-arn "$APP_RUNNER_SERVICE_ARN" --output json 2>&1)"; then
+              printf '%s\n' "$out"
+              operation_id="$(printf '%s\n' "$out" | jq -r '.OperationId // empty')"
+              if [ -z "$operation_id" ]; then
+                echo "start-deployment returned no OperationId"
+                exit 1
+              fi
+              echo "start-deployment accepted: OperationId=$operation_id"
+              break
+            fi
+            printf '%s\n' "$out"
+            if printf '%s\n' "$out" | grep -Eqi 'InvalidRequestException|isn.?t in RUNNING|not in RUNNING'; then
+              echo "start-deployment collided; wait and retry"
+              sleep "$sleep_s"
+              continue
+            fi
+            echo "start-deployment failed"
+            exit 1
+          done
+          if [ -z "$operation_id" ]; then
+            echo "timeout waiting to accept start-deployment"
+            exit 1
+          fi
+
+          deadline=$((SECONDS + 1500))
+          op_status=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            op_status="$(aws apprunner list-operations \
+              --service-arn "$APP_RUNNER_SERVICE_ARN" \
+              --query "OperationSummaryList[?Id=='${operation_id}'].Status | [0]" \
+              --output text)"
+            echo "source build ${operation_id} status=${op_status:-unknown}"
+            case "$op_status" in
+              SUCCEEDED) break ;;
+              FAILED|ROLLBACK_SUCCEEDED|ROLLBACK_FAILED)
+                echo "source build ${op_status}"
+                exit 1
+                ;;
+            esac
+            sleep "$sleep_s"
+          done
+          if [ "$op_status" != "SUCCEEDED" ]; then
+            echo "timeout waiting for the sandbox branch build"
+            exit 1
+          fi
+          deadline=$((SECONDS + 300))
+          if ! wait_until_running; then
+            exit 1
+          fi
+
+  verify:
+    name: Live e2e / fallback / notify
+    needs: deploy
+    uses: ./.github/workflows/release-verify.yml
+    secrets: inherit
+    with:
+      environment: SANDBOX
+      origin: ${{ vars.SANDBOX_ORIGIN }}
+      admin_origin: ${{ vars.SANDBOX_ADMIN_ORIGIN }}
+      service_arn: ${{ vars.SANDBOX_APP_RUNNER_SERVICE_ARN }}
+      previous_sha: ${{ needs.deploy.outputs.previous_sha }}
+      rollback_mode: revert-commit

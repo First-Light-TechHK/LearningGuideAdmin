@@ -5,10 +5,15 @@ import { ConfigService } from '@nestjs/config';
  */
 export type VersionNumberingMode = 'sandbox' | 'production';
 
+/** 预览入口（PREVIEW_ENTRY）：learner = 上游「学员视角预览」；portal = 生产投影渲染草稿（Portal 风格）。 */
+export type PreviewEntry = 'learner' | 'portal';
+
 export interface CommerceCourseConfig {
   environmentLabel: string;
   publicSiteUrl: string;
   versionNumberingMode: VersionNumberingMode;
+  /** commerceConfig 总是给出 learner/portal；手工构造的测试配置可省略（消费方按 learner 处理）。 */
+  previewEntry?: PreviewEntry;
   stripeSecretKey?: string;
   mediaRoot: string;
   packageStagingRoot: string;
@@ -47,6 +52,10 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
     .trim()
     .toLowerCase();
   const environmentRaw = (config.get<string>('ENVIRONMENT_LABEL') ?? '').trim();
+  // 未配置 / 非 portal = learner：缺省保持上游行为（与 VERSION_NUMBERING_MODE 同样宽容解析）。
+  const previewEntryRaw = (config.get<string>('PREVIEW_ENTRY') ?? '')
+    .trim()
+    .toLowerCase();
   return {
     environmentLabel:
       environmentRaw ||
@@ -54,6 +63,7 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
     publicSiteUrl: config.get<string>('PUBLIC_SITE_URL')?.trim() || '',
     versionNumberingMode:
       numberingRaw === 'production' ? 'production' : 'sandbox',
+    previewEntry: previewEntryRaw === 'portal' ? 'portal' : 'learner',
     stripeSecretKey:
       config.get<string>('STRIPE_SECRET_KEY')?.trim() || undefined,
     mediaRoot:

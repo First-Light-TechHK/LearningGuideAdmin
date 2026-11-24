@@ -2,10 +2,12 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { notifyCourseNewLaunch } from '../backoffice/modules/notification/events';
 import {
   COMMERCE_CONFIG,
   type CommerceCourseConfig,
@@ -27,11 +29,51 @@ import {
 import { TrialService } from './trial.service';
 import { snapshotContentHash, versionContentHash } from './content-hash';
 import { employeeNames, operatorName } from './employee-names';
+import { oneOf } from './input';
 
 export interface VersionLabelResult {
   label: string;
   series: number;
   minor: number;
+}
+
+/** 课程首次发布事件需要的展示字段（eventKey 之外）。纯函数，便于单测回退规则。 */
+export type CourseLaunchSource = {
+  code: string;
+  slug: string;
+  defaultContentLanguage: string | null;
+  localizations: Array<{ language: string; title: string | null }>;
+  category: { name: string; localized: unknown } | null;
+};
+
+export function courseLaunchEventParams(course: CourseLaunchSource): {
+  courseTitle: string;
+  categoryName: string;
+  courseLink: string;
+} {
+  const preferred =
+    course.localizations.find(
+      (item) => item.language === course.defaultContentLanguage,
+    ) ?? course.localizations[0];
+  const courseTitle = preferred?.title?.trim() || course.code;
+  const localized =
+    course.category?.localized &&
+    typeof course.category.localized === 'object' &&
+    !Array.isArray(course.category.localized)
+      ? (course.category.localized as Record<string, unknown>)
+      : {};
+  const lang = course.defaultContentLanguage || 'en-GB';
+  const entry = localized[lang] ?? localized['en-GB'];
+  const rawName =
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? (entry as Record<string, unknown>).name
+      : undefined;
+  const categoryName = typeof rawName === 'string' ? rawName.trim() : '';
+  return {
+    courseTitle,
+    categoryName: categoryName || course.category?.name || '',
+    courseLink: `/${lang === 'zh-CN' ? 'zh-CN' : 'en-GB'}/portal/courses/${encodeURIComponent(course.slug)}`,
+  };
 }
 
 /** 纯函数：下一次发布的版本编号（PRD §15.3）。 */
@@ -72,8 +114,43 @@ export const HISTORY_ACTIONS = {
   ADD_LEARNING_LANGUAGE: 'ADD_LEARNING_LANGUAGE',
 } as const;
 
+/** Change status 只接受三种线上状态，且必须说明原因（PRD §21）。 */
+export const LIVE_STATUSES = ['ONLINE', 'HIDDEN', 'OFFLINE'] as const;
+export type LiveStatusValue = (typeof LIVE_STATUSES)[number];
+
+export interface ChangeStatusInput {
+  status: LiveStatusValue;
+  reason: string;
+}
+
+/**
+ * Change status 请求体的正式契约：status 必填且必须是三种状态之一，reason 必须是非空文字。
+ *
+ * 以前直接把 body 交给 Prisma：缺 status 时 `data.liveStatus = undefined` 被忽略，
+ * 请求返回 200 却什么都不改（QA 黑盒复现）。现在形状错误显式拒绝：
+ * status 缺失/非法 → 400 VALIDATION_ERROR（details.field=status）；
+ * reason 缺失/空白 → 409 REASON_REQUIRED（保持原有业务码）。
+ */
+export function parseChangeStatusBody(body: unknown): ChangeStatusInput {
+  const input =
+    typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {};
+  const status = oneOf(input.status, LIVE_STATUSES, 'status');
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  if (!reason) {
+    throw new ConflictException({
+      code: 'REASON_REQUIRED',
+      message: 'A reason is required to change status.',
+    });
+  }
+  return { status, reason };
+}
+
 @Injectable()
 export class PublishingService {
+  private readonly logger = new Logger(PublishingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly trial: TrialService,
@@ -255,6 +332,43 @@ export class PublishingService {
     };
   }
 
+  /**
+   * Notification P0：课程第一次变为 ONLINE 时发 COURSE_NEW_LAUNCH（eventKey=course+线上版本）。
+   * PRD 第 5 节：开关只有模板的 On/Off，发布时的 notifyLearners 勾选不参与。异步执行，不阻塞状态变更。
+   */
+  private async emitCourseNewLaunchIfFirstOnline(
+    courseId: string,
+    versionId: string,
+  ): Promise<void> {
+    const onlineCount = await this.prisma.courseAuthoringActivity.count({
+      where: {
+        courseId,
+        action: HISTORY_ACTIONS.CHANGE_STATUS,
+        detail: { path: ['to'], equals: 'ONLINE' },
+      },
+    });
+    if (onlineCount !== 1) return;
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: {
+        code: true,
+        slug: true,
+        defaultContentLanguage: true,
+        localizations: { select: { language: true, title: true } },
+        category: { select: { name: true, localized: true } },
+      },
+    });
+    if (!course) return;
+    const params = courseLaunchEventParams(course);
+    await notifyCourseNewLaunch({
+      courseId,
+      versionId,
+      courseTitle: params.courseTitle,
+      categoryName: params.categoryName,
+      courseLink: params.courseLink,
+    });
+  }
+
   private resolveSource(course: {
     draftSourceType: string | null;
     draftSourceEnvironment: string | null;
@@ -397,16 +511,10 @@ export class PublishingService {
   /** Change status：Online / Hidden / Offline，必须填原因；不生成版本。 */
   async changeStatus(
     courseId: string,
-    body: { status: 'ONLINE' | 'HIDDEN' | 'OFFLINE'; reason?: string },
+    body: unknown,
     actorEmployeeId: string | null,
   ) {
-    const reason = (body.reason ?? '').trim();
-    if (!reason) {
-      throw new ConflictException({
-        code: 'REASON_REQUIRED',
-        message: 'A reason is required to change status.',
-      });
-    }
+    const { status, reason } = parseChangeStatusBody(body);
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
       select: { id: true, liveVersionId: true, liveStatus: true },
@@ -426,19 +534,31 @@ export class PublishingService {
     await this.prisma.$transaction([
       this.prisma.commerceCourse.update({
         where: { id: courseId },
-        data: { liveStatus: body.status },
+        data: { liveStatus: status },
       }),
       this.prisma.courseAuthoringActivity.create({
         data: {
           courseId,
           actorEmployeeId,
           action: HISTORY_ACTIONS.CHANGE_STATUS,
-          detail: { from, to: body.status, reason },
+          detail: { from, to: status, reason },
           reason,
         },
       }),
     ]);
-    return { from, to: body.status, reason };
+    if (status === 'ONLINE' && from !== 'ONLINE') {
+      void this.emitCourseNewLaunchIfFirstOnline(
+        courseId,
+        course.liveVersionId,
+      ).catch((error) => {
+        this.logger.warn(
+          `COURSE_NEW_LAUNCH event could not be prepared: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }
+    return { from, to: status, reason };
   }
 
   async listVersions(courseId: string) {
@@ -468,8 +588,13 @@ export class PublishingService {
         createdBy: true,
       },
     });
+    const names = await employeeNames(
+      this.prisma,
+      versions.map((version) => version.createdBy),
+    );
     return versions.map((version) => ({
       ...version,
+      publishedBy: operatorName(names, version.createdBy),
       isLive: version.id === course.liveVersionId,
     }));
   }

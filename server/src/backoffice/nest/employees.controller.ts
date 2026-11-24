@@ -7,10 +7,16 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
+import {
+  parseEnabledCapabilities,
+  type CapabilityId,
+} from '../../common/capabilities';
 import { DEFAULT_LOCALE, isLocale, type Locale } from '../lib/i18n/config';
 import { consume } from '../lib/rateLimit';
 import {
@@ -23,6 +29,10 @@ import {
   sendAdminPasswordReset,
   updateEmployee,
 } from '../modules/employee-account/services/employeeAccount';
+import {
+  getEmployeeFeatures,
+  saveEmployeeFeatures,
+} from '../modules/rbac/employeeFeatures';
 import { reissueActivation } from '../modules/user-authentication/services/passwordFlows';
 import { asBody, readNumber, readOptionalString, readString } from './body';
 import { backofficeError } from './errors';
@@ -60,6 +70,15 @@ function linkLocale(body: Record<string, unknown>): Locale {
 /** PRD PORT-LST / PORT-NEW / PORT-EDT / PORT-ADM：员工账号管理（仅 Admin）。 */
 @Controller('admin/employees')
 export class BackofficeEmployeesController {
+  constructor(private readonly config: ConfigService) {}
+
+  /** 环境能力（ADMIN_CAPABILITIES）：功能开关永远不能越过它。 */
+  private enabledCapabilities(): ReadonlySet<CapabilityId> {
+    return parseEnabledCapabilities(
+      this.config.get<string>('ADMIN_CAPABILITIES'),
+    );
+  }
+
   @Get()
   list(
     @Query('email') email?: string,
@@ -125,6 +144,47 @@ export class BackofficeEmployeesController {
       delivery: outcome.delivery,
       manualLink: outcome.manualLink,
     };
+  }
+
+  /** owner 2026-11-20：账号级功能权限（catalog + 显式 grants + effective）。 */
+  @Get(':employeeId/features')
+  async features(@Param('employeeId', new ParseUUIDPipe()) employeeId: string) {
+    const view = await getEmployeeFeatures(
+      employeeId,
+      this.enabledCapabilities(),
+    );
+    if (!view) throw backofficeError('INVALID_INPUT', 'Employee not found');
+    return view;
+  }
+
+  /**
+   * 全量替换显式开关（缺省 = 继承角色）。只有 Admin（accounts FULL）能到这一步；
+   * 最后一个可用 Admin 的账号管理不能被关掉（含给自己关掉），否则 PROTECTED_ADMIN_ACCOUNT。
+   */
+  @Put(':employeeId/features')
+  async saveFeatures(
+    @Req() request: BackofficeRequest,
+    @Param('employeeId', new ParseUUIDPipe()) employeeId: string,
+    @Body() raw: unknown,
+  ) {
+    const actor = admin(request);
+    const body = asBody(raw);
+    const outcome = await saveEmployeeFeatures({
+      employeeId,
+      grants: body.grants,
+      actorEmployeeId: actor.employeeId,
+      ipAddress: clientIp(request),
+      enabledCapabilities: this.enabledCapabilities(),
+    });
+    if (!outcome.ok) {
+      throw backofficeError(
+        outcome.code,
+        outcome.code === 'PROTECTED_ADMIN_ACCOUNT'
+          ? 'The last usable Admin must keep account management'
+          : 'Feature update rejected',
+      );
+    }
+    return outcome.view;
   }
 
   @Post(':employeeId/reset-password')

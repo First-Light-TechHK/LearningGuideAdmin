@@ -1,0 +1,231 @@
+{
+  "id": "81579d63-34ec-4011-99ff-cc4cf5b6f30d",
+  "code": "C002",
+  "slug": "single-language-course",
+  "categoryId": null,
+  "subjectId": null,
+  "learningMode": "TEXT_ONLY",
+  "defaultContentLanguage": "en-GB",
+  "learningLanguages": [
+    "en-GB"
+  ],
+  "coverAssetId": null,
+  "lifecycleStatus": "WORKING",
+  "liveStatus": "HIDDEN",
+  "liveVersionId": null,
+  "currentUatVersionId": null,
+  "approvedAt": null,
+  "approvedBy": null,
+  "lastUatPublishedAt": null,
+  "archivedAt": null,
+  "hasDraft": true,
+  "draftSourceType": null,
+  "draftSourceEnvironment": null,
+  "draftSourceVersionLabel": null,
+  "trialEnabled": false,
+  "revision": 1,
+  "revisionBy": "77909254-8d6e-4f2d-b9c2-60c361d52247",
+  "subtitle": null,
+  "level": null,
+  "tags": null,
+  "referencePrice": null,
+  "discount": null,
+  "legacyCategory": null,
+  "legacyAuthorIds": null,
+  "createdAt": "2026-11-20T00:38:24.570Z",
+  "updatedAt": "2026-11-20T00:38:24.611Z",
+  "category": null,
+  "cover": null,
+  "localizations": [
+    {
+      "id": "e7ebfaea-6ae1-4cba-9b10-4c677f3b2d14",
+      "courseId": "81579d63-34ec-4011-99ff-cc4cf5b6f30d",
+      "language": "en-GB",
+      "title": "Single language course",
+      "shortDescription": "An imported single-language course.",
+      "overview": "An imported single-language course overview with enough text to read.",
+      "whatYouLearn": [
+        "Learn one thing",
+        "Learn two things",
+        "Learn three things",
+        "Learn four things"
+      ],
+      "provides": [
+        "Video lessons",
+        "Reading material",
+        "Practice tests",
+        "Progress tracking"
+      ]
+    },
+    {
+      "id": "621d4ae6-bd48-40f4-9b9b-72810a84ad37",
+      "courseId": "81579d63-34ec-4011-99ff-cc4cf5b6f30d",
+      "language": "zh-CN",
+      "title": "",
+      "shortDescription": null,
+      "overview": null,
+      "whatYouLearn": null,
+      "provides": null
+    }
+  ],
+  "trialRows": [],
+  "plans": [],
+  "lessons": [],
+  "completeness": {
+    "steps": {
+      "courseInformation": {
+        "complete": false,
+        "missing": [
+          "category: Required",
+          "cover: Required",
+          "zh-CN · title: Required",
+          "zh-CN · shortDescription: Required",
+          "zh-CN · overview: Required",
+          "zh-CN · learn: At least 4 items",
+          "zh-CN · learn[0]: Required",
+          "zh-CN · learn[1]: Required",
+          "zh-CN · learn[2]: Required",
+          "zh-CN · learn[3]: Required",
+          "zh-CN · provides: At least 4 items",
+          "zh-CN · provides[0]: Required",
+          "zh-CN · provides[1]: Required",
+          "zh-CN · provides[2]: Required",
+          "zh-CN · provides[3]: Required"
+        ]
+      },
+      "content": {
+        "complete": false,
+        "missing": [
+          "Add at least 1 lesson."
+        ],
+        "lessons": []
+      },
+      "trial": {
+        "complete": true,
+        "missing": []
+      }
+    },
+    "completedSteps": 1,
+    "canPublish": false,
+    "publishBlockers": [
+      "Complete Course Information first.",
+      "Complete at least 1 lesson first."
+    ],
+    "publishBlockerCodes": [
+      "COURSE_INFORMATION",
+      "LESSON_STUDY"
+    ],
+    "issues": [
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "category",
+        "message": "Required"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "cover",
+        "message": "Required"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "title",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "shortDescription",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "overview",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "MIN_ITEMS",
+        "step": "COURSE_INFORMATION",
+        "field": "learn",
+        "message": "At least 4 items",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "learn[0]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "learn[1]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "learn[2]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "learn[3]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "MIN_ITEMS",
+        "step": "COURSE_INFORMATION",
+        "field": "provides",
+        "message": "At least 4 items",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "provides[0]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "provides[1]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "provides[2]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "REQUIRED",
+        "step": "COURSE_INFORMATION",
+        "field": "provides[3]",
+        "message": "Required",
+        "language": "zh-CN"
+      },
+      {
+        "code": "LESSON_REQUIRED",
+        "step": "COURSE_CONTENT",
+        "field": "lessons",
+        "message": "Add at least 1 lesson."
+      }
+    ],
+    "incompleteLessons": []
+  }
+}

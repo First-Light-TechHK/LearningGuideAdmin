@@ -248,6 +248,8 @@ model Employee {
   preferences  EmployeeUiPreference?
   actorEvents  AuditEvent[]          @relation("AuditActor")
   targetEvents AuditEvent[]          @relation("AuditTarget")
+  featureGrants        EmployeeFeatureGrant[] @relation("FeatureGrantEmployee")
+  featureGrantsUpdated EmployeeFeatureGrant[] @relation("FeatureGrantUpdatedBy")
 
   @@index([role], map: "employees_role_idx")
   @@index([accountStatus, emailVerification], map: "employees_status_idx")
@@ -326,6 +328,25 @@ model EmployeeUiPreference {
   employee Employee @relation(fields: [employeeId], references: [employeeId], onDelete: Cascade, onUpdate: NoAction)
 
   @@map("employee_ui_preferences")
+}
+
+/// 账号级功能开关（owner 2026-11-20）：缺省（没有行）= 继承角色基线；有行 = 显式加减。
+/// 生效 = 环境能力（ADMIN_CAPABILITIES）∩ 角色矩阵 ∩ 账号开关，规则见 src/backoffice/modules/rbac/features.ts。
+/// 迁移：20261120120000_employee_feature_grants。
+model EmployeeFeatureGrant {
+  id        BigInt   @id @default(autoincrement())
+  employeeId String  @map("employee_id") @db.Uuid
+  feature   String
+  allowed   Boolean
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  employee          Employee  @relation("FeatureGrantEmployee", fields: [employeeId], references: [employeeId], onDelete: Cascade, onUpdate: NoAction)
+  updatedByEmployee Employee? @relation("FeatureGrantUpdatedBy", fields: [updatedBy], references: [employeeId], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([employeeId, feature], map: "employee_feature_grants_employee_feature_key")
+  @@index([feature], map: "employee_feature_grants_feature_idx")
+  @@map("employee_feature_grants")
 }
 
 model BackofficeSetting {
@@ -1156,7 +1177,8 @@ model LearningPoint {
   anchorHeading String?
   sortOrder     Int
 
-  @@unique([lessonId, language, code])
+  /// 学习点身份 = 课时 + 语言 + 来源 + 编号（包规范 §4.2：视频与文本学习点可以同编号）
+  @@unique([lessonId, language, source, code])
 }
 
 model ExhibitTrigger {

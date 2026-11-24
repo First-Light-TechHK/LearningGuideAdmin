@@ -1,9 +1,12 @@
+import type { PoolClient } from 'pg';
+
 import type {
   AccountStatus,
   DisplayStatus,
   EmailVerification,
   EmployeeRole,
 } from '../contracts/employee';
+import { withAdminGuard } from '../lib/adminGuard';
 import { query } from '../lib/db';
 
 export type EmployeeRecord = {
@@ -143,6 +146,80 @@ export async function updateEmployee(
   const row = rows[0];
   if (!row) throw new Error('Employee not found');
   return toRecord(row);
+}
+
+/** 事务内读取员工（最后管理员校验用）。 */
+export async function findByIdWithin(
+  client: PoolClient,
+  employeeId: string,
+): Promise<EmployeeRecord | null> {
+  const result = await client.query<EmployeeRow>(
+    `SELECT ${COLUMNS} FROM employees WHERE employee_id = $1`,
+    [employeeId],
+  );
+  return result.rows[0] ? toRecord(result.rows[0]) : null;
+}
+
+async function updateWithin(
+  client: PoolClient,
+  employeeId: string,
+  patch: {
+    loginEmail?: string;
+    role?: EmployeeRole;
+    accountStatus?: AccountStatus;
+  },
+): Promise<EmployeeRecord> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (patch.loginEmail !== undefined) {
+    params.push(patch.loginEmail);
+    sets.push(`login_email = $${params.length}`);
+  }
+  if (patch.role !== undefined) {
+    params.push(patch.role);
+    sets.push(`role = $${params.length}`);
+  }
+  if (patch.accountStatus !== undefined) {
+    params.push(patch.accountStatus);
+    sets.push(`account_status = $${params.length}`);
+  }
+
+  sets.push('updated_at = now()');
+  params.push(employeeId);
+
+  const result = await client.query<EmployeeRow>(
+    `UPDATE employees SET ${sets.join(', ')} WHERE employee_id = $${params.length}
+     RETURNING ${COLUMNS}`,
+    params,
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('Employee not found');
+  return toRecord(row);
+}
+
+/**
+ * 角色/状态变更与「最后可用管理员」校验在同一事务内完成。
+ * allow 在 advisory lock 内基于最新行重新计算；返回 null 表示拒绝（调用方给 PROTECTED_ADMIN_ACCOUNT）。
+ */
+export async function updateEmployeeGuardingLastAdmin(input: {
+  employeeId: string;
+  patch: {
+    loginEmail?: string;
+    role?: EmployeeRole;
+    accountStatus?: AccountStatus;
+  };
+  allow: (
+    client: PoolClient,
+    current: EmployeeRecord | null,
+  ) => Promise<boolean>;
+}): Promise<EmployeeRecord | null> {
+  return withAdminGuard(async (client) => {
+    const current = await findByIdWithin(client, input.employeeId);
+    if (!current) return null;
+    if (!(await input.allow(client, current))) return null;
+    return updateWithin(client, input.employeeId, input.patch);
+  });
 }
 
 /** 设置密码同时完成邮箱验证（PRD PORT-ACT-002 / PORT-PWD-004）。 */

@@ -14,7 +14,7 @@ import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { studentsApi } from '../lib/studentsApi'
-import { EMAIL_PATTERN, formatStudentDate, initialOf, studentErrorText } from '../lib/studentsFormat'
+import { EMAIL_PATTERN, emailDelivery, formatStudentAgeRange, formatStudentCountry, formatStudentDate, formatStudentEducation, formatStudentInterest, initialOf, studentErrorText, type EmailDelivery } from '../lib/studentsFormat'
 
 type ModalKind = 'deactivate' | 'activate' | 'email' | 'password' | 'resend' | 'discard'
 type Notice = { tone: 'ok' | 'error'; text: string }
@@ -236,12 +236,12 @@ export function StudentDrawer({
               <section className="smSection">
                 <h3 className="smSectionTitle">{t(locale, 'studentDrawer.profile')}</h3>
                 <dl className="smGrid">
-                  <div><dt>{t(locale, 'studentDrawer.country')}</dt><dd>{detail.profile.country ?? t(locale, 'studentDrawer.notProvided')}</dd></div>
-                  <div><dt>{t(locale, 'studentDrawer.ageRange')}</dt><dd>{detail.profile.ageRange ?? t(locale, 'studentDrawer.notProvided')}</dd></div>
-                  <div><dt>{t(locale, 'studentDrawer.education')}</dt><dd>{detail.profile.education ?? t(locale, 'studentDrawer.notProvided')}</dd></div>
+                  <div><dt>{t(locale, 'studentDrawer.country')}</dt><dd>{detail.profile.country ? formatStudentCountry(locale, detail.profile.country) : t(locale, 'studentDrawer.notProvided')}</dd></div>
+                  <div><dt>{t(locale, 'studentDrawer.ageRange')}</dt><dd>{detail.profile.ageRange ? formatStudentAgeRange(locale, detail.profile.ageRange) : t(locale, 'studentDrawer.notProvided')}</dd></div>
+                  <div><dt>{t(locale, 'studentDrawer.education')}</dt><dd>{detail.profile.education ? formatStudentEducation(locale, detail.profile.education) : t(locale, 'studentDrawer.notProvided')}</dd></div>
                   <div>
                     <dt>{t(locale, 'studentDrawer.interests')}</dt>
-                    <dd>{detail.profile.interests.length ? detail.profile.interests.join(', ') : t(locale, 'studentDrawer.notProvided')}</dd>
+                    <dd>{detail.profile.interests.length ? detail.profile.interests.map((interest) => formatStudentInterest(locale, interest)).join(', ') : t(locale, 'studentDrawer.notProvided')}</dd>
                   </div>
                   <div><dt>{t(locale, 'studentDrawer.language')}</dt><dd>{t(locale, `studentDrawer.languageName.${detail.profile.language}`)}</dd></div>
                   <div>
@@ -418,6 +418,7 @@ export function StudentDrawer({
           kind={modal}
           detail={detail}
           onCancel={() => setModal(null)}
+          onRefresh={apply}
           onDone={(next, text) => {
             apply(next)
             setModal(null)
@@ -497,11 +498,13 @@ function ActionModal({
   kind,
   detail,
   onCancel,
+  onRefresh,
   onDone,
 }: {
   kind: Exclude<ModalKind, 'discard'>
   detail: StudentDetails
   onCancel: () => void
+  onRefresh: (next: StudentDetails) => void
   onDone: (next: StudentDetails, notice: string) => void
 }) {
   const locale = useLocale()
@@ -524,11 +527,28 @@ function ActionModal({
     </label>
   )
 
-  async function run(body: Record<string, unknown>, notice: (sent: boolean | null) => string): Promise<string | null> {
+  async function run(
+    body: Record<string, unknown>,
+    notice: (delivery: EmailDelivery | null) => string,
+    applied?: (fresh: StudentDetails) => boolean,
+  ): Promise<string | null> {
     const result = await studentsApi.act(detail.id, body)
-    if (!result.ok) return studentErrorText(locale, result.code)
-    onDone(result.data.student, notice(result.data.email ? result.data.email.sent : null))
-    return null
+    if (result.ok) {
+      onDone(result.data.student, notice(emailDelivery(result.data.email)))
+      return null
+    }
+    if (result.code === 'STUDENTS_UNAVAILABLE') {
+      // 网关/超时不代表动作没生效：先取最新详情。已生效就按成功处理，避免员工重复操作。
+      const fresh = await studentsApi.detail(detail.id)
+      if (fresh.ok) {
+        onRefresh(fresh.data)
+        if (applied?.(fresh.data)) {
+          onDone(fresh.data, t(locale, 'studentNotice.action_recovered'))
+          return null
+        }
+      }
+    }
+    return studentErrorText(locale, result.code)
   }
 
   if (kind === 'deactivate' || kind === 'activate') {
@@ -540,7 +560,13 @@ function ActionModal({
         danger={deactivate}
         disabled={!reason.trim()}
         onCancel={onCancel}
-        onConfirm={() => run({ action: kind, reason: reason.trim() }, () => t(locale, `studentNotice.${kind}`))}
+        onConfirm={() =>
+          run(
+            { action: kind, reason: reason.trim() },
+            () => t(locale, `studentNotice.${kind}`),
+            (fresh) => fresh.accountStatus === (deactivate ? 'inactive' : 'active'),
+          )
+        }
       >
         <p className="cardBody">{t(locale, deactivate ? 'studentModal.deactivateBody' : 'studentModal.activateBody')}</p>
         {deactivate ? <div className="smBanner smBannerInfo">{t(locale, 'studentModal.deactivateBilling')}</div> : null}
@@ -550,6 +576,7 @@ function ActionModal({
   }
 
   if (kind === 'email') {
+    const target = email.trim()
     const ready = emailValid && reason.trim() !== '' && (!exempt || reference.trim() !== '')
     return (
       <ConfirmModal
@@ -561,16 +588,22 @@ function ActionModal({
           run(
             {
               action: 'change_email',
-              email: email.trim(),
+              email: target,
               reason: reason.trim(),
               exemption: exempt ? { reference: reference.trim() } : null,
             },
-            (sent) =>
+            (delivery) =>
               exempt
                 ? t(locale, 'studentNotice.change_email_exempt')
-                : sent === false
-                  ? t(locale, 'studentNotice.change_email_unsent')
-                  : t(locale, 'studentNotice.change_email'),
+                : delivery === 'pending'
+                  ? t(locale, 'studentNotice.email_pending')
+                  : delivery === 'unsent'
+                    ? t(locale, 'studentNotice.change_email_unsent')
+                    : t(locale, 'studentNotice.change_email'),
+            (fresh) =>
+              fresh.email !== null &&
+              fresh.email.toLowerCase() === target.toLowerCase() &&
+              (detail.email === null || detail.email.toLowerCase() !== target.toLowerCase()),
           )
         }
       >
@@ -622,7 +655,17 @@ function ActionModal({
         title={t(locale, setup ? 'studentModal.passwordSetupTitle' : 'studentModal.passwordResetTitle')}
         confirmLabel={t(locale, 'studentModal.passwordSend')}
         onCancel={onCancel}
-        onConfirm={() => run({ action: 'send_password_link' }, () => t(locale, 'studentNotice.send_password_link'))}
+        onConfirm={() =>
+          run(
+            { action: 'send_password_link' },
+            (delivery) =>
+              delivery === 'pending'
+                ? t(locale, 'studentNotice.email_pending')
+                : delivery === 'unsent'
+                  ? t(locale, 'studentNotice.email_unsent')
+                  : t(locale, 'studentNotice.send_password_link'),
+          )
+        }
       >
         <p className="fieldLabel">{t(locale, 'studentModal.passwordTo', { email: detail.email ?? '' })}</p>
         <p className="cardBody">{t(locale, setup ? 'studentModal.passwordSetupBody' : 'studentModal.passwordResetBody')}</p>
@@ -635,7 +678,17 @@ function ActionModal({
       title={t(locale, 'studentModal.resendTitle')}
       confirmLabel={t(locale, 'studentModal.resendSend')}
       onCancel={onCancel}
-      onConfirm={() => run({ action: 'resend_verification' }, () => t(locale, 'studentNotice.resend_verification'))}
+      onConfirm={() =>
+        run(
+          { action: 'resend_verification' },
+          (delivery) =>
+            delivery === 'pending'
+              ? t(locale, 'studentNotice.email_pending')
+              : delivery === 'unsent'
+                ? t(locale, 'studentNotice.email_unsent')
+                : t(locale, 'studentNotice.resend_verification'),
+        )
+      }
     >
       <p className="cardBody">{t(locale, 'studentModal.resendBody', { email: detail.email ?? '' })}</p>
     </ConfirmModal>

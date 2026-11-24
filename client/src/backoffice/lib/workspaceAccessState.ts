@@ -1,11 +1,11 @@
 import { createContext, useContext } from 'react'
 import {
-  isActionAllowed,
-  levelFor,
+  actionAllowedAtLevel,
   type ActionKind,
   type MenuKey,
   type PermissionLevel,
 } from '../rbac/permissions'
+import { menuEffectiveLevel, type AccountFeatures } from './capabilities'
 
 /**
  * 工作区（Knowledge / AI Tutor）的按角色读写能力。
@@ -25,17 +25,22 @@ export type WorkspaceAccess = {
   can: (action: ActionKind) => boolean
 }
 
-export function buildAccess(role: Parameters<typeof levelFor>[0], menu: MenuKey): WorkspaceAccess {
-  const level = levelFor(role, menu)
+export function buildAccess(
+  role: Parameters<typeof menuEffectiveLevel>[0],
+  menu: MenuKey,
+  features: AccountFeatures = null,
+): WorkspaceAccess {
+  // 账号功能键允许时可把角色 NONE 抬到 VIEW；禁止时收紧到 NONE（与 MenuGuard/服务端一致）。
+  const level = menuEffectiveLevel(role, menu, features)
   return {
     menu,
     level,
     readOnly: level === 'VIEW',
-    canEdit: isActionAllowed(role, menu, 'EDIT_EXISTING'),
-    canCreate: isActionAllowed(role, menu, 'CREATE'),
-    canDelete: isActionAllowed(role, menu, 'DELETE'),
-    canPublish: isActionAllowed(role, menu, 'PUBLISH'),
-    can: (action) => isActionAllowed(role, menu, action),
+    canEdit: actionAllowedAtLevel(level, 'EDIT_EXISTING'),
+    canCreate: actionAllowedAtLevel(level, 'CREATE'),
+    canDelete: actionAllowedAtLevel(level, 'DELETE'),
+    canPublish: actionAllowedAtLevel(level, 'PUBLISH'),
+    can: (action) => actionAllowedAtLevel(level, action),
   }
 }
 

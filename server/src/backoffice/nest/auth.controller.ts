@@ -10,8 +10,10 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 
+import { parseEnabledCapabilities } from '../../common/capabilities';
 import { normaliseEmail, type SessionEmployee } from '../contracts/employee';
 import { isDeployed } from '../lib/env';
 import { DEFAULT_LOCALE, isLocale, type Locale } from '../lib/i18n/config';
@@ -24,13 +26,18 @@ import {
   TOKEN_STATUS_MAX_PER_WINDOW,
 } from '../lib/securityPolicy';
 import {
-  canAccessEmployeeAccount,
   DEFAULT_LANDING_MENU,
   visibleMenus,
   visibleSettingsSubs,
   type MenuKey,
   type SettingsSubKey,
 } from '../modules/rbac/permissions';
+import {
+  effectiveFeatureKeys,
+  effectiveModuleLevel,
+  type FeatureKey,
+} from '../modules/rbac/features';
+import { grantsForRequest } from '../modules/rbac/employeeFeatures';
 import {
   createFirstAdmin,
   employeeCount,
@@ -79,6 +86,8 @@ export type SessionPayload = {
   locale: Locale;
   menus: MenuKey[];
   settings: SettingsSubKey[];
+  /** 该员工生效的功能键（环境能力 ∩ 角色矩阵 ∩ 账号开关），前端菜单过滤用。 */
+  features: FeatureKey[];
   canManageEmployeeAccount: boolean;
   landingMenu: MenuKey;
   /** PORT-NAV-003：按账号恢复侧栏折叠状态 */
@@ -102,6 +111,8 @@ function bodyLocale(body: Record<string, unknown>): Locale {
 /** PRD PORT-LOG / PORT-ACT / PORT-PWD / PORT-NAV-006：员工登录、激活、找回密码与语言偏好。 */
 @Controller()
 export class BackofficeAuthController {
+  constructor(private readonly config: ConfigService) {}
+
   @Post('auth/email-check')
   @HttpCode(200)
   async emailCheck(@Req() request: Request, @Body() raw: unknown) {
@@ -319,6 +330,23 @@ export class BackofficeAuthController {
     const sidebarState = await preferencesRepository
       .findSidebarState(employee.employeeId)
       .catch(() => null);
+    // owner 2026-11-20：账号级功能开关 = 环境能力 ∩ 角色矩阵 ∩ 显式开关；
+    // 守卫已在同一请求里加载过（缓存），这里直接复用。
+    const enabledCapabilities = parseEnabledCapabilities(
+      this.config.get<string>('ADMIN_CAPABILITIES'),
+    );
+    const grants = await grantsForRequest(request, employee.employeeId);
+    const features = effectiveFeatureKeys({
+      role: employee.role,
+      grants,
+      enabledCapabilities,
+    });
+    const accountsLevel = effectiveModuleLevel(
+      employee.role,
+      'module.accounts',
+      grants,
+      enabledCapabilities,
+    );
     return {
       employee: {
         employeeId: employee.employeeId,
@@ -331,7 +359,8 @@ export class BackofficeAuthController {
       locale,
       menus: visibleMenus(employee.role),
       settings: visibleSettingsSubs(employee.role),
-      canManageEmployeeAccount: canAccessEmployeeAccount(employee.role),
+      features,
+      canManageEmployeeAccount: accountsLevel === 'FULL',
       landingMenu: DEFAULT_LANDING_MENU,
       sidebarState: sidebarState === 'collapsed' ? 'collapsed' : 'expanded',
     };

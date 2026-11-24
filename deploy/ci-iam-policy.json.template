@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DeployPortalSandbox",
+      "Effect": "Allow",
+      "Action": [
+        "apprunner:DescribeService",
+        "apprunner:ListOperations",
+        "apprunner:StartDeployment"
+      ],
+      "Resource": "arn:aws:apprunner:ap-southeast-1:<ACCOUNT_ID>:service/learning-guide-sandbox/<SERVICE_ID>"
+    },
+    {
+      "Sid": "DeployAdminSandbox",
+      "Effect": "Allow",
+      "Action": [
+        "apprunner:DescribeService",
+        "apprunner:ListOperations",
+        "apprunner:StartDeployment"
+      ],
+      "Resource": "arn:aws:apprunner:ap-southeast-1:<ACCOUNT_ID>:service/learning-guide-admin-sandbox/<SERVICE_ID>"
+    },
+    {
+      "Sid": "UpdatePortalSandboxEnv",
+      "Effect": "Allow",
+      "Action": [
+        "apprunner:UpdateService"
+      ],
+      "Resource": "arn:aws:apprunner:ap-southeast-1:<ACCOUNT_ID>:service/learning-guide-sandbox/<SERVICE_ID>"
+    },
+    {
+      "Sid": "UpdateAdminSandboxEnv",
+      "Effect": "Allow",
+      "Action": [
+        "apprunner:UpdateService"
+      ],
+      "Resource": "arn:aws:apprunner:ap-southeast-1:<ACCOUNT_ID>:service/learning-guide-admin-sandbox/<SERVICE_ID>"
+    }
+  ]
+}
