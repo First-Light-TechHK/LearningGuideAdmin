@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { boRequest } from './lib/api';
@@ -16,6 +16,7 @@ import {
   type CapabilityId,
   type EnvironmentResponse,
 } from './lib/capabilities';
+import { rememberEnvironmentIdentity, resolveEnvironment } from './lib/environment';
 import { t } from './lib/i18n/messages';
 import { SESSION_CHANGED_EVENT, useLocale, usePathname } from './lib/navigation';
 import { menuFromPathSegments, menuHref, visibleMenus } from './rbac/permissions';
@@ -38,6 +39,8 @@ export function ShellRoute() {
   const [capabilities, setCapabilities] = useState<ReadonlySet<CapabilityId> | null>(null)
   // undefined = 会话还没回来；null = 旧服务端（不额外限制）；Set = 该账号生效的功能键
   const [accountFeatures, setAccountFeatures] = useState<AccountFeatures | undefined>(undefined)
+  const [appEnv, setAppEnv] = useState<string | null>(null)
+  const [envLabel, setEnvLabel] = useState<string | null>(null)
 
   const load = useCallback(() => {
     return boRequest<SessionPayload>('/api/session').then((result) => {
@@ -80,9 +83,22 @@ export function ShellRoute() {
     void boRequest<EnvironmentResponse>('/api/backoffice/environment').then((result) => {
       const payload = result.success ? result.data : null
       rememberEnvironment(payload)
+      setEnvLabel(payload?.label ?? null)
       setCapabilities(capabilitiesFromEnvironment(payload))
     })
   }, [])
+
+  // 环境种类只认 /api/health 的 APP_ENV（环境端点分不清 DEV 与 Sandbox）；读不到 = 中性墙 + “未知环境”，不阻塞首屏。
+  useEffect(() => {
+    void boRequest<{ environment?: string }>('/api/health').then((result) => {
+      setAppEnv(result.success && typeof result.data?.environment === 'string' ? result.data.environment : null)
+    })
+  }, [])
+
+  const environment = useMemo(() => resolveEnvironment(appEnv, envLabel), [appEnv, envLabel])
+  useEffect(() => {
+    rememberEnvironmentIdentity(environment)
+  }, [environment])
 
   if (state.kind === 'loading' || capabilities === null || accountFeatures === undefined) {
     return <div className="shellLoading">{t(locale, 'common.loading')}</div>

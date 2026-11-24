@@ -140,6 +140,14 @@
     "role": "角色",
     "settingsSection": "设置",
     "noModulesEnabled": "当前环境未启用任何可用模块，请联系管理员。",
+    "environment": {
+      "sandbox": "沙盒",
+      "production": "生产",
+      "unknown": "未知环境",
+      "announce": "当前环境：{name}"
+    },
+    "brandLead": "Learning Guide",
+    "brandTail": "BackOffice",
     "switchLanguage": "Switch to English (UK)"
   },
   "course": {

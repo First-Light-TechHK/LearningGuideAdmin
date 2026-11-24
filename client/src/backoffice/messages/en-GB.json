@@ -140,6 +140,14 @@
     "role": "Role",
     "settingsSection": "Settings",
     "noModulesEnabled": "No modules are enabled in this environment. Please contact an administrator.",
+    "environment": {
+      "sandbox": "Sandbox",
+      "production": "Production",
+      "unknown": "Unknown environment",
+      "announce": "Environment: {name}"
+    },
+    "brandLead": "Learning Guide",
+    "brandTail": "BackOffice",
     "switchLanguage": "切换到简体中文"
   },
   "course": {

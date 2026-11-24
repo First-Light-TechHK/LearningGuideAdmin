@@ -30,6 +30,8 @@ export const ALL_CAPABILITIES: ReadonlySet<CapabilityId> = new Set(CAPABILITY_ID
 export type EnvironmentResponse = {
   capabilities?: unknown
   previewEntry?: unknown
+  label?: string
+  versionNumberingMode?: 'sandbox' | 'production'
 }
 
 /** 解析环境端点返回的能力集：缺失 / 非数组 = 全开；未知标识忽略（未来服务端新增能力不拖垮老前端）。 */
@@ -69,9 +71,11 @@ export function previewEntryFromEnvironment(
 let environmentCache: {
   capabilities: ReadonlySet<CapabilityId>
   previewEntry: PreviewEntry
+  numberingMode: 'sandbox' | 'production' | null
 } = {
   capabilities: ALL_CAPABILITIES,
   previewEntry: DEFAULT_PREVIEW_ENTRY,
+  numberingMode: null,
 }
 
 /** 记住一次环境端点结果（ShellRoute 专用）；payload 为 null（读取失败）时回退全开 + learner。 */
@@ -81,7 +85,16 @@ export function rememberEnvironment(
   environmentCache = {
     capabilities: capabilitiesFromEnvironment(payload),
     previewEntry: previewEntryFromEnvironment(payload),
+    numberingMode:
+      payload?.versionNumberingMode === 'sandbox' || payload?.versionNumberingMode === 'production'
+        ? payload.versionNumberingMode
+        : null,
   }
+}
+
+/** 版本号规则（VERSION_NUMBERING_MODE）；环境端点没读到 = null，页面不预测下一个版本号。 */
+export function cachedNumberingMode(): 'sandbox' | 'production' | null {
+  return environmentCache.numberingMode
 }
 
 /** ShellRoute 拉过环境端点后的能力集（与服务端 ADMIN_CAPABILITIES 同义）。 */

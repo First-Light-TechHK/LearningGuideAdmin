@@ -2137,3 +2137,48 @@ body.tableColResizing {
     padding-top: 8px;
   }
 }
+
+/* ============ Classical frame: tokens (environment wall, keystone, versions grammar) ============ */
+:root {
+  --cl-ground: #e7e1d3;
+  --cl-paper: #fbfaf6;
+  --cl-paper-2: #f6f3eb;
+  --cl-ink: #242623;
+  --cl-ink-3: #666960;
+  --cl-walnut: #654b35;
+  --cl-brass: #9b8053;
+  --cl-brass-light: #ad9265;
+  --cl-ivory: #f1ede3;
+  --cl-glow: #de9c46; /* lamp only; never text */
+  --cl-rule: rgba(36, 38, 35, 0.16);
+  --cl-rule-2: rgba(36, 38, 35, 0.34);
+  --cl-rule-strong: rgba(36, 38, 35, 0.62);
+  --cl-text: #111827;
+  --cl-text-2: #4b5563;
+  --cl-text-3: #626a78;
+  --cl-amber-ink: #b54708;
+  --cl-green-ink: #067647;
+  --cl-serif: 'Cormorant', 'Cormorant Garamond', 'Iowan Old Style', 'Palatino Linotype', Georgia,
+    'PingFang SC', 'Microsoft YaHei', serif;
+  --cl-caps: 'Cinzel', 'Trajan Pro', var(--cl-serif);
+  --cl-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --cl-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --cl-ease-publish: cubic-bezier(0.5, 0, 0.2, 1);
+}
+
+/* the three wall kinds */
+.shell[data-env='sandbox'] {
+  --env: #5b2a86;
+  --env-band: #eee9ec;
+  --env-hair: dashed;
+}
+.shell[data-env='production'] {
+  --env: #8e2f1f;
+  --env-band: #f3eae2;
+  --env-hair: solid;
+}
+.shell[data-env='neutral'] {
+  --env: #666960;
+  --env-band: #eceae4;
+  --env-hair: solid;
+}
