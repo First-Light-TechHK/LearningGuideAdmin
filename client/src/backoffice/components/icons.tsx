@@ -168,6 +168,14 @@ export function LockIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function BellIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...strokeProps(size, className, "0 0 16 16", 1.5)}>
+      <path d="M4 5.33333a4 4 0 0 1 8 0C12 10 14 11.3333 14 11.3333H2S4 10 4 5.33333M6.88667 14a1.3333 1.3333 0 0 0 2.2267 0" />
+    </svg>
+  );
+}
+
 export function EyeIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...strokeProps(size, className, "0 0 16 16", 2)}>

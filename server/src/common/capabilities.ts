@@ -84,6 +84,8 @@ const GOVERNED_PREFIXES: readonly GovernedPrefix[] = [
   { segments: ['portal'], capabilities: ['course'] },
   // 运营位（课程首页的运营配置）
   { segments: ['backoffice', 'operations'], capabilities: ['operations'] },
+  // Settings › Notification Configuration
+  { segments: ['backoffice', 'notifications'], capabilities: ['settings'] },
   // 服务台与 Portal → Admin 的 Helpdesk 集成
   { segments: ['integration', 'helpdesk'], capabilities: ['helpdesk'] },
   { segments: ['helpdesk'], capabilities: ['helpdesk'] },

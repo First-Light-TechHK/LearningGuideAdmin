@@ -255,13 +255,35 @@ describe('Commerce course workflow (e2e)', () => {
     const spy = jest
       .spyOn(publishing, 'completenessForDraft')
       .mockResolvedValue({ canPublish: true, publishBlockers: [] } as never);
+    // Notification P0: the first publish leaves the course OFFLINE and must not announce it.
+    const savedEnv = {
+      base: process.env.PORTAL_NOTIFICATIONS_BASE_URL,
+      token: process.env.PORTAL_NOTIFICATIONS_TOKEN,
+    };
+    process.env.PORTAL_NOTIFICATIONS_BASE_URL = 'http://portal.test';
+    process.env.PORTAL_NOTIFICATIONS_TOKEN = 'test-token';
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() =>
+        Promise.resolve(new Response('{"ok":true}', { status: 200 })),
+      );
     try {
       await agent
         .post(`/api/backoffice/courses/${id}/publish`)
-        .send({})
+        .send({ notifyLearners: true })
         .expect(200);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
+      fetchSpy.mockRestore();
+      for (const [name, value] of [
+        ['PORTAL_NOTIFICATIONS_BASE_URL', savedEnv.base],
+        ['PORTAL_NOTIFICATIONS_TOKEN', savedEnv.token],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
     expect(
       (await prisma.commerceCourse.findUniqueOrThrow({ where: { id } }))

@@ -39,6 +39,8 @@ export type RouteAccess =
       feature?: FeatureKey;
       /** 任一功能键生效即放行（用于作业列表这类「导入或导出都该能看」的路径）。 */
       featuresAny?: FeatureKey[];
+      /** 菜单检查之外还要求 Admin 角色（Notification Configuration，PRD §3/§11.3）。 */
+      adminOnly?: boolean;
     };
 
 const PUBLIC_AUTH = new Set([
@@ -218,6 +220,16 @@ export function routeAccess(method: string, path: string): RouteAccess {
   if (first === 'backoffice') {
     // 环境标识是所有后台页面的公共信息
     if (second === 'environment') return { kind: 'signedIn' };
+    // Notification Configuration（Settings 子页）：仅 Admin 且 Settings 生效；
+    // 读 = VIEW，写（保存/开关/测试/广播/撤回）= PUBLISH（Settings 必须 FULL）
+    if (second === 'notifications') {
+      return {
+        kind: 'menu',
+        menus: ['settings'],
+        action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+        adminOnly: true,
+      };
+    }
     // 运营位（/api/backoffice/operations/**）：读 = VIEW；保存/发布 = PUBLISH；
     // 独立 module.operations 开关（账号级），环境能力另由 operations 能力门管
     if (second === 'operations') {

@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
+import { Logger } from '@nestjs/common';
+
 import type { SessionEmployee } from '../../contracts/employee';
 import { isUuid } from '../../../common/uuidv7';
+import { notifyHelpdeskReply } from '../notification/events';
 import {
   AGENT_ACTIONS,
   LIST_STATUS_FILTERS,
@@ -38,6 +41,34 @@ const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
 /** 与 Portal 的 q 上限一致（HELPDESK_LIMITS.queryMax）。 */
 const MAX_QUERY = 120;
+const notificationLogger = new Logger('HelpdeskNotificationEvents');
+
+/**
+ * Notification P0：一条学员可见回复对应的通知事件（设计 §4）。
+ * 内部备注不产生事件；同一 ticket 只取最新一条学员可见员工回复作为 replyId。
+ */
+export function visibleReplyEventFor(detail: EnquiryDetail): {
+  ticketId: string;
+  replyId: string;
+  ticketSubject: string;
+  ticketLink: string;
+  email: string;
+} | null {
+  const reply = [...detail.messages]
+    .reverse()
+    .find((message) => message.authorKind === 'agent' && !message.internal);
+  if (!reply) return null;
+  // Portal 的事件接口必须能定位收件人：只用学员账号邮箱（PRD §10 只发给验证过的账号邮箱）。
+  const email = detail.student?.accountEmail?.trim();
+  if (!email) return null;
+  return {
+    ticketId: detail.id,
+    replyId: reply.id,
+    ticketSubject: detail.subject,
+    ticketLink: `/en-GB/account/my-learning/support/${encodeURIComponent(detail.id)}`,
+    email,
+  };
+}
 const MAX_CURSOR = 512;
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 // eslint-disable-next-line no-control-regex
@@ -270,7 +301,26 @@ export function createHelpdeskService(
         },
         key,
       );
-      return refreshed(id, written);
+      const detail = await refreshed(id, written);
+      // Notification P0（设计 §4）：只有学员可见回复（非内部备注）触发事件。
+      // eventKey = ticket + reply；失败只记录告警，不影响回复已经写成功。
+      if (!body.internal) {
+        const event = visibleReplyEventFor(detail);
+        if (event) {
+          void notifyHelpdeskReply(event).catch((error) => {
+            notificationLogger.warn(
+              `HELPDESK_TICKET_REPLIED event could not be prepared: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          });
+        } else {
+          notificationLogger.warn(
+            `HELPDESK_TICKET_REPLIED skipped for ticket ${id}: no learner account email`,
+          );
+        }
+      }
+      return detail;
     },
 
     async act(

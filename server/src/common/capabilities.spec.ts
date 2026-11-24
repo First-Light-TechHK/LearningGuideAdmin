@@ -38,6 +38,7 @@ describe('能力门：路径前缀 → 能力映射表', () => {
     for (const path of [
       '/api/backoffice/courses',
       '/api/backoffice/operations',
+      '/api/backoffice/notifications/templates',
       '/api/helpdesk/tickets',
       '/api/integration/helpdesk/faqs',
       '/api/students',
@@ -107,6 +108,7 @@ describe('能力门：路径前缀 → 能力映射表', () => {
     for (const path of [
       '/api/backoffice/operations',
       '/api/backoffice/operations/popular-courses',
+      '/api/backoffice/notifications/templates',
       '/api/helpdesk/tickets',
       '/api/helpdesk/faqs/f1',
       '/api/integration/helpdesk/suggest',

@@ -1,0 +1,646 @@
+/*
+ * Settings › Notification Configuration（Figma B01–B06）。
+ * 布局沿用 BackOffice 壳层：页面本体不滚动，长内容只在表格/编辑器面板内部滚动。
+ * 卡片、按钮、表单、弹窗、表格基础样式来自 backoffice.css；学生抽屉样式来自 students.css。
+ */
+
+.notificationPage {
+  overflow: hidden;
+  padding: 26px 32px 18px;
+  gap: 0;
+}
+
+.notificationPageHead {
+  margin-bottom: 14px;
+  flex: 0 0 auto;
+}
+
+.notificationTabs {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  border-bottom: 1px solid var(--lg-line-soft);
+  margin-bottom: 18px;
+  flex: 0 0 auto;
+}
+
+.notificationTopTab {
+  border: 0;
+  background: transparent;
+  padding: 0 0 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--lg-grey-text);
+  font-size: 15px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.notificationTopTab:hover { color: var(--lg-slate-soft); }
+
+.notificationTopTabActive,
+.notificationTopTabActive:hover {
+  color: var(--lg-blue);
+  font-weight: 600;
+  border-bottom-color: var(--lg-blue);
+}
+
+.notificationTabBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notificationTable {
+  table-layout: fixed;
+  min-width: 760px;
+}
+
+.notificationTable th {
+  padding: 0 8px;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.notificationTable td {
+  height: auto;
+  min-height: 48px;
+  padding: 10px 8px;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+.notificationTable th:last-child,
+.notificationTable td:last-child { text-align: left; }
+
+.notificationGroupRow td {
+  background: #f8fafc;
+  color: var(--lg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  height: 30px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--lg-line-soft);
+}
+
+.notificationName {
+  display: block;
+  font-weight: 600;
+  color: var(--lg-heading);
+  font-size: 13px;
+}
+.notificationId {
+  display: block;
+  margin-top: 2px;
+  color: var(--lg-muted);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+.notificationIdInline { color: var(--lg-muted); font-size: 12px; }
+.notificationTriggerCell { color: var(--lg-muted); font-size: 12px; }
+/* a td cannot be a -webkit-box, so the two-line clamp sits on a wrapper */
+.notificationTriggerClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notificationTagList { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; white-space: nowrap; }
+
+/* B01 tags: squared 20px chips, one shape for channels and languages */
+.notificationTag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.notificationTagInApp { background: #eef4ff; color: #1d4ed8; }
+.notificationTagEmail { background: #fce7f3; color: #be185d; }
+.notificationTagLang { background: #f2f4f7; color: #344054; }
+.notificationTagMissing { background: #fff6e5; color: #b54708; }
+
+.notificationStatusCell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.notificationToggleCell { display: inline-flex; align-items: center; gap: 8px; }
+.notificationToggleCell,
+.notificationToggleText { white-space: nowrap; }
+.notificationToggleText {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--lg-muted);
+}
+.smSwitchStatic { cursor: default; opacity: 0.75; }
+
+.notificationInlineNote {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--lg-muted);
+  flex: 0 0 auto;
+}
+
+/* R-02: the note follows the 13th row inside the scrolling list (B01), not fixed below it */
+.notificationListNote { margin-top: 12px; }
+
+.notificationToast {
+  position: fixed;
+  top: 84px;
+  right: 28px;
+  z-index: 120;
+  box-shadow: var(--lg-shadow-md);
+  max-width: 520px;
+}
+
+/* -------------------------------- 编辑页 -------------------------------- */
+
+.notificationEditor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notificationBreadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--lg-muted);
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+.notificationCrumbLink {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--lg-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.notificationCrumbLink:hover { color: var(--lg-blue); text-decoration: underline; }
+
+.notificationEditorHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  flex: 0 0 auto;
+  margin-bottom: 14px;
+}
+.notificationEditorTitle {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: var(--lg-heading);
+}
+.notificationEditorMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--lg-muted);
+}
+.notificationStatusInline { display: inline-flex; align-items: center; gap: 6px; }
+.notificationLastEdited { color: var(--lg-muted); }
+.notificationEditorActions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; flex: 0 0 auto; }
+
+.notificationSystemBox {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1.4fr;
+  gap: 20px;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  flex: 0 0 auto;
+}
+.notificationSystemField { min-width: 0; }
+.notificationSystemLabel {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lg-muted);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.notificationSystemValue { font-size: 12px; color: var(--lg-slate); line-height: 1.35; }
+.notificationSystemLocked {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--lg-faint);
+}
+
+.notificationEditorGrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 370px;
+  gap: 26px;
+}
+.notificationEditorForm {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+}
+
+.notificationChannelTabs {
+  display: flex;
+  gap: 26px;
+  border-bottom: 1px solid var(--lg-line-soft);
+  margin-bottom: 14px;
+}
+.notificationTab {
+  border: 0;
+  background: transparent;
+  padding: 0 0 9px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--lg-muted);
+  cursor: pointer;
+}
+.notificationTabActive,
+.notificationTabActive:hover {
+  color: var(--lg-blue);
+  font-weight: 600;
+  border-bottom-color: var(--lg-blue);
+}
+
+.notificationLanguageBar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.notificationLanguageSwitch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 7px;
+  padding: 2px;
+  background: #fff;
+}
+.notificationLangButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--lg-slate);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.notificationLangButtonActive { background: #eef2f7; font-weight: 600; color: var(--lg-heading); }
+.notificationLangNotSet {
+  font-size: 10px;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.notificationLanguageHint { font-size: 12px; color: var(--lg-muted); }
+
+.notificationField { margin-bottom: 16px; gap: 6px; }
+.notificationFieldHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.notificationCounter { font-size: 11px; color: var(--lg-faint); }
+.notificationCounterOver { color: #b91c1c; font-weight: 600; }
+.notificationVariableTools { display: flex; justify-content: flex-start; }
+.notificationVariableSelect {
+  height: 28px;
+  max-width: 190px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--lg-slate);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0 8px;
+}
+.notificationTextarea { min-height: 112px; height: auto; padding: 10px 12px; resize: vertical; line-height: 1.45; }
+.notificationFieldInvalid,
+.notificationFieldInvalid:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+.notificationFieldError { color: #b91c1c; font-size: 12px; line-height: 1.35; }
+
+.notificationAvailableVariables {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.notificationVariableChip {
+  border: 0;
+  background: #eef2f7;
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--lg-slate);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+}
+.notificationVariableChip:hover { background: #e2e8f0; }
+
+/* -------------------------------- 预览 -------------------------------- */
+
+.notificationPreviewPanel {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 16px;
+  align-self: start;
+  max-height: 100%;
+}
+.notificationPreviewHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--lg-heading);
+  margin-bottom: 12px;
+}
+.notificationPreviewHint { font-size: 11px; color: var(--lg-muted); font-weight: 400; }
+
+.notificationCenterCard {
+  background: #fff;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.notificationCenterHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+  color: var(--lg-heading);
+}
+.notificationBellIcon { color: var(--lg-blue); font-size: 15px; }
+.notificationCenterItem {
+  display: flex;
+  gap: 10px;
+  padding: 13px 14px;
+  background: #f5f9ff;
+}
+.notificationUnreadDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lg-blue);
+  margin-top: 7px;
+  flex: 0 0 auto;
+}
+.notificationCenterItemBody { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.notificationCategoryLabel {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: #64748b;
+}
+.notificationCardTitle { font-size: 13px; color: var(--lg-heading); line-height: 1.3; overflow-wrap: anywhere; }
+.notificationCardBody {
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--lg-slate);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notificationCardLink { font-size: 12px; color: var(--lg-blue); font-weight: 600; }
+.notificationCardTime { font-size: 10px; color: var(--lg-faint); }
+.notificationPreviewSample { font-size: 11px; color: var(--lg-muted); line-height: 1.4; margin-top: 12px; }
+
+.notificationMailInbox {
+  background: #fff;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.notificationMailFrom { font-size: 11px; color: var(--lg-muted); }
+.notificationMailSubject { font-size: 13px; font-weight: 600; color: var(--lg-heading); }
+.notificationMailBody {
+  background: #fff;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 8px;
+  padding: 16px;
+}
+.notificationMailBrand { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--lg-heading); }
+.notificationMailLogo {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--lg-blue);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.notificationMailText { font-size: 12px; color: var(--lg-slate); line-height: 1.55; white-space: pre-wrap; margin: 0 0 12px; }
+.notificationPreviewButton {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 6px;
+  background: var(--lg-blue);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.notificationMailFooter { font-size: 10px; color: var(--lg-faint); line-height: 1.4; margin-top: 16px; }
+
+/* -------------------------------- 广播 -------------------------------- */
+
+.notificationListHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.notificationListCount { font-size: 13px; color: var(--lg-muted); }
+.notificationBroadcastTable td { vertical-align: middle; }
+.notificationTable td.notificationNoWrap,
+.notificationTable th.notificationNoWrap { white-space: nowrap; }
+.notificationTable td.notificationMutedCell { color: #98a2b3; }
+.notificationReadCell { display: flex; flex-direction: column; gap: 2px; }
+.notificationReadRate { font-size: 11px; color: var(--lg-muted); }
+.notificationRowActions { display: flex; gap: 12px; white-space: nowrap; }
+.notificationDangerLink { color: #b91c1c; }
+.notificationEmpty { padding: 18px 4px; }
+
+.notificationBroadcastEditor { margin-top: 4px; }
+.notificationAudienceCards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+.notificationAudienceCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 9px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--lg-heading);
+  cursor: pointer;
+}
+.notificationAudienceCardActive {
+  border-color: var(--lg-blue);
+  background: #f5f9ff;
+  box-shadow: 0 0 0 1px var(--lg-blue);
+}
+.notificationRadio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+.notificationRadio[data-checked='true'] {
+  border-color: var(--lg-blue);
+  box-shadow: inset 0 0 0 4px #fff;
+  background: var(--lg-blue);
+}
+.notificationAudienceHint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--lg-muted);
+  font-weight: 400;
+  line-height: 1.3;
+}
+.notificationTwoColumn { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.notificationDetailTitle { font-size: 14px; font-weight: 600; color: var(--lg-heading); margin: 0 0 6px; }
+.notificationDetailBody { font-size: 13px; color: var(--lg-slate); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 8px; }
+.notificationDetailZh { color: var(--lg-muted); }
+.notificationDetailLink { font-size: 12px; color: var(--lg-blue); margin: 4px 0 0; overflow-wrap: anywhere; }
+
+/* -------------------------------- 发送日志 -------------------------------- */
+
+.notificationFilters { flex-wrap: wrap; flex: 0 0 auto; margin-bottom: 0; }
+.notificationSearch { flex: 1 1 210px; min-width: 180px; }
+.notificationChannelFilter { width: 150px; flex: 0 0 150px; }
+.notificationDateRange { display: inline-flex; align-items: center; gap: 6px; }
+.notificationDateInput { width: 140px; height: 34px; padding: 0 8px; font-size: 12px; }
+.notificationRecipientCell > span { display: block; overflow-wrap: break-word; }
+.notificationTestTag { display: inline-flex; width: auto; margin-left: 8px; vertical-align: middle; }
+.notificationStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.notificationStatusOk { background: #dcfce7; color: #15803d; }
+.notificationStatusDelivered { background: #f1f5f9; color: #475569; }
+.notificationStatusFailed { background: #fee2e2; color: #b91c1c; }
+.notificationStatusSent { background: #e0f2fe; color: #0369a1; }
+.notificationStatusWithdrawn { background: #f1f5f9; color: #475569; }
+.notificationFailure { display: block; margin-top: 3px; font-size: 11px; color: #b91c1c; }
+.notificationLogFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--lg-muted);
+}
+.notificationLogFooter .pagination { border-top: 0; padding-top: 0; flex: 1 1 auto; }
+.notificationTimeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.notificationTimeline li { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--lg-muted); }
+
+@media (max-width: 1300px) {
+  .notificationEditorGrid { grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; }
+  .notificationSystemBox { grid-template-columns: 1fr 1fr; }
+  .notificationSystemLocked { position: static; grid-column: 1 / -1; }
+}
+
+@media (max-width: 1100px) {
+  .notificationEditorGrid { grid-template-columns: minmax(0, 1fr); }
+  .notificationPreviewPanel { max-height: none; }
+  .notificationAudienceCards { grid-template-columns: 1fr; }
+  .notificationTwoColumn { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .notificationPage { flex: 1 1 0; height: auto; padding: 14px; }
+  .notificationTabs { overflow-x: auto; }
+  .notificationTable th,
+  .notificationTable td { padding: 8px; }
+}
+
+@media (max-height: 700px) {
+  .notificationPage { padding: 14px 20px 12px; }
+  .notificationEditorTitle { font-size: 20px; }
+  .notificationSystemBox { padding: 10px 12px; margin-bottom: 10px; }
+}

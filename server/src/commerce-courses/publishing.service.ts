@@ -2,10 +2,12 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { notifyCourseNewLaunch } from '../backoffice/modules/notification/events';
 import {
   COMMERCE_CONFIG,
   type CommerceCourseConfig,
@@ -33,6 +35,45 @@ export interface VersionLabelResult {
   label: string;
   series: number;
   minor: number;
+}
+
+/** 课程首次发布事件需要的展示字段（eventKey 之外）。纯函数，便于单测回退规则。 */
+export type CourseLaunchSource = {
+  code: string;
+  slug: string;
+  defaultContentLanguage: string | null;
+  localizations: Array<{ language: string; title: string | null }>;
+  category: { name: string; localized: unknown } | null;
+};
+
+export function courseLaunchEventParams(course: CourseLaunchSource): {
+  courseTitle: string;
+  categoryName: string;
+  courseLink: string;
+} {
+  const preferred =
+    course.localizations.find(
+      (item) => item.language === course.defaultContentLanguage,
+    ) ?? course.localizations[0];
+  const courseTitle = preferred?.title?.trim() || course.code;
+  const localized =
+    course.category?.localized &&
+    typeof course.category.localized === 'object' &&
+    !Array.isArray(course.category.localized)
+      ? (course.category.localized as Record<string, unknown>)
+      : {};
+  const lang = course.defaultContentLanguage || 'en-GB';
+  const entry = localized[lang] ?? localized['en-GB'];
+  const rawName =
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+      ? (entry as Record<string, unknown>).name
+      : undefined;
+  const categoryName = typeof rawName === 'string' ? rawName.trim() : '';
+  return {
+    courseTitle,
+    categoryName: categoryName || course.category?.name || '',
+    courseLink: `/${lang === 'zh-CN' ? 'zh-CN' : 'en-GB'}/portal/courses/${encodeURIComponent(course.slug)}`,
+  };
 }
 
 /** 纯函数：下一次发布的版本编号（PRD §15.3）。 */
@@ -108,6 +149,8 @@ export function parseChangeStatusBody(body: unknown): ChangeStatusInput {
 
 @Injectable()
 export class PublishingService {
+  private readonly logger = new Logger(PublishingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly trial: TrialService,
@@ -289,6 +332,43 @@ export class PublishingService {
     };
   }
 
+  /**
+   * Notification P0：课程第一次变为 ONLINE 时发 COURSE_NEW_LAUNCH（eventKey=course+线上版本）。
+   * PRD 第 5 节：开关只有模板的 On/Off，发布时的 notifyLearners 勾选不参与。异步执行，不阻塞状态变更。
+   */
+  private async emitCourseNewLaunchIfFirstOnline(
+    courseId: string,
+    versionId: string,
+  ): Promise<void> {
+    const onlineCount = await this.prisma.courseAuthoringActivity.count({
+      where: {
+        courseId,
+        action: HISTORY_ACTIONS.CHANGE_STATUS,
+        detail: { path: ['to'], equals: 'ONLINE' },
+      },
+    });
+    if (onlineCount !== 1) return;
+    const course = await this.prisma.commerceCourse.findUnique({
+      where: { id: courseId },
+      select: {
+        code: true,
+        slug: true,
+        defaultContentLanguage: true,
+        localizations: { select: { language: true, title: true } },
+        category: { select: { name: true, localized: true } },
+      },
+    });
+    if (!course) return;
+    const params = courseLaunchEventParams(course);
+    await notifyCourseNewLaunch({
+      courseId,
+      versionId,
+      courseTitle: params.courseTitle,
+      categoryName: params.categoryName,
+      courseLink: params.courseLink,
+    });
+  }
+
   private resolveSource(course: {
     draftSourceType: string | null;
     draftSourceEnvironment: string | null;
@@ -466,6 +546,18 @@ export class PublishingService {
         },
       }),
     ]);
+    if (status === 'ONLINE' && from !== 'ONLINE') {
+      void this.emitCourseNewLaunchIfFirstOnline(
+        courseId,
+        course.liveVersionId,
+      ).catch((error) => {
+        this.logger.warn(
+          `COURSE_NEW_LAUNCH event could not be prepared: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }
     return { from, to: status, reason };
   }
 
