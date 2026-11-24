@@ -243,7 +243,7 @@ export function CourseTrialSection({
       <div style={{ ...card, marginTop: 0, display: 'flex', flexDirection: 'column', ...(narrow ? { flex: '0 0 auto' } : { flex: '1 1 auto', minHeight: 0 }) }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '试看', 'Trial')}</h2>
+            <h2 className="course-ui-blockTitle">{L(locale, '试看', 'Trial')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '试看直接引用正式学习内容；保存后立即生效，不生成版本。', 'Trial references the real learning content; saving is effective immediately and creates no version.')}</p>
           </div>
           <label style={{ fontSize: 14 }}>
@@ -343,7 +343,7 @@ export function CourseTrialSection({
       <div data-testid="trial-pricing" data-panel="trial-pricing" style={{ overflow: 'auto', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ ...card, marginTop: 0, display: 'flex', flexDirection: 'column', ...(narrow ? { flex: '0 0 auto' } : { flex: '1 1 auto', minHeight: 0 }) }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '价格（订阅 · USD）', 'Pricing (subscription · USD)')}</h2>
+          <h2 className="course-ui-blockTitle">{L(locale, '价格（订阅 · USD）', 'Pricing (subscription · USD)')}</h2>
           {canManage && <button type="button" style={buttonStyle} disabled={busy} onClick={addPlan}>{L(locale, '+ 添加套餐', '+ Add plan')}</button>}
         </div>
         <div data-testid="trial-plans" data-panel="trial-plans" style={narrow ? { marginTop: 12 } : { overflow: 'auto', minHeight: 0, flex: '1 1 auto', marginTop: 12 }}>

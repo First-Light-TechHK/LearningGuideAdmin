@@ -316,7 +316,7 @@ export function CourseInfoSection({
       <div style={{ ...card, marginTop: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '基础信息', 'Basics')}</h2>
+            <h2 className="course-ui-blockTitle">{L(locale, '基础信息', 'Basics')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>
               {L(locale, '课程信息是学生端课程卡片和详情页的唯一数据源。所有中英文字段均为必填。', 'Course Information is the single source for learner cards and the course page. All EN and ZH fields are required.')}
             </p>
@@ -502,7 +502,7 @@ export function CourseInfoSection({
         </div>
         <div data-testid="info-right" data-panel="info-right" style={{ overflow: 'auto', minWidth: 0, minHeight: 0 }}>
       <div style={{ ...card, marginTop: 0 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '标题与简介', 'Title and descriptions')}</h2>
+        <h2 className="course-ui-blockTitle">{L(locale, '标题与简介', 'Title and descriptions')}</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 18, marginTop: 12 }}>
           <div>
             <label style={labelStyle}>{L(locale, '英文', 'English')}</label>
