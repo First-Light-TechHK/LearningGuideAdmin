@@ -248,10 +248,12 @@
       "statusWithdrawn": "Withdrawn",
       "statusSent": "Sent",
       "statusFailed": "Failed",
-      "reasonMissingData": "Missing data"
+      "reasonMissingData": "Missing data",
+      "broadcastName": "Broadcast"
     },
     "errors": {
       "REQUEST_FAILED": "Request failed",
+      "TEMPLATE_NOT_FOUND": "Notification template not found.",
       "INVALID_INPUT": "Check the highlighted fields and try again.",
       "TEMPLATE_CONFLICT": "Someone else saved this notification first. Reload and try again.",
       "TEMPLATE_LOCKED": "Subscription notifications always stay on.",

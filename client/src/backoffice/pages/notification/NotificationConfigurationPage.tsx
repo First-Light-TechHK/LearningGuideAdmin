@@ -126,7 +126,7 @@ function NotificationConfigurationInner() {
             <p className="smMuted">{t(locale, 'common.loading')}</p>
           ) : (
             <div className="alert alertError" role="alert">
-              {templateError ?? 'Notification template not found.'}{' '}
+              {templateError ?? t(locale, 'notification.errors.TEMPLATE_NOT_FOUND')}{' '}
               <button type="button" className="linkButton" onClick={() => setSubpage({ kind: 'system' })}>
                 {t(locale, 'common.back')}
               </button>

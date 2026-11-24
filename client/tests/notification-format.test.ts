@@ -18,6 +18,7 @@ import {
   formatHktDateTime,
   groupTemplates,
   insertVariable,
+  notificationErrorText,
   readRateLabel,
   renderSample,
   suggestVariable,
@@ -26,6 +27,14 @@ import {
   validateTemplateDraft,
   variableErrorMessage,
 } from '../src/backoffice/lib/notificationFormat'
+import { t } from '../src/backoffice/lib/i18n/messages'
+
+test('an unknown error with no message falls back to the request-failed text in the current language (R2-04)', () => {
+  const zh = (key: string) => t('zh-CN', key)
+  assert.equal(notificationErrorText(zh, { code: 'SOMETHING_NEW' }), '请求失败')
+  assert.equal(notificationErrorText((key) => t('en-GB', key), {}), 'Request failed')
+  assert.equal(notificationErrorText(zh, { code: 'SOMETHING_NEW', message: 'raw server text' }), 'raw server text')
+})
 
 function template(overrides: Partial<NotificationTemplate> = {}): NotificationTemplate {
   return {

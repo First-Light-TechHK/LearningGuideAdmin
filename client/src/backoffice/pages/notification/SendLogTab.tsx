@@ -17,6 +17,7 @@ import {
   defaultSendLogRange,
   formatHktDateTime,
   notificationErrorText,
+  sendLogName,
 } from '../../lib/notificationFormat'
 import { SoftBreak } from './SoftBreak'
 
@@ -229,7 +230,7 @@ export function SendLogTab({
                 </td>
                 <td className="notificationLogNotificationCell">
                   <div>
-                    <span>{item.notificationName}</span>
+                    <span>{sendLogName(item, locale)}</span>
                     {item.isTest ? <span className="smPill smPillWarn notificationTestTag">{t(locale, 'notification.sendLog.test')}</span> : null}
                   </div>
                   {item.templateId ? <div className="notificationId"><SoftBreak text={item.templateId} /></div> : null}
@@ -280,7 +281,7 @@ function SendLogDrawer({
           <div>
             <h2 className="smDrawerTitle">{t(locale, 'notification.sendLog.detailTitle')}</h2>
             <div className="smDrawerMeta">
-              <span>{detail.entry.notificationName}</span>
+              <span>{sendLogName(detail.entry, locale)}</span>
               <span>{formatHktDateTime(detail.entry.occurredAt)}</span>
               {detail.isTest ? <span className="smPill smPillWarn">{t(locale, 'notification.sendLog.test')}</span> : null}
             </div>

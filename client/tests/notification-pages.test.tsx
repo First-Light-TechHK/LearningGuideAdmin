@@ -1,6 +1,7 @@
 import './support/dom'
 
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { afterEach, test } from 'node:test'
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -14,6 +15,7 @@ import { EmployeeContext } from '../src/backoffice/employeeSession'
 import { BroadcastsTab, BroadcastEditor } from '../src/backoffice/pages/notification/BroadcastsTab'
 import { NotificationEditor, SystemNotificationsTab } from '../src/backoffice/pages/notification/SystemNotificationsTab'
 import { SendLogTab } from '../src/backoffice/pages/notification/SendLogTab'
+import { SoftBreak } from '../src/backoffice/pages/notification/SoftBreak'
 
 const originalFetch = globalThis.fetch
 afterEach(() => {
@@ -529,7 +531,81 @@ test('send log drawer of a broadcast row shows the translated category, not a me
   }
 })
 
-type Recorded = { method: string; url: string; body: Record<string, unknown> | null }
+test('send log shows the translated name for a row with neither template nor broadcast id (R2-05)', async () => {
+  const entry = {
+    id: 'log-t1',
+    occurredAt: '2026-11-02T02:00:00.000Z',
+    recipientEmail: 'margaret.h@gmail.com',
+    recipientName: null,
+    notificationId: null,
+    templateId: null,
+    broadcastId: null,
+    notificationName: 'Broadcast',
+    channel: 'in_app',
+    status: 'delivered',
+    failureReason: null,
+    isTest: true,
+    related: null,
+  }
+  globalThis.fetch = (() => ok({ ok: true, items: [entry], total: 1, page: 1, pageSize: 20 })) as typeof fetch
+  for (const [locale, name] of [
+    ['en-GB', 'Broadcast'],
+    ['zh-CN', '广播'],
+  ] as const) {
+    render(
+      <MemoryRouter initialEntries={[`/${locale}/log`]}>
+        <Routes>
+          <Route path="/:locale/log" element={<SendLogTab templates={[]} broadcasts={[]} />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    const row = await screen.findByTestId('send-log-row-log-t1')
+    assert.ok(within(row).getByText(name))
+    assert.equal(within(row).queryByText(locale === 'zh-CN' ? 'Broadcast' : '广播'), null)
+    cleanup()
+  }
+})
+
+test('the subscription note sits inside the scrolling list, after the last row (R2-02 earlier fix)', () => {
+  render(
+    <MemoryRouter>
+      <SystemNotificationsTab templates={[template()]} loading={false} errorMessage={null} onReload={() => {}} onEdit={() => {}} />
+    </MemoryRouter>,
+  )
+  const note = screen.getByRole('note')
+  assert.ok(note.closest('.tableWrap'), 'the note must scroll with the list')
+})
+
+test('SoftBreak allows a line break only after @, _ and . (R-09)', () => {
+  const { container } = render(<SoftBreak text="seed@example.test" />)
+  assert.equal(container.textContent, 'seed@example.test')
+  const parts = Array.from(container.childNodes).map((node) => (node.nodeName === 'WBR' ? '|' : node.textContent))
+  assert.equal(parts.join(''), 'seed@|example.|test')
+  cleanup()
+  const code = render(<SoftBreak text="SUB_AUTORENEW_CANCELLED" />)
+  assert.equal(code.container.querySelectorAll('wbr').length, 2)
+  assert.equal(code.container.textContent, 'SUB_AUTORENEW_CANCELLED')
+})
+
+test('broadcast table keeps room for View and Withdraw, and long titles wrap inside the detail panel (R2-02, R2-03)', () => {
+  globalThis.fetch = (() => ok({ ok: true, broadcasts: [], total: 0, page: 1, pageSize: 20 })) as typeof fetch
+  render(
+    <MemoryRouter>
+      <BroadcastsTab refreshKey={0} onNew={() => {}} onEdit={() => {}} />
+    </MemoryRouter>,
+  )
+  const widths = Array.from(screen.getByTestId('broadcast-table').querySelectorAll('col')).map((col) =>
+    Number.parseFloat((col as HTMLElement).style.width),
+  )
+  assert.equal(widths.reduce((sum, value) => sum + value, 0), 100)
+  assert.ok(widths[widths.length - 1] >= 16, 'actions column is at least 16%')
+
+  const css = readFileSync(new URL('../src/backoffice/students.css', import.meta.url), 'utf8')
+  assert.match(css, /\.smDrawerHead > div:first-child \{ min-width: 0; \}/)
+  assert.match(css, /\.smDrawerTitle \{[^}]*overflow-wrap: anywhere/)
+})
+
+type Recorded ={ method: string; url: string; body: Record<string, unknown> | null }
 
 function recordFetch(answer: (request: Recorded) => Response | Promise<Response>): Recorded[] {
   const requests: Recorded[] = []

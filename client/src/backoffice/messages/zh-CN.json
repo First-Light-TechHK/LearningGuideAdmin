@@ -248,10 +248,12 @@
       "statusWithdrawn": "已撤回",
       "statusSent": "已发送",
       "statusFailed": "失败",
-      "reasonMissingData": "缺少数据"
+      "reasonMissingData": "缺少数据",
+      "broadcastName": "广播"
     },
     "errors": {
       "REQUEST_FAILED": "请求失败",
+      "TEMPLATE_NOT_FOUND": "未找到该通知模板。",
       "INVALID_INPUT": "请检查标出的字段后重试。",
       "TEMPLATE_CONFLICT": "其他人先保存了这条通知，请重新加载后重试。",
       "TEMPLATE_LOCKED": "订阅类通知始终开启。",

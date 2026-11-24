@@ -399,5 +399,15 @@ export function notificationErrorText(
   if (code === 'INVALID_INPUT' && result.message) return result.message
   const key = `notification.errors.${code}`
   const translated = translate(key)
-  return translated === key ? result.message ?? t(DEFAULT_LOCALE, 'notification.errors.REQUEST_FAILED') : translated
+  return translated === key ? result.message ?? translate('notification.errors.REQUEST_FAILED') : translated
+}
+
+/** Send-log name. A row with no template and no broadcast id is a test broadcast: use the translated generic name. */
+export function sendLogName(
+  entry: { templateId: string | null; broadcastId: string | null; notificationName: string },
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return entry.templateId || entry.broadcastId
+    ? entry.notificationName
+    : t(locale, 'notification.sendLog.broadcastName')
 }
