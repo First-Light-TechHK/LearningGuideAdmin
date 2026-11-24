@@ -35,9 +35,9 @@
  *     /api/backoffice/environment）要读 body.data。
  *   - Portal 根路径 / 是 307 重定向到 /en-GB/portal，首页探测需跟随重定向。
  *   - Fetch 的 getSetCookie() 返回 Array<string>，不是 Map。
- *   - 能力分区（docs/sandbox/partitioning.md §5）：Sandbox Admin 只起 admin 角色，
- *     /api/user/** 与 /api/ks/** 不对外；Helpdesk 与 AI Tutor 首期不启用，
- *     本脚本不断言这些端点。
+ *   - 能力/角色（docs/sandbox/partitioning.md §5）：Sandbox 全模块、全角色，
+ *     /api/user/** 与 /api/ks/** 已挂载但要求服务密钥；Helpdesk 与 AI Tutor 已启用，
+ *     未配置密钥时按设计降级。本脚本只做 HTTP 可用性断言，不断言这些端点。
  */
 
 import { pathToFileURL } from "node:url";

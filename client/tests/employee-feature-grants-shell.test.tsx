@@ -91,7 +91,7 @@ test('旧服务端（session 无 features、环境无 capabilities）：菜单�
   }
 })
 
-test('Sandbox 形态 course,accounts：侧栏只剩 Course 与 Settings（账号管理独立能力）', async () => {
+test('裁剪形态 course,accounts：侧栏只剩 Course 与 Settings（账号管理独立能力）', async () => {
   const server = serve({
     features: ['module.course', 'course.view', 'module.accounts'],
     capabilities: ['course', 'accounts'],

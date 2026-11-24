@@ -158,9 +158,11 @@ describe('能力门：路径前缀 → 能力映射表', () => {
       false,
     );
 
-    const sandbox = parseEnabledCapabilities('course,accounts');
-    expect(capabilityGateAllows('/api/admin/employees', sandbox)).toBe(true);
-    expect(capabilityGateAllows('/api/learning-access', sandbox)).toBe(false);
+    const restricted = parseEnabledCapabilities('course,accounts');
+    expect(capabilityGateAllows('/api/admin/employees', restricted)).toBe(true);
+    expect(capabilityGateAllows('/api/learning-access', restricted)).toBe(
+      false,
+    );
   });
 
   it('共享前缀（courses / releases）只要任一所属能力启用就放行', () => {

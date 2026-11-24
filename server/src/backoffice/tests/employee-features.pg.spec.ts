@@ -419,7 +419,7 @@ describeDb('employee feature grants (PostgreSQL)', () => {
     });
 
     it('never lets an account switch exceed the environment capability', async () => {
-      const sandbox = parseEnabledCapabilities('course,accounts');
+      const restricted = parseEnabledCapabilities('course,accounts');
       const outcome = await saveEmployeeFeatures({
         employeeId: FINANCE_C,
         grants: [
@@ -428,7 +428,7 @@ describeDb('employee feature grants (PostgreSQL)', () => {
         ],
         actorEmployeeId: ADMIN_A,
         ipAddress: null,
-        enabledCapabilities: sandbox,
+        enabledCapabilities: restricted,
       });
       expect(outcome.ok).toBe(true);
       if (outcome.ok) {

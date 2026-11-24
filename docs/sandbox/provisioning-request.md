@@ -19,7 +19,7 @@
 - **Sandbox 的组成**（PRD v2.0 §3.1）：Course Sandbox（Portal 学员前台）+ Admin Sandbox（后台）+ Stripe 沙盒。数据与 Production 完全隔离。
 - **独立部署**（owner 2026-11-16）：独立库/桶/密钥命名空间；环境差异只由配置表达，**禁止环境专属代码分支**（分区规范见 `docs/sandbox/partitioning.md`）。
 - **分支契约**：`sandbox` 分支 = 上游最近一次生产发布 SHA 快进（UAT=当前生产，同码）；生产发布后快进到该发布 SHA，修复合入上游 `dev` 后随下一次生产发布进入（`docs/sandbox/environments.md` §3）。
-- **能力分区**（owner 2026-11-16）：Sandbox Admin 只开放课程管理与导入导出（`course.authoring` / `course.import` / `course.export`）；Helpdesk、学员端学生/AI Tutor、Study Group 首期不启用（变量不写入 sandbox 配置）。
+- **能力/角色**（owner 2026-11-16 拍板、2026-11-24 修订）：Sandbox Admin 全模块、全角色（不设置 `ADMIN_CAPABILITIES` / `APP_ROLES`）；需要密钥的功能（AI Tutor/KS、Helpdesk、邮件、Portal 集成、Study Group）同样启用，密钥/ARN 由运维配置，未配置时按设计降级（Helpdesk 503、AI 未配置错误）。仍不新增编辑能力。
 - **当前生产 = UAT**（课程直接发到 UAT）。Sandbox 建成后目标流程：Sandbox 创作/验证（`X.Y`）→ 导出课程包 → UAT（=Production）导入 → Publish（`Version N`）→ Change status。Production 只通过课程包获得内容（操作规则；服务端强制见 §6 G1/G2）。
 - **同一套代码，仅配置不同**：`ENVIRONMENT_LABEL`、`VERSION_NUMBERING_MODE`、站点地址、Stripe key、数据库/S3/密钥命名空间、能力开关。Portal 与 Admin 各一个 App Runner 服务。
 
@@ -31,7 +31,7 @@
  ┌──────▼───────────────────┐            ┌─────────▼────────────────────┐
  │ App Runner               │  X-API-Key │ App Runner                   │
  │ learning-guide-sandbox   │ ─────────► │ learning-guide-admin-sandbox │
- │ (Portal, :8080)          │ ◄───────── │ (Admin, :3000; APP_ROLES=admin)│
+ │ (Portal, :8080)          │ ◄───────── │ (Admin, :3000; 全角色/全模块)  │
  ├──────────────────────────┤            ├──────────────────────────────┤
  │ RDS learning-guide-      │            │ RDS learning-guide-admin-     │
  │ sandbox (PostgreSQL 16)  │            │ sandbox (PostgreSQL 16+pgvector)│
@@ -70,13 +70,13 @@
 | P12 | CloudWatch 日志与告警 | 运行监控 | ops-AWS | 日志 30 天；5xx、延迟、DB CPU/存储、webhook 失败告警 | 不记录密码/卡号/OAuth code | 告警存在且可触发 |
 | P13 | GitHub Connection | 源码部署 | 复用现有 | 复用现有 App Runner GitHub connection | — | 连接 available |
 
-### 2.2 Admin Sandbox（后台；能力分区：只开课程管理与导入导出）
+### 2.2 Admin Sandbox（后台；全模块、全角色启用）
 
 | # | 资源 | 用途 | 归属 | 配置项占位 | 隔离要求 | 验收检查 |
 |---|---|---|---|---|---|---|
 | A1 | RDS `learning-guide-admin-sandbox` | 后台数据库 | ops-AWS | PostgreSQL 16.13；`db.t4g.micro`；20 GiB gp3；加密；私有；库名 `learning_guide_admin_sandbox`；账号 `lg_admin_sandbox`；备份 7 天（provision 脚本已按 sandbox 设 7 天） | 独立实例；与 Portal Sandbox DB 及任何生产库分离 | available；私有；加密；`vector` 扩展存在 |
 | A2 | S3 桶 `learning-guide-admin-sandbox-course-<ACCOUNT_ID>` | 课程媒体 + 课程包 staging | ops-AWS | 私有；公共访问块全开；SSE AES256；版本化；媒体在根前缀，包 staging 在 `staging/`；`Retain` | 运行时只读写本桶；生产导入靠操作员上传包文件，不做跨环境桶授权 | 桶策略拒绝非 TLS；角色可 Put/Get/List |
-| A3 | IAM 角色 `learning-guide-admin-sandbox-runtime` | App Runner 实例角色 | security | Secrets `learning-guide/admin/sandbox/*`；S3 本桶读写；SES Send（可选）。Helpdesk 首期不启用，`learning-guide/sandbox/` 下令牌暂不授权（需要时再对称精确授权） | 资源精确到 sandbox | IAM 模拟：读生产 secret/bucket → denied |
+| A3 | IAM 角色 `learning-guide-admin-sandbox-runtime` | App Runner 实例角色 | security | Secrets `learning-guide/admin/sandbox/*`；S3 本桶读写；SES Send（可选）。Helpdesk/Portal 集成已启用；`learning-guide/sandbox/` 下的配对令牌在运维创建后按需精确授权（未配置时对应接口按设计 503） | 资源精确到 sandbox | IAM 模拟：读生产 secret/bucket → denied |
 | A4 | Secrets `learning-guide/admin/sandbox/*` | Admin 密钥 | security | 见 §3.2 / §3.4；`admin_api_key` 部署时映射为 `AUTH_TOKEN` | 独立命名空间 | ARN 存在；与 Portal 配对值一致（§3.3） |
 | A5 | App Runner `learning-guide-admin-sandbox` | 后台服务 | ops-AWS + eng | Node.js 22；构建 `cd server && npm ci && npx prisma generate && npm run build && cd ../client && npm ci && npm run build`；启动 `sh ./start-admin.sh`；端口 3000；1 vCPU / 2 GiB；健康检查 `/api/health`；`AutoDeploymentsEnabled=false`（provision 脚本对 sandbox 已关闭，发布只走工作流） | 独立服务 | RUNNING；`/api/health` 200 且 `environment=SANDBOX`；`prisma migrate deploy` 成功 |
 | A6 | 自定义域名 `admin.sandbox.ilovelearningguide.com` | 后台域名 | product + DNS | App Runner 自定义域名 + HTTPS；CloudFront 可选（首期可省） | 独立主机名 | active；TLS 有效；可登录 |
@@ -90,7 +90,7 @@
 | E2 | Google OAuth Web Client | Google 登录 | product | Redirect URI：`https://sandbox.ilovelearningguide.com/api/auth/google/callback` | 独立回调域名 | OAuth 预检通过；真实登录成功 |
 | E3 | WeChat 网站应用 | 微信扫码登录 | product | 独立网站应用；授权回调域：`sandbox.ilovelearningguide.com`（仅主机名） | 独立 AppID；openid 按 AppID 隔离 | 真实扫码 + 邮箱绑定通过 |
 | E4 | 邮件通道 | 注册验证/密码重置/通知 | ops + product | 首期复用 163 SMTP（`smtp.163.com:465`，From `learningguide@163.com`）或新邮箱；`SMTP_PASS` 只进 Secrets Manager | 共用邮箱建议主题加 `[Sandbox]`（§7 Q4） | 真实收件箱收到验证邮件；链接指向 sandbox 域名 |
-| E5 | OpenRouter API Key | AI Tutor | — | **首期不启用（能力分区）**：不申请、不写入 sandbox 配置 | — | — |
+| E5 | OpenRouter API Key | AI Tutor | product + ops | **启用（需密钥）**：由产品/运维提供，直接注入 Secrets Manager（Portal `learning-guide/sandbox/openrouter_api_key`、Admin `learning-guide/admin/sandbox/openrouter_api_key`）；未配置时 AI 端点返回未配置错误 | 值只进 Secrets Manager | 配置后后台测试对话与学员对话可用 |
 | E6 | DNS 记录 | 两个域名解析 | DNS（DNSPod） | 按 App Runner 输出添加 CNAME/验证记录 | 独立子域；不与 www/sit/uat 冲突 | `dig` 正确；HTTPS 可访问 |
 | E7 | Sandbox 测试账号 | 客户角色前台测试 | product | 每个客户角色至少 1 个；可订阅（测试卡）与学习；可重置学习数据（PRD §3.2） | 账号只存在于 Sandbox | 登录/订阅/学习/重置全流程通过 |
 
@@ -99,7 +99,7 @@
 | # | 事项 | 归属 | 说明 | 验收 |
 |---|---|---|---|---|
 | S1 | `sandbox` 分支策略 | eng + product | `sandbox` 分支只允许快进到上游最近一次生产发布（UAT=当前生产）的 SHA；Sandbox 不走 DEV→SIT→UAT 链；修复合入上游 dev 后随下一次生产发布进入（§3 分支契约） | `git rev-parse sandbox` 与生产发布 SHA 一致 |
-| S2 | Admin provision 支持 sandbox | eng | **本分支已完成**：`ADMIN_ENV=sandbox`（分支必传、`AUTH_ENABLED=true` 强制、`AUTH_TOKEN` 映射、`-sandbox-` 桶名、备份 7 天、关闭自动部署；并显式写入 `APP_ROLES=admin`、`ADMIN_CAPABILITIES=course,accounts`、`ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`）；脚本不自建运行时角色与课程桶 | dry-run 输出 sandbox 资源名与 `runtimeEnvironmentDefaults`（`ADMIN_BRANCH`/`AUTH_ENABLED` 校验生效） |
+| S2 | Admin provision 支持 sandbox | eng | **本分支已完成**：`ADMIN_ENV=sandbox`（分支必传、`AUTH_ENABLED=true` 强制、`AUTH_TOKEN` 映射、`-sandbox-` 桶名、备份 7 天、关闭自动部署；只显式写入 `ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`，**不写 `APP_ROLES`/`ADMIN_CAPABILITIES`** = 全角色、全模块）；脚本不自建运行时角色与课程桶 | dry-run 输出 sandbox 资源名与 `runtimeEnvironmentDefaults`（`ADMIN_BRANCH`/`AUTH_ENABLED` 校验生效） |
 | S3 | Portal provision sandbox | eng（Portal 仓库） | **Portal 工作区已实现**（待提交/部署验证）：`scripts/provision-uat.mjs` 参数化 sandbox tier（`PORTAL_ENV=sandbox`，G7） | `--deploy` 可创建 `learning-guide-sandbox`；证据：Portal 工作区 `scripts/provision-uat.mjs:66-111` |
 | S4 | Admin sandbox 部署工作流 | eng | **模板已提供**：`deploy/admin-sandbox-deploy.yml.template`（复制到 `.github/workflows/sandbox-deploy.yml`；手动/推送触发 + CI 门禁 + 轮询 Operation） | 发布成功且等待 `SUCCEEDED` |
 | S5 | Portal sandbox 部署工作流 | eng（Portal 仓库） | **模板已提供**：`deploy/portal-sandbox-deploy.yml.template`（复制到 Portal 仓库 `.github/workflows/sandbox-deploy.yml`）；`release/environments.mjs` 的 SANDBOX 条目（D10）已在 Portal 工作区实现（待提交/部署验证） | 同上 |
@@ -109,35 +109,35 @@
 
 ## 3. 环境变量与密钥
 
-完整模板见 `deploy/sandbox.example.env`（只含占位符，含能力分区注释）。此处只列引用名。
+完整模板见 `deploy/sandbox.example.env`（只含占位符，含全模块/全角色与未配置密钥的降级说明）。此处只列引用名。
 
 ### 3.1 Portal Sandbox（App Runner 变量 / Secrets）
 
 - 普通变量：`APP_ENV=SANDBOX`、`NODE_ENV=production`、`APP_VERSION=<sha>`、`PORT=8080`、`NEXT_PUBLIC_APP_URL`、`ADMIN_HOSTS`、`STORAGE_BACKEND=postgresql`、`DATA_S3_BUCKET`、`DATA_S3_PREFIX=learning-guide/sandbox`、`AWS_REGION=ap-southeast-1`、`EMAIL_VERIFICATION_REQUIRED=1`、`LOCAL_SOCIAL_LOGIN=0`、`PAYMENT_MODE=stripe`、`STRIPE_SANDBOX=1`、`STRIPE_PRICE_*`（8 项）、`GOOGLE_CLIENT_ID`、`WECHAT_APP_ID`、`SMTP_HOST/PORT/SECURE/USER/FROM`、`SES_FROM_EMAIL`、`ADMIN_PORTAL_BASE_URL`。
 - Secrets：`DATABASE_URL`、`SESSION_SECRET`、`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、`GOOGLE_CLIENT_SECRET`、`WECHAT_APP_SECRET`、`SMTP_PASS`、`ADMIN_PORTAL_API_TOKEN`。
-- **首期不启用（不写入）**：`OPENROUTER_*`、`KS_TUTOR_*`、`PORTAL_HELPDESK_*`、`ADMIN_HELPDESK_*`、`LIVEKIT_*`、`STUDY_GROUP_TOKEN_LOG_KEY`、`PORTAL_INTEGRATION_TOKEN`。
+- **需运维配置密钥（已启用，未配置时降级）**：`OPENROUTER_API_KEY`（未配置 → 学员 AI 不可用）、`KS_TUTOR_API_KEY`（← `admin_api_key`）、`PORTAL_HELPDESK_TOKEN`、`ADMIN_HELPDESK_TOKEN`、`LIVEKIT_PROJECTS_SECRET_ID`/`LIVEKIT_PROJECTS_JSON`/`LIVEKIT_LOCAL_CREDENTIALS_JSON`、`STUDY_GROUP_TOKEN_LOG_KEY`、`PORTAL_INTEGRATION_TOKEN`。地址类变量已指向 Sandbox 自身：`KS_TUTOR_BASE_URL=https://admin.sandbox.ilovelearningguide.com`、`OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`、`ADMIN_HELPDESK_BASE_URL=https://admin.sandbox.ilovelearningguide.com`。
 
 ### 3.2 Admin Sandbox（App Runner 变量 / Secrets）
 
-- 普通变量：`APP_ENV=SANDBOX`、`NODE_ENV=production`、`PORT=3000`、`AWS_REGION=ap-southeast-1`、`APP_ROLES=admin`、`ADMIN_CAPABILITIES=course,accounts`、`AUTH_ENABLED=true`、`BACKOFFICE_APP_URL=https://admin.sandbox.ilovelearningguide.com`、`ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`、`PUBLIC_SITE_URL=https://sandbox.ilovelearningguide.com`、`COURSE_MEDIA_BUCKET`、`COURSE_MEDIA_PREFIX`、`COURSE_PACKAGE_BUCKET`、`COURSE_PACKAGE_PREFIX=staging/`、`PACKAGE_SOURCE_ENFORCEMENT=off`；（可选）`SMTP_*`、`SES_FROM_EMAIL`。
-- 其中 `APP_ROLES`、`ADMIN_CAPABILITIES`、`ENVIRONMENT_LABEL`、`VERSION_NUMBERING_MODE` 由 `scripts/provision-admin-dev.mjs` 在 `ADMIN_ENV=sandbox` 时自动写入（本分支 F3b）；仅手工部署路径需要人工注入。
-- Secrets：`DATABASE_URL`、`AUTH_TOKEN`（← `admin_api_key`）、`SESSION_SECRET`、`BOOTSTRAP_ADMIN_PASSWORD`、`PORTAL_PREVIEW_SECRET`、`STRIPE_SECRET_KEY`；（可选）`SMTP_PASS`、`STRIPE_WEBHOOK_SECRET`。
-- **首期不启用（不写入）**：`OPENROUTER_*`、`AI_CONFIG_ENCRYPTION_KEY`、`AI_AVAILABLE_MODELS`、`AI_RATE_LIMIT_*`、`KS_SERVICE_TOKEN`、`KS_BASE_URL`、`PORTAL_HELPDESK_*`、`ADMIN_HELPDESK_*`、`HELPDESK_*`、`ENV_CAPABILITY_ENFORCEMENT`。
+- 普通变量：`APP_ENV=SANDBOX`、`NODE_ENV=production`、`PORT=3000`、`AWS_REGION=ap-southeast-1`、`AUTH_ENABLED=true`、`BACKOFFICE_APP_URL=https://admin.sandbox.ilovelearningguide.com`、`ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`、`PUBLIC_SITE_URL=https://sandbox.ilovelearningguide.com`、`COURSE_MEDIA_BUCKET`、`COURSE_MEDIA_PREFIX`、`COURSE_PACKAGE_BUCKET`、`COURSE_PACKAGE_PREFIX=staging/`、`PACKAGE_SOURCE_ENFORCEMENT=off`、`OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`、`PORTAL_HELPDESK_BASE_URL=https://sandbox.ilovelearningguide.com`、`PORTAL_NOTIFICATIONS_BASE_URL=https://sandbox.ilovelearningguide.com`、`PORTAL_STUDENTS_BASE_URL=https://sandbox.ilovelearningguide.com`、`SMTP_HOST/PORT/SECURE/USER/FROM`、`SES_FROM_EMAIL`；`APP_ROLES` 与 `ADMIN_CAPABILITIES` **不设置**（全角色、全模块）。
+- 其中 `ENVIRONMENT_LABEL`、`VERSION_NUMBERING_MODE` 由 `scripts/provision-admin-dev.mjs` 在 `ADMIN_ENV=sandbox` 时自动写入；`APP_ROLES`/`ADMIN_CAPABILITIES` 脚本不再写入（未设置即全开）。仅手工部署路径需要人工注入普通变量。
+- Secrets：`DATABASE_URL`、`AUTH_TOKEN`（← `admin_api_key`）、`SESSION_SECRET`、`BOOTSTRAP_ADMIN_PASSWORD`、`PORTAL_PREVIEW_SECRET`、`STRIPE_SECRET_KEY`、`OPENROUTER_API_KEY`、`AI_CONFIG_ENCRYPTION_KEY`、`KS_SERVICE_TOKEN`、`PORTAL_HELPDESK_TOKEN`、`ADMIN_HELPDESK_TOKEN`、`PORTAL_NOTIFICATIONS_TOKEN`、`PORTAL_STUDENTS_TOKEN`、`SMTP_PASS`；（可选）`STRIPE_WEBHOOK_SECRET`。
+- **需运维配置（已启用，未配置时降级）**：`AI_AVAILABLE_MODELS`（非密钥，模型清单）、`AI_RATE_LIMIT_*`（非密钥，沿用代码缺省）、`KS_BASE_URL` 留空（本服务同时起 ks 角色，直接读库）、`HELPDESK_*` 模型参数（非密钥，沿用缺省）；`ENV_CAPABILITY_ENFORCEMENT` 保持不设置（Part C 未接线，默认 off）。
 
 ### 3.3 跨服务配对（必须一致）
 
 | 配对 | Admin Sandbox | Portal Sandbox | 说明 |
 |---|---|---|---|
-| 学员端/目录 API Key | `AUTH_TOKEN` | `ADMIN_PORTAL_API_TOKEN` | 都指向 `learning-guide/admin/sandbox/admin_api_key`；Portal 调 Admin `/api/portal/v1/**`，Admin 端按 `X-API-Key == AUTH_TOKEN` 校验 |
+| 学员端/目录 API Key | `AUTH_TOKEN` | `ADMIN_PORTAL_API_TOKEN` / `KS_TUTOR_API_KEY` | 都指向 `learning-guide/admin/sandbox/admin_api_key`；Portal 调 Admin `/api/portal/v1/**`、`/api/user/**`、`/api/ks/**`，Admin 端按 `X-API-Key`/Bearer == `AUTH_TOKEN` 校验 |
 | 站点地址 | `PUBLIC_SITE_URL` | `NEXT_PUBLIC_APP_URL` | 同一个 sandbox 域名 |
-| 方向 | — | `ADMIN_PORTAL_BASE_URL` | Portal → Admin |
-| Helpdesk | 首期不配置 | 首期不配置 | 未配置时按设计 503；启用时再按原模板成对配置 |
-| AI Tutor | 首期不配置 | 首期不配置 | `agent`/`ks` 角色不启动 |
+| 方向 | `PORTAL_HELPDESK_BASE_URL` / `PORTAL_NOTIFICATIONS_BASE_URL` / `PORTAL_STUDENTS_BASE_URL` → Portal | `ADMIN_PORTAL_BASE_URL` / `ADMIN_HELPDESK_BASE_URL` / `KS_TUTOR_BASE_URL` → Admin | 双向；地址已指向 Sandbox 自身 |
+| Helpdesk | `PORTAL_HELPDESK_TOKEN`、`ADMIN_HELPDESK_TOKEN` | `ADMIN_HELPDESK_TOKEN`、`PORTAL_HELPDESK_TOKEN` | 成对一致；未配置时按设计 503 `HELPDESK_NOT_CONNECTED` / `integration_disabled` |
+| AI Tutor | `OPENROUTER_API_KEY`、`AI_CONFIG_ENCRYPTION_KEY` | `OPENROUTER_API_KEY`、`KS_TUTOR_API_KEY` | `agent`/`ks` 角色全起；缺 key 时 AI 端点返回未配置错误，不伪造可用 |
 
 ### 3.4 Secrets Manager 命名建议
 
-- Portal：`learning-guide/sandbox/{database_url, session_secret, stripe_secret_key, stripe_webhook_secret, google_client_secret, wechat_app_secret, smtp_pass}`
-- Admin：`learning-guide/admin/sandbox/{database_url, admin_api_key, session_secret, bootstrap_admin_password, portal_preview_secret, stripe_secret_key, smtp_pass}`
+- Portal：`learning-guide/sandbox/{database_url, session_secret, stripe_secret_key, stripe_webhook_secret, google_client_secret, wechat_app_secret, smtp_pass, openrouter_api_key, admin_helpdesk_token, portal_helpdesk_token, portal_integration_token, portal_notifications_token, portal_students_token, livekit_projects_json, livekit_local_credentials_json, study_group_token_log_key}`
+- Admin：`learning-guide/admin/sandbox/{database_url, admin_api_key, session_secret, bootstrap_admin_password, portal_preview_secret, stripe_secret_key, smtp_pass, openrouter_api_key, ai_config_encryption_key, ks_service_token}`
 
 > `admin_api_key` 由 provision 脚本创建；服务端读取的变量名是 `AUTH_TOKEN`，脚本已把 `RuntimeEnvironmentSecrets.AUTH_TOKEN` 指向该 secret ARN（G11 已在本分支修复），不要新增明文变量。
 
@@ -152,7 +152,7 @@
 | Repo variable | `ADMIN_SANDBOX_APP_RUNNER_SERVICE_ARN` | sandbox 部署工作流目标（S4） |
 | Repo secret | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 专用 IAM 用户（策略模板 `deploy/ci-iam-policy.json.template`） |
 | Workflow | `.github/workflows/sandbox-deploy.yml`（待安装） | 从 `deploy/admin-sandbox-deploy.yml.template` 复制；手动/推送触发；等待 CI；轮询 Operation 到 `SUCCEEDED` |
-| 可选变量 | `SANDBOX_OPENROUTER_API_KEY_SECRET_ARN` 等 | **首期不设置**（AI 不启用） |
+| 可选变量 | `SANDBOX_OPENROUTER_API_KEY_SECRET_ARN` 等 | AI Tutor 已启用；运维配置 ARN 后自动注入，未配置时步骤跳过、AI 端点按设计不可用 |
 
 ### 4.2 Portal（`First-Light-TechHK/LearningGuidePortal`）
 
@@ -165,7 +165,7 @@
 
 ### 4.3 本仓库（Admin）已落地的 Sandbox 内容
 
-- `deploy/sandbox.example.env` — 两服务变量模板（占位符 + 能力分区注释）。
+- `deploy/sandbox.example.env` — 两服务变量模板（占位符 + 全模块/全角色与密钥降级说明）。
 - `deploy/sandbox-infrastructure.yml` — Portal 侧网络/DB/桶/角色 CloudFormation 模板。
 - `deploy/admin-sandbox-deploy.yml.template` — Admin sandbox 部署工作流模板。
 - `deploy/portal-sandbox-deploy.yml.template` — Portal sandbox 部署工作流模板（F4 合并；安装属 Portal 仓库任务）。
@@ -201,21 +201,21 @@
 | 1.3 | 核对 S3 | 公共访问块 4 项全 true；版本化 Enabled；拒绝非 TLS |
 | 1.4 | 核对网络 | 私有子网无公网 IP；NAT/EIP/S3 Endpoint available；DB SG 只接受 App SG |
 | 1.5 | 核对 IAM | 运行时角色只读 `learning-guide/sandbox/*`、只写 sandbox 桶/前缀；IAM Policy Simulator 验证跨环境 denied |
-| 1.6 | Admin RDS + 密钥 + 课程桶（ops 先建运行时角色与桶，再跑）：<br>`ADMIN_ENV=sandbox ADMIN_BRANCH=sandbox AUTH_ENABLED=true VPC_ID=… SUBNET_IDS=… SECURITY_GROUP_ID=… GITHUB_CONNECTION_ARN=… INSTANCE_ROLE_ARN=… VPC_CONNECTOR_ARN=… COURSE_MEDIA_BUCKET=learning-guide-admin-sandbox-course-<acct> node scripts/provision-admin-dev.mjs --apply` | `learning-guide-admin-sandbox` available、私有、加密、备份 7 天；secrets ARN 存在；`AUTH_TOKEN` 映射正确；App Runner `AutoDeploymentsEnabled=false`；运行时变量含 `APP_ROLES=admin`、`ADMIN_CAPABILITIES=course,accounts`、`ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`（F3b，脚本自动写入） |
+| 1.6 | Admin RDS + 密钥 + 课程桶（ops 先建运行时角色与桶，再跑）：<br>`ADMIN_ENV=sandbox ADMIN_BRANCH=sandbox AUTH_ENABLED=true VPC_ID=… SUBNET_IDS=… SECURITY_GROUP_ID=… GITHUB_CONNECTION_ARN=… INSTANCE_ROLE_ARN=… VPC_CONNECTOR_ARN=… COURSE_MEDIA_BUCKET=learning-guide-admin-sandbox-course-<acct> node scripts/provision-admin-dev.mjs --apply` | `learning-guide-admin-sandbox` available、私有、加密、备份 7 天；secrets ARN 存在；`AUTH_TOKEN` 映射正确；App Runner `AutoDeploymentsEnabled=false`；运行时变量含 `ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`，**不含** `APP_ROLES`/`ADMIN_CAPABILITIES`（未设置 = 全角色、全模块） |
 
 ### Phase 2 Admin Sandbox
 
 | 步骤 | 执行 | 验收标准 |
 |---|---|---|
-| 2.1 | 部署 App Runner（S4 / 手工），注入 §3.2 配置；`AUTH_ENABLED=true`、`AUTH_TOKEN` 指向 `admin_api_key` secret（`APP_ROLES`/`ADMIN_CAPABILITIES`/`ENVIRONMENT_LABEL`/`VERSION_NUMBERING_MODE` 已由 Phase 1.6 脚本写入；手工路径需补齐） | RUNNING；`GET /api/health` 200 且 `environment=SANDBOX` |
+| 2.1 | 部署 App Runner（S4 / 手工），注入 §3.2 配置；`AUTH_ENABLED=true`、`AUTH_TOKEN` 指向 `admin_api_key` secret（`ENVIRONMENT_LABEL`/`VERSION_NUMBERING_MODE` 已由 Phase 1.6 脚本写入；`APP_ROLES`/`ADMIN_CAPABILITIES` 保持不设置；手工路径需核对） | RUNNING；`GET /api/health` 200 且 `environment=SANDBOX` |
 | 2.2 | 启动时 `npx prisma migrate deploy` | `_prisma_migrations` 无失败；`pg_extension` 中 `vector` 存在 |
 | 2.3 | 分类预置核对 | `SELECT name FROM "CourseCatalogueEntry" WHERE "parentId" IS NULL ORDER BY "sortOrder"` 返回 `Science`、`Chinese Humanities`、`European Humanities`、`Society` |
 | 2.4 | 初始化 Operator 账号并登录 | 登录成功；`GET /api/backoffice/environment` 返回 `label="Sandbox"`、`versionNumberingMode="sandbox"`、`stripeConfigured=true` |
 | 2.5 | 环境徽标 | 后台页头紫色 `Sandbox` 徽标（`client/src/backoffice/components/AppShell.tsx`） |
 | 2.6 | Stripe 价格同步 | 课程价格页保存并同步 8 个价格；Dashboard（test mode）出现对应 Product/Price；无 `syncError` |
-| 2.7 | 课程闭环（能力分区核心） | 新建课程 → 上传媒体（S3）→ 保存草稿 → Publish；版本号 `1.1`；改动后再次 Publish `1.2` |
+| 2.7 | 课程闭环（核心） | 新建课程 → 上传媒体（S3）→ 保存草稿 → Publish；版本号 `1.1`；改动后再次 Publish `1.2` |
 | 2.8 | 导出与版本序列 | 导出课程包；`CourseVersion.exportedAt` 已写入；再次发布得到 `2.1` |
-| 2.9 | 能力分区核对 | 只有 `admin` 角色：`/api/user/**`、`/api/ks/**` 不对外；Helpdesk 未配置返回 503；AI 变量未配置（后台不出现 AI 测试入口可用性错误导致崩溃） |
+| 2.9 | 能力/角色核对 | 全角色已起：`/api/user/**`、`/api/ks/**` 已挂载且要求服务密钥（假 key → 401）；Helpdesk 未配置令牌返回 503（不是 404）；AI 未配置 key 时明确提示未配置，不崩溃。显式设 `APP_ROLES`/`ADMIN_CAPABILITIES` 才出现裁剪（404 `MODULE_NOT_ENABLED`） |
 
 ### Phase 3 Portal Sandbox
 
@@ -228,9 +228,9 @@
 | 3.5 | 测试账号 | 每个客户角色至少 1 个测试账号可登录、可订阅、可学习 |
 | 3.6 | Stripe 支付 | 测试卡完成订阅 → 订单 paid、entitlement 生效；`livemode=false`；webhook 验签 200；过期/取消会话不授权 |
 | 3.7 | 课程展示 | 测试账号能看到并播放课程（Portal 尚未消费 Admin 课程投影，D6；首期用 Portal 数据迁移导入同课程过渡验收） |
-| 3.8 | AI Tutor | **首期不启用**（能力分区）：不做验收，不配置变量 |
+| 3.8 | AI Tutor | 全启用：配置 `OPENROUTER_API_KEY` 后验收学员对话与后台测试对话；未配置时确认明确提示未配置（不崩溃、不伪造成功） |
 | 3.9 | 邮件 | 注册验证、密码重置真实收件；链接域名为 sandbox 域名 |
-| 3.10 | 后台配对 | Portal 分类筛选读取 Admin Sandbox 分类（`/api/portal/v1/categories`，4 个顶级分类）；Helpdesk 首期不验收 |
+| 3.10 | 后台配对 | Portal 分类筛选读取 Admin Sandbox 分类（`/api/portal/v1/categories`，4 个顶级分类）；Helpdesk 令牌配置后验收一对工单/FAQ，未配置时确认 503 |
 
 ### Phase 4 隔离与安全验收
 
@@ -291,7 +291,7 @@
 | G1 | `ENV_CAPABILITY_ENFORCEMENT` 未在本基线 | 上游 dev 87e0be2 无 `server/src/partc/**`；变量无人读取（Part C 半成品在 `fix/course-category-single-source`，已 stash） | 生产/UAT 仍可 authoring；"生产只导入"只能靠操作规程 | Part C 集成时接线，开关默认 off；UI/生产演练后再开 |
 | G2 | `PACKAGE_SOURCE_ENFORCEMENT` 未在本基线 | 同上（`src/partc/compiler/parse.ts` 不在基线） | 导入不校验 provenance | 同 G1；Sandbox 保持 off |
 | G3 | ~~Admin 环境枚举不含 SANDBOX~~ | **本分支已修复**：`env.ts` + `env.spec.ts` | — | — |
-| G4 | ~~Admin provision 不支持 sandbox~~ | **本分支已修复**：`ADMIN_ENV=sandbox` 全套约束（分支必传/AUTH 强制/AUTH_TOKEN 映射/桶名/备份 7 天/关闭自动部署/`APP_ROLES`+`ADMIN_CAPABILITIES`+环境标识与编号四项显式写入，F3b） | — | — |
+| G4 | ~~Admin provision 不支持 sandbox~~ | **本分支已修复**：`ADMIN_ENV=sandbox` 全套约束（分支必传/AUTH 强制/AUTH_TOKEN 映射/桶名/备份 7 天/关闭自动部署；**不写 `APP_ROLES`/`ADMIN_CAPABILITIES` = 全角色、全模块**，只显式写入环境标识与编号，F3b） | — | — |
 | G5 | Admin 部署工作流未安装 | 仓库 `.github/workflows/` 只有 dev-deploy/ci；模板在 `deploy/` | 需复制模板到 `.github/workflows/sandbox-deploy.yml` 并配置仓库变量 | 部署前由 eng 安装 |
 | G6 | ~~Portal `isManagedEnvironment()` 不含 SANDBOX~~ | **Portal 工作区已实现**（待提交/部署验证）：`isManagedEnvironment()` 含 SANDBOX、Stripe 沙盒强校验覆盖 SANDBOX（Portal 工作区 `services/runtimeConfig.ts:12-16,95`） | — | — |
 | G7 | ~~Portal provision 只支持 SIT/UAT~~ | **Portal 工作区已实现**（待提交/部署验证）：`scripts/provision-uat.mjs` 参数化 sandbox tier（`PORTAL_ENV=sandbox`，Portal 工作区 `scripts/provision-uat.mjs:66-111`） | — | — |
@@ -301,7 +301,7 @@
 | G11 | ~~secret 名与变量名不一致~~ | **本分支已修复**：脚本映射 `AUTH_TOKEN ← admin_api_key` ARN | — | — |
 | G12 | ~~Admin RDS 备份默认 1 天~~ | **本分支已修复**：Sandbox 7 天 | — | — |
 | G13 | Admin 无 live Stripe key 运行时防护 | Admin 只看 `STRIPE_SECRET_KEY` 值 | 填错 key 会把 Sandbox 指向正式账号 | 部署检查项（`sk_test_` 前缀）+ 后续启动校验 |
-| G14 | Study Group（LiveKit）取舍 | — | 首期不启用（能力分区已拍板） | 不写变量，接受 `configured:false` |
+| G14 | Study Group（LiveKit）取舍 | — | 已启用；LiveKit 密钥由运维配置，未配置时直播间不可用（接受 `configured:false`） | 运维配置 `LIVEKIT_*` / `STUDY_GROUP_TOKEN_LOG_KEY` |
 
 ### 6.3 结论
 
@@ -322,8 +322,8 @@
 | Q5 | 数据重置策略：频率、范围、执行人、是否保留课程内容？ | 例行只重置测试学员数据（订单/订阅/权益/学习记录），课程保留；季度可整栈重建（先导出课程包） | 产品 / ops |
 | Q6 | WeChat 网站应用：新建还是在现有应用加授权域？ | 按"一环境一应用"惯例新建 | 产品 |
 | Q7 | 代码同步：谁在何时把 `sandbox` 分支快进到最近一次生产发布 SHA？ | 每次生产发布后由发布负责人把 `sandbox` 分支快进到该发布 SHA 并登记；修复合入上游 dev 后随下一次生产发布进入 | eng / 发布负责人 |
-| Q8 | Study Group（LiveKit）是否纳入首期？ | 首期不纳入（已按能力分区执行） | 产品 |
-| Q9 | OpenRouter key 与预算？ | 首期不启用 AI Tutor，暂不申请 | 产品 / eng |
+| Q8 | Study Group（LiveKit）是否纳入？ | 已随“全模块”纳入；密钥由运维配置，未配置时不可用 | 产品 |
+| Q9 | OpenRouter key 与预算？ | AI Tutor 已启用，需要产品/运维提供 key 与预算上限；未配置时 AI 端点按设计不可用 | 产品 / eng |
 | Q10 | 测试账号身份来源：邮箱/微信账号由谁提供？ | 产品提供每个客户角色至少 1 个可收件邮箱与 1 个可扫码微信账号；清单只存密码管理器 | 产品 |
 
 ---
@@ -331,7 +331,7 @@
 ## 8. 完成定义
 
 1. §2 资源全部创建并通过验收；§5 Phase 0–4 全部通过。
-2. Admin Sandbox：`/api/health` 200 且 `environment=SANDBOX`；紫色 `Sandbox` 徽标；`versionNumberingMode=sandbox`；4 个预置分类存在；Stripe 测试价格同步成功；能力分区生效（只开课程管理与导入导出）。
+2. Admin Sandbox：`/api/health` 200 且 `environment=SANDBOX`；紫色 `Sandbox` 徽标；`versionNumberingMode=sandbox`；4 个预置分类存在；Stripe 测试价格同步成功；全模块、全角色启用（未配置密钥的功能按设计降级）。
 3. Portal Sandbox：`/api/health` 200 且 `environment=SANDBOX`；`/api/health/config` 逐项 `configured`；测试账号可登录、订阅（测试卡）、学习。
 4. 隔离验收（Phase 4）全部通过：数据库、S3、密钥、token、域名、Stripe 六项互不可达/不可混用。
 5. 课程包 Sandbox → 当前生产（UAT）导入、发布成功；来源字段正确。

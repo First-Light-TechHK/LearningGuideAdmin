@@ -43,13 +43,12 @@ function optional(service, operation, input) {
   catch (error) { if (/ResourceNotFound|NoSuchEntity|DBInstanceNotFound|DBSubnetGroupNotFound/i.test(String(error.stderr))) return null; throw error; }
 }
 
-// Sandbox 能力分区缺省（owner 2026-11-16 拍板、2026-11-20 修订）：只起 admin 角色，
-// 服务端/前端只开放课程管理与后台账号管理（ADMIN_CAPABILITIES=course,accounts）；
-// 环境标识与版本编号显式写死为 Sandbox 语义，避免依赖编号模式的静默推导。
-// dev/sit/uat 保持历史行为（不写这四项）。
+// Sandbox 环境缺省（owner 2026-11-24：不再做能力/角色分区）：不写 APP_ROLES 与
+// ADMIN_CAPABILITIES，服务端按“未设置 = 全开”启动全部角色与全部模块（见
+// server/src/app-roles.ts、server/src/common/capabilities.ts）。只显式写死
+// Sandbox 的环境标识与版本编号语义，避免依赖编号模式的静默推导。
+// dev/sit/uat 保持历史行为（这两项也不写）。
 const sandboxEnvironmentDefaults = {
-  APP_ROLES: "admin",
-  ADMIN_CAPABILITIES: "course,accounts",
   ENVIRONMENT_LABEL: "Sandbox",
   VERSION_NUMBERING_MODE: "sandbox"
 };
@@ -169,7 +168,7 @@ const source = {
           // 服务鉴权：显式写入，不再依赖服务缺省。Sandbox 必为 true（脚本已校验）；
           // dev/sit/uat 缺省 false，与历史部署行为一致。
           AUTH_ENABLED: process.env.AUTH_ENABLED || "false",
-          // Sandbox 能力分区缺省见文件顶部 sandboxEnvironmentDefaults（F3b）；
+          // Sandbox 环境缺省见文件顶部 sandboxEnvironmentDefaults（能力/角色全开）；
           // dev/sit/uat 不写，保持历史行为。
           ...(environment === "sandbox" ? sandboxEnvironmentDefaults : {}),
           // Course media/package storage. DEV uses a dedicated Admin course bucket;

@@ -80,14 +80,14 @@ aws --profile learning-guide-sandbox secretsmanager create-secret \
 | Secret | 来源 |
 |---|---|
 | `*/database_url` | 2.2 的 MasterSecret 恢复出的主密码 + 自建应用账号（参照 UAT `lg_uat_app` 做法） |
-| `*/session_secret`、`*/portal_preview_secret`、`admin/*/ai_config_encryption_key`（64 hex，首期不启用时可不建） | 执行时用 openssl 随机生成 |
+| `*/session_secret`、`*/portal_preview_secret`、`admin/*/ai_config_encryption_key`（64 hex） | 执行时用 openssl 随机生成 |
 | `*/stripe_secret_key`、`*/stripe_webhook_secret` | 付款负责人（测试账号） |
 | `*/google_client_secret`、`*/wechat_app_secret` | 产品（对应 E2/E3 申请的应用） |
 | `*/smtp_pass` | ops（163 授权码，Q4 决策） |
 | `admin/sandbox/admin_api_key` | 随机生成；**部署时映射为 App Runner 的 `AUTH_TOKEN`（G11）** |
 | `admin/sandbox/bootstrap_admin_password` | 执行者设定，仅用于建首个 Operator |
 
-> 能力分区（owner 2026-11-16）：Helpdesk / AI Tutor / Study Group 首期不启用，`openrouter_api_key`、`ks_service_token`、`portal_helpdesk_token`、`admin_helpdesk_token`、`portal_integration_token`、`study_group_token_log_key` **不创建、不写入**（见 `deploy/sandbox.example.env` 第三部分）。
+> 能力/角色（owner 2026-11-24）：Sandbox 全模块、全角色启用。Helpdesk / AI Tutor / Study Group 的密钥与配对令牌（`openrouter_api_key`、`ai_config_encryption_key`、`ks_service_token`、`portal_helpdesk_token`、`admin_helpdesk_token`、`portal_notifications_token`、`portal_students_token`、`portal_integration_token`、`livekit_*`、`study_group_token_log_key`）由运维按需创建；**未创建时功能按设计降级**（Helpdesk 503、AI 未配置错误），不影响课程管理。不要写任何假密钥值。
 
 ### 2.4 创建 Admin Sandbox App Runner
 
@@ -106,14 +106,14 @@ node scripts/provision-admin-dev.mjs --apply
 - `ADMIN_BRANCH` 必传（无缺省分支）；`AutoDeploymentsEnabled=false`（发布只走 `deploy/admin-sandbox-deploy.yml.template`）；
 - `AUTH_ENABLED=true` 强制校验，`RuntimeEnvironmentSecrets.AUTH_TOKEN` ← `admin_api_key` secret ARN（G11/D8）；
 - 课程桶缺省为 `learning-guide-admin-sandbox-course-<acct>`，RDS 备份保留 7 天（G12/D9）；
-- 显式写入 `APP_ROLES=admin`、`ADMIN_CAPABILITIES=course,accounts`、`ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`（F3b；dev/sit/uat 保持历史行为）。
-- 脚本**不自建**运行时角色与课程桶：`INSTANCE_ROLE_ARN`、`COURSE_MEDIA_BUCKET`/`COURSE_PACKAGE_BUCKET` 是输入参数，需 ops 先建；Helpdesk 首期不启用时，运行时不需授权 `learning-guide/sandbox/` 下的 helpdesk 令牌。
+- 显式写入 `ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`；**不写 `APP_ROLES`/`ADMIN_CAPABILITIES`**（未设置 = 全角色、全模块；dev/sit/uat 保持历史行为）。
+- 脚本**不自建**运行时角色与课程桶：`INSTANCE_ROLE_ARN`、`COURSE_MEDIA_BUCKET`/`COURSE_PACKAGE_BUCKET` 是输入参数，需 ops 先建；Helpdesk/Portal 集成已启用，`learning-guide/sandbox/` 下的配对令牌在 ops 创建后按需精确授权。
 
 先跑不带 `--apply` 的 dry run 核对资源名（该路径只打印计划、不调用任何 AWS API）。
 
-备选手工路径：控制台按 `provisioning-request.md` §2.2 A5 的参数建（构建/启动命令、端口 3000、健康检查 `/api/health`），变量与 Secrets 按 `deploy/sandbox.example.env` 第二部分注入（其中四项沙箱缺省与上面脚本一致）。
+备选手工路径：控制台按 `provisioning-request.md` §2.2 A5 的参数建（构建/启动命令、端口 3000、健康检查 `/api/health`），变量与 Secrets 按 `deploy/sandbox.example.env` 第二部分注入（其中两项沙箱缺省与上面脚本一致；`APP_ROLES`/`ADMIN_CAPABILITIES` 保持不设置）。
 
-完成后验收 §5 Phase 2 全部步骤（health=SANDBOX、分类 4 个、徽标紫色、版本 `1.1`→`1.2`→`2.1`、能力分区 404）。
+完成后验收 §5 Phase 2 全部步骤（health=SANDBOX、分类 4 个、徽标紫色、版本 `1.1`→`1.2`→`2.1`、全模块可见、未配置密钥的 Helpdesk/AI 按设计降级）。
 
 ### 2.5 创建 Portal Sandbox App Runner
 
@@ -170,7 +170,7 @@ node scripts/sandbox-smoke.mjs
 | 7 | 保留 | `DATABASE_CA_FILE`、`STORAGE_BACKEND=postgresql`、`PAYMENT_MODE=stripe`、`LOCAL_SOCIAL_LOGIN=0` | 不变 |
 | 8 | bootstrap Lambda | 建 `product_payment_keys`/`orm_runtime` 表 | 保留（表结构需要）；需先有 `deploy/sandbox-bootstrap.cjs`（外部前置，缺失时脚本在 AWS 调用前 fail-closed） |
 | 9 | 媒体 archive 只读策略 | 读 `aitutor-data` 旧桶 | **不要**（隔离要求，见 CFN 模板说明） |
-| 10 | Admin provision 的默认值 | — | **已在本分支脚本内解决**：`ADMIN_ENV=sandbox` 无缺省分支、`AutoDeploymentsEnabled=false`、`-sandbox-` 桶名、`AUTH_ENABLED=true` 强制、`AUTH_TOKEN` 映射、能力分区四项显式写入（见 §2.4） |
+| 10 | Admin provision 的默认值 | — | **已在本分支脚本内解决**：`ADMIN_ENV=sandbox` 无缺省分支、`AutoDeploymentsEnabled=false`、`-sandbox-` 桶名、`AUTH_ENABLED=true` 强制、`AUTH_TOKEN` 映射、只显式写 `ENVIRONMENT_LABEL`/`VERSION_NUMBERING_MODE`（不写 `APP_ROLES`/`ADMIN_CAPABILITIES`，全角色、全模块；见 §2.4） |
 
 ---
 

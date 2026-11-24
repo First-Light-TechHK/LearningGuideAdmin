@@ -202,7 +202,7 @@ describe('module level: environment ∩ role ∩ grant', () => {
   });
 
   it('environment capability always wins over an allowed account switch', () => {
-    const sandbox = parseEnabledCapabilities('course,accounts');
+    const restricted = parseEnabledCapabilities('course,accounts');
     for (const [module, capability] of [
       ['module.knowledge', 'knowledge'],
       ['module.helpdesk', 'helpdesk'],
@@ -214,18 +214,18 @@ describe('module level: environment ∩ role ∩ grant', () => {
           'ADMIN',
           module,
           withGrant([[module, true]]),
-          sandbox,
+          restricted,
         ),
         'NONE',
         capability,
       );
     }
     assert.equal(
-      effectiveModuleLevel('ADMIN', 'module.course', grants(), sandbox),
+      effectiveModuleLevel('ADMIN', 'module.course', grants(), restricted),
       'FULL',
     );
     assert.equal(
-      effectiveModuleLevel('ADMIN', 'module.accounts', grants(), sandbox),
+      effectiveModuleLevel('ADMIN', 'module.accounts', grants(), restricted),
       'FULL',
     );
     const noAccounts = parseEnabledCapabilities('course');
@@ -549,7 +549,7 @@ describe('resolveEffectiveFeatures', () => {
       .map((e) => e.key);
     assert.ok(!allowed.includes('module.helpdesk'));
     assert.ok(!allowed.includes('module.knowledge'));
-    // course 能力在 sandbox 里是开着的：动作开关照常生效
+    // course 能力在裁剪集里是开着的：动作开关照常生效
     assert.ok(allowed.includes('course.publish'));
     assert.ok(allowed.includes('module.course'));
     assert.ok(allowed.includes('module.accounts'));

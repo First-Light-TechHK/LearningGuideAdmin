@@ -5,7 +5,7 @@
 > - **A. 自动 smoke**：`node scripts/sandbox-smoke.mjs`（只发 HTTPS 请求，不调 AWS、不读密钥）。
 > - **B. 手工核对**：需要 AWS 控制台 / IAM / Stripe Dashboard / 真实浏览器执行的项。
 > 与 `docs/sandbox/provisioning-request.md` §5 的 Phase 4/5 对应；任何一项不过都不得宣告 Sandbox 可用。
-> 能力分区（`docs/sandbox/partitioning.md` §5）：Helpdesk、学员端学生/AI Tutor、Study Group 首期不启用，对应验收项标记为“首期不做”。
+> 能力/角色（`docs/sandbox/partitioning.md` §5）：Sandbox 全模块、全角色启用；需要密钥的功能（AI Tutor/KS、Helpdesk、邮件、Portal 集成、Study Group）已打开，密钥由运维配置，未配置时按设计降级（Helpdesk 503、AI 未配置错误）。验收按“已配置的密钥”逐项判定。
 
 ---
 
@@ -59,12 +59,12 @@ node scripts/sandbox-smoke.mjs
 - Admin：`/api/health` 不返回 version，用 App Runner 部署记录/`APP_VERSION` 配置核对同一 SHA。
 - `sandbox` 分支 `git rev-parse` 与该提交相等；分支上不得出现 sandbox 专属提交。
 
-### B1 环境徽标、版本编号与能力分区（若 A5 未跑）
+### B1 环境徽标、版本编号与能力/角色（若 A5 未跑）
 
 - 用 Operator 账号登录 `https://admin.sandbox.ilovelearningguide.com`。
 - 页头徽标为**紫色 `Sandbox`**（红色 Production 即错）。
 - 课程页发布一门课 → 版本号 `1.1`；改动后再发布 → `1.2`；导出后再发布 → `2.1`（Sandbox `X.Y` 语义）。
-- 能力分区：课程管理与导入导出可用；`/api/user/**`、`/api/ks/**` 不对外（`APP_ROLES=admin`）；Helpdesk 未配置时 `/api/helpdesk/**` 返回 404 `MODULE_NOT_ENABLED`；AI Tutor 入口不产生可用的 LLM 调用（变量未配置）。`ADMIN_ENV=sandbox` 的 provision 脚本已显式写入 `APP_ROLES=admin`、`ADMIN_CAPABILITIES=course,accounts`、`ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`（F3b）；手工部署路径需核对这四项。
+- 能力/角色：不设 `APP_ROLES` / `ADMIN_CAPABILITIES`，全部模块菜单可见（按角色权限）；`/api/user/**`、`/api/ks/**` 已挂载但仍要求服务密钥（`AUTH_TOKEN` / `KS_SERVICE_TOKEN`）；Helpdesk 未配置令牌时 `/api/helpdesk/**` 返回 503 `HELPDESK_NOT_CONNECTED`（不是 404）；AI Tutor 入口可用，未配置 `OPENROUTER_API_KEY` 时明确提示未配置而不是崩溃。`ADMIN_ENV=sandbox` 的 provision 脚本只显式写入 `ENVIRONMENT_LABEL=Sandbox`、`VERSION_NUMBERING_MODE=sandbox`；手工部署路径需核对这两项且不要写 `APP_ROLES`/`ADMIN_CAPABILITIES`。
 
 ### B2 数据库跨环境拒绝（ops）
 
@@ -108,7 +108,7 @@ psql "$SANDBOX_DATABASE_URL" -c "select count(*) from orm_rows where domain='use
 - 测试账号在 Course Sandbox 能看到并播放课程、走试看/订阅全链路。
 - **已知限制**：Portal 尚未消费 Admin 课程投影（G8）；首期验收以 Portal 数据迁移导入的同内容课程为过渡，并在记录里注明。
 - 分类筛选在 Portal 显示 Admin Sandbox 的 4 个分类（`services/adminCatalogue.ts` 走 `/api/portal/v1/categories`）。
-- AI Tutor：**首期不启用**，不验收（`partitioning.md` §5）。
+- AI Tutor：全启用；配置 `OPENROUTER_API_KEY` 后验收学员对话与后台测试对话各一次；未配置时页面明确提示“未配置可用的 LLM API Key”，不得崩溃或伪造成功（`partitioning.md` §5）。
 
 ### B8 数据重置演练（产品/ops，按 `provisioning-request.md` §7 Q5 结论执行）
 
@@ -127,7 +127,7 @@ psql "$SANDBOX_DATABASE_URL" -c "select count(*) from orm_rows where domain='use
 |---|---|---|---|---|
 | 0 本地自检 | | `--self-test` TAP 输出 | | |
 | A1–A8 smoke | | 脚本 JSON 输出 | | |
-| B1 徽标/编号/能力分区 | | 截图 + 版本列表 + 端点探测 | | |
+| B1 徽标/编号/能力角色 | | 截图 + 版本列表 + 端点探测 | | |
 | B2 DB 隔离 | | psql 输出 + 控制台截图 | | |
 | B3 S3 隔离 | | IAM 模拟结果 | | |
 | B4 Secrets 隔离 | | IAM 模拟结果 | | |
@@ -137,4 +137,4 @@ psql "$SANDBOX_DATABASE_URL" -c "select count(*) from orm_rows where domain='use
 | B8 数据重置 | | 前后账号状态对比 | | |
 | B9 成本/告警 | | Cost Explorer + 告警通知 | | |
 
-> 通过标准：0 + A 全部 pass（含人工补项）、B1–B9 全部打勾（首期不启用项按说明标注“不适用”）。任何“降级接受”须由 LEO 书面确认并记录在本文件尾部。
+> 通过标准：0 + A 全部 pass（含人工补项）、B1–B9 全部打勾（未配置密钥的功能项按说明标注“待运维配置”，其降级行为仍需验证）。任何“降级接受”须由 LEO 书面确认并记录在本文件尾部。

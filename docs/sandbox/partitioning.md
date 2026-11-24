@@ -9,7 +9,7 @@
 flowchart LR
   subgraph CFG["配置命名空间（同一套代码，仅配置不同）"]
     E1["APP_ENV=SANDBOX<br/>VERSION_NUMBERING_MODE=sandbox<br/>ENVIRONMENT_LABEL=Sandbox"]
-    E2["APP_ROLES=admin<br/>ADMIN_CAPABILITIES=course,accounts<br/>（课程管理 + 账号管理）"]
+    E2["APP_ROLES 不设置 = admin/agent/ks 全起<br/>ADMIN_CAPABILITIES 不设置 = 全模块"]
     E3["ENV_CAPABILITY_ENFORCEMENT=off<br/>PACKAGE_SOURCE_ENFORCEMENT=off（Part C，未接线）"]
   end
 
@@ -83,7 +83,7 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 ## 3. 隔离边界（IAM / 网络）
 
 - Portal 运行时角色（`learning-guide-sandbox-runtime`）：只读 `learning-guide/sandbox/*`，只读写本桶 `learning-guide/sandbox/*` 前缀；另由 `shared-admin-tokens-read` 精确授权读 `learning-guide/admin/sandbox/admin_api_key`（Portal 的 `ADMIN_PORTAL_API_TOKEN` 用它）。
-- Admin 运行时角色（`learning-guide-admin-sandbox-runtime`，ops 预建）：只读 `learning-guide/admin/sandbox/*`，只读写 Admin 课程桶。Helpdesk 首期不启用，`learning-guide/sandbox/` 下的 helpdesk 令牌暂不授权。
+- Admin 运行时角色（`learning-guide-admin-sandbox-runtime`，ops 预建）：只读 `learning-guide/admin/sandbox/*`，只读写 Admin 课程桶。Helpdesk/Portal 集成已启用；`learning-guide/sandbox/` 下的配对令牌由 ops 配置后按需精确授权（未配置时对应接口按设计 503）。
 - 网络：私有子网（建议 `172.31.68.0/24`、`172.31.69.0/24`，与 SIT 64/65、UAT 66/67 不重叠）+ 独立 NAT + S3 Gateway Endpoint；DB 5432 只接受应用安全组。
 - 红线：Sandbox 不得读取其它环境的桶/密钥，其它环境不得读取 Sandbox 桶/密钥；除课程包（Sandbox → Production）外没有跨环境数据通道。
 
@@ -94,26 +94,28 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 - 能力差异用**能力开关 + 环境矩阵**表达（见 §5），不在路由里写环境判断。
 - `APP_ENV=SANDBOX` 只是运行标识（健康检查、审计、helpdesk seed 判定）；`AppEnvName` 已把它作为独立值保留，不借用 DEV/UAT 语义（`server/src/backoffice/lib/env.ts`，本分支）。
 
-## 5. 能力分区（Owner 2026-11-16 拍板，2026-11-19 修订）
+## 5. 能力与角色（Owner 2026-11-16 拍板，2026-11-24 修订：全部打开）
 
-**Sandbox Admin 开放集 = 课程管理**（列表/状态、导入与解析、预览、发布、版本与历史、导出）。
-**不含编辑：沙箱不新增任何编辑能力。**
+**Sandbox Admin 开放集 = 全部上游模块**（课程管理、知识库/KS、AI Tutor、学员管理、Helpdesk、运营位、报表、订单、Settings 与账号管理）。
+**不含新增编辑能力：全开只打开上游已有模块，沙箱不新增任何编辑/新建/删除能力。**
+
+需要密钥的功能（AI Tutor/KS、Helpdesk、邮件、Portal 集成、Study Group）同样启用；密钥/ARN 由运维后续配置，未配置时按设计降级（Helpdesk 503、AI 端点返回未配置错误、邮件 NOT_CONFIGURED），不伪造密钥或假值。
 
 ### 5.1 模块能力门（已实现：`ADMIN_CAPABILITIES`）
 
-- 单一环境变量 `ADMIN_CAPABILITIES`（逗号分隔的能力标识）：**未配置/空 = 全部启用**（dev/sit/uat/prod 行为零变化）；Sandbox 配置 `ADMIN_CAPABILITIES=course,accounts`。
+- 单一环境变量 `ADMIN_CAPABILITIES`（逗号分隔的能力标识）：**未配置/空 = 全部启用**；Sandbox **不设置**该变量（全开）。显式列出全部标识会在新增模块时漏开，因此不作为默认写法；只有需要裁剪的环境才显式列出子集。
 - 服务端：前缀→能力映射集中在 `server/src/common/capabilities.ts`；未启用能力的 API 前缀返回 404 + 既有信封 `{success:false,error:{code:'MODULE_NOT_ENABLED'}}`。豁免：`/api/health`、`/api/auth/**`、`/api/session`、`/api/preferences/**`、`/api/backoffice/environment`、非 `/api` 资源。
-- 前端：菜单 = 角色权限（RBAC 继续生效）∩ 已启用能力；被禁用路由重定向到可用落点（沙箱只剩 `course`）。
+- 前端：菜单 = 角色权限（RBAC 继续生效）∩ 已启用能力；能力全开时菜单由角色权限单独决定。
 - **无环境专属分支**：逻辑只依赖 `ADMIN_CAPABILITIES` 的值，不判断 `APP_ENV`。未知能力值启动即失败（fail-fast）。
 
 | 能力 | 覆盖 | Sandbox |
 |---|---|---|
 | `course` | `/api/backoffice/courses/**`、`/api/portal/v1/**`（课程投影与媒体） | **开** |
 | `accounts` | `/api/admin/employees/**`、Settings › Employee Account（含账号级功能开关） | **开** |
-| `knowledge` / `ai` / `students` / `helpdesk` / `operations` / `reporting` / `order` | 对应模块与路由 | 关（404 + 菜单隐藏） |
-| `settings` | 学习权限与其它 Settings 子项（支付/通知等） | 关（`accounts` 不打开 `settings`） |
+| `knowledge` / `ai` / `students` / `helpdesk` / `operations` / `reporting` / `order` | 对应模块与路由 | **开** |
+| `settings` | 学习权限与其它 Settings 子项（支付/通知等） | **开** |
 
-角色层仍按原设计降级：`APP_ROLES=admin`；`agent`/`ks` 等角色不启用，对应变量不写入 sandbox 配置（见第三部分模板）。能力门与角色是两层：角色决定"起哪些服务"，能力门决定"暴露哪些模块"。
+角色层也全开：**不设置 `APP_ROLES`** = `admin` + `agent` + `ks` 三角色全起（`server/src/app-roles.ts`）。`/api/user/**`（agent）与 `/api/ks/**`（ks）是服务间接口，不是用户登录入口，分别由 `AUTH_ENABLED=true` + `AUTH_TOKEN` 与 `KS_SERVICE_TOKEN`（未配置时回退 `AUTH_TOKEN`）保护。能力门与角色是两层：角色决定"起哪些服务"，能力门决定"暴露哪些模块"；Sandbox 两层都不裁剪。
 
 ### 5.2 预览语义（唯一）
 
@@ -143,7 +145,7 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 
 | 开关 | 默认 | Sandbox | 生产/UAT |
 |---|---|---|---|
-| `ENV_CAPABILITY_ENFORCEMENT` | `off` | 永远 `off`（开放课程管理与导入导出全部能力） | 演练后开 `on`：禁 authoring → 403 `CAPABILITY_DISABLED` |
+| `ENV_CAPABILITY_ENFORCEMENT` | `off` | 永远 `off`（全模块开放） | 演练后开 `on`：禁 authoring → 403 `CAPABILITY_DISABLED` |
 | `PACKAGE_SOURCE_ENFORCEMENT` | `off` | 永远 `off`（允许任意来源导入用于演练） | 演练后开 `on`：只收 `provenance.sourceEnv=sandbox` 的 v2 包，否则 422 `PACKAGE_SOURCE_NOT_ALLOWED` |
 
 当前上游 dev 基线（87e0be2）尚未包含 Part C 能力矩阵接线（`server/src/partc/**` 不在基线；半成品在 `fix/course-category-single-source`，已 stash）。两个开关名是**已拍板的契约**：任何分支引入时默认值必须是 `off`，不得在 Sandbox 打开；本分支只新增环境标识与托管就绪语义，不引入任何 Part C 产品行为改动。
@@ -158,5 +160,5 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 | 域名/Cookie | 会话 Cookie host-only；其它域不生效 |
 | Stripe | `livemode=false`；无 `sk_live_` |
 | 版本编号 | 发布 `1.1` → `1.2`；导出后再发布 `2.1` |
-| 能力分区 | `ADMIN_CAPABILITIES=course,accounts`：菜单只剩 Course 与 Settings›Employee Account；`/api/backoffice/helpdesk/**` 等返回 404 `MODULE_NOT_ENABLED`；不配置时全部放行（dev/uat 回归） |
+| 能力/角色 | 不设置 `ADMIN_CAPABILITIES` / `APP_ROLES`：全部模块菜单可见（按角色权限），`/api/helpdesk/**`、`/api/user/**`、`/api/ks/**` 已挂载；未配置密钥的 Helpdesk 返回 503、AI 端点返回未配置错误（不是 404）；显式裁剪时才出现 404 `MODULE_NOT_ENABLED` |
 | 分支契约 | `git rev-parse sandbox` 与最近一次生产发布（UAT）部署 SHA 一致；CI 通过后工作流发布 |

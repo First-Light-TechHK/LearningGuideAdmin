@@ -242,7 +242,8 @@ describe('Notification Configuration capability gate (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeAll(async () => {
-    // sandbox 只开 course,accounts：settings 关闭，通知配置不得对外暴露。
+    // 能力裁剪场景（显式只开 course,accounts）：settings 关闭，通知配置不得对外暴露。
+    // Sandbox 本身不裁剪（未配置 = 全开），这里验证能力门机制仍然生效。
     process.env.ADMIN_CAPABILITIES = 'course,accounts';
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],

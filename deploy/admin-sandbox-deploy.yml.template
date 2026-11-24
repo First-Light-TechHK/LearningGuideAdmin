@@ -16,8 +16,10 @@
 #   - provision 脚本对 sandbox 关闭了 App Runner 分支自动部署
 #     （AutoDeploymentsEnabled=false），本工作流是唯一发布者：先等 CI 通过，
 #     再 start-deployment 并轮询到 SUCCEEDED。
-#   - 能力分区：沙箱首期不启用 AI Tutor——SANDBOX_OPENROUTER_API_KEY_SECRET_ARN /
-#     SANDBOX_AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN 保持未设置，下面的 AI 步骤自动跳过。
+#   - 能力/角色：Sandbox 全模块、全角色（不设置 ADMIN_CAPABILITIES / APP_ROLES）。
+#     需要密钥的 AI Tutor 同样开启；SANDBOX_OPENROUTER_API_KEY_SECRET_ARN /
+#     SANDBOX_AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN 由运维配置，未配置时下面的
+#     AI 步骤自动跳过、AI 端点按设计返回未配置错误（不伪造密钥）。
 # =============================================================================
 name: Deploy Sandbox
 
@@ -78,7 +80,8 @@ jobs:
           aws-region: ap-southeast-1
 
       # 与 dev-deploy.yml 相同的语义：密钥值只留在 Secrets Manager，仓库变量只放 ARN。
-      # 沙箱首期 AI 不启用：两个 ARN 变量都不设时本步骤跳过。
+      # AI Tutor 已启用但需要密钥：两个 ARN 变量都未配置时本步骤跳过（端点按设计不可用），
+      # 运维在仓库 variables 配置后，下一次部署自动注入。
       - name: Ensure AI Tutor runtime secrets
         if: vars.SANDBOX_OPENROUTER_API_KEY_SECRET_ARN != '' || vars.SANDBOX_AI_CONFIG_ENCRYPTION_KEY_SECRET_ARN != ''
         env:

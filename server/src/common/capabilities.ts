@@ -1,10 +1,10 @@
 /**
- * 配置驱动的模块能力门（ADMIN_CAPABILITIES）——owner 2026-11-19 决策：
- * sandbox 只暴露课程管理，HelpDesk / 学员 / AI Tutor 等用配置剪掉，
- * 不 fork 代码、不写环境专属分支。
+ * 配置驱动的模块能力门（ADMIN_CAPABILITIES）。
  *
  * 语义：
- * - 变量未配置 / 为空 = 全部能力启用（dev / sit / uat / prod 行为零变化）；
+ * - 变量未配置 / 为空 = 全部能力启用（默认；dev / sit / uat / prod 行为零变化，
+ *   Sandbox 同样不裁剪 —— owner 2026-11-24 决策：全模块打开，需要密钥的功能
+ *   由运维配置密钥，未配置时按设计降级）；
  * - 配置后按逗号分隔的能力标识启用子集；写错标识启动即报错（与 APP_ROLES 同一先例）；
  * - 请求路径 → 能力按下面的前缀表集中映射，一处维护、可单测；
  *   不属于任何能力的路径不归能力门管，交给既有的 401/403 或 404，
@@ -24,7 +24,8 @@ export const CAPABILITY_IDS = [
   'order', // 订单：上游仅前端占位菜单，没有后端路由
   'settings', // 设置：学习权限（/api/learning-access）与其余 /api/admin/**
   'accounts', // 员工账号管理（/api/admin/employees/**）：owner 2026-11-20 从 settings 拆出，
-  // 账号级功能权限也挂在这里；sandbox 只开 course,accounts，不暴露其它 Settings
+  // 账号级功能权限也挂在这里；需要裁剪的环境可只显式开启 course,accounts 等子集
+  // （Sandbox 不裁剪，未设置即全开，见下方 parseEnabledCapabilities）。
 ] as const;
 
 export type CapabilityId = (typeof CAPABILITY_IDS)[number];

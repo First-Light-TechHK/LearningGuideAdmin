@@ -17,7 +17,8 @@ Description: Learning Guide isolated Sandbox network, database and storage
 #   7. 跨命名空间共享令牌：Portal 运行时角色除本命名空间外，还被精确授权读取
 #      Admin 命名空间的 admin_api_key（Portal 的 ADMIN_PORTAL_API_TOKEN 指向它，
 #      见 deploy/sandbox.example.env 第四部分）；Admin 运行时角色需对称地授权读取
-#      learning-guide/sandbox/ 下的 helpdesk 令牌（首期不启用 Helpdesk 时可暂不授权）。
+#      learning-guide/sandbox/ 下的 helpdesk 令牌（Helpdesk 已启用；令牌由 ops 创建后
+#      对称授权，未创建时接口按设计 503）。
 #      注意：Admin 的运行时角色与课程桶不是 provision 脚本自建的（脚本只建
 #      RDS/Secrets/App Runner，角色与桶是它的输入参数），需 ops 单独创建。
 # 执行命令（拿到凭据后）：
