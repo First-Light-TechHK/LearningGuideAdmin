@@ -71,7 +71,7 @@
   padding: 10px 8px;
   white-space: normal;
   overflow: visible;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   text-overflow: clip;
   line-height: 1.35;
   vertical-align: middle;
@@ -161,6 +161,9 @@
   color: var(--lg-muted);
   flex: 0 0 auto;
 }
+
+/* R-02: the note follows the 13th row inside the scrolling list (B01), not fixed below it */
+.notificationListNote { margin-top: 12px; }
 
 .notificationToast {
   position: fixed;
@@ -584,7 +587,7 @@
 .notificationChannelFilter { width: 150px; flex: 0 0 150px; }
 .notificationDateRange { display: inline-flex; align-items: center; gap: 6px; }
 .notificationDateInput { width: 140px; height: 34px; padding: 0 8px; font-size: 12px; }
-.notificationRecipientCell > span { display: block; overflow-wrap: anywhere; }
+.notificationRecipientCell > span { display: block; overflow-wrap: break-word; }
 .notificationTestTag { display: inline-flex; width: auto; margin-left: 8px; vertical-align: middle; }
 .notificationStatusBadge {
   display: inline-flex;
