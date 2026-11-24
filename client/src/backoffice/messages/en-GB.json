@@ -87,7 +87,12 @@
       "subscription": "Subscription",
       "support": "Support",
       "course": "Course",
-      "study_group": "Study group"
+      "study_group": "Study group",
+      "announcement": "Announcement"
+    },
+    "channels": {
+      "in_app": "In-app",
+      "email": "Email"
     },
     "columns": {
       "notification": "Notification",
@@ -142,6 +147,8 @@
       "englishRequired": "English is required.",
       "chineseAllOrNothing": "If any Chinese field is filled, all required Chinese fields must be filled.",
       "tooLong": "Use {max} characters or fewer.",
+      "variableUnavailable": "{name} is not available for this notification.",
+      "variableUseInstead": "{name} is not available for this notification. Use {suggestion} instead.",
       "loadError": "Notification Configuration could not be loaded.",
       "notConnected": "Notification Configuration is not connected yet. Ask an administrator to configure the Portal notification token.",
       "notAdmin": "Notification Configuration is available to Admin only.",
@@ -179,6 +186,14 @@
       "buttonPlaceholder": "e.g. Learn more",
       "linkPlaceholder": "https://…",
       "announcement": "ANNOUNCEMENT",
+      "empty": "No broadcasts yet.",
+      "readRate": "{percent}% read",
+      "languageBoth": "EN · {chinese}",
+      "languageEnOnly": "EN only",
+      "detailLabel": "Broadcast detail",
+      "sectionMessage": "Message",
+      "sectionDelivery": "Delivery",
+      "withdrawnField": "Withdrawn",
       "testSent": "Test message sent to the learner account for {email}",
       "sendNowNote": "“Send now” sends the in-app message straight away to everyone in the audience at that moment. You can withdraw it later from the Broadcasts list.",
       "sendConfirmTitle": "Send this broadcast now?",
@@ -226,6 +241,7 @@
       "related": "Related record",
       "messageAsSent": "Message as sent",
       "noMessage": "No stored message for this row.",
+      "empty": "No messages in this period.",
       "loadError": "Send log could not be loaded.",
       "statusDelivered": "Delivered",
       "statusRead": "Read",
@@ -235,6 +251,7 @@
       "reasonMissingData": "Missing data"
     },
     "errors": {
+      "REQUEST_FAILED": "Request failed",
       "INVALID_INPUT": "Check the highlighted fields and try again.",
       "TEMPLATE_CONFLICT": "Someone else saved this notification first. Reload and try again.",
       "TEMPLATE_LOCKED": "Subscription notifications always stay on.",

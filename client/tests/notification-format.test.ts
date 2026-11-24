@@ -10,6 +10,8 @@ import type {
 } from '../src/backoffice/contracts/notifications'
 import {
   broadcastLanguageLabel,
+  categoryLabel,
+  channelLabel,
   chineseCopyMissing,
   defaultSendLogRange,
   formatHktDate,
@@ -22,6 +24,7 @@ import {
   unknownVariables,
   validateBroadcastDraft,
   validateTemplateDraft,
+  variableErrorMessage,
 } from '../src/backoffice/lib/notificationFormat'
 
 function template(overrides: Partial<NotificationTemplate> = {}): NotificationTemplate {
@@ -180,6 +183,30 @@ test('labels broadcast languages and read rate', () => {
   assert.equal(broadcastLanguageLabel(broadcast({ titleZh: '', bodyZh: '' })), 'EN only')
   assert.equal(readRateLabel(12480, 0.41), '41% read')
   assert.equal(readRateLabel(0, 0), '—')
+})
+
+test('labels built in code follow the interface language (R-05)', () => {
+  const zh = 'zh-CN'
+  const noChinese = broadcast({ titleZh: '', bodyZh: '' })
+  const draft: BroadcastDraftInput = { titleEn: 'Hi', bodyEn: 'Body', audience: 'all' }
+  const first = (input: BroadcastDraftInput) => validateBroadcastDraft(input, zh)[0].message
+  assert.equal(readRateLabel(100, 0.41, zh), '41% 已读')
+  assert.equal(broadcastLanguageLabel(noChinese, zh), '仅英文')
+  assert.equal(channelLabel('in_app', zh), '站内')
+  assert.equal(channelLabel('email', zh), '邮件')
+  assert.equal(categoryLabel('announcement', zh), '公告')
+  assert.equal(first({ ...draft, titleEn: ' ' }), '标题为必填。')
+  assert.equal(first({ ...draft, titleEn: 'x'.repeat(61) }), '最多 60 个字符。')
+  assert.equal(first({ ...draft, buttonText: 'Go' }), '按钮文字和按钮链接必须同时填写。')
+  assert.equal(
+    variableErrorMessage({ field: 'message', name: 'amount_due', suggestion: 'renewal_amount' }, zh),
+    '这条通知不能使用 {{amount_due}}，请改用 {{renewal_amount}}。',
+  )
+  assert.equal(
+    validateTemplateDraft(template(), { ...template().en, title: '' }, template().zh, [], zh).fields[0]
+      .message,
+    '英文为必填。',
+  )
 })
 
 test('validates broadcast content and optional button pair (NTF-BC-012)', () => {

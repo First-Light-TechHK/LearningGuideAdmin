@@ -29,7 +29,7 @@ export function NotificationPreview({
   sample?: boolean
 }) {
   const content = previewContent(copy, channel)
-  const category = label ?? (template ? categoryLabel(template.category) : 'Notification')
+  const category = label ?? (template ? categoryLabel(template.category, locale) : t(locale, 'notification.title'))
   const head = (
     <div className="notificationPreviewHead">
       <span>{t(locale, 'notification.preview.title')}</span>

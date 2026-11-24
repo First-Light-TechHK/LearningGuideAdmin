@@ -24,6 +24,7 @@ import {
 } from '../../lib/notificationFormat'
 import { NotificationDialog } from './NotificationDialog'
 import { NotificationPreview } from './NotificationPreview'
+import { SoftBreak } from './SoftBreak'
 
 function errorText(
   locale: ReturnType<typeof useLocale>,
@@ -139,13 +140,13 @@ export function BroadcastsTab({
       <div className="tableWrap">
         <table className="table notificationTable notificationBroadcastTable" data-testid="broadcast-table">
           <colgroup>
-            <col style={{ width: '22%' }} />
+            <col style={{ width: '19%' }} />
             <col style={{ width: '12%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '17%' }} />
             <col style={{ width: '10%' }} />
+            <col style={{ width: '17%' }} />
             <col style={{ width: '11%' }} />
-            <col style={{ width: '16%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '14%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -171,7 +172,7 @@ export function BroadcastsTab({
                       })}
                     </span>
                   ) : (
-                    <span className="notificationId">{broadcastLanguageLabel(broadcast)}</span>
+                    <span className="notificationId">{broadcastLanguageLabel(broadcast, locale)}</span>
                   )}
                 </td>
                 <td>
@@ -194,12 +195,12 @@ export function BroadcastsTab({
                     <span className="notificationReadCell">
                       <span>{countLabel(broadcast.recipients)}</span>
                       <span className="notificationReadRate">
-                        {readRateLabel(broadcast.recipients, broadcast.rate)}
+                        {readRateLabel(broadcast.recipients, broadcast.rate, locale)}
                       </span>
                     </span>
                   )}
                 </td>
-                <td>{broadcast.createdBy || '—'}</td>
+                <td>{broadcast.createdBy ? <SoftBreak text={broadcast.createdBy} /> : '—'}</td>
                 <td>
                   <div className="notificationRowActions">
                     {broadcast.status === 'draft' ? (
@@ -238,7 +239,7 @@ export function BroadcastsTab({
           </tbody>
         </table>
         {!loading && rows.length === 0 ? (
-          <p className="smMuted notificationEmpty">No broadcasts yet.</p>
+          <p className="smMuted notificationEmpty">{t(locale, 'notification.broadcasts.empty')}</p>
         ) : null}
       </div>
 
@@ -299,14 +300,19 @@ function BroadcastDetailDrawer({
       ? { title: broadcast.titleEn, message: broadcast.bodyEn }
       : { title: broadcast.titleEn, message: broadcast.bodyEn }
   return (
-    <div className="smDrawerBackdrop" role="dialog" aria-modal="true" aria-label="Broadcast detail">
+    <div
+      className="smDrawerBackdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t(locale, 'notification.broadcasts.detailLabel')}
+    >
       <div className="smDrawer">
         <div className="smDrawerHead">
           <div>
             <h2 className="smDrawerTitle">{broadcast.titleEn}</h2>
             <div className="smDrawerMeta">
               <span className={statusPill(broadcast.status)}>{statusLabel(locale, broadcast.status)}</span>
-              <span>{broadcastLanguageLabel(broadcast)}</span>
+              <span>{broadcastLanguageLabel(broadcast, locale)}</span>
             </div>
           </div>
           <button type="button" className="modalClose" aria-label={t(locale, 'common.close')} onClick={onClose}>
@@ -315,7 +321,7 @@ function BroadcastDetailDrawer({
         </div>
         <div className="smDrawerBody">
           <section className="smSection">
-            <h3 className="smSectionTitle">Message</h3>
+            <h3 className="smSectionTitle">{t(locale, 'notification.broadcasts.sectionMessage')}</h3>
             <p className="notificationDetailBody">{broadcast.bodyEn}</p>
             {broadcast.titleZh || broadcast.bodyZh ? (
               <p className="notificationDetailBody notificationDetailZh">
@@ -330,23 +336,24 @@ function BroadcastDetailDrawer({
             ) : null}
           </section>
           <section className="smSection">
-            <h3 className="smSectionTitle">Delivery</h3>
+            <h3 className="smSectionTitle">{t(locale, 'notification.broadcasts.sectionDelivery')}</h3>
             <dl className="smGrid">
-              <dt>Audience</dt>
+              <dt>{t(locale, 'notification.broadcasts.audience')}</dt>
               <dd>
                 {broadcast.audience === 'paid'
                   ? t(locale, 'notification.broadcasts.audiencePaid')
                   : t(locale, 'notification.broadcasts.audienceAll')}
               </dd>
-              <dt>Recipients · read</dt>
+              <dt>{t(locale, 'notification.broadcasts.recipientsRead')}</dt>
               <dd>
-                {countLabel(detail.readRate.recipients)} · {readRateLabel(detail.readRate.recipients, detail.readRate.rate)}
+                {countLabel(detail.readRate.recipients)} ·{' '}
+                {readRateLabel(detail.readRate.recipients, detail.readRate.rate, locale)}
               </dd>
-              <dt>Created by</dt>
+              <dt>{t(locale, 'notification.broadcasts.createdBy')}</dt>
               <dd>{broadcast.createdBy || '—'}</dd>
-              <dt>Sent at</dt>
+              <dt>{t(locale, 'notification.broadcasts.sentAt')}</dt>
               <dd>{broadcast.sentAt ? formatHktDateTime(broadcast.sentAt) : '—'}</dd>
-              <dt>Withdrawn</dt>
+              <dt>{t(locale, 'notification.broadcasts.withdrawnField')}</dt>
               <dd>
                 {broadcast.withdrawnAt
                   ? `${formatHktDateTime(broadcast.withdrawnAt, true)} · ${broadcast.withdrawnBy || '—'}`
@@ -464,7 +471,7 @@ export function BroadcastEditor({
   }
 
   function validate(): boolean {
-    const next = validateBroadcastDraft(draft)
+    const next = validateBroadcastDraft(draft, locale)
     setIssues(next)
     if (next.length > 0) {
       setError(t(locale, 'notification.errors.INVALID_INPUT'))
@@ -624,7 +631,7 @@ export function BroadcastEditor({
           </div>
 
           <div className="notificationLanguageBar">
-            <span className="notificationLanguageSwitch" role="group" aria-label="Language">
+            <span className="notificationLanguageSwitch" role="group" aria-label={t(locale, 'common.language')}>
               <button
                 type="button"
                 className={

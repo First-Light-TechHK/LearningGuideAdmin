@@ -18,6 +18,7 @@ import {
   formatHktDateTime,
   notificationErrorText,
 } from '../../lib/notificationFormat'
+import { SoftBreak } from './SoftBreak'
 
 function errorText(
   locale: ReturnType<typeof useLocale>,
@@ -151,8 +152,8 @@ export function SendLogTab({
           aria-label={t(locale, 'notification.sendLog.channel')}
         >
           <option value="">{t(locale, 'notification.sendLog.allChannels')}</option>
-          <option value="in_app">In-app</option>
-          <option value="email">Email</option>
+          <option value="in_app">{channelLabel('in_app', locale)}</option>
+          <option value="email">{channelLabel('email', locale)}</option>
         </select>
         <select
           className="filterSelect notificationChannelFilter"
@@ -223,7 +224,7 @@ export function SendLogTab({
               <tr key={item.id} data-testid={`send-log-row-${item.id}`}>
                 <td className="notificationNoWrap">{formatHktDateTime(item.occurredAt)}</td>
                 <td className="notificationRecipientCell">
-                  <span>{item.recipientEmail || '—'}</span>
+                  <span>{item.recipientEmail ? <SoftBreak text={item.recipientEmail} /> : '—'}</span>
                   {item.recipientName ? <span className="notificationId">{item.recipientName}</span> : null}
                 </td>
                 <td className="notificationLogNotificationCell">
@@ -231,9 +232,9 @@ export function SendLogTab({
                     <span>{item.notificationName}</span>
                     {item.isTest ? <span className="smPill smPillWarn notificationTestTag">{t(locale, 'notification.sendLog.test')}</span> : null}
                   </div>
-                  {item.templateId ? <div className="notificationId">{item.templateId}</div> : null}
+                  {item.templateId ? <div className="notificationId"><SoftBreak text={item.templateId} /></div> : null}
                 </td>
-                <td>{channelLabel(item.channel)}</td>
+                <td>{channelLabel(item.channel, locale)}</td>
                 <td>
                   <span className={statusClass(item.status)}>{statusText(locale, item.status)}</span>
                   {item.status === 'failed' && item.failureReason ? (
@@ -250,7 +251,7 @@ export function SendLogTab({
           </tbody>
         </table>
         {!loading && items.length === 0 ? (
-          <p className="smMuted notificationEmpty">No messages in this period.</p>
+          <p className="smMuted notificationEmpty">{t(locale, 'notification.sendLog.empty')}</p>
         ) : null}
       </div>
 
@@ -302,7 +303,7 @@ function SendLogDrawer({
                 ) : null}
                 <div className="smDrawerMeta">
                   {[
-                    `${t(locale, 'notification.sendLog.language')}: ${detail.message.language === 'zh' ? '中文' : 'English'}`,
+                    `${t(locale, 'notification.sendLog.language')}: ${t(locale, detail.message.language === 'zh' ? 'notification.chinese' : 'notification.english')}`,
                     detail.message.category ? t(locale, `notification.categories.${detail.message.category}`) : null,
                     detail.message.readAt
                       ? t(locale, 'notification.sendLog.readAt', { date: formatHktDateTime(detail.message.readAt) })
@@ -340,7 +341,7 @@ function SendLogDrawer({
                 {detail.entry.recipientName ? ` · ${detail.entry.recipientName}` : ''}
               </dd>
               <dt>{t(locale, 'notification.sendLog.channel')}</dt>
-              <dd>{channelLabel(detail.entry.channel)}</dd>
+              <dd>{channelLabel(detail.entry.channel, locale)}</dd>
               <dt>{t(locale, 'notification.sendLog.status')}</dt>
               <dd>{statusText(locale, detail.entry.status)}</dd>
               {detail.entry.failureReason ? (

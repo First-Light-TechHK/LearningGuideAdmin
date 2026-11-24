@@ -9,6 +9,8 @@ import {
   type NotificationCopy,
   type NotificationTemplate,
 } from '../contracts/notifications'
+import { DEFAULT_LOCALE, type Locale } from './i18n/config'
+import { t } from './i18n/messages'
 
 /**
  * Notification Configuration 的纯逻辑（日期、分组、变量校验、预览、广播校验）。
@@ -73,22 +75,13 @@ export function defaultSendLogRange(now = new Date()): { from: string; to: strin
   return { from: hktDateInput(from), to: hktDateInput(now) }
 }
 
-export function categoryLabel(category: NotificationCategory): string {
-  switch (category) {
-    case 'subscription':
-      return 'Subscription'
-    case 'support':
-      return 'Support'
-    case 'course':
-      return 'Course'
-    case 'study_group':
-      return 'Study group'
-  }
+export function categoryLabel(category: string, locale: Locale = DEFAULT_LOCALE): string {
+  return t(locale, `notification.categories.${category}`)
 }
 
 export function groupTemplates(
   templates: readonly NotificationTemplate[],
-  label: (category: NotificationCategory) => string = categoryLabel,
+  label: (category: NotificationCategory) => string = (category) => categoryLabel(category),
 ): Array<{ category: NotificationCategory; label: string; items: NotificationTemplate[] }> {
   return NOTIFICATION_CATEGORY_ORDER.map((category) => ({
     category,
@@ -97,8 +90,8 @@ export function groupTemplates(
   })).filter((group) => group.items.length > 0)
 }
 
-export function channelLabel(channel: NotificationChannel): string {
-  return channel === 'email' ? 'Email' : 'In-app'
+export function channelLabel(channel: NotificationChannel, locale: Locale = DEFAULT_LOCALE): string {
+  return t(locale, channel === 'email' ? 'notification.channels.email' : 'notification.channels.in_app')
 }
 
 /** 某语言的必填字段（由英文侧存在的字段决定）。 */
@@ -222,10 +215,11 @@ export function unknownVariables(
   return result
 }
 
-export function variableErrorMessage(issue: UnknownVariable): string {
+export function variableErrorMessage(issue: UnknownVariable, locale: Locale = DEFAULT_LOCALE): string {
+  const name = `{{${issue.name}}}`
   return issue.suggestion
-    ? `{{${issue.name}}} is not available for this notification. Use {{${issue.suggestion}}} instead.`
-    : `{{${issue.name}}} is not available for this notification.`
+    ? t(locale, 'notification.editor.variableUseInstead', { name, suggestion: `{{${issue.suggestion}}}` })
+    : t(locale, 'notification.editor.variableUnavailable', { name })
 }
 
 export type DraftIssues = {
@@ -239,6 +233,7 @@ export function validateTemplateDraft(
   en: NotificationCopy,
   zh: NotificationCopy,
   allowedVariables: readonly string[],
+  locale: Locale = DEFAULT_LOCALE,
 ): DraftIssues {
   const fields: DraftIssues['fields'] = []
   for (const [copy, language] of [
@@ -249,13 +244,16 @@ export function validateTemplateDraft(
       const value = copy[field]
       if (value === undefined) continue
       if (value.length > copyLimit(field))
-        fields.push({ field: `${language}.${field}`, message: `Use ${copyLimit(field)} characters or fewer.` })
+        fields.push({
+          field: `${language}.${field}`,
+          message: t(locale, 'notification.editor.tooLong', { max: copyLimit(field) }),
+        })
     }
   }
   const required = requiredCopyFields(template.channels, template.en)
   for (const field of required) {
     if ((en[field] ?? '').trim() === '')
-      fields.push({ field: `en.${field}`, message: 'English is required.' })
+      fields.push({ field: `en.${field}`, message: t(locale, 'notification.editor.englishRequired') })
   }
   const anyChinese = NOTIFICATION_COPY_FIELDS.some((field) => (zh[field] ?? '').trim() !== '')
   if (anyChinese) {
@@ -263,7 +261,7 @@ export function validateTemplateDraft(
       if ((zh[field] ?? '').trim() === '')
         fields.push({
           field: `zh.${field}`,
-          message: 'If any Chinese field is filled, all required Chinese fields must be filled.',
+          message: t(locale, 'notification.editor.chineseAllOrNothing'),
         })
     }
   }
@@ -343,44 +341,46 @@ export function previewContent(copy: NotificationCopy, channel: NotificationChan
   }
 }
 
-/** 语言标签里的中文（i18n 守卫禁止源码写死中文；这里是产品固定的语言名）。 */
-const CHINESE_LABEL = String.fromCharCode(0x4e2d, 0x6587)
-
-export function broadcastLanguageLabel(broadcast: NotificationBroadcast): string {
-  return (broadcast.titleZh && broadcast.titleZh.trim()) || (broadcast.bodyZh && broadcast.bodyZh.trim())
-    ? `EN · ${CHINESE_LABEL}`
-    : 'EN only'
+export function broadcastLanguageLabel(
+  broadcast: NotificationBroadcast,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const hasChinese = Boolean(broadcast.titleZh?.trim() || broadcast.bodyZh?.trim())
+  return hasChinese
+    ? t(locale, 'notification.broadcasts.languageBoth', { chinese: t(locale, 'notification.chinese') })
+    : t(locale, 'notification.broadcasts.languageEnOnly')
 }
 
 export type BroadcastDraftIssues = { fields: Array<{ field: string; message: string }> }
 
 /** 新建/编辑广播的保存前校验（NTF-BC-012）：标题/正文限长、按钮成对、链接前缀。 */
-export function validateBroadcastDraft(input: BroadcastDraftInput): BroadcastDraftIssues["fields"] {
+export function validateBroadcastDraft(
+  input: BroadcastDraftInput,
+  locale: Locale = DEFAULT_LOCALE,
+): BroadcastDraftIssues["fields"] {
   const fields: BroadcastDraftIssues['fields'] = []
+  const tooLong = (max: number) => t(locale, 'notification.editor.tooLong', { max })
   const title = input.titleEn.trim()
   const body = input.bodyEn.trim()
-  if (!title) fields.push({ field: 'titleEn', message: 'Title is required.' })
-  if (title.length > 60) fields.push({ field: 'titleEn', message: 'Use 60 characters or fewer.' })
-  if (!body) fields.push({ field: 'bodyEn', message: 'Message is required.' })
-  if (body.length > 300) fields.push({ field: 'bodyEn', message: 'Use 300 characters or fewer.' })
-  if ((input.titleZh ?? '').trim().length > 60)
-    fields.push({ field: 'titleZh', message: 'Use 60 characters or fewer.' })
-  if ((input.bodyZh ?? '').trim().length > 300)
-    fields.push({ field: 'bodyZh', message: 'Use 300 characters or fewer.' })
+  if (!title) fields.push({ field: 'titleEn', message: t(locale, 'notification.broadcasts.titleRequired') })
+  if (title.length > 60) fields.push({ field: 'titleEn', message: tooLong(60) })
+  if (!body) fields.push({ field: 'bodyEn', message: t(locale, 'notification.broadcasts.messageRequired') })
+  if (body.length > 300) fields.push({ field: 'bodyEn', message: tooLong(300) })
+  if ((input.titleZh ?? '').trim().length > 60) fields.push({ field: 'titleZh', message: tooLong(60) })
+  if ((input.bodyZh ?? '').trim().length > 300) fields.push({ field: 'bodyZh', message: tooLong(300) })
   const buttonText = (input.buttonText ?? '').trim()
   const buttonLink = (input.buttonLink ?? '').trim()
   if (Boolean(buttonText) !== Boolean(buttonLink))
-    fields.push({ field: 'button', message: 'Button text and button link must be provided together.' })
-  if (buttonText.length > 24)
-    fields.push({ field: 'buttonText', message: 'Use 24 characters or fewer.' })
+    fields.push({ field: 'button', message: t(locale, 'notification.broadcasts.buttonPair') })
+  if (buttonText.length > 24) fields.push({ field: 'buttonText', message: tooLong(24) })
   if (buttonLink && !buttonLink.startsWith('https://') && !buttonLink.startsWith('/'))
-    fields.push({ field: 'buttonLink', message: 'Button link must start with https:// or /.' })
+    fields.push({ field: 'buttonLink', message: t(locale, 'notification.broadcasts.linkInvalid') })
   return fields
 }
 
-export function readRateLabel(recipients: number, rate: number): string {
+export function readRateLabel(recipients: number, rate: number, locale: Locale = DEFAULT_LOCALE): string {
   if (recipients <= 0) return '—'
-  return `${Math.round(rate * 100)}% read`
+  return t(locale, 'notification.broadcasts.readRate', { percent: Math.round(rate * 100) })
 }
 
 export function countLabel(value: number): string {
@@ -399,5 +399,5 @@ export function notificationErrorText(
   if (code === 'INVALID_INPUT' && result.message) return result.message
   const key = `notification.errors.${code}`
   const translated = translate(key)
-  return translated === key ? result.message ?? 'Request failed' : translated
+  return translated === key ? result.message ?? t(DEFAULT_LOCALE, 'notification.errors.REQUEST_FAILED') : translated
 }

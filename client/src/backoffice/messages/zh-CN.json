@@ -87,7 +87,12 @@
       "subscription": "订阅",
       "support": "支持",
       "course": "课程",
-      "study_group": "学习小组"
+      "study_group": "学习小组",
+      "announcement": "公告"
+    },
+    "channels": {
+      "in_app": "站内",
+      "email": "邮件"
     },
     "columns": {
       "notification": "通知",
@@ -142,6 +147,8 @@
       "englishRequired": "英文为必填。",
       "chineseAllOrNothing": "只要填写了任一中文内容，所有必填中文字段都必须填写。",
       "tooLong": "最多 {max} 个字符。",
+      "variableUnavailable": "这条通知不能使用 {name}。",
+      "variableUseInstead": "这条通知不能使用 {name}，请改用 {suggestion}。",
       "loadError": "无法加载通知配置。",
       "notConnected": "通知配置尚未连接。请联系管理员配置 Portal 通知令牌。",
       "notAdmin": "通知配置仅管理员角色可用。",
@@ -179,6 +186,14 @@
       "buttonPlaceholder": "例如：了解更多",
       "linkPlaceholder": "https://…",
       "announcement": "公告",
+      "empty": "还没有广播。",
+      "readRate": "{percent}% 已读",
+      "languageBoth": "EN · {chinese}",
+      "languageEnOnly": "仅英文",
+      "detailLabel": "广播详情",
+      "sectionMessage": "消息",
+      "sectionDelivery": "发送情况",
+      "withdrawnField": "撤回",
       "testSent": "测试消息已发送至 {email} 对应的用户账号",
       "sendNowNote": "“立即发送”会把站内消息立刻发给当时该接收人范围内的所有人。之后可以在广播列表中撤回。",
       "sendConfirmTitle": "立即发送这条广播？",
@@ -226,6 +241,7 @@
       "related": "关联记录",
       "messageAsSent": "实际发送的消息",
       "noMessage": "该记录没有存储的消息内容。",
+      "empty": "这段时间没有消息。",
       "loadError": "无法加载发送日志。",
       "statusDelivered": "已送达",
       "statusRead": "已读",
@@ -235,6 +251,7 @@
       "reasonMissingData": "缺少数据"
     },
     "errors": {
+      "REQUEST_FAILED": "请求失败",
       "INVALID_INPUT": "请检查标出的字段后重试。",
       "TEMPLATE_CONFLICT": "其他人先保存了这条通知，请重新加载后重试。",
       "TEMPLATE_LOCKED": "订阅类通知始终开启。",

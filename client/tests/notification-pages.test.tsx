@@ -473,6 +473,62 @@ test('send log drawer is translated and separates its details with a dot in Chin
   assert.equal(within(drawer).queryByText('Details'), null)
 })
 
+test('send log drawer of a broadcast row shows the translated category, not a message key (R-01)', async () => {
+  const entry = {
+    id: 'log-b1',
+    occurredAt: '2026-11-02T02:00:00.000Z',
+    recipientEmail: 'margaret.h@gmail.com',
+    recipientName: null,
+    notificationId: 'n2',
+    templateId: null,
+    broadcastId: 'b1',
+    notificationName: 'Scheduled maintenance',
+    channel: 'in_app',
+    status: 'delivered',
+    failureReason: null,
+    isTest: false,
+    related: null,
+  }
+  globalThis.fetch = ((url: string) =>
+    String(url).includes('send-log/log-b1')
+      ? ok({
+          ok: true,
+          entry,
+          message: {
+            notificationId: 'n2',
+            title: 'Scheduled maintenance',
+            body: 'Tonight',
+            buttonText: null,
+            buttonLink: null,
+            language: 'en',
+            category: 'announcement',
+            createdAt: '2026-11-02T02:00:00.000Z',
+            readAt: null,
+            withdrawnAt: null,
+          },
+          timeline: [],
+          isTest: false,
+        })
+      : ok({ ok: true, items: [entry], total: 1, page: 1, pageSize: 20 })) as typeof fetch
+  for (const [locale, view, panel, text] of [
+    ['en-GB', 'View', 'Send log detail', 'Language: English · Announcement'],
+    ['zh-CN', '查看', '发送日志详情', '语言: English · 公告'],
+  ] as const) {
+    render(
+      <MemoryRouter initialEntries={[`/${locale}/log`]}>
+        <Routes>
+          <Route path="/:locale/log" element={<SendLogTab templates={[]} broadcasts={[]} />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByText(view))
+    const drawer = await screen.findByRole('dialog', { name: panel })
+    assert.ok(within(drawer).getByText(text))
+    assert.equal(within(drawer).queryByText(/notification\.categories/), null)
+    cleanup()
+  }
+})
+
 type Recorded = { method: string; url: string; body: Record<string, unknown> | null }
 
 function recordFetch(answer: (request: Recorded) => Response | Promise<Response>): Recorded[] {

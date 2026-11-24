@@ -27,6 +27,7 @@ import {
 } from '../../lib/notificationFormat'
 import { NotificationDialog } from './NotificationDialog'
 import { NotificationPreview } from './NotificationPreview'
+import { SoftBreak } from './SoftBreak'
 
 function errorText(
   locale: ReturnType<typeof useLocale>,
@@ -144,11 +145,10 @@ export function SystemNotificationsTab({
             ))}
           </tbody>
         </table>
-      </div>
-
-      <div className="notificationInlineNote" role="note">
-        <span aria-hidden="true">ⓘ</span>
-        <span>{t(locale, 'notification.system.note')}</span>
+        <div className="notificationInlineNote notificationListNote" role="note">
+          <span aria-hidden="true">ⓘ</span>
+          <span>{t(locale, 'notification.system.note')}</span>
+        </div>
       </div>
 
       {pendingOff ? (
@@ -203,7 +203,7 @@ function NotificationGroup({
           <tr key={template.id} data-testid={`notification-row-${template.id}`}>
             <td className="notificationNameCell">
               <span className="notificationName">{name}</span>
-              <span className="notificationId">{template.id}</span>
+              <span className="notificationId"><SoftBreak text={template.id} /></span>
             </td>
             <td className="notificationTriggerCell">
               <div className="notificationTriggerClamp" title={template.triggerText}>
@@ -221,7 +221,7 @@ function NotificationGroup({
                         : 'notificationTag notificationTagInApp'
                     }
                   >
-                    {channelLabel(channel)}
+                    {channelLabel(channel, locale)}
                   </span>
                 ))}
               </span>
@@ -403,7 +403,7 @@ export function NotificationEditor({
 
   async function save() {
     if (saving) return
-    const nextIssues = validateTemplateDraft(template, en, zh, allowed)
+    const nextIssues = validateTemplateDraft(template, en, zh, allowed, locale)
     if (nextIssues.fields.length > 0 || nextIssues.unknown.length > 0) {
       setIssues(nextIssues)
       setError(t(locale, 'notification.errors.INVALID_INPUT'))
@@ -590,7 +590,7 @@ export function NotificationEditor({
           </div>
 
           <div className="notificationLanguageBar">
-            <span className="notificationLanguageSwitch" role="group" aria-label="Language">
+            <span className="notificationLanguageSwitch" role="group" aria-label={t(locale, 'common.language')}>
               <button
                 type="button"
                 className={
@@ -723,7 +723,7 @@ export function NotificationEditor({
                 ))}
                 {unknown.map((issue) => (
                   <span className="notificationFieldError" key={`${issue.field}-${issue.name}`}>
-                    {variableErrorMessage(issue)}
+                    {variableErrorMessage(issue, locale)}
                   </span>
                 ))}
               </label>
