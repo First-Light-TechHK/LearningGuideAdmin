@@ -16,6 +16,7 @@ import type { Locale } from '../lib/i18n/config';
 import { cachedPreviewEntry } from '../lib/capabilities';
 import { useCoursePermissions } from '../lib/coursePermissions';
 import { categoryLabel } from '../lib/categoryLabel';
+import { sweepEditorDrafts } from '../lib/editorDraftStore';
 import { FailureProvider } from './course-editor/feedback';
 import { versionName } from './course-editor/versionNumbering';
 import { runEchoMotion } from './course-editor/versionMotion';
@@ -140,6 +141,11 @@ export function CourseEditorPage() {
   useEffect(() => {
     void fetchLoad();
   }, [fetchLoad]);
+
+  // 编辑器打开时懒清理过期 / 损坏的本地草稿（TTL 7 天、最多 50 条），避免 sessionStorage 残留。
+  useEffect(() => {
+    sweepEditorDrafts();
+  }, []);
 
   async function openPreview() {
     if (previewEntry !== 'portal') {
@@ -367,8 +373,8 @@ export function CourseEditorPage() {
       )}
       <div className="course-ui-panel" data-course-tab-panel data-testid={`course-tab-panel-${tab}`}>
         <div style={{ display: 'contents' }} inert={tab === 'trial' ? !canManageCommerce : tab === 'versions' ? false : !canEdit}>
-          {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} onNext={() => setTab('content')} />}
-          {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} />}
+          {tab === 'info' && <CourseInfoSection locale={locale} course={course} categories={localizedCategories} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} onNext={() => setTab('content')} canEdit={canEdit} />}
+          {tab === 'content' && <CourseContentSection locale={locale} course={course} activeLessonId={activeLessonId} setActiveLessonId={setActiveLessonId} contentLanguage={contentLanguage} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} canEdit={canEdit} />}
           {tab === 'trial' && trial && <CourseTrialSection canManage={canManageCommerce} locale={locale} courseId={course.id} trial={trial} course={course} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} contentLanguage={contentLanguage} />}
           {tab === 'versions' && <CourseVersionsSection locale={locale} course={course} versions={versions} history={history} historyPage={historyPage} setHistoryPage={setHistoryPage} busy={busy} setBusy={setBusy} onReload={load} onNotice={showNotice} />}
         </div>

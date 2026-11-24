@@ -8,9 +8,14 @@ import { useReportFailure } from './feedback';
 import { Field, Modal } from './shared';
 import { L, buttonStyle, card, inputStyle, languageLabel, primaryBtn } from './shared-utils';
 import type { Locale } from '../../lib/i18n/config';
+import { t } from '../../lib/i18n/messages';
 import { serverText } from '../../lib/i18n/serverText';
+import { mergeUnderstandingDraft, parseUnderstandingDraft, understandingDraftOf, type UnderstandingDraft, type UnderstandingQuestionDraft } from './drafts/understandingDraft';
+import { isDirty } from './drafts/merge';
+import { restoreDraft, useDraftAutosave } from './useDraftPersistence';
+import { removeDraft, type DraftIdentity } from '../../lib/editorDraftStore';
 
-type Question = { code: string; question: string; referenceAnswer: string };
+type Question = UnderstandingQuestionDraft;
 
 export function UnderstandingPanel({
   locale,
@@ -21,6 +26,7 @@ export function UnderstandingPanel({
   setBusy,
   onSaved,
   onNotice,
+  canEdit,
 }: {
   locale: string;
   courseId: string;
@@ -30,6 +36,7 @@ export function UnderstandingPanel({
   setBusy: (value: boolean) => void;
   onSaved: () => Promise<void>;
   onNotice: (message: string) => void;
+  canEdit: boolean;
 }) {
   const [knowledgeEnabled, setKnowledgeEnabled] = useState(true);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -42,40 +49,69 @@ export function UnderstandingPanel({
   const [singleBusy, setSingleBusy] = useState(false);
   const reportFailure = useReportFailure();
 
-  const [source, setSource] = useState<{ lesson: Lesson; language: string } | null>(null);
-  if (source?.lesson !== lesson || source?.language !== language) {
-    setSource({ lesson, language });
-    setKnowledgeEnabled(true);
-    setQuestions(
-      lesson.questions.map((question, index) => ({
-        code: question.code ?? `K-${String(index + 1).padStart(4, '0')}`,
-        question: question.question,
-        referenceAnswer: question.referenceAnswer ?? '',
-      })),
-    );
-    setApplicationEnabled(Boolean(lesson.applicationTest));
-    setApplicationScenario(lesson.applicationTest?.scenario ?? '');
-    setApplicationAnswer(lesson.applicationTest?.referenceAnswer ?? '');
+  const applyDraft = (draft: UnderstandingDraft) => {
+    setKnowledgeEnabled(draft.knowledgeEnabled);
+    setQuestions(draft.questions);
+    setApplicationEnabled(draft.applicationEnabled);
+    setApplicationScenario(draft.applicationScenario);
+    setApplicationAnswer(draft.applicationAnswer);
+  };
+
+  const serverDraft = understandingDraftOf(lesson);
+  // 身份与 Study 一致：课程 + 课时 + 内容语言。
+  const draftIdentity: DraftIdentity = { courseId, step: 'understanding', lessonId: lesson.id, language };
+  const draftStorageIdentity = canEdit ? draftIdentity : null;
+  const [draftSource, setDraftSource] = useState<{ lessonId: string; language: string; lesson: Lesson; snapshot: UnderstandingDraft } | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [draftServerChanged, setDraftServerChanged] = useState(false);
+  if (!draftSource || draftSource.lessonId !== lesson.id || draftSource.language !== language) {
+    // 挂载 / 换课时 / 换语言：本地有该身份的未保存草稿就先三路合并恢复。
+    const restored = restoreDraft(draftStorageIdentity, serverDraft, {
+      parse: parseUnderstandingDraft,
+      merge: mergeUnderstandingDraft,
+      dirty: isDirty,
+    });
+    setDraftSource({ lessonId: lesson.id, language, lesson, snapshot: serverDraft });
+    applyDraft(restored.value);
+    setDraftRestored(restored.restored);
+    setDraftServerChanged(restored.restored && restored.serverChanged);
+  } else if (draftSource.lesson !== lesson) {
+    // 同身份重载（保存、导入等）：用户改过的字段保留，没改过的跟随服务器（P96）。
+    const currentDraft: UnderstandingDraft = { knowledgeEnabled, questions, applicationEnabled, applicationScenario, applicationAnswer };
+    setDraftSource({ ...draftSource, lesson, snapshot: serverDraft });
+    applyDraft(mergeUnderstandingDraft(currentDraft, draftSource.snapshot, serverDraft));
+  }
+
+  const currentDraft: UnderstandingDraft = { knowledgeEnabled, questions, applicationEnabled, applicationScenario, applicationAnswer };
+  const draftBase = draftSource?.snapshot ?? serverDraft;
+  useDraftAutosave(draftStorageIdentity, currentDraft, draftBase, isDirty);
+  // 草稿回到与服务器一致（保存后重载合并 / 用户改回原值）时视为无草稿，恢复提示随之消失。
+  const draftDirty = isDirty(currentDraft, draftBase);
+  if (draftRestored && !draftDirty) {
+    setDraftRestored(false);
+    setDraftServerChanged(false);
   }
 
   async function saveKnowledge() {
+    // 保存的是点击这一刻的知识测试草稿；应用测试的未保存修改不受影响。
+    const sentEnabled = knowledgeEnabled;
+    const sentQuestions = knowledgeEnabled
+      ? questions.map((question, index) => ({
+          code: question.code || `K-${String(index + 1).padStart(4, '0')}`,
+          question: question.question,
+          referenceAnswer: question.referenceAnswer,
+        }))
+      : [];
     setBusy(true);
     const result = await boRequest(`/api/backoffice/courses/${courseId}/lessons/${lesson.id}/knowledge-test`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        enabled: knowledgeEnabled,
-        questions: knowledgeEnabled
-          ? questions.map((question, index) => ({
-              code: question.code || `K-${String(index + 1).padStart(4, '0')}`,
-              question: question.question,
-              referenceAnswer: question.referenceAnswer,
-            }))
-          : [],
-      }),
+      body: JSON.stringify({ enabled: sentEnabled, questions: sentQuestions }),
     });
     setBusy(false);
     if (result.success) {
+      // 服务器已接受知识测试：更新基线，这部分变 clean（应用测试的脏字段仍保留）。
+      setDraftSource((current) => (current ? { ...current, snapshot: { ...current.snapshot, knowledgeEnabled: sentEnabled, questions: sentQuestions } } : current));
       onNotice(L(locale, '知识测试已保存。', 'Knowledge Test saved.'));
       await onSaved();
     } else {
@@ -84,18 +120,21 @@ export function UnderstandingPanel({
   }
 
   async function saveApplication() {
+    const sentEnabled = applicationEnabled;
+    const sentScenario = applicationScenario;
+    const sentAnswer = applicationAnswer;
     setBusy(true);
     const result = await boRequest(`/api/backoffice/courses/${courseId}/lessons/${lesson.id}/application-test`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        enabled: applicationEnabled,
-        scenario: applicationScenario,
-        referenceAnswer: applicationAnswer,
-      }),
+      body: JSON.stringify({ enabled: sentEnabled, scenario: sentScenario, referenceAnswer: sentAnswer }),
     });
     setBusy(false);
     if (result.success) {
+      // 服务器已接受应用测试：更新基线，这部分变 clean（知识测试的脏字段仍保留）。
+      setDraftSource((current) =>
+        current ? { ...current, snapshot: { ...current.snapshot, applicationEnabled: sentEnabled, applicationScenario: sentScenario, applicationAnswer: sentAnswer } } : current,
+      );
       onNotice(L(locale, '应用测试已保存。', 'Application Test saved.'));
       await onSaved();
     } else {
@@ -138,8 +177,31 @@ export function UnderstandingPanel({
     window.open(`/api/backoffice/courses/${courseId}/understanding/template`, '_blank');
   }
 
+  /** 丢弃本地草稿：删掉存储记录，把面板重置到最新服务器快照（不发任何服务器请求）。 */
+  function discardDraft() {
+    removeDraft(draftIdentity);
+    applyDraft(serverDraft);
+    setDraftSource((current) => (current ? { ...current, snapshot: serverDraft } : current));
+    setDraftRestored(false);
+    setDraftServerChanged(false);
+  }
+
   return (
     <div>
+      {draftRestored && (
+        <div
+          data-testid="draft-restored"
+          role="status"
+          aria-live="polite"
+          style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: '#F3F7FF', border: '1px solid #D6E2F8', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 10 }}
+        >
+          <span>{t(locale as Locale, 'course.ui.draftRestored')}</span>
+          {draftServerChanged && <span data-testid="draft-server-changed" style={{ color: '#5A6577' }}>{t(locale as Locale, 'course.ui.draftServerChanged')}</span>}
+          <button type="button" data-testid="draft-discard" style={{ ...buttonStyle, padding: '4px 10px' }} onClick={discardDraft}>
+            {t(locale as Locale, 'course.ui.draftDiscard')}
+          </button>
+        </div>
+      )}
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
