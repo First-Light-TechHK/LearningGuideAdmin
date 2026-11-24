@@ -334,7 +334,7 @@ export class PublishingService {
 
   /**
    * Notification P0：课程第一次变为 ONLINE 时发 COURSE_NEW_LAUNCH（eventKey=course+线上版本）。
-   * 只有最近一次发布勾选了 notifyLearners 才发送。异步执行，不阻塞状态变更。
+   * PRD 第 5 节：开关只有模板的 On/Off，发布时的 notifyLearners 勾选不参与。异步执行，不阻塞状态变更。
    */
   private async emitCourseNewLaunchIfFirstOnline(
     courseId: string,
@@ -348,16 +348,6 @@ export class PublishingService {
       },
     });
     if (onlineCount !== 1) return;
-    const lastPublish = await this.prisma.courseAuthoringActivity.findFirst({
-      where: { courseId, action: HISTORY_ACTIONS.PUBLISH },
-      orderBy: { createdAt: 'desc' },
-      select: { detail: true },
-    });
-    const detail = lastPublish?.detail as { notifyLearners?: unknown } | null;
-    if (detail?.notifyLearners !== true) {
-      this.logger.debug('COURSE_NEW_LAUNCH not sent: notifyLearners is off');
-      return;
-    }
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
       select: {

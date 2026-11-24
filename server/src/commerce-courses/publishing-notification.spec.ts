@@ -5,7 +5,7 @@ import type { CommerceCourseConfig } from './commerce.config';
 
 /**
  * Notification P0：COURSE_NEW_LAUNCH 在课程第一次变为 ONLINE 时发出，
- * 且只有最近一次发布勾选了 notifyLearners 才发。
+ * 不看发布时的 notifyLearners 勾选（PRD 第 5 节）。
  */
 const COURSE_ID = 'course-1';
 const LIVE_VERSION_ID = 'version-9';
@@ -99,7 +99,7 @@ describe('COURSE_NEW_LAUNCH hook on the first ONLINE', () => {
       ...fake,
     }).changeStatus(COURSE_ID, { status: 'ONLINE', reason: 'Launch' }, null);
 
-  it('sends the event once when notifyLearners was ticked', async () => {
+  it('sends the event once on the first ONLINE', async () => {
     await goOnline({});
     await flush();
     expect(fetchStub).toHaveBeenCalledTimes(1);
@@ -119,10 +119,10 @@ describe('COURSE_NEW_LAUNCH hook on the first ONLINE', () => {
     ]);
   });
 
-  it('sends nothing when notifyLearners was not ticked', async () => {
+  it('sends the event even when notifyLearners was not ticked (PRD section 5)', async () => {
     await goOnline({ lastPublishDetail: { notifyLearners: false } });
     await flush();
-    expect(fetchStub).not.toHaveBeenCalled();
+    expect(fetchStub).toHaveBeenCalledTimes(1);
   });
 
   it('sends nothing the second time the course goes ONLINE', async () => {
