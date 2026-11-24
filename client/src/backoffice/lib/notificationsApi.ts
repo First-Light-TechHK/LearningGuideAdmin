@@ -60,6 +60,12 @@ export const notificationsApi = {
     return postJson(`${BASE}/broadcasts`, input)
   },
 
+  testBroadcast(
+    input: BroadcastDraftInput & { language: NotificationLanguage },
+  ): Promise<ApiResult<{ ok: true; sentTo?: string }>> {
+    return postJson(`${BASE}/broadcasts/test`, input)
+  },
+
   broadcast(id: string): Promise<ApiResult<BroadcastDetailResponse>> {
     return boRequest<BroadcastDetailResponse>(`${BASE}/broadcasts/${encodeURIComponent(id)}`)
   },

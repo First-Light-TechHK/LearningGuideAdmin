@@ -237,6 +237,26 @@ export function createNotificationsService(deps: {
     );
   }
 
+  /** “Send test to me”（NTF-BC-014）：转发屏幕上的内容，收件人固定为会话里的操作人。 */
+  async function testBroadcast(employee: SessionEmployee, rawBody: unknown) {
+    const body = bodyOf(rawBody);
+    const payload = {
+      ...pick(body, BROADCAST_FIELDS),
+      ...(body.language === undefined
+        ? {}
+        : { language: oneOf(NOTIFICATION_LANGUAGES, body.language, 'language') }),
+      operatorEmail: employee.loginEmail,
+      operator: actorOf(employee),
+    };
+    return audited(
+      employee,
+      'test_sent',
+      'notification-broadcast',
+      { titleEn: body.titleEn },
+      () => portal.send('POST', '/broadcasts/test', payload),
+    );
+  }
+
   async function patchBroadcast(
     employee: SessionEmployee,
     rawId: string,
@@ -305,6 +325,7 @@ export function createNotificationsService(deps: {
     listBroadcasts,
     broadcastDetail,
     createBroadcast,
+    testBroadcast,
     patchBroadcast,
     sendLog,
     sendLogDetail,

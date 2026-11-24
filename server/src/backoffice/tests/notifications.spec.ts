@@ -117,6 +117,7 @@ describe('notification route access', () => {
       ['GET', '/api/backoffice/notifications/audiences', 'VIEW'],
       ['GET', '/api/backoffice/notifications/broadcasts?page=1', 'VIEW'],
       ['POST', '/api/backoffice/notifications/broadcasts', 'PUBLISH'],
+      ['POST', '/api/backoffice/notifications/broadcasts/test', 'PUBLISH'],
       ['PATCH', '/api/backoffice/notifications/broadcasts/b1', 'PUBLISH'],
       ['GET', '/api/backoffice/notifications/send-log', 'VIEW'],
       ['GET', '/api/backoffice/notifications/send-log/log-1', 'VIEW'],
@@ -417,6 +418,33 @@ describe('notification service', () => {
     );
     assert.equal((test?.body as { operator?: string }).operator, 'Jack');
     assert.equal(events[0].eventName, 'test_sent');
+  });
+
+  it('sends a broadcast test with the on-screen content to the session operator only (NTF-BC-014)', async () => {
+    const { portal, calls } = fakePortal();
+    const { events, audit } = fakeAudit();
+    const service = createNotificationsService({ portal, audit });
+    await service.testBroadcast(employee, {
+      titleEn: 'Unsaved',
+      bodyEn: 'On screen',
+      audience: 'paid',
+      operatorEmail: 'attacker@example.com',
+      operator: 'Mallory',
+      extra: 'dropped',
+    });
+    const test = calls.find((call) => call.path === '/broadcasts/test');
+    assert.equal(test?.method, 'POST');
+    assert.deepEqual(test?.body, {
+      titleEn: 'Unsaved',
+      bodyEn: 'On screen',
+      audience: 'paid',
+      operatorEmail: 'jack@example.com',
+      operator: 'Jack',
+    });
+    assert.equal(events[0].eventName, 'test_sent');
+    await assert.rejects(service.testBroadcast(employee, { titleEn: 'x', bodyEn: 'y', language: 'fr' }), {
+      code: 'INVALID_INPUT',
+    });
   });
 
   it('records broadcast_sent and injects the operator', async () => {

@@ -95,6 +95,13 @@ export class BackofficeNotificationsController {
     return run(() => this.notifications.createBroadcast(employee, body));
   }
 
+  @Post('broadcasts/test')
+  @HttpCode(200)
+  testBroadcast(@Req() request: BackofficeRequest, @Body() body: unknown) {
+    const employee = signedIn(request);
+    return run(() => this.notifications.testBroadcast(employee, body));
+  }
+
   @Get('broadcasts/:id')
   broadcast(@Param('id') id: string) {
     return run(() => this.notifications.broadcastDetail(id));
