@@ -12,6 +12,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { FilesService, MAX_FILE_SIZE } from './files.service';
 import type { Response } from 'express';
+import { MAX_IMAGE_UPLOAD_BYTES } from './knowledge-image';
 
 /**
  * 文档转换（§5.1.6）：multipart file → 本地转 Markdown 返回预览，不建页。
@@ -39,7 +40,8 @@ export class FilesController {
   @Post('images/:courseId')
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      // Busboy reports the limit as reached at equality. The service accepts exactly 20 MiB.
+      limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES + 1, files: 1 },
     }),
   )
   uploadImage(

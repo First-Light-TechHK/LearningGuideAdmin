@@ -53,6 +53,8 @@ export async function buildCoursePackage(
       trialRows: true,
       plans: { where: { active: true }, orderBy: { sortOrder: 'asc' } },
       lessons: {
+        // PRD §22：被移除的课时在下一次 Publish 后才从网站消失；草稿包也不能把它们带回目标环境。
+        where: { archivedAt: null },
         orderBy: { sortOrder: 'asc' },
         include: {
           localizations: { include: { video: true } },

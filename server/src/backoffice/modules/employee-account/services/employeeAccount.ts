@@ -17,6 +17,7 @@ import {
 } from '../../../lib/securityPolicy';
 import { tryRecordAuditEvent } from '../../../repositories/auditRepository';
 import * as employeeRepository from '../../../repositories/employeeRepository';
+import * as featureGrantRepository from '../../../repositories/featureGrantRepository';
 import * as sessionRepository from '../../../repositories/sessionRepository';
 import {
   manualLinkFor,
@@ -76,6 +77,21 @@ function isUniqueViolation(error: unknown): boolean {
     'code' in error &&
     (error as { code?: string }).code === '23505'
   );
+}
+
+/** 这次 PATCH 是否会让一个当前可用的 Admin 失去账号管理资格（角色降级或停用）。 */
+function removesUsableAdmin(
+  current: employeeRepository.EmployeeRecord,
+  patch: { role?: EmployeeRole; accountStatus?: AccountStatus },
+): boolean {
+  const usable =
+    current.role === 'ADMIN' &&
+    current.accountStatus === 'ACTIVE' &&
+    current.emailVerification === 'VERIFIED';
+  if (!usable) return false;
+  const nextRole = patch.role ?? current.role;
+  const nextStatus = patch.accountStatus ?? current.accountStatus;
+  return nextRole !== 'ADMIN' || nextStatus !== 'ACTIVE';
 }
 
 /** 非有限数或越界的分页参数夹到 [1, max]，避免巨大 OFFSET 让数据库报错。 */
@@ -249,10 +265,24 @@ export async function updateEmployee(input: {
 
   let updated: employeeRepository.EmployeeRecord;
   try {
-    updated = await employeeRepository.updateEmployee(
-      existing.employeeId,
+    // 角色/状态变更与最后管理员校验同事务 + advisory lock：
+    // 非 bootstrap 的最后一个可用 Admin 不能把自己降级/停用，并发互降也只会成功一个。
+    const guarded = await employeeRepository.updateEmployeeGuardingLastAdmin({
+      employeeId: existing.employeeId,
       patch,
-    );
+      allow: async (client, current) => {
+        if (!current) return false;
+        if (!removesUsableAdmin(current, patch)) return true;
+        return (
+          (await featureGrantRepository.countOtherAccountsCapableAdminsWithin(
+            client,
+            current.employeeId,
+          )) > 0
+        );
+      },
+    });
+    if (!guarded) return { ok: false, code: 'PROTECTED_ADMIN_ACCOUNT' };
+    updated = guarded;
   } catch (error) {
     if (isUniqueViolation(error)) return { ok: false, code: 'DUPLICATE_EMAIL' };
     throw error;

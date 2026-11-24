@@ -1,4 +1,4 @@
-import { PackageImporter } from './package-importer';
+import { PackageImporter, probeVideoDurationSeconds } from './package-importer';
 import type { PackageManifest } from './contracts/manifest';
 
 /** 构造一个不含媒体的最小课程包清单（lessons 为空，便于聚焦冲突/slug 逻辑）。 */
@@ -118,5 +118,60 @@ describe('PackageImporter.importPackage — Course ID vs slug 冲突', () => {
         options,
       ),
     ).rejects.toMatchObject({ code: 'PACKAGE_CONFLICT' });
+  });
+});
+
+describe('probeVideoDurationSeconds（导入时按真实文件探测）', () => {
+  /** ftyp 签名 + 可选 mvhd（version 0，timescale 1000）。 */
+  function mp4(seconds: number | null): Buffer {
+    const ftyp = Buffer.alloc(24);
+    ftyp.writeUInt32BE(24, 0);
+    ftyp.write('ftyp', 4, 'ascii');
+    ftyp.write('isom', 8, 'ascii');
+    if (seconds === null) return Buffer.concat([ftyp, Buffer.alloc(24)]);
+    const mvhd = Buffer.alloc(28);
+    mvhd.write('mvhd', 0, 'ascii');
+    mvhd.writeUInt8(0, 4);
+    mvhd.writeUInt32BE(1000, 4 + 12);
+    mvhd.writeUInt32BE(Math.round(seconds * 1000), 4 + 16);
+    return Buffer.concat([ftyp, mvhd]);
+  }
+
+  it('reads the mvhd timescale/duration for mp4 and mov', () => {
+    expect(probeVideoDurationSeconds('mp4', mp4(3))).toBe(3);
+    expect(probeVideoDurationSeconds('mov', mp4(692.4))).toBe(692);
+  });
+
+  it('returns null when the container has no mvhd, is empty, or is not ISO BMFF', () => {
+    expect(probeVideoDurationSeconds('mp4', mp4(null))).toBeNull();
+    expect(probeVideoDurationSeconds('mp4', mp4(0))).toBeNull();
+    expect(probeVideoDurationSeconds('webm', mp4(3))).toBeNull();
+    expect(probeVideoDurationSeconds('mp4', Buffer.alloc(0))).toBeNull();
+  });
+});
+
+describe('PackageImporter — 竞态下的冲突策略错误码', () => {
+  it('确认后课程 ID 才出现时，CREATE_NEW_COURSE 返回 422 STRATEGY_UNSUPPORTED', async () => {
+    const prisma = {
+      commerceCourse: {
+        findFirst: ({ where }: { where: { code?: string } }) =>
+          Promise.resolve(
+            where.code ? { id: 'existing', code: where.code } : null,
+          ),
+      },
+    };
+    await expect(
+      importer(prisma).importPackage(
+        manifestWith('SCI001', 'modeling-life'),
+        new Map(),
+        {
+          ...options,
+          onConflict: 'CREATE_NEW_COURSE',
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 'PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED',
+      status: 422,
+    });
   });
 });

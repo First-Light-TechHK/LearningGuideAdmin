@@ -215,7 +215,7 @@ export const knowledgeApi = {
   uploadImage: (file: File, courseId: string) => {
     const form = new FormData()
     form.append('file', file)
-    return http.post<{ url: string }>(`/files/images/${encodeURIComponent(courseId)}`, form).then((r) => r.data)
+    return http.post<{ url: string }>(`/files/images/${encodeURIComponent(courseId)}`, form, { timeout: 120000 }).then((r) => r.data)
   },
 }
 
@@ -239,6 +239,12 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.doc',
   '.xls',
 ] as const
+
+export const IMAGE_UPLOAD_MAX_MIB = 20
+export const IMAGE_UPLOAD_MAX_BYTES = IMAGE_UPLOAD_MAX_MIB * 1024 * 1024
+export const IMAGE_UPLOAD_FORMATS = 'JPEG/JFIF, PNG/APNG, GIF, WebP, AVIF, HEIC/HEIF, TIFF, BMP/DIB, SVG'
+export const IMAGE_UPLOAD_UNIT = 'MiB'
+export const IMAGE_UPLOAD_ACCEPT = '.jpg,.jpeg,.jfif,.png,.gif,.webp,.apng,.avif,.heic,.heif,.tif,.tiff,.bmp,.dib,.svg'
 
 /** §10.1 单文件大小上限 15MB */
 export const UPLOAD_MAX_FILE_SIZE = 15 * 1024 * 1024

@@ -14,8 +14,13 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import JSZip from 'jszip';
 import type { Response } from 'express';
+
+import { parseEnabledCapabilities } from '../common/capabilities';
+import { effectiveCourseAction } from '../backoffice/modules/rbac/features';
+import { grantsForRequest } from '../backoffice/modules/rbac/employeeFeatures';
 
 import {
   CommerceCoursesService,
@@ -55,7 +60,7 @@ function wrap<T>(fn: () => Promise<T>): Promise<T> {
 
 /**
  * 商品课程 v2 管理接口（P1a：列表/详情/工作流/导入导出）。
- * RBAC 见 backoffice route-access：courses/* 走 knowledge 菜单，导入导出要求 FULL。
+ * RBAC 见 backoffice route-access：courses/* 走 course 菜单，动作按 course.* 账号级开关拆分。
  */
 @Controller('backoffice/courses')
 export class CommerceCoursesController {
@@ -72,6 +77,7 @@ export class CommerceCoursesController {
     private readonly portalPreview: PortalPreviewService,
     private readonly portalProjection: PortalProjectionService,
     private readonly storage: CourseStorageService,
+    private readonly config: ConfigService,
   ) {}
 
   @Get()
@@ -684,11 +690,13 @@ export class CommerceCoursesController {
     return this.publishing.deleteDraft(id, actor(request));
   }
 
+  // 契约：{ status: "ONLINE"|"HIDDEN"|"OFFLINE", reason } 两项都必填；
+  // 运行时校验在 PublishingService.parseChangeStatusBody（缺/非法 400，缺 reason 409）。
   @Post(':id/live-status')
   @HttpCode(200)
   changeStatus(
     @Param('id') id: string,
-    @Body() body: { status: 'ONLINE' | 'HIDDEN' | 'OFFLINE'; reason?: string },
+    @Body() body: unknown,
     @Req() request: BackofficeRequest,
   ) {
     return this.publishing.changeStatus(id, body, actor(request));
@@ -840,6 +848,52 @@ export class CommerceCoursesController {
     return wrap(() => this.jobs.completeRawUpload(jobId));
   }
 
+  // ===== 课程包分块上传（> 200 MB 的 .lgcourse.zip；不做 Excel 转换）=====
+  @Post('import/package/session')
+  @HttpCode(200)
+  createPackageUploadSession(
+    @Body() body: { fileName?: string; bytesTotal?: number; courseId?: string },
+    @Req() request: BackofficeRequest,
+  ) {
+    const idempotencyKey =
+      typeof request.headers['idempotency-key'] === 'string'
+        ? request.headers['idempotency-key']
+        : undefined;
+    return wrap(() =>
+      this.jobs.createPackageUploadSession(
+        {
+          name: body?.fileName || 'package.zip',
+          bytesTotal: Number(body?.bytesTotal) || 0,
+        },
+        actor(request),
+        idempotencyKey,
+        body?.courseId,
+      ),
+    );
+  }
+
+  @Put('import/package/:jobId/chunk')
+  @HttpCode(200)
+  @UseInterceptors(FileInterceptor('chunk'))
+  uploadPackageChunk(
+    @Param('jobId') jobId: string,
+    @Query('index') chunkIndex: string | undefined,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+  ) {
+    if (!file?.buffer) {
+      throw new PackageError('INVALID_INPUT', 400, 'No chunk uploaded.');
+    }
+    return wrap(() =>
+      this.jobs.appendPackageChunk(jobId, Number(chunkIndex), file.buffer),
+    );
+  }
+
+  @Post('import/package/:jobId/complete')
+  @HttpCode(200)
+  completePackageUpload(@Param('jobId') jobId: string) {
+    return wrap(() => this.jobs.completePackageUpload(jobId));
+  }
+
   // ===== 本地目录导入（服务端直接读取仓库内 docs 素材，规避浏览器上传大文件中断） =====
   @Post('import/local')
   @HttpCode(201)
@@ -983,10 +1037,11 @@ export class CommerceCoursesController {
   @HttpCode(202)
   export(
     @Param('id') id: string,
-    @Body() body: { version?: string },
+    @Body()
+    body: { version?: string; versionId?: string; sourceVersion?: string },
     @Req() request: BackofficeRequest,
   ) {
-    return wrap(() => this.jobs.startExport(id, actor(request), body?.version));
+    return wrap(() => this.jobs.startExport(id, actor(request), body ?? {}));
   }
 
   @Get('export/:jobId')
@@ -1011,8 +1066,20 @@ export class CommerceCoursesController {
   }
 
   // ===== 作业列表 =====
+  // 作业元数据与 IMPORT / EXPORT 开关一致：只返回该账号有权限的作业类别。
   @Get('jobs/list')
-  jobsList(@Req() request: BackofficeRequest) {
-    return this.jobs.listJobs(actor(request));
+  async jobsList(@Req() request: BackofficeRequest) {
+    const employee = request.employee;
+    if (!employee) return [];
+    const grants = await grantsForRequest(request, employee.employeeId);
+    const capabilities = parseEnabledCapabilities(
+      this.config.get<string>('ADMIN_CAPABILITIES'),
+    );
+    const kinds: string[] = [];
+    if (effectiveCourseAction(employee.role, 'IMPORT', grants, capabilities))
+      kinds.push('IMPORT');
+    if (effectiveCourseAction(employee.role, 'EXPORT', grants, capabilities))
+      kinds.push('EXPORT');
+    return this.jobs.listJobs(actor(request), kinds);
   }
 }

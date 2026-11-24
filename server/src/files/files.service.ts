@@ -6,15 +6,19 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { Readable } from 'node:stream';
 import JSZip from 'jszip';
 import { MarkItDown } from 'markitdown-ts';
+import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import WordExtractor from 'word-extractor';
 import { latexToMarkdown } from './latex-to-markdown';
 import { CourseStorageService } from '../commerce-courses/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  MAX_IMAGE_UPLOAD_BYTES,
+  prepareKnowledgeImage,
+} from './knowledge-image';
 
 /**
  * §10.1 白名单。
@@ -75,11 +79,11 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
   }
 
   async storeImage(courseId: string, file: Express.Multer.File) {
-    if (file.size > 5 * 1024 * 1024)
-      throw new BadRequestException('图片不能超过 5MB');
-    const detected = this.detectImage(file.buffer);
-    if (!detected)
-      throw new BadRequestException('仅支持 PNG、JPEG、GIF、WebP 图片');
+    if (
+      file.size > MAX_IMAGE_UPLOAD_BYTES ||
+      file.buffer.length > MAX_IMAGE_UPLOAD_BYTES
+    )
+      throw new BadRequestException('图片不能超过 20 MiB');
     if (
       !(await this.prisma.course.findUnique({
         where: { id: courseId },
@@ -87,16 +91,10 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
       }))
     )
       throw new BadRequestException('课程不存在');
+    const { bytes, extension } = await prepareKnowledgeImage(file.buffer);
     const assetId = randomUUID();
-    await this.saveImageAsset(
-      courseId,
-      assetId,
-      detected.extension,
-      file.buffer,
-    );
-    return {
-      url: `/api/files/images/${courseId}/${assetId}.${detected.extension}`,
-    };
+    await this.saveImageAsset(courseId, assetId, extension, bytes);
+    return { url: `/api/files/images/${courseId}/${assetId}.${extension}` };
   }
 
   private async saveImageAsset(
@@ -263,18 +261,13 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
       } else if (ext === '.doc') {
         // 旧版 Word（OLE 二进制）：markitdown-ts 不支持，改用 word-extractor 提取纯文本
         markdown = (await this.docToMarkdown(file.buffer)).trim();
+      } else if (ext === '.docx') {
+        markdown = await this.docxToMarkdown(file.buffer, courseId);
       } else {
-        if (ext === '.docx') await this.preflightDocx(file.buffer);
         const result = await this.markitdown.convertBuffer(file.buffer, {
           file_extension: ext,
         });
         markdown = result?.markdown?.trim() ?? '';
-        if (ext === '.docx')
-          markdown = await this.persistEmbeddedImages(
-            markdown,
-            file.buffer,
-            courseId,
-          );
       }
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
@@ -323,15 +316,34 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async persistEmbeddedImages(
-    markdown: string,
-    docx: Buffer,
+  private async docxToMarkdown(
+    buffer: Buffer,
     courseId?: string,
   ): Promise<string> {
-    const imageRefs = [
-      ...markdown.matchAll(/!\[([^\]]*)\]\(data:image\/[^)]*\)/g),
-    ];
-    if (!imageRefs.length) return markdown;
+    await this.preflightDocx(buffer);
+    const images: Buffer[] = [];
+    let imageError: Error | undefined;
+    const result = await this.markitdown.convertBuffer(buffer, {
+      file_extension: '.docx',
+      // 转换器会截断 data URI；按实际出现的位置放占位地址，避免依赖 XML 顺序猜测对应关系。
+      convertImage: mammoth.images.imgElement(async (image) => {
+        try {
+          const bytes = await image.readAsBuffer();
+          if (!this.detectImage(bytes))
+            throw new BadRequestException('仅支持 PNG、JPEG、GIF、WebP 图片');
+          const index = images.push(bytes) - 1;
+          return { src: `/knowledge-import-images/${index}/image` };
+        } catch (error) {
+          imageError =
+            error instanceof Error ? error : new Error(String(error));
+          throw error;
+        }
+      }),
+    });
+    // mammoth 会将图片回调异常转为 messages，必须显式中断，不能成功导入缺图文档。
+    if (imageError) throw imageError;
+    let markdown = result?.markdown?.trim() ?? '';
+    if (!images.length || !markdown) return markdown;
     if (
       !courseId ||
       !(await this.prisma.course.findUnique({
@@ -343,51 +355,13 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
         'DOCX 含图片，请从 Knowledge Pages 课程中导入',
       );
 
-    const zip = await JSZip.loadAsync(docx);
-    const documentXml = await zip.file('word/document.xml')?.async('text');
-    const relationshipsXml = await zip
-      .file('word/_rels/document.xml.rels')
-      ?.async('text');
-    if (!documentXml || !relationshipsXml) return markdown;
-    const relationships = new Map<string, string>();
-    for (const [, raw] of relationshipsXml.matchAll(
-      /<Relationship\b([^>]*?)\/?\s*>/g,
-    )) {
-      const id = /\bId="([^"]+)"/.exec(raw)?.[1];
-      const target = /\bTarget="([^"]+)"/.exec(raw)?.[1];
-      const type = /\bType="([^"]+)"/.exec(raw)?.[1];
-      if (id && target && type?.endsWith('/image')) {
-        relationships.set(
-          id,
-          path.posix.normalize(path.posix.join('word', target)),
-        );
-      }
-    }
-    const imageIds = [
-      ...documentXml.matchAll(
-        /<(?:a:blip\b[^>]*\br:embed|v:imagedata\b[^>]*\br:id)="([^"]+)"[^>]*\/?\s*>/g,
-      ),
-    ].map((match) => match[1]);
-    const images: Buffer[] = [];
-    for (const imageId of imageIds) {
-      const target = relationships.get(imageId);
-      const entry = target ? zip.file(target) : null;
-      if (entry) images.push(await entry.async('nodebuffer'));
-    }
-    if (images.length !== imageRefs.length) {
-      this.logger.warn(
-        `DOCX 图片数量不匹配：Markdown ${imageRefs.length}，DOCX ${images.length}`,
-      );
-    }
-    for (let i = 0; i < Math.min(images.length, imageRefs.length); i++) {
-      const bytes = images[i];
-      const detected = this.detectImage(bytes);
-      if (!detected) continue;
+    for (const [index, bytes] of images.entries()) {
+      const detected = this.detectImage(bytes)!;
       const assetId = randomUUID();
       await this.saveImageAsset(courseId, assetId, detected.extension, bytes);
-      markdown = markdown.replace(
-        imageRefs[i][0],
-        `![${imageRefs[i][1]}](/api/files/images/${courseId}/${assetId}.${detected.extension})`,
+      markdown = markdown.replaceAll(
+        `/knowledge-import-images/${index}/image`,
+        `/api/files/images/${courseId}/${assetId}.${detected.extension}`,
       );
     }
     return markdown;

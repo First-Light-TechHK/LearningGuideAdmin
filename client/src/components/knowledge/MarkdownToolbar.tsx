@@ -150,12 +150,7 @@ export function MarkdownToolbar({ view, disabled }: Props) {
       <Space size={2}>
         {btn('$x$', text('toolbar.inlineMath'), false, () => {
           if (!view) return
-          // 有选区 → toggle $…$；无选区 → 插入占位 $x$ 并选中 x（避免产生空公式 `$$`）
-          if (view.state.selection.main.empty) {
-            insertSnippet(view, '$x$', { select: { from: 1, to: 2 } })
-          } else {
-            toggleWrap(view, '$')
-          }
+          toggleWrap(view, '$')
         })}
         {btn(
           text('toolbar.linkLabel'),
@@ -165,18 +160,6 @@ export function MarkdownToolbar({ view, disabled }: Props) {
             if (!view) return
             const linkText = text('editor.snippet.linkText')
             insertSnippet(view, `[${linkText}](https://)`, { select: { from: 1, to: 1 + linkText.length } })
-          },
-        )}
-        {btn(
-          text('toolbar.imageLabel'),
-          text('toolbar.image'),
-          false,
-          // 编辑器换成 Markdown 后保留「外链 URL 插图」入口（BUG-0224）；选中 URL 占位便于直接粘贴
-          () => {
-            if (!view) return
-            const alt = text('editor.snippet.toolbarImageAlt')
-            const urlFrom = 4 + alt.length
-            insertSnippet(view, `![${alt}](https://)`, { block: true, select: { from: urlFrom, to: urlFrom + 8 } })
           },
         )}
       </Space>

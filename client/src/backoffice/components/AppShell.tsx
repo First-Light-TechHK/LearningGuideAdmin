@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { usePathname, useRouter } from "../lib/navigation";
@@ -27,10 +27,10 @@ import { useLocale } from "../lib/navigation";
 import {
   menuFromPathSegments,
   menuHref,
-  visibleMenus,
   type MenuKey,
 } from "../rbac/permissions";
-import { boFetch, boRequest, postJson } from "../lib/api";
+import { boFetch, postJson } from "../lib/api";
+import { cachedEnvironmentIdentity, environmentName, type EnvironmentIdentity } from "../lib/environment";
 import { clearEmployeeWorkspace } from "../lib/signOutCleanup";
 
 const MENU_ICON: Record<MenuKey, (props: { size?: number }) => React.ReactElement> = {
@@ -63,11 +63,17 @@ export type ShellEmployee = {
 
 export function AppShell({
   employee,
+  menus,
   workspace = false,
   initialCollapsed = false,
+  environment = cachedEnvironmentIdentity(),
   children,
 }: {
+  /** 环境身份（ShellRoute 从 /api/health 与环境端点解析）：决定墙与钥石 */
+  environment?: EnvironmentIdentity;
   employee: ShellEmployee;
+  /** 侧栏菜单：ShellRoute 已按“角色权限 ∩ 已启用能力”算好，顺序按 PRD PORT-NAV-002 */
+  menus: readonly MenuKey[];
   /** Knowledge / AI Tutor 工作区占满内容区 */
   workspace?: boolean;
   /** PORT-NAV-003：登录后按账号偏好恢复折叠状态 */
@@ -81,17 +87,8 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const [environment, setEnvironment] = useState<{ label: string; numbering: string } | null>(null);
+  const envName = environmentName(locale, environment);
 
-  useEffect(() => {
-    void boRequest<{ label: string; versionNumberingMode: string }>("/api/backoffice/environment").then((payload) => {
-      if (payload.success) {
-        setEnvironment({ label: payload.data.label, numbering: payload.data.versionNumberingMode ?? "sandbox" });
-      }
-    });
-  }, []);
-
-  const menus = visibleMenus(employee.role);
   const roleLabel = t(locale, `roles.${employee.role}`);
 
   /** PORT-NAV-003：折叠状态按账号落库，失败不阻断交互。 */
@@ -111,29 +108,23 @@ export function AppShell({
   }
 
   return (
-    <div className={collapsed ? "shell shellCollapsed" : "shell"}>
+    <div className={collapsed ? "shell shellCollapsed" : "shell"} data-env={environment.kind}>
+      <div className="envWall">
+        {/* 钥石在 DOM 最前：读屏先听到环境，再听到导航 */}
+        <p className="envKeystone" data-testid="env-keystone" data-env-code={environment.code ?? ""} data-pending={environment.pending ? "true" : undefined}>
+          <span className="envMark" aria-hidden="true" />
+          <span aria-hidden="true">{envName}</span>
+          {envName !== "" && <span className="visuallyHidden">{t(locale, "shell.environment.announce", { name: envName })}</span>}
+        </p>
+        <div className="appSurface">
       <header className="header">
         {/* PORT-NAV-001：共享顶部栏展示 logo 与产品名 */}
         <span className="headerBrand">
-          <BrandMark size={42} />
-          {t(locale, "app.name")}
-          {environment && (
-            <span
-              title={environment.numbering === "production" ? "Version N" : "Sandbox X.Y"}
-              style={{
-                marginLeft: 10,
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: 0.4,
-                padding: "3px 10px",
-                borderRadius: 999,
-                color: "#fff",
-                background: environment.numbering === "production" ? "#C0392B" : "#6C4BD3",
-              }}
-            >
-              {environment.label}
-            </span>
-          )}
+          <BrandMark size={34} />
+          <span>
+            <span>{t(locale, "shell.brandLead")}</span>{" "}
+            <span className="brandTail">{t(locale, "shell.brandTail")}</span>
+          </span>
         </span>
 
         <div className="headerRight">
@@ -216,6 +207,8 @@ export function AppShell({
         </nav>
 
         <main className={workspace ? "content contentWorkspace" : "content"}>{children}</main>
+      </div>
+        </div>
       </div>
 
       {passwordOpen ? (

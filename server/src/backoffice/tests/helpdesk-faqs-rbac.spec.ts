@@ -35,6 +35,10 @@ import { createMemoryFaqRepository } from './helpers/memoryFaqRepository';
 jest.mock('../modules/user-authentication/services/session', () => ({
   resolveSession: jest.fn(),
 }));
+// 守卫会加载账号级功能开关；这些用例只看角色矩阵，不需要数据库。
+jest.mock('../repositories/featureGrantRepository', () => ({
+  mapForEmployee: jest.fn(() => Promise.resolve(new Map())),
+}));
 
 const TOKEN = 'test-admin-helpdesk-token-local-only';
 const FID = '0192bbbb-0000-7000-8000-000000000001';

@@ -1,5 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +17,109 @@ import type {
 import { runImportWorker } from './heavy-tasks';
 import { PricingService } from './pricing.service';
 import { PublishingService } from './publishing.service';
+
+/** Postgres INTEGER 的上限；CoursePackageJob.bytesTotal 是 Int 列。 */
+const JOB_BYTE_TOTAL_MAX = 2_147_483_647;
+/** 超过 Int 上限的声明体积存在 requestId（本子系统此前未使用该列），读取时还原。 */
+const RAW_BYTES_TOTAL_MARKER = 'raw-bytes-total:';
+
+/**
+ * staging 存储（S3 桶 / 本地盘）不可用时给操作员看的文案。
+ * 具体是桶不存在、无权限、凭证或网络问题由服务器日志里的原始错误栈定位；
+ * 响应体不泄露桶名、端点或 SDK 细节。
+ */
+export const STORAGE_UNAVAILABLE_MESSAGE =
+  '课程存储不可用，请联系运维检查课程存储桶与实例角色权限';
+
+/** 人类可读的字节数：8 GB / 200 MB / 512 KB。 */
+export function formatBytes(bytes: number): string {
+  const GB = 1024 * 1024 * 1024;
+  const MB = 1024 * 1024;
+  const KB = 1024;
+  if (bytes >= GB) return `${Number((bytes / GB).toFixed(2))} GB`;
+  if (bytes >= MB) return `${Number((bytes / MB).toFixed(2))} MB`;
+  if (bytes >= KB) return `${Number((bytes / KB).toFixed(2))} KB`;
+  return `${bytes} B`;
+}
+
+/**
+ * 把声明的总字节数写进 Int 列：≤ Int 上限直接存；更大的值把 Int 列封顶，
+ * 真实值以 `raw-bytes-total:<n>` 记在 requestId（用于 4 GiB–8 GiB 的大包会话，
+ * 避免 Prisma Int 溢出把用户请求变成 500）。
+ */
+export function encodeJobByteTotal(total: number): {
+  bytesTotal: number;
+  requestId: string | null;
+} {
+  if (total <= JOB_BYTE_TOTAL_MAX) {
+    return { bytesTotal: total, requestId: null };
+  }
+  return {
+    bytesTotal: JOB_BYTE_TOTAL_MAX,
+    requestId: `${RAW_BYTES_TOTAL_MARKER}${total}`,
+  };
+}
+
+function jobDeclaredBytes(job: {
+  bytesTotal: number | null;
+  requestId?: string | null;
+}): number {
+  const marker = job.requestId;
+  if (typeof marker === 'string' && marker.startsWith(RAW_BYTES_TOTAL_MARKER)) {
+    const parsed = Number(marker.slice(RAW_BYTES_TOTAL_MARKER.length));
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  }
+  return job.bytesTotal ?? 0;
+}
+
+/**
+ * 导出选择器（PRD §16.2，owner 2026-11-18 裁决以 PRD 为准）：
+ * 产品导出路径只允许当前线上版本 —— 草稿、指定版本号/标签、versionId、sourceVersion
+ * 等选择器一律 400 VALIDATION_ERROR，不提供任何非线上导出。
+ */
+export type ExportVersionSelector = { kind: 'live' };
+
+const EXPORT_ONLY_LIVE_MESSAGE =
+  'Only the current live version can be exported. Draft and specific-version selectors are not supported.';
+
+/**
+ * 导出请求体的类型校验：version / versionId / sourceVersion 只要出现就必须是字符串。
+ * 否则（例如 version: 1）parseExportSelector 会把它当成未提供而默认导出 live —— 静默改变语义。
+ */
+export function assertExportSelectorBody(
+  body:
+    | { version?: unknown; versionId?: unknown; sourceVersion?: unknown }
+    | null
+    | undefined,
+): void {
+  for (const field of ['version', 'versionId', 'sourceVersion'] as const) {
+    const value = body?.[field];
+    if (value !== undefined && typeof value !== 'string') {
+      throw new PackageError(
+        'VALIDATION_ERROR',
+        400,
+        `${field} must be a string.`,
+      );
+    }
+  }
+}
+
+export function parseExportSelector(
+  body:
+    | { version?: unknown; versionId?: unknown; sourceVersion?: unknown }
+    | null
+    | undefined,
+): ExportVersionSelector {
+  const asString = (value: unknown): string =>
+    typeof value === 'string' ? value.trim() : '';
+  // 旧字段一律拒绝（含 sourceVersion: 'live'）：产品导出不接受任何显式版本选择。
+  if (asString(body?.versionId) || asString(body?.sourceVersion)) {
+    throw new PackageError('VALIDATION_ERROR', 400, EXPORT_ONLY_LIVE_MESSAGE);
+  }
+  const raw = asString(body?.version);
+  if (!raw || raw.toLowerCase() === 'live') return { kind: 'live' };
+  throw new PackageError('VALIDATION_ERROR', 400, EXPORT_ONLY_LIVE_MESSAGE);
+}
 
 export interface JobReport {
   errors: PackageValidationReport['errors'];
@@ -92,13 +195,16 @@ export class PackageJobsService {
   }
 
   /** 读取一个仍处于上传中的作业；不存在 �?404，状态不�?�?409�?*/
-  private async requireUploadingJob(jobId: string) {
+  private async requireUploadingJob(
+    jobId: string,
+    stage: 'UPLOADING' | 'UPLOADING_PACKAGE' = 'UPLOADING',
+  ) {
     const job = await this.prisma.coursePackageJob.findUnique({
       where: { id: jobId },
     });
     if (!job)
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
-    if (job.stage !== 'UPLOADING') {
+    if (job.stage !== stage) {
       throw new PackageError(
         'RAW_UPLOAD_NOT_ACTIVE',
         409,
@@ -135,6 +241,46 @@ export class PackageJobsService {
     return this.storage.describe();
   }
 
+  /**
+   * staging 存储是导入同步链路唯一的共享外部依赖。驱动/SDK 抛出的原始错误
+   * 不是 HttpException，若不转换会被全局过滤器兜底成 500「服务器内部错误」。
+   * 这里统一映射为 503 STORAGE_UNAVAILABLE（操作员可读），原始错误（含堆栈）
+   * 只写服务器日志，供运维定位桶/角色/网络问题。
+   */
+  private storageUnavailable(
+    error: unknown,
+    operation: string,
+    key: string,
+  ): PackageError {
+    this.logger.error(
+      `Course staging storage ${operation} failed for ${key}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      error instanceof Error ? error.stack : undefined,
+    );
+    return new PackageError(
+      'STORAGE_UNAVAILABLE',
+      HttpStatus.SERVICE_UNAVAILABLE,
+      STORAGE_UNAVAILABLE_MESSAGE,
+    );
+  }
+
+  private async writeStaging(key: string, bytes: Buffer): Promise<void> {
+    try {
+      await this.storage.putStaging(key, bytes);
+    } catch (error) {
+      throw this.storageUnavailable(error, 'put', key);
+    }
+  }
+
+  private async stagingExists(key: string): Promise<boolean> {
+    try {
+      return await this.storage.hasStaging(key);
+    } catch (error) {
+      throw this.storageUnavailable(error, 'probe', key);
+    }
+  }
+
   // ===== 导入 =====
   async createImportJob(
     file: { name: string; bytes: Buffer },
@@ -150,14 +296,16 @@ export class PackageJobsService {
     }
     if (file.bytes.length > this.config.packageDirectUploadBytes) {
       throw new PackageError(
-        'PACKAGE_TOO_LARGE',
-        413,
-        'Package too large for direct upload; use chunked upload.',
+        'VALIDATION_ERROR',
+        400,
+        `Package exceeds the direct upload limit (${formatBytes(
+          this.config.packageDirectUploadBytes,
+        )}); use the chunked upload instead.`,
       );
     }
     const jobId = randomUUID();
     const storageKey = this.storage.stagingKey(jobId, 'package.zip');
-    await this.storage.putStaging(storageKey, file.bytes);
+    await this.writeStaging(storageKey, file.bytes);
     await this.prisma.coursePackageJob.create({
       data: {
         id: jobId,
@@ -196,14 +344,17 @@ export class PackageJobsService {
     if (existing) return this.getJob(existing.id);
     if (file.bytes.length > this.config.packageMaxBytes) {
       throw new PackageError(
-        'PACKAGE_TOO_LARGE',
-        413,
-        'Raw materials archive exceeds size limit.',
+        'VALIDATION_ERROR',
+        400,
+        `Raw materials archive exceeds the package size limit (${formatBytes(
+          this.config.packageMaxBytes,
+        )}).`,
       );
     }
     const jobId = randomUUID();
     const rawKey = this.storage.stagingKey(jobId, 'raw.zip');
-    await this.storage.putStaging(rawKey, file.bytes);
+    await this.writeStaging(rawKey, file.bytes);
+    const encodedTotal = encodeJobByteTotal(file.bytes.length);
     await this.prisma.coursePackageJob.create({
       data: {
         id: jobId,
@@ -213,8 +364,9 @@ export class PackageJobsService {
         actorEmployeeId,
         idempotencyKey: idempotencyKey ?? null,
         sourceFileName: file.name,
-        bytesTotal: file.bytes.length,
-        bytesReceived: file.bytes.length,
+        bytesTotal: encodedTotal.bytesTotal,
+        requestId: encodedTotal.requestId,
+        bytesReceived: Math.min(JOB_BYTE_TOTAL_MAX, file.bytes.length),
         progress: 5,
       },
     });
@@ -264,6 +416,8 @@ export class PackageJobsService {
         data: {
           storageKey: pkgKey,
           bytesTotal: pkgBytes.length,
+          // 原始分块上传结束后清掉大体积标记（真实包大小已写回 bytesTotal）
+          requestId: null,
           packageHash: CourseStorageService.sha256(pkgBytes),
           sourceFileName: `${built.courseCode}.lgcourse.zip`,
           progress: 40,
@@ -307,21 +461,32 @@ export class PackageJobsService {
         jobId: existing.id,
         chunkSize: PackageJobsService.RAW_CHUNK_BYTES,
       };
-    if (!Number.isFinite(file.bytesTotal) || file.bytesTotal <= 0) {
+    if (!Number.isSafeInteger(file.bytesTotal) || file.bytesTotal <= 0) {
       throw new PackageError(
         'INVALID_INPUT',
         400,
-        'bytesTotal is required for a chunked upload.',
+        'bytesTotal must be a positive integer for a chunked upload.',
+      );
+    }
+    // 创建会话时就按扩展名白名单预校验，避免 raw.exe/7z 白传完到 complete 才失败。
+    if (!/\.zip$/i.test((file.name ?? '').trim())) {
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'Raw course materials must be uploaded as a .zip archive.',
       );
     }
     if (file.bytesTotal > this.config.packageMaxBytes) {
       throw new PackageError(
-        'PACKAGE_TOO_LARGE',
-        413,
-        'Raw materials archive exceeds size limit.',
+        'VALIDATION_ERROR',
+        400,
+        `Raw materials archive exceeds the package size limit (${formatBytes(
+          this.config.packageMaxBytes,
+        )}).`,
       );
     }
     const jobId = randomUUID();
+    const encodedTotal = encodeJobByteTotal(file.bytesTotal);
     await this.prisma.coursePackageJob.create({
       data: {
         id: jobId,
@@ -331,7 +496,8 @@ export class PackageJobsService {
         actorEmployeeId,
         idempotencyKey: idempotencyKey ?? null,
         sourceFileName: file.name,
-        bytesTotal: file.bytesTotal,
+        bytesTotal: encodedTotal.bytesTotal,
+        requestId: encodedTotal.requestId,
         bytesReceived: 0,
         progress: 0,
       },
@@ -354,16 +520,26 @@ export class PackageJobsService {
       PackageJobsService.RAW_CHUNK_BYTES +
         PackageJobsService.RAW_CHUNK_SLACK_BYTES
     ) {
-      throw new PackageError('PACKAGE_TOO_LARGE', 413, 'Chunk too large.');
+      throw new PackageError(
+        'VALIDATION_ERROR',
+        400,
+        `Chunk exceeds the agreed chunk size (${formatBytes(
+          PackageJobsService.RAW_CHUNK_BYTES,
+        )}).`,
+      );
     }
-    await this.storage.putStaging(this.rawChunkKey(jobId, index), bytes);
-    const total = job.bytesTotal ?? 0;
+    await this.writeStaging(this.rawChunkKey(jobId, index), bytes);
+    const total = jobDeclaredBytes(job);
     const expected = this.chunkCountFor(total);
     const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
     await this.prisma.coursePackageJob.update({
       where: { id: jobId },
       data: {
-        bytesReceived: Math.round((total * (index + 1)) / expected),
+        // Int 列封顶：4 GiB+ 的声明体积不会溢出（真实总量在 requestId 里）
+        bytesReceived: Math.min(
+          JOB_BYTE_TOTAL_MAX,
+          Math.round((total * (index + 1)) / expected),
+        ),
         progress,
       },
     });
@@ -373,13 +549,13 @@ export class PackageJobsService {
   /** 全部分块到达后：合并为原始素材包，后台转�?+ 校验�?*/
   async completeRawUpload(jobId: string): Promise<JobView> {
     const job = await this.requireUploadingJob(jobId);
-    const total = job.bytesTotal ?? 0;
+    const total = jobDeclaredBytes(job);
     if (!total) {
       throw new PackageError('INVALID_INPUT', 400, 'Missing upload size.');
     }
     const count = this.chunkCountFor(total);
     for (let i = 0; i < count; i++) {
-      const present = await this.storage.hasStaging(this.rawChunkKey(jobId, i));
+      const present = await this.stagingExists(this.rawChunkKey(jobId, i));
       if (!present) {
         throw new PackageError(
           'RAW_UPLOAD_INCOMPLETE',
@@ -422,6 +598,190 @@ export class PackageJobsService {
    * 本地目录导入：服务端直接读取仓库内素材目录（�?docs/modeling-life），
    * 打包为原始素�?ZIP 后走原始素材导入流程。用于规避浏览器上传超大文件中断�?
    */
+  // ===== 课程包分块上传（> 200 MB 的 .lgcourse.zip）=====
+  // 与原始素材分块共用块大小与 staging 键，但 complete 后不做 Excel 转换，直接校验课程包。
+  // 直传上限（PACKAGE_DIRECT_UPLOAD_BYTES，默认 200 MB）只约束单次 POST；分块通道可到 PACKAGE_MAX_BYTES。
+
+  /** 建分块会话：只落作业与声明体积，包体随后逐块上传。 */
+  async createPackageUploadSession(
+    file: { name: string; bytesTotal: number },
+    actorEmployeeId: string | null,
+    idempotencyKey?: string,
+    targetCourseId?: string,
+  ) {
+    const existing = await this.findJobByIdempotencyKey(idempotencyKey);
+    if (existing)
+      return {
+        jobId: existing.id,
+        chunkSize: PackageJobsService.RAW_CHUNK_BYTES,
+      };
+    if (!Number.isSafeInteger(file.bytesTotal) || file.bytesTotal <= 0) {
+      throw new PackageError(
+        'INVALID_INPUT',
+        400,
+        'bytesTotal must be a positive integer for a chunked upload.',
+      );
+    }
+    const name = (file.name ?? '').trim();
+    if (!/\.zip$/i.test(name)) {
+      throw new PackageError(
+        'PACKAGE_INVALID_ZIP',
+        400,
+        'Course packages must be uploaded as a .zip archive.',
+      );
+    }
+    if (file.bytesTotal > this.config.packageMaxBytes) {
+      throw new PackageError(
+        'VALIDATION_ERROR',
+        400,
+        `Package exceeds the package size limit (${formatBytes(
+          this.config.packageMaxBytes,
+        )}).`,
+      );
+    }
+    const jobId = randomUUID();
+    const encodedTotal = encodeJobByteTotal(file.bytesTotal);
+    await this.prisma.coursePackageJob.create({
+      data: {
+        id: jobId,
+        kind: 'IMPORT',
+        status: 'VALIDATING',
+        stage: 'UPLOADING_PACKAGE',
+        actorEmployeeId,
+        courseId: targetCourseId ?? null,
+        idempotencyKey: idempotencyKey ?? null,
+        sourceFileName: name,
+        bytesTotal: encodedTotal.bytesTotal,
+        requestId: encodedTotal.requestId,
+        bytesReceived: 0,
+        progress: 0,
+      },
+    });
+    return { jobId, chunkSize: PackageJobsService.RAW_CHUNK_BYTES };
+  }
+
+  /** 写入一个课程包分块。 */
+  async appendPackageChunk(
+    jobId: string,
+    index: number,
+    bytes: Buffer,
+  ): Promise<{ jobId: string; progress: number }> {
+    const job = await this.requireUploadingJob(jobId, 'UPLOADING_PACKAGE');
+    if (!Number.isInteger(index) || index < 0) {
+      throw new PackageError('INVALID_INPUT', 400, 'Invalid chunk index.');
+    }
+    if (
+      bytes.length >
+      PackageJobsService.RAW_CHUNK_BYTES +
+        PackageJobsService.RAW_CHUNK_SLACK_BYTES
+    ) {
+      throw new PackageError(
+        'VALIDATION_ERROR',
+        400,
+        `Chunk exceeds the agreed chunk size (${formatBytes(
+          PackageJobsService.RAW_CHUNK_BYTES,
+        )}).`,
+      );
+    }
+    await this.writeStaging(this.rawChunkKey(jobId, index), bytes);
+    const total = jobDeclaredBytes(job);
+    const expected = this.chunkCountFor(total);
+    const progress = Math.min(85, Math.round(((index + 1) / expected) * 85));
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: {
+        bytesReceived: Math.min(
+          JOB_BYTE_TOTAL_MAX,
+          Math.round((total * (index + 1)) / expected),
+        ),
+        progress,
+      },
+    });
+    return { jobId, progress };
+  }
+
+  /** 全部分块到达后：后台按顺序拼包并校验（不把整包读进内存）。 */
+  async completePackageUpload(jobId: string): Promise<JobView> {
+    const job = await this.requireUploadingJob(jobId, 'UPLOADING_PACKAGE');
+    const total = jobDeclaredBytes(job);
+    if (!total) {
+      throw new PackageError('INVALID_INPUT', 400, 'Missing upload size.');
+    }
+    const count = this.chunkCountFor(total);
+    for (let i = 0; i < count; i++) {
+      const present = await this.stagingExists(this.rawChunkKey(jobId, i));
+      if (!present) {
+        throw new PackageError(
+          'RAW_UPLOAD_INCOMPLETE',
+          400,
+          `Missing chunk ${i + 1}/${count}.`,
+        );
+      }
+    }
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: { stage: 'PACKAGE_QUEUED', progress: 88 },
+    });
+    void this.assembleAndValidatePackage(jobId, count, total).catch(
+      () => undefined,
+    );
+    return this.getJob(jobId);
+  }
+
+  private async assembleAndValidatePackage(
+    jobId: string,
+    count: number,
+    total: number,
+  ): Promise<void> {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-pkg-'));
+    const assembled = path.join(tmp, 'package.zip');
+    try {
+      const handle = await fs.open(assembled, 'w');
+      const hash = createHash('sha256');
+      try {
+        for (let i = 0; i < count; i++) {
+          const part = await this.storage.getStaging(
+            this.rawChunkKey(jobId, i),
+          );
+          hash.update(part);
+          await handle.write(part);
+        }
+      } finally {
+        await handle.close();
+      }
+      await this.prisma.coursePackageJob.update({
+        where: { id: jobId },
+        data: {
+          bytesTotal: Math.min(JOB_BYTE_TOTAL_MAX, total),
+          requestId:
+            total > JOB_BYTE_TOTAL_MAX
+              ? `${RAW_BYTES_TOTAL_MARKER}${total}`
+              : null,
+          packageHash: hash.digest('hex'),
+          stage: 'VALIDATING',
+          progress: 40,
+        },
+      });
+      await this.runValidationFromFile(jobId, assembled);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Package assembly failed';
+      await this.prisma.coursePackageJob
+        .update({
+          where: { id: jobId },
+          data: { status: 'FAILED', error: message, progress: 100 },
+        })
+        .catch(() => undefined);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+      for (let i = 0; i < count; i++) {
+        await this.storage
+          .removeStaging(this.rawChunkKey(jobId, i))
+          .catch(() => undefined);
+      }
+    }
+  }
+
   async createLocalRawImportJob(
     options: { dir?: string; courseCode?: string; slug?: string },
     actorEmployeeId: string | null,
@@ -494,44 +854,12 @@ export class PackageJobsService {
     if (!job || !job.storageKey) return;
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-ins-'));
     try {
-      // 调用方手里已有同一份字节时直接复用，避免再�?staging 读回整包（少一份大缓冲�?
+      // 调用方手里已有同一份字节时直接复用，避免再从 staging 读回整包（少一份大缓冲）。
       const zipBytes =
         providedBytes ?? (await this.storage.getStaging(job.storageKey));
       const packagePath = path.join(tmp, 'package.zip');
-      const outDir = path.join(tmp, 'files');
-      await fs.mkdir(outDir, { recursive: true });
       await fs.writeFile(packagePath, zipBytes);
-      // 解压 + 全面校验�?CPU 重活，放�?worker 线程，避免阻塞事件循�?
-      const result = await runImportWorker<{
-        manifest: PackageManifest;
-        report: PackageValidationReport;
-        files: string[];
-      }>('inspect', { packagePath, outDir, config: this.config });
-      await this.prisma.coursePackageJob.update({
-        where: { id: jobId },
-        data: {
-          status:
-            result.report.errors.length > 0 ? 'FAILED' : 'AWAITING_CONFIRM',
-          stage: 'VALIDATED',
-          progress: 100,
-          manifest: result.manifest as unknown as Prisma.InputJsonValue,
-          report: {
-            errors: result.report.errors,
-            warnings: result.report.warnings,
-          } as unknown as Prisma.InputJsonValue,
-          error:
-            result.report.errors.length > 0
-              ? result.report.errors[0].message
-              : null,
-        },
-      });
-      // 暂存解压内容�?staging（媒体二进制 + manifest�?
-      await this.persistExtractedFromDir(
-        jobId,
-        outDir,
-        result.files,
-        result.manifest,
-      );
+      await this.inspectAndPersist(jobId, tmp, packagePath);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Validation failed';
@@ -542,6 +870,70 @@ export class PackageJobsService {
     } finally {
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  /**
+   * 分块拼好的课程包已经落在临时文件上：校验前不再整包读入内存，
+   * 直接复制到本次校验目录（大包只多一次磁盘复制），之后与直传走同一套 inspect+persist。
+   */
+  private async runValidationFromFile(
+    jobId: string,
+    sourcePath: string,
+  ): Promise<void> {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-ins-'));
+    try {
+      const packagePath = path.join(tmp, 'package.zip');
+      await fs.copyFile(sourcePath, packagePath);
+      await this.inspectAndPersist(jobId, tmp, packagePath);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Validation failed';
+      await this.prisma.coursePackageJob.update({
+        where: { id: jobId },
+        data: { status: 'FAILED', error: message, progress: 100 },
+      });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private async inspectAndPersist(
+    jobId: string,
+    tmp: string,
+    packagePath: string,
+  ): Promise<void> {
+    const outDir = path.join(tmp, 'files');
+    await fs.mkdir(outDir, { recursive: true });
+    // 解压 + 全面校验是 CPU 重活，放到 worker 线程，避免阻塞事件循环。
+    const result = await runImportWorker<{
+      manifest: PackageManifest;
+      report: PackageValidationReport;
+      files: string[];
+    }>('inspect', { packagePath, outDir, config: this.config });
+    await this.prisma.coursePackageJob.update({
+      where: { id: jobId },
+      data: {
+        status: result.report.errors.length > 0 ? 'FAILED' : 'AWAITING_CONFIRM',
+        stage: 'VALIDATED',
+        progress: 100,
+        manifest: result.manifest as unknown as Prisma.InputJsonValue,
+        report: {
+          errors: result.report.errors,
+          warnings: result.report.warnings,
+        } as unknown as Prisma.InputJsonValue,
+        error:
+          result.report.errors.length > 0
+            ? result.report.errors[0].message
+            : null,
+      },
+    });
+    // 暂存解压内容到 staging（媒体二进制 + manifest）。
+    await this.persistExtractedFromDir(
+      jobId,
+      outDir,
+      result.files,
+      result.manifest,
+    );
   }
 
   private async persistExtractedFromDir(
@@ -566,7 +958,7 @@ export class PackageJobsService {
   async confirmImport(
     jobId: string,
     body: {
-      onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
+      onConflict?: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
       reassignCodes?: boolean;
       overwriteDraft?: boolean;
     },
@@ -578,6 +970,52 @@ export class PackageJobsService {
     if (!job)
       throw new PackageError('PACKAGE_JOB_NOT_FOUND', 404, 'Job not found.');
 
+    const request = body ?? {};
+    const onConflict = request.onConflict ?? 'ABORT';
+    if (
+      onConflict !== 'ABORT' &&
+      onConflict !== 'CREATE_NEW_COURSE' &&
+      onConflict !== 'NEW_VERSION'
+    ) {
+      throw new PackageError(
+        'VALIDATION_ERROR',
+        400,
+        'onConflict must be ABORT, CREATE_NEW_COURSE or NEW_VERSION.',
+      );
+    }
+
+    // 先条件认领（AWAITING_CONFIRM → IMPORTING），再读 staging manifest：
+    // 双击或两人同时确认时只有一个请求能往下走；另一个明确得到 409 PACKAGE_CONFLICT，
+    // 不会两个都因为"包已不在"而报错，更不会把同一个包导入两次。
+    const claimed = await this.prisma.coursePackageJob.updateMany({
+      where: { id: jobId, status: 'AWAITING_CONFIRM' },
+      data: { status: 'IMPORTING', progress: 0 },
+    });
+    if (claimed.count === 0) {
+      const current = await this.prisma.coursePackageJob.findUnique({
+        where: { id: jobId },
+        select: { status: true },
+      });
+      throw new PackageError(
+        'PACKAGE_CONFLICT',
+        409,
+        `Import job is already being processed (status=${current?.status ?? job.status}).`,
+      );
+    }
+    // 认领后在真正写库前发现"不该继续"（包丢失/冲突/已上线）时，把作业放回
+    // AWAITING_CONFIRM，用户才能换冲突策略、取消或重新上传。
+    let claimReleased = false;
+    const releaseClaim = async (): Promise<void> => {
+      if (claimReleased) return;
+      claimReleased = true;
+      await this.prisma.coursePackageJob
+        .updateMany({
+          where: { id: jobId, status: 'IMPORTING' },
+          data: { status: 'AWAITING_CONFIRM', progress: job.progress ?? 100 },
+        })
+        .catch(() => undefined);
+    };
+
     // 读取已校验的包清单（用于判定 Course ID 冲突）
     let manifest: PackageManifest;
     try {
@@ -586,6 +1024,7 @@ export class PackageJobsService {
       );
       manifest = JSON.parse(manifestBytes.toString('utf8')) as PackageManifest;
     } catch {
+      await releaseClaim();
       throw new PackageError(
         'PACKAGE_MANIFEST_MISSING',
         409,
@@ -605,6 +1044,7 @@ export class PackageJobsService {
       if (existing) {
         if (existing.liveVersionId) {
           // 已上线课程：拒绝，避免影响线上内容（保持作业可取消，不置为 FAILED）
+          await releaseClaim();
           return {
             jobId,
             status: job.status,
@@ -613,54 +1053,82 @@ export class PackageJobsService {
             message: `Course ${existing.code} is already live. The import is refused: only draft courses (never published) can be overwritten, so live content is never affected.`,
           };
         }
-        if (!body.overwriteDraft) {
-          // 草稿课程：询问是否覆盖（不改动作业状态，等待用户确认）
-          return {
-            jobId,
-            status: job.status,
-            requiresOverwrite: true as const,
-            existingCourseId: existing.id,
-            existingCourseCode: existing.code,
-          };
+        // 用户显式确认覆盖 → 替换该草稿课程的沙盒草稿内容（保留原有覆盖行为）
+        if (!request.overwriteDraft) {
+          await releaseClaim();
+          // 文档 §15.5：ABORT 且存在冲突 → 409 PACKAGE_CONFLICT（不再用 200 + requiresOverwrite 模糊表达）
+          if (onConflict === 'ABORT') {
+            throw new PackageError(
+              'PACKAGE_CONFLICT',
+              409,
+              `Course ${existing.code} already exists. The Course ID must not already exist in this Admin, or the import is refused (onConflict=ABORT).`,
+            );
+          }
+          // CREATE_NEW_COURSE / NEW_VERSION 尚未实现：明确 4xx，绝不静默按覆盖处理
+          throw new PackageError(
+            'PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED',
+            422,
+            `onConflict=${onConflict} is not implemented yet; use ABORT (409 on conflict) or overwriteDraft=true to replace the existing draft.`,
+          );
         }
-        // 用户确认覆盖 → 替换该草稿课程的沙盒草稿内容
+        // 覆盖既有草稿
         targetCourseId = existing.id;
+      } else if (onConflict === 'NEW_VERSION') {
+        // NEW_VERSION 只适用于"目标已存在同 code"；没有目标时明确拒绝，不静默新建
+        await releaseClaim();
+        throw new PackageError(
+          'PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED',
+          422,
+          'NEW_VERSION requires an existing course with this Course ID; it is not implemented yet.',
+        );
       }
-    }
-    // 条件认领：只有一次确认能把任务从 AWAITING_CONFIRM 拿到 IMPORTING�?
-    // 双击或两人同时确认不会把同一个包导入两次
-    const claimed = await this.prisma.coursePackageJob.updateMany({
-      where: { id: jobId, status: 'AWAITING_CONFIRM' },
-      data: { status: 'IMPORTING', progress: 0 },
-    });
-    if (claimed.count === 0) {
-      const current = await this.prisma.coursePackageJob.findUnique({
-        where: { id: jobId },
-        select: { status: true },
-      });
-      throw new PackageError(
-        'PACKAGE_JOB_NOT_FOUND',
-        409,
-        `Job not awaiting confirm (status=${current?.status ?? job.status}).`,
-      );
     }
     try {
       const files = await this.loadStagingFiles(jobId, manifest);
-      const { courseId } = targetCourseId
+      const result = targetCourseId
         ? await this.importer.importIntoExistingCourse(
             targetCourseId,
             manifest,
             files,
             actorEmployeeId,
+            job.sourceFileName,
           )
         : await this.importer.importPackage(manifest, files, {
-            onConflict: body.onConflict,
-            reassignCodes: body.reassignCodes ?? false,
+            onConflict,
+            reassignCodes: request.reassignCodes ?? false,
             actorEmployeeId,
+            sourceFileName: job.sourceFileName,
           });
+      const courseId = result.courseId;
+      // 把导入阶段产生的 warning（如视频时长探测失败）并入作业报告
+      const currentReport = (job.report as JobReport | null) ?? {
+        errors: [],
+        warnings: [],
+      };
+      const warningKeys = new Set(
+        (currentReport.warnings ?? []).map(
+          (warning) => `${warning.code}|${warning.path ?? ''}`,
+        ),
+      );
+      const report: JobReport = {
+        errors: currentReport.errors ?? [],
+        warnings: [...(currentReport.warnings ?? [])],
+      };
+      for (const warning of result.warnings ?? []) {
+        const key = `${warning.code}|${warning.path ?? ''}`;
+        if (warningKeys.has(key)) continue;
+        warningKeys.add(key);
+        report.warnings.push(warning);
+      }
       await this.prisma.coursePackageJob.update({
         where: { id: jobId },
-        data: { status: 'READY', progress: 100, courseId, stage: 'COMMITTED' },
+        data: {
+          status: 'READY',
+          progress: 100,
+          courseId,
+          stage: 'COMMITTED',
+          report: report as unknown as Prisma.InputJsonValue,
+        },
       });
       await this.storage.clearStagingPrefix(jobId);
       // 导入完成后在目标环境重新创建 Stripe 产品/价格（失败不阻断导入�?
@@ -808,9 +1276,13 @@ export class PackageJobsService {
     return n;
   }
 
-  async listJobs(actorEmployeeId: string | null) {
+  async listJobs(actorEmployeeId: string | null, kinds?: readonly string[]) {
+    if (kinds && kinds.length === 0) return [];
     return this.prisma.coursePackageJob.findMany({
-      where: actorEmployeeId ? { actorEmployeeId } : {},
+      where: {
+        ...(actorEmployeeId ? { actorEmployeeId } : {}),
+        ...(kinds ? { kind: { in: kinds as never[] } } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
       select: {
@@ -827,13 +1299,20 @@ export class PackageJobsService {
   }
 
   // ===== 导出 =====
-  // 默认导出线上版本；versionLabel='working'/'draft' 导出当前草稿（不产生版本）；
-  // 其他值按版本号导出历史快照�?
+  // PRD §16.2（owner 2026-11-18 裁决以 PRD 为准）：产品导出只允许当前线上版本；
+  // 草稿 / 指定版本选择器在 parseExportSelector 里直接 400，导出前仍走 assertExportable 的 3 步门禁。
   async startExport(
     courseId: string,
     actorEmployeeId: string | null,
-    versionLabel?: string,
+    body?: {
+      version?: unknown;
+      versionId?: unknown;
+      sourceVersion?: unknown;
+    } | null,
   ) {
+    assertExportSelectorBody(body);
+    // 选择器校验：非线上选择器 → 400 VALIDATION_ERROR，且不创建作业（先于任何查询）。
+    parseExportSelector(body);
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
       select: { code: true },
@@ -841,33 +1320,10 @@ export class PackageJobsService {
     if (!course) {
       throw new PackageError('COURSE_NOT_FOUND', 404, 'Course not found.');
     }
-    let sourceVersionId: string | null;
-    let label: string;
-    if (versionLabel === 'working' || versionLabel === 'draft') {
-      // 草稿导出：不走版本快照，�?worker 从当前工作区聚合打包
-      sourceVersionId = null;
-      label = 'draft';
-    } else if (versionLabel) {
-      // 指定了版本号：直接查找对应快�?
-      const v = await this.prisma.courseVersion.findFirst({
-        where: { courseId, versionLabel },
-        select: { id: true, versionLabel: true },
-      });
-      if (!v) {
-        throw new PackageError(
-          'PACKAGE_VERSION_NOT_FOUND',
-          404,
-          `Version ${versionLabel} not found for this course.`,
-        );
-      }
-      sourceVersionId = v.id;
-      label = v.versionLabel;
-    } else {
-      // 默认：导出线上发布版�?
-      const exportable = await this.publishing.assertExportable(courseId);
-      sourceVersionId = exportable.versionId;
-      label = exportable.versionLabel;
-    }
+    // 线上版本必须存在且 3 步完整（未发布/不完整时给出明确 4xx）。
+    const exportable = await this.publishing.assertExportable(courseId);
+    const sourceVersionId = exportable.versionId;
+    const label = exportable.versionLabel;
     const fileLabel = `${course.code}_${label}.zip`;
     const jobId = randomUUID();
     await this.prisma.coursePackageJob.create({

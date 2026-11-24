@@ -1,8 +1,14 @@
+import {
+  COURSE_ACTION_FEATURE,
+  type FeatureKey,
+} from '../modules/rbac/features';
 import type { ActionKind, MenuKey } from '../modules/rbac/permissions';
 
 /**
  * 每个 /api 请求归哪一类、要哪个菜单、算哪种操作。
  * PRD §1.4：View 只读；Edit = View + 修改既有记录；Full = 新建、删除、发布等全部操作。
+ * feature：账号级功能开关（owner 2026-11-20），课程路由带 course.<action>，
+ * operations 带 module.operations；守卫按 features.ts 的生效规则判定。
  */
 export type RouteAccess =
   | { kind: 'public' }
@@ -17,10 +23,25 @@ export type RouteAccess =
   | { kind: 'helpdeskIntegration' }
   /** 只要求登录（会话、改密、语言偏好）。 */
   | { kind: 'signedIn' }
-  /** 员工账号管理：PRD §3.3 仅 Admin。 */
+  /** 其余 /api/admin/**：PRD §3.3 仅 Admin。 */
   | { kind: 'employeeAdmin' }
+  /**
+   * 员工账号管理（/api/admin/employees/**）：归 accounts 能力；
+   * VIEW = 账号列表（仅 Admin 基线），写 = FULL；
+   * 功能权限 GET/PUT 用 PUBLISH（只有 Full/Admin 可读可改，避免泄露他人 grants）。
+   */
+  | { kind: 'accountsAdmin'; action: ActionKind }
   /** 任一菜单在该角色下允许这种操作即可。 */
-  | { kind: 'menu'; menus: MenuKey[]; action: ActionKind };
+  | {
+      kind: 'menu';
+      menus: MenuKey[];
+      action: ActionKind;
+      feature?: FeatureKey;
+      /** 任一功能键生效即放行（用于作业列表这类「导入或导出都该能看」的路径）。 */
+      featuresAny?: FeatureKey[];
+      /** 菜单检查之外还要求 Admin 角色（Notification Configuration，PRD §3/§11.3）。 */
+      adminOnly?: boolean;
+    };
 
 const PUBLIC_AUTH = new Set([
   'email-check',
@@ -88,8 +109,6 @@ function actionFor(method: string, segments: string[]): ActionKind {
  * - 未在此登记的写接口按 CREATE，避免新接口默认放开。
  */
 const COURSE_PUBLISH_SEGMENTS = new Set([
-  'import',
-  'export',
   'confirm',
   'cancel',
   'publish',
@@ -113,20 +132,33 @@ function backofficeCourseAction(
   method: string,
   segments: string[],
 ): ActionKind {
-  if (method === 'GET' || method === 'HEAD') return 'VIEW';
   // segments: ['backoffice', 'courses', ...rest]
   const rest = segments.slice(2);
+  // 整包导入 / 导出（含作业状态与下载）各自独立成开关；
+  // 必须在 GET→VIEW 早退之前判定，否则只读账号可凭 jobId 下载导出包。
+  if (rest[0] === 'import') return 'IMPORT';
+  if (rest[0] === 'export') return 'EXPORT';
+  if (method === 'GET' || method === 'HEAD') return 'VIEW';
   if (rest.length === 0) return 'CREATE';
-  // 整包导入 / 导出（/courses/import/**、/courses/export/**）
-  if (rest[0] === 'import' || rest[0] === 'export') return 'PUBLISH';
-  // 对一门课的发布级动作（/courses/:id/publish、/courses/:id/import ...）
+  // 对一门课的导入 / 导出（/courses/:id/import、/courses/:id/export）
+  if (rest.length === 2 && rest[1] === 'import') return 'IMPORT';
+  if (rest.length === 2 && rest[1] === 'export') return 'EXPORT';
+  // 对一门课的发布级动作（/courses/:id/publish ...）
   if (rest.length === 2 && COURSE_PUBLISH_SEGMENTS.has(rest[1]))
     return 'PUBLISH';
   if (rest.some((seg) => COURSE_COMMERCIAL_SEGMENTS.has(seg))) return 'CREATE';
   if (rest.length === 1 && method === 'PUT') return 'EDIT_EXISTING';
+  if (rest.length === 1 && method === 'DELETE') return 'DELETE';
   if (rest.length >= 2 && COURSE_CONTENT_SEGMENTS.has(rest[1]))
     return 'EDIT_EXISTING';
   return 'CREATE';
+}
+
+/** /api/admin/employees/**：读 = VIEW；写 = FULL；功能权限 GET/PUT 只有 Full 可读写。 */
+function accountsAdminAction(method: string, segments: string[]): ActionKind {
+  // segments: ['admin', 'employees', :id, 'features']
+  if (segments.length >= 4 && segments[3] === 'features') return 'PUBLISH';
+  return method === 'GET' || method === 'HEAD' ? 'VIEW' : 'CREATE';
 }
 
 export function routeAccess(method: string, path: string): RouteAccess {
@@ -152,7 +184,12 @@ export function routeAccess(method: string, path: string): RouteAccess {
     return { kind: 'helpdeskIntegration' };
   if (first === 'session' || first === 'preferences')
     return { kind: 'signedIn' };
-  if (first === 'admin') return { kind: 'employeeAdmin' };
+  if (first === 'admin') {
+    // 员工账号管理归独立能力 accounts；其余 /api/admin/** 仍是 settings/Admin-only
+    return second === 'employees'
+      ? { kind: 'accountsAdmin', action: accountsAdminAction(verb, segments) }
+      : { kind: 'employeeAdmin' };
+  }
   // HelpDesk 工单（Tickets v1 §7）与 Common Questions（Figma addendum §A）：读 = VIEW；
   // 任何写（回复、内部备注、认领、请学员确认、标签、已读、问答增改 / 发布 / 归档 / 排序）
   // 都按 CREATE 处理，只有该菜单为 Full 的角色可用
@@ -183,17 +220,53 @@ export function routeAccess(method: string, path: string): RouteAccess {
   if (first === 'backoffice') {
     // 环境标识是所有后台页面的公共信息
     if (second === 'environment') return { kind: 'signedIn' };
-    // 运营位（/api/backoffice/operations/**）：读 = VIEW；保存/发布 = PUBLISH
+    // Notification Configuration（Settings 子页）：仅 Admin 且 Settings 生效；
+    // 读 = VIEW，写（保存/开关/测试/广播/撤回）= PUBLISH（Settings 必须 FULL）
+    if (second === 'notifications') {
+      return {
+        kind: 'menu',
+        menus: ['settings'],
+        action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+        adminOnly: true,
+      };
+    }
+    // 运营位（/api/backoffice/operations/**）：读 = VIEW；保存/发布 = PUBLISH；
+    // 独立 module.operations 开关（账号级），环境能力另由 operations 能力门管
     if (second === 'operations') {
       return {
         kind: 'menu',
         menus: ['course'],
         action: verb === 'GET' || verb === 'HEAD' ? 'VIEW' : 'PUBLISH',
+        feature: 'module.operations',
       };
     }
-    // 商品课程 v2（/api/backoffice/courses/**）：导入/导出/发布=发布级动作
+    // 只有 courses 前缀归课程菜单；其它未登记的 /api/backoffice/<x> 一律 Admin-only，
+    // 避免以后新增控制器忘记登记时被所有 course VIEW 账号读到（fail-closed）。
+    if (second !== 'courses') return { kind: 'employeeAdmin' };
+    // 作业列表同时暴露导入/导出作业，必须与 IMPORT / EXPORT 开关一致：
+    // 只有 course.view 的账号不能读作业元数据（docs/sandbox/permissions.md §4）。
+    if (
+      second === 'courses' &&
+      segments[2] === 'jobs' &&
+      segments[3] === 'list'
+    ) {
+      return {
+        kind: 'menu',
+        menus: ['course'],
+        action: 'VIEW',
+        featuresAny: ['course.import', 'course.export'],
+      };
+    }
+    // 商品课程 v2（/api/backoffice/courses/**）：导入/导出/发布各自独立成动作开关；
+    // 新建/删除没有账号级开关（只由角色矩阵控制），路由不带 feature。
     const action = backofficeCourseAction(verb, segments);
-    return { kind: 'menu', menus: ['course'], action };
+    const feature = COURSE_ACTION_FEATURE[action];
+    return {
+      kind: 'menu',
+      menus: ['course'],
+      action,
+      ...(feature ? { feature } : {}),
+    };
   }
   const action = actionFor(verb, segments);
   if (first === 'ai') return { kind: 'menu', menus: ['aiTutor'], action };

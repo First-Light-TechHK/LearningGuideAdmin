@@ -2,12 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Alert, App, Button, Dropdown, Empty, Input, Modal, Panel, Tag } from '../ui'
 import type { MenuProps } from '../ui'
 import { EditOutlined, EyeOutlined } from '@ant-design/icons'
-import MDEditor from '@uiw/react-md-editor'
-import remarkMath from 'remark-math'
-import remarkGfm from 'remark-gfm'
-import rehypeKatex from 'rehype-katex'
-import rehypeRaw from 'rehype-raw'
-import 'katex/dist/katex.min.css'
+import { KnowledgeMarkdown } from './KnowledgeMarkdown'
 import type { EditorView } from '@codemirror/view'
 import { EditorSelection } from '@codemirror/state'
 import { clearLocalDraft, localDraftKey, registerDraftFlusher, useKnowledgeStore } from '../../stores/knowledgeStore'
@@ -17,7 +12,7 @@ import { insertSnippet, toggleLinePrefix } from './markdownCommands'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
-import { knowledgeApi } from '../../api/knowledge'
+import { IMAGE_UPLOAD_ACCEPT, IMAGE_UPLOAD_FORMATS, IMAGE_UPLOAD_MAX_BYTES, IMAGE_UPLOAD_MAX_MIB, IMAGE_UPLOAD_UNIT, knowledgeApi } from '../../api/knowledge'
 import { formatDateTime } from '../../backoffice/lib/i18n/format'
 import { extractWikiSources } from './wikiSources'
 
@@ -32,34 +27,6 @@ import { extractWikiSources } from './wikiSources'
  *  - 跨块选中、撤销/重做、查找都是 CM6 免费能力。
  * 标题栏右侧提供「预览」按钮，用与 Portal 相同的渲染器（remark-math + rehype-katex）展示效果。
  */
-
-/** 与 AI Tutor / Portal 一致的 Markdown+KaTeX 渲染插件 */
-function sanitizeHtml() {
-  const tags = new Set(['div', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'b', 'i', 'img'])
-  const attrs = new Set(['className', 'colSpan', 'rowSpan', 'alt', 'src'])
-  return (tree: { children?: unknown[] }) => {
-    const clean = (node: unknown): unknown[] => {
-      if (!node || typeof node !== 'object') return []
-      const item = node as { type?: string; tagName?: string; properties?: Record<string, unknown>; children?: unknown[] }
-      if (item.type === 'element') {
-        if (!tags.has(item.tagName ?? '')) return []
-        item.properties = Object.fromEntries(Object.entries(item.properties ?? {}).filter(([key]) => attrs.has(key)))
-        if (item.tagName === 'img') {
-          const src = String(item.properties?.src ?? '')
-          if (!/^(https?:\/\/|\/api\/files\/images\/)/i.test(src)) return []
-        }
-      }
-      if (item.children) item.children = item.children.flatMap(clean)
-      return [item]
-    }
-    if (tree.children) tree.children = tree.children.flatMap(clean)
-  }
-}
-
-const katexPlugins = {
-  remarkPlugins: [remarkGfm, remarkMath],
-  rehypePlugins: [rehypeRaw, sanitizeHtml, rehypeKatex],
-}
 
 /** 浏览器刷新/关闭页面时的本地草稿兜底 key（与 store 共用，保持单一 key 规则） */
 interface LocalDraft {
@@ -116,6 +83,10 @@ export function PageEditor() {
   const [insertTableRows, setInsertTableRows] = useState(3)
   const [insertTableCols, setInsertTableCols] = useState(3)
   const titleBeforeEdit = useRef('')
+  const [imageDialog, setImageDialog] = useState<{ source: 'url' | 'upload'; target: EditorView } | null>(null)
+  const [imageUrl, setImageUrl] = useState('')
+  const imageUploadRef = useRef(false)
+  const [imageUploading, setImageUploading] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
 
   const viewRef = useRef<EditorView | null>(null)
@@ -340,7 +311,10 @@ export function PageEditor() {
     { key: 'table',     icon: sym('⊞'), label: text('editor.insert.table') },
     { key: 'mathBlock', icon: sym('∑'), label: text('editor.insert.mathBlock') },
     { key: 'inlineMath',icon: sym('ƒ'), label: text('editor.insert.inlineMath') },
-    { key: 'image',     icon: sym('🖼'), label: text('editor.insert.image') },
+    { key: 'image', icon: sym('🖼'), label: text('editor.insert.image'), children: [
+      { key: 'imageUrl', label: text('editor.insert.imageUrl') },
+      { key: 'imageUpload', label: text('editor.insert.imageUpload') },
+    ] },
     { key: 'code',      icon: sym('⌨'), label: text('editor.insert.code') },
     { key: 'quote',     icon: sym('❝'), label: text('editor.insert.quote') },
     { key: 'divider',   icon: sym('―'), label: text('editor.insert.divider') },
@@ -356,6 +330,15 @@ export function PageEditor() {
     return [header, sep, ...body].join('\n')
   }
 
+  const insertImage = (target: EditorView, url: string, alt: string) => {
+    insertSnippet(target, `![${alt}](${url})`, { block: true, continueOnNextLine: true })
+  }
+
+  const parsedImageUrl = URL.canParse(imageUrl.trim()) ? new URL(imageUrl.trim()) : null
+  const validImageUrl = parsedImageUrl &&
+    ['https:', 'http:'].includes(parsedImageUrl.protocol) &&
+    !parsedImageUrl.username && !parsedImageUrl.password
+
   const onInsertMenuClick: MenuProps['onClick'] = ({ key }) => {
     const target = viewRef.current
     if (!target) return
@@ -369,8 +352,9 @@ export function PageEditor() {
     } else if (key === 'inlineMath') {
       // 行内片段：不补空行，插入 `$x$` 并选中 x
       insertSnippet(target, '$x$', { select: { from: 1, to: 2 } })
-    } else if (key === 'image') {
-      imageInputRef.current?.click()
+    } else if (key === 'imageUrl' || key === 'imageUpload') {
+      setImageUrl('')
+      setImageDialog({ source: key === 'imageUrl' ? 'url' : 'upload', target })
     } else if (key === 'code') {
       insertWithSelection(`\`\`\`\n${text('editor.snippet.code')}\n\`\`\``, text('editor.snippet.code'))
     } else if (key === 'quote') {
@@ -510,11 +494,7 @@ export function PageEditor() {
             padding: `${tokens.spacing.md}px ${tokens.spacing.lg}px`,
           }}
         >
-          <MDEditor.Markdown
-            source={draft.contentMd}
-            {...katexPlugins}
-            style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
-          />
+          <KnowledgeMarkdown source={draft.contentMd} />
         </div>
       ) : (
         <div style={{ ...borderStyle, flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -529,7 +509,7 @@ export function PageEditor() {
             <input
               ref={imageInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp"
+              accept={IMAGE_UPLOAD_ACCEPT}
               hidden
               onChange={async (event) => {
                 const file = event.currentTarget.files?.[0]
@@ -537,19 +517,32 @@ export function PageEditor() {
                 const courseId = useKnowledgeStore.getState().selectedCourseId
                 const target = viewRef.current
                 const pageId = useKnowledgeStore.getState().draft?.pageId
-                if (!file || !courseId || !target || !pageId) return
+                if (!file || !courseId || !target || !pageId || imageUploadRef.current || imageDialog?.target !== target) return
+                if (file.size > IMAGE_UPLOAD_MAX_BYTES) {
+                  modal.error({
+                    title: text('editor.insert.imageUpload'),
+                    content: text('editor.insert.imageTooLarge', { size: (file.size / 1024 ** 2).toFixed(6), max: IMAGE_UPLOAD_MAX_MIB, unit: IMAGE_UPLOAD_UNIT }),
+                  })
+                  return
+                }
+                imageUploadRef.current = true
+                setImageUploading(true)
                 try {
                   const { url } = await knowledgeApi.uploadImage(file, courseId)
                   if (viewRef.current !== target || useKnowledgeStore.getState().draft?.pageId !== pageId) return
-                  const alt = file.name.replace(/\.[^.]+$/, '').replace(/[\\[\]]/g, '\\$&')
-                  insertSnippet(target, `![${alt}](${url})`, { block: true })
-                } catch {
-                  modal.error({ title: text('editor.insert.image'), content: text('editor.saveFailed') })
+                  const alt = file.name.replace(/\.[^.]+$/, '').replace(/[\r\n]+/g, ' ').replace(/[\\[\]]/g, '\\$&')
+                  setImageDialog(null)
+                  insertImage(target, url, alt)
+                } catch (error) {
+                  modal.error({ title: text('editor.insert.imageUploadFailed'), content: (error as Error).message })
+                } finally {
+                  imageUploadRef.current = false
+                  setImageUploading(false)
                 }
               }}
             />
             <Dropdown
-              menu={{ items: insertMenuItems, onClick: onInsertMenuClick }}
+              menu={{ items: insertMenuItems, onClick: onInsertMenuClick, triggerSubMenuAction: 'click' }}
               trigger={['contextMenu']}
               disabled={!access.canEdit}
             >
@@ -581,6 +574,34 @@ export function PageEditor() {
           </div>
         </div>
       )}
+      <Modal
+        open={!!imageDialog && imageDialog.target === view && !preview}
+        title={text(imageDialog?.source === 'url' ? 'editor.insert.imageUrl' : 'editor.insert.imageUpload')}
+        okText={text(imageDialog?.source === 'url' ? 'common.create' : 'editor.insert.imageChoose')}
+        cancelText={text('common.cancel')}
+        confirmLoading={imageUploading}
+        focusTriggerAfterClose={false}
+        cancelButtonProps={{ disabled: imageUploading }}
+        okButtonProps={{ disabled: imageDialog?.source === 'url' && !validImageUrl }}
+        onCancel={() => { if (!imageUploadRef.current) setImageDialog(null) }}
+        onOk={() => {
+          if (!imageDialog || imageDialog.target !== viewRef.current || imageUploadRef.current) return
+          if (imageDialog.source === 'upload') {
+            imageInputRef.current?.click()
+          } else if (validImageUrl) {
+            setImageDialog(null)
+            const url = parsedImageUrl.href.replace(/[()]/g, (char) => char === '(' ? '%28' : '%29')
+            insertImage(imageDialog.target, url, text('editor.snippet.toolbarImageAlt'))
+          }
+        }}
+      >
+        {imageDialog?.source === 'url' ? (
+          <Input aria-label={text('editor.insert.imageUrl')} value={imageUrl}
+            placeholder="https://" onChange={(event) => setImageUrl(event.target.value)} />
+        ) : (
+          <p>{text('editor.insert.imageUploadHint', { max: IMAGE_UPLOAD_MAX_MIB, unit: IMAGE_UPLOAD_UNIT, formats: IMAGE_UPLOAD_FORMATS })}</p>
+        )}
+      </Modal>
       <details style={{ flexShrink: 0, marginTop: tokens.spacing.sm }}>
         <summary>{text('editor.sourceReferences', { count: sourceRefs.length })}</summary>
         <div style={{ padding: tokens.spacing.sm }}>

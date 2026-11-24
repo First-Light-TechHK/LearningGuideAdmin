@@ -281,12 +281,12 @@ function buildInlineDecorations(
           if (!singleLine || line.text.trim() === slice.trim()) return false
           if (lineOccupied(occupied, line.number)) return false
           if (selectionTouches(state, node.from, node.to)) return false
-          const parsed = /^!\[([^\]]*)\]\(([\s\S]*)\)$/.exec(slice.trim())
+          const parsed = /^!\[((?:\\.|[^\\\]])*)\]\(([\s\S]*)\)$/.exec(slice.trim())
           if (!parsed) return false
           const src = parseDestination(parsed[2])
           if (!src) return false
           out.push(
-            Decoration.replace({ widget: new ImageWidget(src, parsed[1], false, text, locale) }).range(
+            Decoration.replace({ widget: new ImageWidget(src, parsed[1].replace(/\\([\\[\]])/g, '$1'), false, text, locale) }).range(
               node.from,
               node.to,
             ),

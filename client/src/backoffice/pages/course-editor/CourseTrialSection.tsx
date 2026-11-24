@@ -4,7 +4,7 @@ import type { CourseDetail, TrialSettings, TrialRow } from '../../contracts/cour
 import { boRequest } from '../../lib/api';
 import { useReportFailure } from './feedback';
 import { Chip, TimeInput } from './shared';
-import { L, buttonStyle, card, languageLabel, primaryBtn, trialStatusLabel } from './shared-utils';
+import { L, buttonStyle, card, languageLabel, primaryBtn, trialStatusLabel, useNarrowLayout } from './shared-utils';
 
 const PLAN_TERM_OPTIONS = [1, 3, 6, 12];
 
@@ -226,12 +226,24 @@ export function CourseTrialSection({
     }
   }
 
+  const narrow = useNarrowLayout();
   return (
-    <div>
-      <div style={card}>
+    <div
+      data-testid="trial-root"
+      style={{
+        height: '100%',
+        minHeight: 0,
+        display: 'grid',
+        gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : 'minmax(0, 3fr) minmax(0, 2fr)',
+        gridTemplateRows: narrow ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)',
+        gap: 16,
+      }}
+    >
+      <div data-testid="trial-list" data-panel="trial-list" style={{ overflow: 'auto', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ ...card, marginTop: 0, display: 'flex', flexDirection: 'column', ...(narrow ? { flex: '0 0 auto' } : { flex: '1 1 auto', minHeight: 0 }) }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '试看', 'Trial')}</h2>
+            <h2 className="course-ui-blockTitle">{L(locale, '试看', 'Trial')}</h2>
             <p style={{ margin: '6px 0 0', fontSize: 12, opacity: 0.65 }}>{L(locale, '试看直接引用正式学习内容；保存后立即生效，不生成版本。', 'Trial references the real learning content; saving is effective immediately and creates no version.')}</p>
           </div>
           <label style={{ fontSize: 14 }}>
@@ -240,7 +252,7 @@ export function CourseTrialSection({
         </div>
 
         {enabled && (
-          <div style={{ marginTop: 12 }}>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', minHeight: 0, flex: '1 1 auto' }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
               <span style={{ fontSize: 12, opacity: 0.65 }}>{L(locale, '截止点语言', 'Cut-off language')}:</span>
               {languages.map((language) => (
@@ -262,7 +274,7 @@ export function CourseTrialSection({
                 </button>
               ))}
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <div data-testid="trial-table" data-panel="trial-table" style={narrow ? undefined : { overflow: 'auto', minHeight: 0, flex: '1 1 auto' }}>
             <table className="table" style={{ width: '100%' }}>
               <thead>
                 <tr>
@@ -326,13 +338,15 @@ export function CourseTrialSection({
           )}
         </div>}
       </div>
+      </div>
 
-      <div style={card}>
+      <div data-testid="trial-pricing" data-panel="trial-pricing" style={{ overflow: 'auto', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ ...card, marginTop: 0, display: 'flex', flexDirection: 'column', ...(narrow ? { flex: '0 0 auto' } : { flex: '1 1 auto', minHeight: 0 }) }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '价格（订阅 · USD）', 'Pricing (subscription · USD)')}</h2>
+          <h2 className="course-ui-blockTitle">{L(locale, '价格（订阅 · USD）', 'Pricing (subscription · USD)')}</h2>
           {canManage && <button type="button" style={buttonStyle} disabled={busy} onClick={addPlan}>{L(locale, '+ 添加套餐', '+ Add plan')}</button>}
         </div>
-        <div style={{ overflowX: 'auto', marginTop: 12 }}>
+        <div data-testid="trial-plans" data-panel="trial-plans" style={narrow ? { marginTop: 12 } : { overflow: 'auto', minHeight: 0, flex: '1 1 auto', marginTop: 12 }}>
           <table className="table" style={{ width: '100%' }}>
             <thead>
               <tr>
@@ -385,6 +399,7 @@ export function CourseTrialSection({
             <span style={{ fontSize: 12, color: '#b42318' }}>{L(locale, '有套餐的计费周期相同，Lookup key 会重复，请先调整。', 'Some plans share a billing period, so their lookup keys clash — adjust them first.')}</span>
           )}
         </div>}
+      </div>
       </div>
     </div>
   );

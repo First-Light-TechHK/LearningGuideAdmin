@@ -84,7 +84,11 @@ export function validateCourseContent(
   const blocking: PackageValidationIssue[] = [];
   const soft: PackageValidationIssue[] = [];
   for (const issue of errors) {
-    if (isStructural(issue.code)) blocking.push(issue);
+    if (
+      isStructural(issue.code) ||
+      (forAction === 'import' && IMPORT_BLOCKING_CODES.has(issue.code))
+    )
+      blocking.push(issue);
     else if (forAction === 'approve')
       blocking.push({ ...issue, level: 'error' });
     else soft.push({ ...issue, level: 'warning' });
@@ -97,6 +101,9 @@ export function validateCourseContent(
     incomplete: allWarnings.length > 0 || blocking.length > 0,
   };
 }
+
+/** Design §17.4：这些错误在 Import 阶段就阻断（而不是等到发布）。 */
+const IMPORT_BLOCKING_CODES = new Set(['LEARNING_POINT_TIME_BEYOND_VIDEO']);
 
 function isStructural(code: string): boolean {
   return (
@@ -173,6 +180,7 @@ function validateLesson(
           `lessons.${lesson.code}.localized.${lang}.video`,
         );
       } else {
+        const duration = loc.video.durationSeconds;
         const seen = new Set<string>();
         for (const lp of loc.video.learningPoints ?? []) {
           if (seen.has(lp.code))
@@ -186,6 +194,17 @@ function validateLesson(
             out.err(
               'LEARNING_POINT_INVALID_TIME',
               `learning point ${lp.code} invalid time`,
+              `lessons.${lesson.code}.localized.${lang}.video`,
+            );
+          } else if (
+            typeof duration === 'number' &&
+            duration >= 0 &&
+            lp.timeSeconds > duration
+          ) {
+            // Design §17.4 #14：学习点时间超过视频时长在 Import 阶段就是 ERROR。
+            out.err(
+              'LEARNING_POINT_TIME_BEYOND_VIDEO',
+              `learning point ${lp.code} (${lp.timeSeconds}s) is beyond video length (${duration}s)`,
               `lessons.${lesson.code}.localized.${lang}.video`,
             );
           }

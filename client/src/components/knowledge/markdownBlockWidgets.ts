@@ -1,7 +1,7 @@
 import { syntaxTree } from '@codemirror/language'
 import { EditorState, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
-import { BlockMathWidget, ImageWidget, TableWidget, parseDestination } from './markdownWidgets'
+import { BlockMathWidget, HtmlTableWidget, ImageWidget, TableWidget, parseDestination } from './markdownWidgets'
 import type { TextFn } from './markdownWidgets'
 
 /**
@@ -22,7 +22,7 @@ export const setEditingTable = StateEffect.define<{ from: number; to: number } |
 interface BlockRange {
   from: number
   to: number
-  kind: 'math' | 'table' | 'image'
+  kind: 'math' | 'table' | 'htmlTable' | 'image'
   payload: string
   fromLine: number
   toLine: number
@@ -155,6 +155,22 @@ function scanTables(state: EditorState): BlockRange[] {
   return blocks
 }
 
+function scanHtmlTables(state: EditorState): BlockRange[] {
+  const blocks: BlockRange[] = []
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name !== 'HTMLBlock') return undefined
+      const html = state.sliceDoc(node.from, node.to)
+      if (!/^\s*<(?:table\b|div\b[^>]*class=["']joplin-table-wrapper["'])/i.test(html) || !/<\/table>/i.test(html)) return false
+      const first = state.doc.lineAt(node.from)
+      const last = state.doc.lineAt(Math.max(node.from, node.to - 1))
+      blocks.push({ from: first.from, to: last.to, kind: 'htmlTable', payload: html, fromLine: first.number, toLine: last.number })
+      return false
+    },
+  })
+  return blocks
+}
+
 function scanBlockImages(state: EditorState): BlockRange[] {
   const doc = state.doc
   const blocks: BlockRange[] = []
@@ -181,7 +197,7 @@ function scanBlockImages(state: EditorState): BlockRange[] {
 
 function collectBlocks(state: EditorState): BlockRange[] {
   const codeRanges = codeRangesOf(state)
-  const all = [...scanBlockMath(state, codeRanges), ...scanTables(state), ...scanBlockImages(state)]
+  const all = [...scanBlockMath(state, codeRanges), ...scanTables(state), ...scanHtmlTables(state), ...scanBlockImages(state)]
   const sorted = [...all].sort((a, b) => a.from - b.from)
   const kept: BlockRange[] = []
   for (const block of sorted) {
@@ -207,6 +223,12 @@ function decorateActive(
   editing: { from: number; to: number } | null,
 ): BlockRange[] {
   return blocks.filter((block) => {
+    // 复杂 HTML 表格只在明确进入源码内部时展开，初始光标停在文档开头仍显示表格。
+    if (block.kind === 'htmlTable') {
+      return !state.selection.ranges.some((range) => range.empty
+        ? range.head > block.from && range.head < block.to
+        : range.from < block.to && range.to > block.from)
+    }
     // 正在编辑的表格：永远渲染（不回退源码）
     if (editing && block.from === editing.from && block.to === editing.to) return true
     return !touchesSelection(state, block.from, block.to)
@@ -250,6 +272,9 @@ function decorate(
         ),
       )
       rendered.push(block)
+    } else if (block.kind === 'htmlTable') {
+      ranges.push(Decoration.replace({ widget: new HtmlTableWidget(block.payload, block.from, readOnly, deps.getView, text, locale), block: true }).range(block.from, block.to))
+      rendered.push(block)
     } else if (block.kind === 'table') {
       const isEditing = !!editing && editing.from === block.from && editing.to === block.to
       ranges.push(
@@ -271,12 +296,12 @@ function decorate(
       )
       rendered.push(block)
     } else {
-      const parsed = /^!\[([^\]]*)\]\(([\s\S]*)\)$/.exec(block.payload.trim())
+      const parsed = /^!\[((?:\\.|[^\\\]])*)\]\(([\s\S]*)\)$/.exec(block.payload.trim())
       if (!parsed) continue
       const src = parseDestination(parsed[2])
       if (!src) continue
       ranges.push(
-        Decoration.replace({ widget: new ImageWidget(src, parsed[1], true, text, locale), block: true }).range(
+        Decoration.replace({ widget: new ImageWidget(src, parsed[1].replace(/\\([\\[\]])/g, '$1'), true, text, locale), block: true }).range(
           block.from,
           block.to,
         ),

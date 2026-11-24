@@ -33,6 +33,10 @@ import { BackofficeHelpdeskAgentRunsController } from '../nest/helpdesk-agent-ru
 jest.mock('../modules/user-authentication/services/session', () => ({
   resolveSession: jest.fn(),
 }));
+// 守卫会加载账号级功能开关；这些用例只看角色矩阵，不需要数据库。
+jest.mock('../repositories/featureGrantRepository', () => ({
+  mapForEmployee: jest.fn(() => Promise.resolve(new Map())),
+}));
 
 const RUN = '0192eeee-0000-7000-8000-0000000000a1';
 const ROOT = '0192eeee-0000-7000-8000-0000000000a0';
@@ -318,6 +322,8 @@ describe('BackofficeModule wiring (agent run traces)', () => {
     const source = createTraceSource(createMemoryAgentEventLog());
     const moduleRef = await Test.createTestingModule({
       imports: [
+        // 控制器（会话/员工账号）现在读 ConfigService 的能力集
+        ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         BackofficeModule.register({
           helpdeskTrace: { provide: HELPDESK_TRACE_SOURCE, useValue: source },
         }),

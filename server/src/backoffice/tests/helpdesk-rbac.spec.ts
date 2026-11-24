@@ -40,6 +40,10 @@ import {
 jest.mock('../modules/user-authentication/services/session', () => ({
   resolveSession: jest.fn(),
 }));
+// 守卫会加载账号级功能开关；这些用例只看角色矩阵，不需要数据库。
+jest.mock('../repositories/featureGrantRepository', () => ({
+  mapForEmployee: jest.fn(() => Promise.resolve(new Map())),
+}));
 
 const TICKET_ID = '01920000-0000-7000-8000-000000000001';
 const TEST_TOKEN = 'test-helpdesk-token-local-only';
@@ -468,6 +472,8 @@ describe('BackofficeModule wiring', () => {
   it('registers the HelpDesk controller with a real service (no DB needed to compile)', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
+        // 控制器（会话/员工账号）现在读 ConfigService 的能力集
+        ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         BackofficeModule.register({
           helpdeskTrace: {
             provide: HELPDESK_TRACE_SOURCE,
@@ -489,6 +495,8 @@ describe('BackofficeModule wiring (FAQs, Tickets v2 §2 / §3)', () => {
   it('registers the FAQ and Portal FAQ integration controllers', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
+        // 控制器（会话/员工账号）现在读 ConfigService 的能力集
+        ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         BackofficeModule.register({
           helpdeskTrace: {
             provide: HELPDESK_TRACE_SOURCE,

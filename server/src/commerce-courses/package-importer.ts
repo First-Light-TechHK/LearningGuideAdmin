@@ -2,7 +2,11 @@ import { Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import type { PackageManifest, PackageExhibit } from './contracts/manifest';
+import type {
+  PackageManifest,
+  PackageExhibit,
+  PackageValidationIssue,
+} from './contracts/manifest';
 import { CourseStorageService } from './storage.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 import {
@@ -11,6 +15,7 @@ import {
   lessonNumber,
 } from './code-allocator';
 import { validateMediaFile } from './media-validate';
+import { mp4DurationSeconds } from './media-duration';
 import { applyVersionSnapshot, type VersionSnapshot } from './version-snapshot';
 import { HISTORY_ACTIONS } from './publishing.service';
 
@@ -18,6 +23,8 @@ export interface ImportOptions {
   onConflict: 'ABORT' | 'CREATE_NEW_COURSE' | 'NEW_VERSION';
   reassignCodes: boolean;
   actorEmployeeId: string | null;
+  /** 上传的原始文件名（PRD §16.3 History 显示）。 */
+  sourceFileName?: string | null;
 }
 
 export class ImportError extends Error {
@@ -30,6 +37,19 @@ export class ImportError extends Error {
   }
 }
 
+/**
+ * 学习点身份 key：`lesson|language|source|code`（与 schema 的 @@unique 顺序一致）。
+ * 同一编号在 VIDEO / TEXT 下是两行，查找时必须带上 source，不能只用 lesson|code。
+ */
+function learningPointKey(
+  lessonCode: string,
+  language: string,
+  source: 'VIDEO' | 'TEXT',
+  code: string,
+): string {
+  return `${lessonCode}|${language}|${source}|${code}`;
+}
+
 interface ImportedMediaMeta {
   assetId: string;
   kind: string;
@@ -38,6 +58,44 @@ interface ImportedMediaMeta {
   mimeType: string;
   size: number;
   originalName: string;
+  /** 视频文件从容器 mvhd 探测到的时长（秒）；非视频或探测失败为 null。 */
+  durationSeconds?: number | null;
+}
+
+/**
+ * 视频时长：包内声明优先；省略（或非法）时用真实文件的 mvhd 探测。
+ * 探测只支持 mp4/mov（ISO BMFF），其他容器返回 null（不猜测）。
+ */
+export function probeVideoDurationSeconds(
+  extension: string,
+  bytes: Buffer,
+): number | null {
+  if (extension !== 'mp4' && extension !== 'mov') return null;
+  const seconds = mp4DurationSeconds(bytes);
+  if (seconds === null || !Number.isFinite(seconds)) return null;
+  const rounded = Math.round(seconds);
+  return rounded > 0 ? rounded : null;
+}
+
+/** 包内 durationSeconds 合法（正数）就用它；否则用探测值（没有就是 null）。 */
+function effectiveVideoDuration(
+  declared: number | undefined,
+  probed: number | null | undefined,
+): number | null {
+  if (
+    typeof declared === 'number' &&
+    Number.isFinite(declared) &&
+    declared > 0
+  ) {
+    return Math.round(declared);
+  }
+  return probed ?? null;
+}
+
+export interface PackageImportResult {
+  courseId: string;
+  /** 导入报告里追加的 warning（例如视频时长探测失败）。 */
+  warnings: PackageValidationIssue[];
 }
 
 /**
@@ -56,7 +114,7 @@ export class PackageImporter {
     manifest: PackageManifest,
     files: Map<string, Buffer>,
     options: ImportOptions,
-  ): Promise<{ courseId: string }> {
+  ): Promise<PackageImportResult> {
     const { course } = manifest;
 
     // 冲突检测：Course ID（课程身份）与 slug（URL 标识）要分开判断。
@@ -71,24 +129,20 @@ export class PackageImporter {
     });
     if (existingByCode) {
       // PRD §9.2 / §16.3：Course ID 已存在时必须拒绝导入；已有课程请使用 Import package。
-      if (
-        options.onConflict === 'ABORT' ||
-        options.onConflict === 'CREATE_NEW_COURSE'
-      ) {
+      // 正常路径由 package-jobs.service 先做冲突判定；这里只处理「确认后、写库前」的竞态。
+      if (options.onConflict === 'ABORT') {
         throw new ImportError(
           'PACKAGE_CONFLICT',
           409,
           `Course ${existingByCode.code} already exists. The Course ID must not already exist in this Admin, or the import is refused.`,
         );
       }
-      // NEW_VERSION 暂未实现，按冲突处理
-      if (options.onConflict === 'NEW_VERSION') {
-        throw new ImportError(
-          'PACKAGE_CONFLICT',
-          409,
-          'NEW_VERSION import not implemented yet.',
-        );
-      }
+      // CREATE_NEW_COURSE / NEW_VERSION 均未实现：按契约返回 422，而不是 409 PACKAGE_CONFLICT。
+      throw new ImportError(
+        'PACKAGE_CONFLICT_STRATEGY_UNSUPPORTED',
+        422,
+        `onConflict=${options.onConflict} is not implemented yet.`,
+      );
     }
     const slugOwner = await this.prisma.commerceCourse.findFirst({
       where: { slug: targetSlug },
@@ -104,9 +158,15 @@ export class PackageImporter {
     const courseId = randomUUID();
     const mediaKeyMap = new Map<string, ImportedMediaMeta>();
 
-    // 1) 媒体转存
+    // 1) 媒体转存（视频顺手按 mvhd 探测时长；探测失败只产生 warning）
+    let warnings: PackageValidationIssue[];
     try {
-      await this.transferMedia(courseId, manifest, files, mediaKeyMap);
+      warnings = await this.transferMedia(
+        courseId,
+        manifest,
+        files,
+        mediaKeyMap,
+      );
     } catch (error) {
       await this.rollbackMedia(courseId, mediaKeyMap);
       throw error;
@@ -128,7 +188,7 @@ export class PackageImporter {
       throw error;
     }
 
-    return { courseId };
+    return { courseId, warnings };
   }
 
   /**
@@ -140,7 +200,8 @@ export class PackageImporter {
     manifest: PackageManifest,
     files: Map<string, Buffer>,
     actorEmployeeId: string | null,
-  ): Promise<{ courseId: string }> {
+    sourceFileName?: string | null,
+  ): Promise<PackageImportResult> {
     const existing = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
       select: { id: true, code: true },
@@ -157,8 +218,14 @@ export class PackageImporter {
 
     const categoryId = await this.resolveCategory(manifest.course.category);
     const mediaKeyMap = new Map<string, ImportedMediaMeta>();
+    let warnings: PackageValidationIssue[];
     try {
-      await this.transferMedia(courseId, manifest, files, mediaKeyMap);
+      warnings = await this.transferMedia(
+        courseId,
+        manifest,
+        files,
+        mediaKeyMap,
+      );
       // 媒体资产必须先落库，applyVersionSnapshot 才能写入视频/展品外键。
       await this.createMediaRows(courseId, mediaKeyMap);
     } catch (error) {
@@ -200,23 +267,56 @@ export class PackageImporter {
         const lessonCodeById = new Map(
           actualLessons.map((lesson) => [lesson.id, lesson.code]),
         );
+        // 学习点身份 = (lesson, language, source, code)：同一编号在 VIDEO / TEXT 下各有一行，
+        // 试看的文本截止点只能落到 TEXT 行（包规范 §4.2、§14），不能落到同编号的 VIDEO 行。
         const learningPoints = await tx.learningPoint.findMany({
           where: { lesson: { courseId } },
-          select: { id: true, lessonId: true, code: true },
+          select: {
+            id: true,
+            lessonId: true,
+            language: true,
+            code: true,
+            source: true,
+          },
         });
-        const lpIdByKey = new Map(
-          learningPoints.map((lp) => [
-            `${lessonCodeById.get(lp.lessonId) ?? ''}|${lp.code}`,
+        const lpIdByKey = new Map<string, string>();
+        const textPoints: Array<{
+          lessonCode: string;
+          code: string;
+          id: string;
+        }> = [];
+        const textPointIds = new Set<string>();
+        for (const lp of learningPoints) {
+          const lessonCode = lessonCodeById.get(lp.lessonId);
+          if (!lessonCode) continue;
+          lpIdByKey.set(
+            learningPointKey(lessonCode, lp.language, lp.source, lp.code),
             lp.id,
-          ]),
-        );
-        const lpIds = new Set(learningPoints.map((lp) => lp.id));
+          );
+          if (lp.source === 'TEXT') {
+            textPoints.push({ lessonCode, code: lp.code, id: lp.id });
+            textPointIds.add(lp.id);
+          }
+        }
+        // 包里的 trial 行没有语言字段：优先默认内容语言，否则接受该课时唯一一个
+        // 同编号的 TEXT 行；两种都不成立时返回 null，绝不回退到 VIDEO 行。
         const resolveCutoff = (lessonCode: string, ref?: string | null) => {
           if (!ref) return null;
-          return (
-            lpIdByKey.get(`${lessonCode}|${ref}`) ??
-            (lpIds.has(ref) ? ref : null)
+          const preferred = lpIdByKey.get(
+            learningPointKey(
+              lessonCode,
+              manifest.course.defaultContentLanguage,
+              'TEXT',
+              ref,
+            ),
           );
+          if (preferred) return preferred;
+          const matches = textPoints.filter(
+            (point) => point.lessonCode === lessonCode && point.code === ref,
+          );
+          if (matches.length === 1) return matches[0].id;
+          if (matches.length > 1) return null;
+          return textPointIds.has(ref) ? ref : null;
         };
 
         await tx.trialSetting.deleteMany({ where: { courseId } });
@@ -224,16 +324,23 @@ export class PackageImporter {
           for (const row of manifest.course.trial.lessons ?? []) {
             const lessonId = lessonIdByCode.get(row.lessonRef);
             if (!lessonId) continue;
+            // Design §17.5：包引用的文本截止点在本课程里找不到时降级 RE_CONFIRM，
+            // 不能假装 READY（管理员需要在试看页重新确认截止点）。
+            const textCutoff = resolveCutoff(
+              row.lessonRef,
+              row.textCutoffLearningPoint,
+            );
+            const status =
+              row.textCutoffLearningPoint && !textCutoff
+                ? 'RE_CONFIRM'
+                : (row.status ?? 'READY');
             await tx.trialSetting.create({
               data: {
                 courseId,
                 lessonId,
                 videoCutoffSeconds: row.videoCutoffSeconds ?? null,
-                textCutoffLearningPointId: resolveCutoff(
-                  row.lessonRef,
-                  row.textCutoffLearningPoint,
-                ),
-                status: (row.status ?? 'READY') as never,
+                textCutoffLearningPointId: textCutoff,
+                status: status as never,
               },
             });
           }
@@ -269,13 +376,14 @@ export class PackageImporter {
             action: HISTORY_ACTIONS.IMPORT_PACKAGE,
             detail: {
               packageId: manifest.packageId,
+              fileName: sourceFileName ?? null,
               sourceEnvironment: manifest.source.environment ?? null,
               sourceVersionLabel: manifest.source.sourceVersion ?? null,
             },
           },
         });
       });
-      return { courseId };
+      return { courseId, warnings };
     } catch (error) {
       await this.rollbackMedia(courseId, mediaKeyMap);
       throw error;
@@ -339,7 +447,12 @@ export class PackageImporter {
                   videoAssetId: loc.video?.file
                     ? (mediaKeyMap.get(loc.video.file)?.assetId ?? null)
                     : null,
-                  videoDurationSeconds: loc.video?.durationSeconds ?? null,
+                  videoDurationSeconds: effectiveVideoDuration(
+                    loc.video?.durationSeconds,
+                    loc.video?.file
+                      ? mediaKeyMap.get(loc.video.file)?.durationSeconds
+                      : undefined,
+                  ),
                   textHtml: loc.text?.html ?? null,
                   textLearningPoints: loc.text?.learningPoints ?? [],
                 }),
@@ -463,7 +576,7 @@ export class PackageImporter {
     manifest: PackageManifest,
     files: Map<string, Buffer>,
     map: Map<string, ImportedMediaMeta>,
-  ): Promise<void> {
+  ): Promise<PackageValidationIssue[]> {
     const { course } = manifest;
     const store = async (relPath: string) => {
       const bytes = files.get(relPath);
@@ -486,6 +599,11 @@ export class PackageImporter {
           `Invalid media: ${relPath}`,
         );
       }
+      // 视频时长只从真实文件的容器头读取（mp4/mov 的 mvhd），不猜测其他格式。
+      const durationSeconds =
+        validated.kind === 'VIDEO'
+          ? probeVideoDurationSeconds(validated.extension, bytes)
+          : null;
       const assetId = randomUUID();
       const storageKey = this.storage.mediaKey(
         courseId,
@@ -501,6 +619,7 @@ export class PackageImporter {
         mimeType: validated.mimeType,
         size: validated.size,
         originalName: validated.originalName,
+        durationSeconds,
       });
       return { assetId, validated };
     };
@@ -515,6 +634,34 @@ export class PackageImporter {
         if (ex.thumbnail) await store(ex.thumbnail);
       }
     }
+
+    // 包内省略可选 durationSeconds 且文件里读不到时长：导入继续（时长落 null），
+    // 但在导入报告里明确 warning；该课时在补齐时长前不能发布（completeness）。
+    const warnings: PackageValidationIssue[] = [];
+    const warned = new Set<string>();
+    for (const lesson of course.lessons ?? []) {
+      for (const [language, loc] of Object.entries(lesson.localized ?? {})) {
+        const file = loc.video?.file;
+        if (!file) continue;
+        const declared = loc.video?.durationSeconds;
+        const declaredValid =
+          typeof declared === 'number' &&
+          Number.isFinite(declared) &&
+          declared > 0;
+        if (declaredValid) continue;
+        if (map.get(file)?.durationSeconds) continue;
+        const key = `${lesson.code}|${language}|${file}`;
+        if (warned.has(key)) continue;
+        warned.add(key);
+        warnings.push({
+          level: 'warning',
+          code: 'VIDEO_DURATION_UNREADABLE',
+          path: `lessons.${lesson.code}.localized.${language}.video`,
+          message: `Video duration could not be read from ${file} (${language}); the lesson cannot be published until a duration is set.`,
+        });
+      }
+    }
+    return warnings;
   }
 
   /** 导入已有课程时补齐媒体资产行；新建课程在 writeCourse 的事务内创建。 */
@@ -617,7 +764,11 @@ export class PackageImporter {
 
     // 课时
     const lessonIdByCode = new Map<string, string>();
+    // 学习点身份 = (lesson, language, source, code)，见 schema 的 @@unique；
+    // 试看的文本截止点只能绑 TEXT 行，不能绑同编号的 VIDEO 行。
     const lpIdByKey = new Map<string, string>();
+    const textPoints: Array<{ lessonCode: string; code: string; id: string }> =
+      [];
     const takenKnowledgeCodes = new Set<string>();
     for (const lesson of [...(course.lessons ?? [])].sort(
       (a, b) => a.order - b.order,
@@ -638,7 +789,12 @@ export class PackageImporter {
               videoAssetId: loc.video?.file
                 ? (mediaKeyMap.get(loc.video.file)?.assetId ?? null)
                 : null,
-              videoDurationSeconds: loc.video?.durationSeconds ?? null,
+              videoDurationSeconds: effectiveVideoDuration(
+                loc.video?.durationSeconds,
+                loc.video?.file
+                  ? mediaKeyMap.get(loc.video.file)?.durationSeconds
+                  : undefined,
+              ),
               textHtml: loc.text?.html ?? null,
               textLearningPoints: (loc.text?.learningPoints ??
                 []) as unknown as Prisma.InputJsonValue,
@@ -678,7 +834,10 @@ export class PackageImporter {
               sortOrder: order++,
             },
           });
-          lpIdByKey.set(`${lesson.code}|${lp.code}`, createdLp.id);
+          lpIdByKey.set(
+            learningPointKey(lesson.code, language, 'VIDEO', lp.code),
+            createdLp.id,
+          );
         }
         for (const lp of textLps) {
           const createdLp = await tx.learningPoint.create({
@@ -692,7 +851,15 @@ export class PackageImporter {
               sortOrder: order++,
             },
           });
-          lpIdByKey.set(`${lesson.code}|${lp.code}`, createdLp.id);
+          lpIdByKey.set(
+            learningPointKey(lesson.code, language, 'TEXT', lp.code),
+            createdLp.id,
+          );
+          textPoints.push({
+            lessonCode: lesson.code,
+            code: lp.code,
+            id: createdLp.id,
+          });
         }
         for (const trigger of loc.video?.exhibitTriggers ?? []) {
           const exId = exhibitIdByCode.get(trigger.exhibitRef);
@@ -775,22 +942,48 @@ export class PackageImporter {
       }
     }
 
-    // 试用
+    // 试用：文本截止点按 (lesson, language, source=TEXT, code) 解析（包规范 §4.2、§14）。
+    // 包里的 trial 行没有语言字段：优先默认内容语言，否则接受该课时唯一一个同编号的
+    // TEXT 行；绝不落到同编号的 VIDEO 行。
+    const resolveTextCutoff = (
+      lessonCode: string,
+      code?: string | null,
+    ): string | null => {
+      if (!code) return null;
+      const preferred = lpIdByKey.get(
+        learningPointKey(
+          lessonCode,
+          course.defaultContentLanguage,
+          'TEXT',
+          code,
+        ),
+      );
+      if (preferred) return preferred;
+      const matches = textPoints.filter(
+        (point) => point.lessonCode === lessonCode && point.code === code,
+      );
+      return matches.length === 1 ? matches[0].id : null;
+    };
     if (course.trial?.enabled) {
       for (const row of course.trial.lessons ?? []) {
         const lessonId = lessonIdByCode.get(row.lessonRef);
         if (!lessonId) continue;
+        // Design §17.5：引用缺失 → RE_CONFIRM（见 importIntoExistingCourse 同款处理）。
+        const textCutoff = resolveTextCutoff(
+          row.lessonRef,
+          row.textCutoffLearningPoint,
+        );
+        const status =
+          row.textCutoffLearningPoint && !textCutoff
+            ? 'RE_CONFIRM'
+            : (row.status ?? 'READY');
         await tx.trialSetting.create({
           data: {
             courseId,
             lessonId,
             videoCutoffSeconds: row.videoCutoffSeconds ?? null,
-            textCutoffLearningPointId: row.textCutoffLearningPoint
-              ? (lpIdByKey.get(
-                  `${row.lessonRef}|${row.textCutoffLearningPoint}`,
-                ) ?? null)
-              : null,
-            status: (row.status ?? 'READY') as never,
+            textCutoffLearningPointId: textCutoff,
+            status: status as never,
           },
         });
       }

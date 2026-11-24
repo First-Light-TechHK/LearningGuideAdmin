@@ -46,7 +46,7 @@ test('两份语言包的 key 完全一致', () => {
 })
 
 test('英文语言包没有中文（语言切换标签和中英文对照编辑器除外）', () => {
-  const allowed = new Set(['helpDesk.preview.zh', 'helpDesk.candidates.draftSources', 'helpDesk.review.editor.zh', 'shell.switchLanguage'])
+  const allowed = new Set(['helpDesk.preview.zh', 'helpDesk.candidates.draftSources', 'helpDesk.review.editor.zh', 'shell.switchLanguage', 'notification.chineseMissing', 'notification.chinese'])
   assert.deepEqual(en.filter(([key, value]) => HAN.test(value) && !allowed.has(key)).map(([key]) => key), [])
 })
 

@@ -693,10 +693,12 @@ PUBLISHED --archive--> ARCHIVED --restore--> DRAFT
 | 404 | `COURSE_NOT_FOUND` | 课程/章节/课时/媒体不存在 |
 | 409 | `COURSE_STALE_VERSION` | `expectedUpdatedAt` 不匹配 |
 | 409 | `COURSE_SLUG_TAKEN` | slug 冲突 |
-| 413 | `MEDIA_TOO_LARGE` | 超过 25 MiB |
-| 415 | `MEDIA_UNSUPPORTED` | 扩展名/MIME/文件签名不合法 |
+| 400 | `MEDIA_TOO_LARGE` | 超过该媒体种类的单文件上限（见 `GET /api/backoffice/courses/media-limits`；默认 image 20 MiB / video 500 MiB / audio 100 MiB / PDF 100 MiB / 3D 模型 25 MiB） |
+| 400 | `MEDIA_INVALID` | 扩展名/MIME/文件签名不合法 |
 | 422 | `COURSE_PUBLISH_BLOCKED` | 发布前置条件不满足（逐项原因） |
 | 503 | `MEDIA_STORAGE_UNAVAILABLE` | 生产未配置媒体存储 |
+
+> 媒体上传的状态码以上表为准（媒体规格保持接手前原样）：超限与非法文件都以 400 返回业务错误码 `MEDIA_TOO_LARGE` / `MEDIA_INVALID`，不使用本表早期草案里的 413 / 415。来源：`/Users/nihao/AI infra/verify-takeover-20261116/upstream-preview-media-as-is.md` §2.3（接手前实现把 `validateMediaFile` 的 `MEDIA_TOO_LARGE` / `MEDIA_INVALID` 映射为 400）；黑盒实测证据 `verify-takeover-20261116/qa/backend-blackbox-20261119/phase-e-probes.log`、`media-multipart-probes.log`、`media-session-probes*.log`。
 
 ---
 

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 /**
  * BackOffice 运行参数。全部延迟求值：缺失时在请求期报错，不影响 KS/AI Tutor 启动。
  */
-export type AppEnvName = 'DEV' | 'SIT' | 'UAT' | 'PPE' | 'PROD';
+export type AppEnvName = 'DEV' | 'SIT' | 'UAT' | 'PPE' | 'PROD' | 'SANDBOX';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -39,9 +39,22 @@ export function generateSecret(): string {
   return randomBytes(48).toString('base64url');
 }
 
+/**
+ * 解析 APP_ENV 到受支持的环境标识。折叠语义（历史行为，如实记录）：
+ * - 未配置时缺省 DEV（本地开发假设）；
+ * - 任何不在白名单里的值一律折叠为 DEV——历史上未知环境按 DEV 语义处理
+ *   （如部署环境帮助台 seed 判定只认显式 APP_ENV，见 helpdeskDemoSeed.ts）。
+ * - SANDBOX 是独立的内容验证环境（PRD §3.1，见 docs/sandbox/partitioning.md），
+ *   单独保留标识，不借 DEV/UAT 语义。App Runner 上 NODE_ENV=production，
+ *   因此 SANDBOX 的 isDeployed() 仍为 true（与 SIT/UAT 部署一致，属既有语义）。
+ */
 export function appEnvName(): AppEnvName {
   const raw = (process.env.APP_ENV ?? 'DEV').toUpperCase();
-  return raw === 'SIT' || raw === 'UAT' || raw === 'PPE' || raw === 'PROD'
+  return raw === 'SIT' ||
+    raw === 'UAT' ||
+    raw === 'PPE' ||
+    raw === 'PROD' ||
+    raw === 'SANDBOX'
     ? raw
     : 'DEV';
 }

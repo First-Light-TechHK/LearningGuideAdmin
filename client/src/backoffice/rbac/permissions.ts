@@ -86,8 +86,18 @@ export const ROLE_MATRIX: Record<EmployeeRole, Record<MenuKey, PermissionLevel>>
   },
 };
 
-/** PRD §3.2 注释：Edit 只允许修改既有记录，不能创建、删除或发布。 */
-export type ActionKind = "VIEW" | "EDIT_EXISTING" | "CREATE" | "DELETE" | "PUBLISH";
+/**
+ * PRD §3.2 注释：Edit 只允许修改既有记录，不能创建、删除或发布。
+ * IMPORT / EXPORT 是发布级动作，但账号级功能开关要求单独控制（与服务端 ActionKind 对齐）。
+ */
+export type ActionKind =
+  | "VIEW"
+  | "EDIT_EXISTING"
+  | "CREATE"
+  | "DELETE"
+  | "PUBLISH"
+  | "IMPORT"
+  | "EXPORT";
 
 export function levelFor(role: EmployeeRole, menu: MenuKey): PermissionLevel {
   return ROLE_MATRIX[role][menu];
@@ -102,7 +112,14 @@ export function isActionAllowed(
   menu: MenuKey,
   action: ActionKind
 ): boolean {
-  const level = levelFor(role, menu);
+  return actionAllowedAtLevel(levelFor(role, menu), action);
+}
+
+/** 某一权限级别是否允许某种操作（账号开关解析出的生效级别也可直接套用）。 */
+export function actionAllowedAtLevel(
+  level: PermissionLevel,
+  action: ActionKind
+): boolean {
   switch (action) {
     case "VIEW":
       return level !== "NONE";
@@ -111,6 +128,9 @@ export function isActionAllowed(
     case "CREATE":
     case "DELETE":
     case "PUBLISH":
+    // 导入/导出沿用发布级基线：角色层面只有 Full 可以，账号开关再单独加减。
+    case "IMPORT":
+    case "EXPORT":
       return level === "FULL";
     default:
       return false;
@@ -176,11 +196,29 @@ export function settingsSubHref(locale: string, sub: SettingsSubKey): string {
   return `/${locale}/${MENU_SEGMENT.settings}/${SETTINGS_SUB_SEGMENT[sub]}`;
 }
 
-/** 非 Admin 看不到 Employee Account 子项（PORT-§3.3 / §15.3）。 */
-export function visibleSettingsSubs(role: EmployeeRole): SettingsSubKey[] {
-  return SETTINGS_SUB_ORDER.filter(
-    (sub) => sub !== "employeeAccount" || canAccessEmployeeAccount(role)
-  );
+/**
+ * Settings 子项 = 角色可见 ∩ 环境能力 ∩ 账号功能键。
+ * - capabilities / features 传 null = 旧调用（只按角色过滤，保持既有行为）；
+ * - employeeAccount 由 module.accounts（环境能力 accounts 或 settings）单独控制；
+ * - 其它子项仍要 module.settings（环境能力 settings）。
+ */
+export function visibleSettingsSubs(
+  role: EmployeeRole,
+  capabilities: ReadonlySet<string> | null = null,
+  features: ReadonlySet<string> | null = null
+): SettingsSubKey[] {
+  return SETTINGS_SUB_ORDER.filter((sub) => {
+    if (sub === "employeeAccount" && !canAccessEmployeeAccount(role)) return false
+    if (capabilities !== null) {
+      const anyOf = sub === "employeeAccount" ? ["settings", "accounts"] : ["settings"]
+      if (!anyOf.some((id) => capabilities.has(id))) return false
+    }
+    if (features !== null) {
+      const featureKey = sub === "employeeAccount" ? "module.accounts" : "module.settings"
+      if (!features.has(featureKey)) return false
+    }
+    return true
+  })
 }
 
 export function menuFromPathSegments(segments: string[] | undefined): MenuKey | null {

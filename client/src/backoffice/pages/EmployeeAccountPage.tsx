@@ -5,11 +5,19 @@ import type { ErrorCode } from "../contracts/envelope";
 import {
   DISPLAY_STATUSES,
   EMPLOYEE_ROLES,
+  effectiveFeatureMap,
+  baselineFeatureMap,
+  featureDraftFromFeatures,
+  featureGrantsPayload,
+  setFeatureMode,
   type AccountStatus,
+  type EmployeeFeatures,
   type EmployeeListItem,
   type EmployeeListResult,
   type EmployeeRole,
+  type FeatureMode,
 } from "../contracts/employee";
+import { EmployeeFeatureGrants } from "../components/EmployeeFeatureGrants";
 import {
   CloseCircleIcon,
   DotsIcon,
@@ -20,7 +28,8 @@ import { Pagination } from '../components/Pagination';
 import { usePageSize } from '../components/paginationState';
 import type { Locale } from "../lib/i18n/config";
 import { t } from "../lib/i18n/messages";
-import { boFetch } from "../lib/api";
+import { boFetch, boRequest } from "../lib/api";
+import { notifySessionChanged } from "../lib/navigation";
 import { useResizableColumns } from "../components/resizableColumns";
 
 type Filters = { email: string; role: string; status: string };
@@ -34,6 +43,27 @@ type EditorState =
       role: EmployeeRole;
       accountStatus: AccountStatus;
     };
+
+/**
+ * 编辑抽屉里的「功能权限」数据：
+ * 目录/显式开关/生效结果都来自服务端 GET /api/admin/employees/:id/features；
+ * 草稿只保存三态，保存时替换式 PUT（继承 = 省略）。
+ */
+type FeatureEditorState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; data: EmployeeFeatures; draft: Record<string, FeatureMode> }
+  | { kind: "error"; error: ErrorCode };
+
+function isEmployeeFeatures(value: unknown): value is EmployeeFeatures {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Partial<EmployeeFeatures>;
+  return (
+    Array.isArray(data.catalog) &&
+    Array.isArray(data.grants) &&
+    Array.isArray(data.effective)
+  );
+}
 
 /** 行操作菜单改用 fixed 定位渲染到 body，避免被可滚动的表格容器裁切。 */
 type OpenMenu = {
@@ -73,14 +103,56 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   const [manualLink, setManualLink] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [featureEditor, setFeatureEditor] = useState<FeatureEditorState>({ kind: "idle" });
   const [submitting, setSubmitting] = useState(false);
   const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const employeeTable = useResizableColumns({
-    storageKey: "employee-list",
-    defaultWidths: [300, 180, 140, 240, 158],
+    // Total 840 so Last Login and Actions stay whole inside the wall at 1280 wide.
+    storageKey: "employee-list-v2",
+    defaultWidths: [250, 140, 110, 190, 150],
   });
+
+  /** 功能权限只在编辑既有账号时加载（新建还没有 employeeId）；失败走页面既有错误码机制。 */
+  const loadEmployeeFeatures = useCallback((employeeId: string) => {
+    setFeatureEditor({ kind: "loading" });
+    setErrorCode(null);
+    return boRequest<EmployeeFeatures>(`/api/admin/employees/${employeeId}/features`).then((result) => {
+      if (result.success && isEmployeeFeatures(result.data)) {
+        setFeatureEditor({
+          kind: "ready",
+          data: result.data,
+          draft: featureDraftFromFeatures(result.data),
+        });
+        return;
+      }
+      const error = result.success ? "INTERNAL_ERROR" : result.error;
+      setFeatureEditor({ kind: "error", error });
+      setErrorCode(error);
+    });
+  }, []);
+
+  function openCreateEditor() {
+    setFeatureEditor({ kind: "idle" });
+    setEditor({ mode: "create", email: "", role: "", accountStatus: "ACTIVE" });
+  }
+
+  function openEditEditor(employee: EmployeeListItem) {
+    setEditor({
+      mode: "edit",
+      employee,
+      email: employee.loginEmail,
+      role: employee.role,
+      accountStatus: employee.accountStatus,
+    });
+    void loadEmployeeFeatures(employee.employeeId);
+  }
+
+  function closeEditor() {
+    setEditor(null);
+    setFeatureEditor({ kind: "idle" });
+  }
 
   const fetchLoad = useCallback(() => {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
@@ -234,6 +306,35 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
         return;
       }
 
+      // 功能权限随账号一起保存：账号 PATCH 成功后再替换式 PUT（服务端按目录只留显式开关）。
+      // 失败时保留抽屉打开并复用既有错误提示；再次保存是幂等的。
+      if (!isCreate && featureEditor.kind === "ready") {
+        const featureResponse = await boRequest<EmployeeFeatures>(
+          `/api/admin/employees/${editor.employee.employeeId}/features`,
+          {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(featureGrantsPayload(featureEditor.draft, featureEditor.data.catalog)),
+          }
+        );
+        if (!featureResponse.success) {
+          setErrorCode(featureResponse.error);
+          setFeatureEditor({ kind: "error", error: featureResponse.error });
+          return;
+        }
+        if (isEmployeeFeatures(featureResponse.data)) {
+          setFeatureEditor({
+            kind: "ready",
+            data: featureResponse.data,
+            draft: featureDraftFromFeatures(featureResponse.data),
+          });
+        } else {
+          await loadEmployeeFeatures(editor.employee.employeeId);
+        }
+        // 角色/开关可能改的是当前登录账号：让外壳重读会话，菜单与子导航立即跟随生效结果
+        notifySessionChanged();
+      }
+
       setManualLink(payload.data?.manualLink ?? null);
       setLinkCopied(false);
 
@@ -249,7 +350,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
               })
             : t(locale, "employees.results.updated")
       );
-      setEditor(null);
+      closeEditor();
       await load();
     } catch {
       setErrorCode("INTERNAL_ERROR");
@@ -328,14 +429,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
         <button
           type="button"
           className="button buttonCompact"
-          onClick={() =>
-            setEditor({
-              mode: "create",
-              email: "",
-              role: "",
-              accountStatus: "ACTIVE",
-            })
-          }
+          onClick={openCreateEditor}
         >
           <PlusIcon size={15} />
           {t(locale, "employees.addEmployee")}
@@ -514,13 +608,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                   onClick={() => {
                     const employee = openMenu.employee;
                     setOpenMenu(null);
-                    setEditor({
-                      mode: "edit",
-                      employee,
-                      email: employee.loginEmail,
-                      role: employee.role,
-                      accountStatus: employee.accountStatus,
-                    });
+                    openEditEditor(employee);
                   }}
                 >
                   {t(locale, "employees.actions.edit")}
@@ -569,7 +657,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
               </div>              <button
                 type="button"
                 className="modalClose"
-                onClick={() => setEditor(null)}
+                onClick={closeEditor}
                 aria-label={t(locale, "common.close")}
                 title={t(locale, "common.close")}
               >
@@ -669,13 +757,58 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                   <span className="fieldHint">{t(locale, "employees.bootstrapLocked")}</span>
                 ) : null}
               </div>
+
+              {editor.mode === "edit" ? (
+                <div className="field" data-testid="employee-feature-grants-section">
+                  <span className="fieldLabel">{t(locale, "employees.features.title")}</span>
+                  <span className="fieldHint">{t(locale, "employees.features.subtitle")}</span>
+                  {featureEditor.kind === "loading" ? (
+                    <p className="fieldHint" data-testid="employee-feature-grants-loading">
+                      {t(locale, "employees.features.loading")}
+                    </p>
+                  ) : null}
+                  {featureEditor.kind === "error" ? (
+                    <p className="fieldHint" data-testid="employee-feature-grants-error">
+                      {t(locale, "employees.features.loadFailed")}{" "}
+                      <button
+                        type="button"
+                        className="button buttonGhost buttonSmall"
+                        onClick={() => void loadEmployeeFeatures(editor.employee.employeeId)}
+                      >
+                        {t(locale, "common.retry")}
+                      </button>
+                    </p>
+                  ) : null}
+                  {featureEditor.kind === "ready" ? (
+                    <EmployeeFeatureGrants
+                      locale={locale}
+                      catalog={featureEditor.data.catalog}
+                      draft={featureEditor.draft}
+                      effective={effectiveFeatureMap(featureEditor.data.effective)}
+                      baseline={baselineFeatureMap(featureEditor.data.baseline)}
+                      disabled={submitting}
+                      onChange={(key, mode) =>
+                        setFeatureEditor((current) =>
+                          current.kind === "ready"
+                            ? { ...current, draft: setFeatureMode(current.draft, key, mode) }
+                            : current
+                        )
+                      }
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="modalFooter">
-              <button type="button" className="button buttonGhost" onClick={() => setEditor(null)}>
+              <button type="button" className="button buttonGhost" onClick={closeEditor}>
                 {t(locale, "common.cancel")}
               </button>
-              <button type="submit" className="button" disabled={submitting}>
+              <button
+                type="submit"
+                className="button"
+                disabled={submitting || (editor.mode === "edit" && featureEditor.kind === "loading")}
+              >
                 {editor.mode === "create"
                   ? submitting
                     ? t(locale, "common.creating")

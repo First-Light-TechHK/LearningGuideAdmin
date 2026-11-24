@@ -1,11 +1,11 @@
 import { Link, Navigate } from 'react-router-dom'
 
 import { SettingsSubNav } from '../components/SettingsSubNav'
+import { cachedAccountFeatures, cachedCapabilities, menuEffectiveLevel } from '../lib/capabilities'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import {
   canAccessEmployeeAccount,
-  canViewMenu,
   menuHref,
   settingsSubHref,
   visibleSettingsSubs,
@@ -14,6 +14,7 @@ import {
 } from '../rbac/permissions'
 import { useEmployee } from '../employeeSession';
 import { EmployeeAccountClient } from './EmployeeAccountPage'
+import { NotificationConfigurationPage } from './notification/NotificationConfigurationPage'
 
 const MENU_LABEL: Record<MenuKey, string> = {
   course: 'nav.course',
@@ -41,10 +42,11 @@ export function ForbiddenCard() {
   )
 }
 
-/** PORT-NAV-004 / §15.3：直接输入 URL 也必须按权限拒绝（接口另由服务端守卫拒绝）。 */
+/** PORT-NAV-004 / §15.3：直接输入 URL 也必须按权限拒绝（接口另由服务端守卫拒绝）。
+ *  账号功能键允许时可以把角色 NONE 的模块抬到 VIEW（与 /api/session 的 effective 一致）。 */
 export function MenuGuard({ menu, children }: { menu: MenuKey; children: React.ReactNode }) {
   const employee = useEmployee()
-  return canViewMenu(employee.role, menu) ? <>{children}</> : <ForbiddenCard />
+  return menuEffectiveLevel(employee.role, menu) !== 'NONE' ? <>{children}</> : <ForbiddenCard />
 }
 
 export function CoursePage() {
@@ -69,19 +71,24 @@ export function PlaceholderPage({ menu }: { menu: MenuKey }) {
   )
 }
 
-/** /settings 本身没有内容，落到当前角色第一个可见子项。 */
+/** /settings 本身没有内容，落到当前角色第一个可见子项（角色 ∩ 环境能力 ∩ 账号功能）。 */
 export function SettingsIndexPage() {
   const locale = useLocale()
   const employee = useEmployee()
-  const [first] = visibleSettingsSubs(employee.role)
+  const [first] = visibleSettingsSubs(employee.role, cachedCapabilities(), cachedAccountFeatures())
   return <Navigate to={first ? settingsSubHref(locale, first) : menuHref(locale, DEFAULT_LANDING_MENU)} replace />
 }
 
 export function EmployeeAccountSettingsPage() {
   const locale = useLocale()
   const employee = useEmployee()
-  // PORT-LST-001：仅 Admin
+  // PORT-LST-001：仅 Admin；账号管理还要环境能力（settings 或 accounts）与 module.accounts 生效
   if (!canAccessEmployeeAccount(employee.role)) return <ForbiddenCard />
+  const capabilities = cachedCapabilities()
+  const accountFeatures = cachedAccountFeatures()
+  const capabilityOpen = capabilities.has('settings') || capabilities.has('accounts')
+  const featureOpen = accountFeatures === null || accountFeatures.has('module.accounts')
+  if (!capabilityOpen || !featureOpen) return <ForbiddenCard />
   return (
     <>
       <SettingsSubNav role={employee.role} />
@@ -93,6 +100,7 @@ export function EmployeeAccountSettingsPage() {
 export function SettingsEntryPage({ section }: { section: 'paymentGateway' | 'notificationConfiguration' }) {
   const locale = useLocale()
   const employee = useEmployee()
+  if (section === 'notificationConfiguration') return <NotificationConfigurationPage />
   return (
     <MenuGuard menu="settings">
       <SettingsSubNav role={employee.role} />

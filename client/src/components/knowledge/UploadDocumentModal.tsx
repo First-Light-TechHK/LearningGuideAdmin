@@ -10,6 +10,7 @@ import {
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
+import { KnowledgeMarkdown } from './KnowledgeMarkdown'
 
 /**
  * 「上传并解析」两步弹窗（§3.2.3）：
@@ -172,6 +173,7 @@ export function UploadDocumentModal({
             <FileTextOutlined /> {file?.name}
           </p>
           <div
+            data-color-mode="light"
             style={{
               border: `1px dashed ${tokens.color.primaryBorder}`,
               borderRadius: tokens.radius.md,
@@ -181,17 +183,7 @@ export function UploadDocumentModal({
               background: tokens.color.bg.subtle,
             }}
           >
-            <pre
-              style={{
-                margin: 0,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-                fontSize: tokens.fontSize.md,
-                fontFamily: 'inherit',
-              }}
-            >
-              {converted?.markdown}
-            </pre>
+            <KnowledgeMarkdown source={converted?.markdown ?? ''} />
           </div>
         </>
       )}

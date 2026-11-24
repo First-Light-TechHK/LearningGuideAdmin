@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { formatDateTime } from '../../lib/i18n/format';
 
 export const L = (locale: string, zh: string, en: string) => (locale.startsWith('zh') ? zh : en);
@@ -204,4 +204,25 @@ export function parseTimeInput(value: string): number | null {
 export function useForceRerender() {
   const [, set] = useState(0);
   return useCallback(() => set((value) => value + 1), []);
+}
+
+/**
+ * 壳层断点（backoffice.css @media max-width:1100px）在组件内的等价物：
+ * 父容器给固定高度时，窄屏把编辑页的分栏折叠成单列。课程页没有 courseUi* 类可用，
+ * 又不允许改 backoffice.css，所以用 matchMedia 跟随同一个视口断点，样式仍全部走内联。
+ */
+export function useNarrowLayout(maxWidth = 1100): boolean {
+  const query = `(max-width: ${maxWidth}px)`;
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const update = () => setNarrow(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [query]);
+  return narrow;
 }

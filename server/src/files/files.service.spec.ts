@@ -3,6 +3,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import sharp from 'sharp';
+import {
+  Document,
+  ImageRun,
+  Packer,
+  Paragraph,
+  Table,
+  TableCell,
+  TableRow,
+} from 'docx';
 import { FilesService, ALLOWED_EXTENSIONS } from './files.service';
 
 /**
@@ -229,7 +239,11 @@ ODE & Ordinary differential equation
   });
 
   it('Knowledge 图片按课程持久化并返回稳定读取地址；非图片签名拒绝', async () => {
-    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+    const png = await sharp({
+      create: { width: 2, height: 2, channels: 3, background: '#123456' },
+    })
+      .png()
+      .toBuffer();
     const result = await service.storeImage('course-1', mkFile('a.png', png));
     expect(result.url).toMatch(
       /^\/api\/files\/images\/course-1\/[0-9a-f-]+\.png$/,
@@ -244,8 +258,102 @@ ODE & Ordinary differential equation
         'course-1',
         mkFile('fake.png', Buffer.from('not png')),
       ),
-    ).rejects.toThrow('仅支持');
+    ).rejects.toThrow('图片已损坏或格式不受支持');
   });
+
+  it('校验图片大小边界，允许大于旧上限的图片', async () => {
+    const under = await sharp({
+      create: { width: 1500, height: 1500, channels: 3, background: '#123456' },
+    })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
+    expect(under.length).toBeGreaterThan(5 * 1024 * 1024);
+    const over = Buffer.alloc(20 * 1024 * 1024 + 1);
+    await expect(
+      service.storeImage('course-1', mkFile('under.png', under)),
+    ).resolves.toHaveProperty('url');
+    await expect(
+      service.storeImage('course-1', mkFile('over.png', over)),
+    ).rejects.toThrow('20 MiB');
+    expect(storage.putMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['heic', 'heif'])(
+    '解码 HEVC .%s 上传并保存主图的 PNG 像素',
+    async (extension) => {
+      // Synthetic 32×24 red frame encoded as HEVC and wrapped in a HEIF container.
+      const input = fs.readFileSync(
+        path.join(__dirname, 'fixtures/red-32x24.heic'),
+      );
+      expect((await sharp(input).metadata()).compression).toBe('hevc');
+      const result = await service.storeImage(
+        'course-1',
+        mkFile(`red.${extension}`, input),
+      );
+      expect(result.url.endsWith('.png')).toBe(true);
+      const [, preview] = storage.putMedia.mock.calls[0] as [string, Buffer];
+      expect(await sharp(preview).metadata()).toMatchObject({
+        format: 'png',
+        width: 32,
+        height: 24,
+      });
+      const pixels = await sharp(preview).removeAlpha().raw().toBuffer();
+      expect(pixels[0]).toBeGreaterThan(220);
+      expect(pixels[1]).toBeLessThan(25);
+      expect(pixels[2]).toBeLessThan(25);
+    },
+  );
+
+  const raster = () =>
+    sharp({
+      create: { width: 2, height: 2, channels: 4, background: '#12345678' },
+    });
+  const bitmap = Buffer.from(
+    'Qk0+AAAAAAAAADYAAAAoAAAAAgAAAAEAAAABABgAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AAAA/wAA',
+    'base64',
+  );
+  it.each([
+    ['sample.jfif', 'jpg', true, () => raster().jpeg().toBuffer()],
+    [
+      'animated.apng',
+      'png',
+      true,
+      () =>
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAYAAADlNHIOAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAABgAAAAQAAAAAAAAAAAAAkAFAAAs9lPmgAAA7hJREFUeJztnE1IVFEUx/8vX6UztnIcUqcxcgItSMqUaCGRuLBNRYugWqVgO42Ioo+FWEG1UQiKyE0gbdq1ME2CcmeLNCJLhXRyyo9xITX5iTfu00n6oHfn43HPNOcHupDxznB+955373lzniGEAKMPU+N7MyxAP7wCNMMCNMMCNMMCNMMCUlGAp6HWOjwIGDAMpDVCAAbkLwPhlgeGowJyGmqF9Q6rUU/z2GMtFCuR8DTWCXmwnW5tM5IuIKexThjpPt0VkDGSE1VVgqkcfJUXMj8leBprRbjFXoKSAMNKdKwgNtTiZSpdcDn4caGyCuxXAAff0VVgK0CsbDYT+RRpi1Co9NsK4ODHj0ry4JOwZliAZliAZlJKgC/rG2q8n1CdOwZ/1jfkZ0asv3+ecyM4m42uKR86JvwIzbmRKqSEgLyN33E+0I+TvkFkGH9uLQLuGevnoCeEGyW9eDJeiKYPey0p1CEv4JA3iLu7euA2F5Vevw4ChzePoCo3hDP9lXg6uQWUIS2gfus7NBe/soIaK9kZi3i45zmuDJTj/ugOUMWkPPOb4wx+FPm/10peITi7iexKICkgPzNipZ1Egh9FjnGv9CX29RzF+JwL1CAp4GKgTznnq6ajC4E+nH27H9QwKW41jxcMJ33cEwVDuD1cam1ZKWFSzP0Zf9lqJoocs8YbRFuwBJQgJ6DKE3Js7OrcEAuwY5v7q2MCtrqcG/u/WQHeDbOOnqipQU6AkyyDHuQEjC+4UGTOODM2sR0QSQEjkWwUuZwRMEqwOEdOwLOwzyqkOUHnpA/UICegY8KP68W9ST8LLIl16JyiVw8iJyA058ajUACnfENJHbd9bDu5UzBJAZKbQ7txJG/EquEkg69L63FruBQUISngy7wLda8PoL2sO+FUtAzDujEzMU+vEkpWgKQ7XICr78uten68ZWkZ/MsDFSRzP3kBEnknS95MkfX8WNORTDv1byrRRfRGTEoIkMg7WWUvjuFc0Ruc9r+HaSzbzvrHoW1oGiwjm3ZSSoBkeiETlwYqcOfjTqukXO0dQ2Fm5JevpYyufi1FCqO420lpAVFkYGU9n1pNP20E/I+wAM2wAM3YN2hwe5ij2DdocHOMo3AKcpJktCjJ9nvZAZ6kj5RWhFvtH12gtAJk+z13yceI4rP4lATItnvulo8BIWd/Eh9VIJm2UpF8Sgpflf+JEMrBj/kiHO36jorgHmKsxcCa9Q4/ruZ3EUzi8DZUMyxAMyxAMyxAMyxAMyxAMywAevkBKZwlQBz425gAAAAaZmNUTAAAAAEAAAAYAAAAGAAAACQAAAAUAAkAFAAAvQF1wAAAAjJmZEFUAAAAAnictZZPaNNQHMe/6Xtbkja2ExHcWufoLuJhyDZQ6Dw4CtNL8SKoJ0FEcAeRoSed6HZTb+pJGHgRD7t5WauIBz1th+lFxIlbbOYO/kvaNNn6GnlvrGysrd2afCCQPHi/78svv9/3F2nftUse6pBgRYy435F28uhmBXQyW6wvkzCWiIacHMeMchB5Eq4XArTWYicrYazwAeftLyDYrt9bNsV10jUwac7ipdKNiWg/dBL5v8BpR8ejP+8R8dbQDCF4yDiLGF41MBpLYUZJ1Be4XPyEu+ac2LRTtMoapn6/xXh0AE8jh7cL8JPvNvgGfO89cw460apvIgS6mC3S0krwDXiMx3/fYag9gx8hdV3gpjXfdM6bTdcNax5jseOgvBTPlr7Cb87ZC3io9YGecvSapdgqBB5GHB102DUQFGnXAE0yKzCBHmaB7mdOYAIHWKm2VfhFhffBClGRLPtXoptZIWHQb0RDsmwiCBaJBvpKjiOoSsrKcVDu5xPmrO+9UJZCyCkJUD4sXoSTuGAv+CrwXO2Fwb8Bf7ivHUXGWRIe4geW1IYHWp+4FwLLRMWVjhN49utNy6mqQMJoRwq8OqsCnNdyF+5EB4Sf79a2K5BwOzaI7KaptqXR+CTiw4L7+U7TZUltuLo3hZzcYGRy+CQ61n4G1wsfcdH+DOrxfmx86mm1B5N7+qtpaSjA+RmScSs6iCeRI8Jy024eh1hxy28Lb6KcEkdWTohqqcc/oPjF9Ue3y6wAAAAASUVORK5CYII=',
+          'base64',
+        ),
+    ],
+    ['sample.avif', 'png', false, () => raster().avif().toBuffer()],
+    ['sample.bmp', 'png', false, () => bitmap],
+    ['sample.dib', 'png', false, () => bitmap.subarray(14)],
+    ['sample.tiff', 'png', false, () => raster().tiff().toBuffer()],
+    [
+      'transparent.svg',
+      'png',
+      false,
+      () =>
+        Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="1" height="1" fill="green"/></svg>',
+        ),
+    ],
+  ] as const)(
+    '上传 %s 后写入可预览的 %s',
+    async (name, extension, preserve, fixture) => {
+      const input = await fixture();
+      const result = await service.storeImage('course-1', mkFile(name, input));
+      expect(result.url.endsWith(`.${extension}`)).toBe(true);
+      const [key, bytes] = storage.putMedia.mock.calls[0] as [string, Buffer];
+      expect(key.endsWith(`.${extension}`)).toBe(true);
+      if (preserve) expect(bytes.equals(input)).toBe(true);
+      else
+        expect(
+          bytes
+            .subarray(0, 8)
+            .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+        ).toBe(true);
+    },
+  );
 
   it('清理只删除超过 24 小时且未被页面引用的图片', async () => {
     const old = new Date('2026-11-01T00:00:00Z');
@@ -318,34 +426,83 @@ ODE & Ordinary differential equation
     ).rejects.toThrow('DOCX 解压内容超过安全限制');
   });
 
-  it('DOCX 转换生成的内嵌图片 data URI 会替换为持久化图片地址', async () => {
-    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
-    const zip = new JSZip();
-    zip.file(
-      'word/document.xml',
-      '<w:document><a:blip r:embed="rId1"/></w:document>',
+  const docxWithImages = async () => {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+      'base64',
     );
-    zip.file(
-      'word/_rels/document.xml.rels',
-      '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/></Relationships>',
+    const picture = () =>
+      new ImageRun({
+        type: 'png',
+        data: png,
+        transformation: { width: 10, height: 10 },
+      });
+    return Packer.toBuffer(
+      new Document({
+        sections: [
+          {
+            children: [
+              new Paragraph({ children: [picture()] }),
+              new Table({
+                rows: [
+                  new TableRow({
+                    children: [
+                      new TableCell({
+                        children: [
+                          new Paragraph('阅读时间：'),
+                          new Paragraph({
+                            children: [picture(), picture()],
+                            bullet: { level: 0 },
+                          }),
+                        ],
+                      }),
+                      new TableCell({
+                        children: [new Paragraph('第21回：唐僧渡过沙河。')],
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+            ],
+          },
+        ],
+      }),
     );
-    zip.file('word/media/image1.png', png);
-    const converter = service as unknown as {
-      persistEmbeddedImages: (
-        markdown: string,
-        docx: Buffer,
-        courseId: string,
-      ) => Promise<string>;
-    };
-    const converted = await converter.persistEmbeddedImages(
-      '![diagram](data:image/png;base64...)',
-      await zip.generateAsync({ type: 'nodebuffer' }),
+  };
+
+  it('DOCX 中文与复杂表格保留，表格内外每张图片均替换为可预览的持久化地址', async () => {
+    const result = await service.convertFile(
+      mkFile('阅读任务.docx', await docxWithImages()),
       'course-1',
     );
-    expect(converted).toMatch(
-      /^!\[diagram\]\(\/api\/files\/images\/course-1\/[0-9a-f-]+\.png\)$/,
+    expect(result.title).toBe('阅读任务');
+    expect(result.markdown).toContain('阅读时间：');
+    expect(result.markdown).toContain('第21回：唐僧渡过沙河。');
+    expect(result.markdown).toContain('<table>');
+    const urls = result.markdown.match(
+      /\/api\/files\/images\/course-1\/[0-9a-f-]+\.png/g,
     );
-    expect(storage.putMedia).toHaveBeenCalledTimes(1);
+    expect(urls).toHaveLength(3);
+    expect(result.markdown).not.toContain('data:image');
+    expect(result.markdown).not.toContain('/knowledge-import-images/');
+    expect(storage.putMedia).toHaveBeenCalledTimes(3);
+  });
+
+  it('含图片 DOCX 没有课程时拒绝导入，不写入图片文件', async () => {
+    await expect(
+      service.convertFile(mkFile('images.docx', await docxWithImages())),
+    ).rejects.toThrow('DOCX 含图片，请从 Knowledge Pages 课程中导入');
+    expect(storage.putMedia).not.toHaveBeenCalled();
+  });
+
+  it('DOCX 图片存储失败时拒绝导入，不返回缺图文档', async () => {
+    storage.putMedia.mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(
+      service.convertFile(
+        mkFile('images.docx', await docxWithImages()),
+        'course-1',
+      ),
+    ).rejects.toThrow('文档转换失败');
   });
 
   it('无扩展名、空 buffer 或 undefined 应 400', async () => {

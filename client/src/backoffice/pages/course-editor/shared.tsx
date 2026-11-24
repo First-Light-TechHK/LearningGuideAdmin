@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { t } from '../../lib/i18n/messages';
+import { useLocale } from '../../lib/navigation';
 import { fmtTimeInput, parseTimeInput } from './shared-utils';
 
 
@@ -127,30 +129,77 @@ export function Modal({
   onClose: () => void;
   width?: number;
 }) {
+  const locale = useLocale();
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    // Move focus into the dialog (the first control after the close button, else the close button itself).
+    if (dialog && !dialog.contains(document.activeElement)) {
+      const items = focusable();
+      (items.find((el) => !el.classList.contains('modalClose')) ?? items[0] ?? dialog).focus();
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (opener && opener.isConnected) opener.focus();
+    };
+  }, []);
   return (
     <div
-      className="modalBackdrop"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(15,23,42,0.35)',
-        display: 'grid',
-        placeItems: 'center',
-        zIndex: 1000,
-      }}
+      className="modalBackdrop course-ui-scrim"
+      style={{ zIndex: 1000 }}
       onClick={onClose}
     >
       <div
-        className="modal"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="modal course-ui-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         style={{ width: `min(${width}px, 94vw)`, maxHeight: '90vh', overflow: 'auto' }}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modalHead">
-          <div className="modalTitle">{title}</div>
-          <button type="button" className="modalClose" onClick={onClose}>
+          <div className="modalTitle" id={titleId}>{title}</div>
+          <button type="button" className="modalClose" onClick={onClose} aria-label={t(locale, 'common.close')}>
             ×
           </button>
         </div>
+        <div className="course-ui-dRule" aria-hidden="true" />
         <div className="modalBody">{children}</div>
       </div>
     </div>

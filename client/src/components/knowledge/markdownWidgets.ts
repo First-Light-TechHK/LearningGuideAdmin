@@ -1,6 +1,7 @@
 import katex from 'katex'
 import { WidgetType } from '@codemirror/view'
 import type { EditorView } from '@codemirror/view'
+import { renderHtmlTable } from './markdownHtml'
 
 /**
  * Markdown Live Preview 的 Widget（2026-10-29 M3 / 2026-10-27 M4 表格可编辑）。
@@ -173,6 +174,52 @@ export class ImageWidget extends WidgetType {
 }
 
 // ========================== 表格：解析 / 序列化 / 渲染 ==========================
+
+export class HtmlTableWidget extends WidgetType {
+  readonly html: string
+  readonly from: number
+  readonly readOnly: boolean
+  readonly getView: () => EditorView | null
+  readonly text: TextFn
+  readonly locale: string
+
+  constructor(html: string, from: number, readOnly: boolean, getView: () => EditorView | null, text: TextFn, locale: string) {
+    super()
+    this.html = html
+    this.from = from
+    this.readOnly = readOnly
+    this.getView = getView
+    this.text = text
+    this.locale = locale
+  }
+
+  eq(other: HtmlTableWidget) {
+    return other.html === this.html && other.from === this.from && other.readOnly === this.readOnly && other.locale === this.locale
+  }
+
+  toDOM() {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-table-widget'
+    wrap.appendChild(renderHtmlTable(this.html))
+    if (!this.readOnly) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'cm-md-table-edit-btn'
+      button.textContent = this.text('table.editSource')
+      button.addEventListener('mousedown', (event) => event.preventDefault())
+      button.addEventListener('click', () => {
+        const view = this.getView()
+        if (!view || view.state.readOnly) return
+        view.dispatch({ selection: { anchor: this.from + 1 }, scrollIntoView: true })
+        view.focus()
+      })
+      wrap.appendChild(button)
+    }
+    return wrap
+  }
+
+  ignoreEvent() { return true }
+}
 
 export type Align = 'left' | 'right' | 'center' | null
 
@@ -706,10 +753,13 @@ export class TableWidget extends WidgetType {
         // 工具条按钮点击会让单元格失焦 → 触发 focusout 提交；这里抑制一次（B3）
         b.addEventListener('mousedown', (e) => {
           e.preventDefault()
+          if (e.detail > 1) return
           suppressCommit = true
         })
         b.addEventListener('click', (e) => {
           e.preventDefault()
+          // 进入编辑时工具条会推移表格，连续点击的后两次可能落到行列按钮上。
+          if (e.detail > 1) return
           fn()
           window.setTimeout(() => {
             suppressCommit = false
@@ -767,9 +817,10 @@ export class TableWidget extends WidgetType {
       goBtn.title = this.text('table.batchTitle')
       goBtn.className = 'cm-md-table-tbtn'
       goBtn.style.fontWeight = 'bold'
-      goBtn.addEventListener('mousedown', (e) => { e.preventDefault(); suppressCommit = true })
+      goBtn.addEventListener('mousedown', (e) => { e.preventDefault(); if (e.detail <= 1) suppressCommit = true })
       goBtn.addEventListener('click', (e) => {
         e.preventDefault()
+        if (e.detail > 1) return
         const count = Math.max(1, Math.min(50, Number(numInput.value) || 1))
         const action = select.value
         if (action === 'addRow') addRow(count)
