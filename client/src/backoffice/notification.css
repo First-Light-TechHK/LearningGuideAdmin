@@ -445,8 +445,9 @@
   font-weight: 700;
   color: #64748b;
 }
-.notificationCardTitle { font-size: 13px; color: var(--lg-heading); line-height: 1.3; }
+.notificationCardTitle { font-size: 13px; color: var(--lg-heading); line-height: 1.3; overflow-wrap: anywhere; }
 .notificationCardBody {
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
@@ -576,9 +577,9 @@
 .notificationTwoColumn { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
 .notificationDetailTitle { font-size: 14px; font-weight: 600; color: var(--lg-heading); margin: 0 0 6px; }
-.notificationDetailBody { font-size: 13px; color: var(--lg-slate); line-height: 1.5; white-space: pre-wrap; margin: 0 0 8px; }
+.notificationDetailBody { font-size: 13px; color: var(--lg-slate); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 8px; }
 .notificationDetailZh { color: var(--lg-muted); }
-.notificationDetailLink { font-size: 12px; color: var(--lg-blue); margin: 4px 0 0; }
+.notificationDetailLink { font-size: 12px; color: var(--lg-blue); margin: 4px 0 0; overflow-wrap: anywhere; }
 
 /* -------------------------------- 发送日志 -------------------------------- */
 
