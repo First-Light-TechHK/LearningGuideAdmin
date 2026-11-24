@@ -111,6 +111,23 @@ describe('BUG-0357: the Interests field follows the BackOffice language', () => 
     }
   })
 
+  test('zh-CN shows the age range in Chinese, en-GB keeps the stored value (R2-08)', async () => {
+    const zh = await openDrawer('zh-CN', details({ profile: { ...PROFILE, ageRange: 'Under 18' } }))
+    try {
+      assert.ok(await screen.findByText('18 岁以下'))
+      assert.equal(screen.queryByText('Under 18'), null)
+    } finally {
+      zh.restore()
+    }
+    cleanup()
+    const en = await openDrawer('en-GB', details({ profile: { ...PROFILE, ageRange: 'Under 18' } }))
+    try {
+      assert.ok(await screen.findByText('Under 18'))
+    } finally {
+      en.restore()
+    }
+  })
+
   test('zh-CN shows an unlisted country and education as stored', async () => {
     const server = await openDrawer(
       'zh-CN',

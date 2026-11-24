@@ -2467,6 +2467,15 @@
       "United Kingdom": "United Kingdom",
       "United States": "United States"
     },
+    "ageLabel": {
+      "Under 18": "Under 18",
+      "18–24": "18–24",
+      "25–34": "25–34",
+      "35–44": "35–44",
+      "45–54": "45–54",
+      "55–64": "55–64",
+      "65+": "65+"
+    },
     "educationLabel": {
       "Secondary education": "Secondary education",
       "Undergraduate": "Undergraduate",

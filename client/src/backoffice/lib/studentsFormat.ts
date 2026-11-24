@@ -16,6 +16,13 @@ export function formatStudentEducation(locale: Locale, value: string): string {
   return studentOptionLabel(locale, 'educationLabel', value)
 }
 
+/** Portal 把年龄段存成固定英文选项（Under 18、18–24 … 65+，中间是 en dash）；规则同兴趣，也接受普通连字符。 */
+export function formatStudentAgeRange(locale: Locale, value: string): string {
+  const key = `studentDrawer.ageLabel.${value.trim().replace('-', '–')}`
+  const label = t(locale, key)
+  return label === key ? value : label
+}
+
 /**
  * Portal 把国家存成选项列表里的英文名称（如 United Kingdom）；列表可由运营修改。
  * 若存的是两位 ISO 代码，用平台的 Intl.DisplayNames；否则查语言包；都不认识就原样显示。

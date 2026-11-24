@@ -14,7 +14,7 @@ import type { Locale } from '../lib/i18n/config'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import { studentsApi } from '../lib/studentsApi'
-import { EMAIL_PATTERN, emailDelivery, formatStudentCountry, formatStudentDate, formatStudentEducation, formatStudentInterest, initialOf, studentErrorText, type EmailDelivery } from '../lib/studentsFormat'
+import { EMAIL_PATTERN, emailDelivery, formatStudentAgeRange, formatStudentCountry, formatStudentDate, formatStudentEducation, formatStudentInterest, initialOf, studentErrorText, type EmailDelivery } from '../lib/studentsFormat'
 
 type ModalKind = 'deactivate' | 'activate' | 'email' | 'password' | 'resend' | 'discard'
 type Notice = { tone: 'ok' | 'error'; text: string }
@@ -237,7 +237,7 @@ export function StudentDrawer({
                 <h3 className="smSectionTitle">{t(locale, 'studentDrawer.profile')}</h3>
                 <dl className="smGrid">
                   <div><dt>{t(locale, 'studentDrawer.country')}</dt><dd>{detail.profile.country ? formatStudentCountry(locale, detail.profile.country) : t(locale, 'studentDrawer.notProvided')}</dd></div>
-                  <div><dt>{t(locale, 'studentDrawer.ageRange')}</dt><dd>{detail.profile.ageRange ?? t(locale, 'studentDrawer.notProvided')}</dd></div>
+                  <div><dt>{t(locale, 'studentDrawer.ageRange')}</dt><dd>{detail.profile.ageRange ? formatStudentAgeRange(locale, detail.profile.ageRange) : t(locale, 'studentDrawer.notProvided')}</dd></div>
                   <div><dt>{t(locale, 'studentDrawer.education')}</dt><dd>{detail.profile.education ? formatStudentEducation(locale, detail.profile.education) : t(locale, 'studentDrawer.notProvided')}</dd></div>
                   <div>
                     <dt>{t(locale, 'studentDrawer.interests')}</dt>

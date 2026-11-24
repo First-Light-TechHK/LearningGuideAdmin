@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { StudentActionEmail } from '../src/backoffice/contracts/students'
-import { emailDelivery, formatStudentCountry, formatStudentEducation, formatStudentInterest } from '../src/backoffice/lib/studentsFormat'
+import { emailDelivery, formatStudentAgeRange, formatStudentCountry, formatStudentEducation, formatStudentInterest } from '../src/backoffice/lib/studentsFormat'
 
 describe('BUG-0357: Portal interest values are shown in the BackOffice language', () => {
   test('zh-CN translates every Portal interest label', () => {
@@ -55,6 +55,29 @@ describe('BUG-0357: Portal country and education values are shown in the BackOff
     assert.equal(formatStudentCountry('zh-CN', 'ZZ'), 'ZZ')
     assert.equal(formatStudentCountry('zh-CN', 'XX'), 'XX')
     assert.equal(formatStudentEducation('zh-CN', "Bachelor's degree"), "Bachelor's degree")
+  })
+})
+
+describe('R2-08: Portal age ranges are shown in the BackOffice language', () => {
+  test('zh-CN translates every Portal age range, with the Portal Chinese wording', () => {
+    const expected: Array<[string, string]> = [
+      ['Under 18', '18 岁以下'],
+      ['18–24', '18–24 岁'],
+      ['25–34', '25–34 岁'],
+      ['35–44', '35–44 岁'],
+      ['45–54', '45–54 岁'],
+      ['55–64', '55–64 岁'],
+      ['65+', '65 岁及以上'],
+    ]
+    for (const [stored, label] of expected) {
+      assert.equal(formatStudentAgeRange('zh-CN', stored), label)
+      assert.equal(formatStudentAgeRange('en-GB', stored), stored)
+    }
+  })
+
+  test('a plain hyphen is accepted and unknown values are shown as stored', () => {
+    assert.equal(formatStudentAgeRange('zh-CN', '25-34'), '25–34 岁')
+    assert.equal(formatStudentAgeRange('zh-CN', '100+'), '100+')
   })
 })
 
