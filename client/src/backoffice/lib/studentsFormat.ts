@@ -8,7 +8,34 @@ import { t } from './i18n/messages'
  * 避免 Portal 新增标签时界面出现空白。
  */
 export function formatStudentInterest(locale: Locale, value: string): string {
-  const key = `studentDrawer.interestLabel.${value.trim()}`
+  return studentOptionLabel(locale, 'interestLabel', value)
+}
+
+/** Portal 把学历存成固定英文选项（Secondary education … Other）；规则同兴趣。 */
+export function formatStudentEducation(locale: Locale, value: string): string {
+  return studentOptionLabel(locale, 'educationLabel', value)
+}
+
+/**
+ * Portal 把国家存成选项列表里的英文名称（如 United Kingdom）；列表可由运营修改。
+ * 若存的是两位 ISO 代码，用平台的 Intl.DisplayNames；否则查语言包；都不认识就原样显示。
+ */
+export function formatStudentCountry(locale: Locale, value: string): string {
+  const trimmed = value.trim()
+  if (/^[A-Za-z]{2}$/.test(trimmed) && trimmed.toUpperCase() !== 'ZZ') {
+    try {
+      const name = new Intl.DisplayNames([locale], { type: 'region', fallback: 'none' }).of(trimmed.toUpperCase())
+      if (name) return name
+    } catch {
+      // 非法区域代码：按原值显示
+    }
+    return value
+  }
+  return studentOptionLabel(locale, 'countryLabel', value)
+}
+
+function studentOptionLabel(locale: Locale, group: string, value: string): string {
+  const key = `studentDrawer.${group}.${value.trim()}`
   const label = t(locale, key)
   return label === key ? value : label
 }

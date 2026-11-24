@@ -2455,6 +2455,25 @@
       "Literature": "Literature",
       "Arts": "Arts"
     },
+    "countryLabel": {
+      "Australia": "Australia",
+      "Canada": "Canada",
+      "China": "China",
+      "France": "France",
+      "Germany": "Germany",
+      "Hong Kong SAR": "Hong Kong SAR",
+      "Ireland": "Ireland",
+      "Singapore": "Singapore",
+      "United Kingdom": "United Kingdom",
+      "United States": "United States"
+    },
+    "educationLabel": {
+      "Secondary education": "Secondary education",
+      "Undergraduate": "Undergraduate",
+      "Postgraduate": "Postgraduate",
+      "Doctorate": "Doctorate",
+      "Other": "Other"
+    },
     "language": "Language",
     "signIn": "Sign-in methods",
     "notProvided": "Not provided",

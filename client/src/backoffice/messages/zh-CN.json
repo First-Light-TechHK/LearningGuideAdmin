@@ -2455,6 +2455,25 @@
       "Literature": "文学",
       "Arts": "艺术"
     },
+    "countryLabel": {
+      "Australia": "澳大利亚",
+      "Canada": "加拿大",
+      "China": "中国",
+      "France": "法国",
+      "Germany": "德国",
+      "Hong Kong SAR": "中国香港特别行政区",
+      "Ireland": "爱尔兰",
+      "Singapore": "新加坡",
+      "United Kingdom": "英国",
+      "United States": "美国"
+    },
+    "educationLabel": {
+      "Secondary education": "中等教育",
+      "Undergraduate": "本科",
+      "Postgraduate": "研究生",
+      "Doctorate": "博士",
+      "Other": "其他"
+    },
     "language": "语言",
     "signIn": "登录方式",
     "notProvided": "未填写",

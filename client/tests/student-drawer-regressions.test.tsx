@@ -96,6 +96,33 @@ describe('BUG-0357: the Interests field follows the BackOffice language', () => 
       server.restore()
     }
   })
+
+  test('zh-CN shows country and education in Chinese, unknown values as stored', async () => {
+    const server = await openDrawer(
+      'zh-CN',
+      details({ profile: { ...PROFILE, country: 'United Kingdom', education: 'Postgraduate' } }),
+    )
+    try {
+      assert.ok(await screen.findByText('英国'))
+      assert.ok(screen.getByText('研究生'))
+      assert.equal(screen.queryByText('United Kingdom'), null)
+    } finally {
+      server.restore()
+    }
+  })
+
+  test('zh-CN shows an unlisted country and education as stored', async () => {
+    const server = await openDrawer(
+      'zh-CN',
+      details({ profile: { ...PROFILE, country: 'Narnia', education: "Bachelor's degree" } }),
+    )
+    try {
+      assert.ok(await screen.findByText('Narnia'))
+      assert.ok(screen.getByText("Bachelor's degree"))
+    } finally {
+      server.restore()
+    }
+  })
 })
 
 describe('BUG-0358/0359: email delivery states from the Portal contract', () => {
