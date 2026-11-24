@@ -56,11 +56,11 @@
 
 .notificationTable {
   table-layout: fixed;
-  min-width: 860px;
+  min-width: 760px;
 }
 
 .notificationTable th {
-  padding: 0 12px;
+  padding: 0 8px;
   white-space: normal;
   line-height: 1.25;
 }
@@ -68,14 +68,16 @@
 .notificationTable td {
   height: auto;
   min-height: 48px;
-  padding: 10px 12px;
+  padding: 10px 8px;
   white-space: normal;
   overflow: visible;
+  overflow-wrap: anywhere;
   text-overflow: clip;
   line-height: 1.35;
   vertical-align: middle;
 }
 
+.notificationTable th:last-child,
 .notificationTable td:last-child { text-align: left; }
 
 .notificationGroupRow td {
@@ -224,7 +226,7 @@
 }
 .notificationStatusInline { display: inline-flex; align-items: center; gap: 6px; }
 .notificationLastEdited { color: var(--lg-muted); }
-.notificationEditorActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.notificationEditorActions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; flex: 0 0 auto; }
 
 .notificationSystemBox {
   position: relative;
@@ -511,8 +513,9 @@
   flex: 0 0 auto;
 }
 .notificationListCount { font-size: 13px; color: var(--lg-muted); }
-.notificationBroadcastTable td { vertical-align: top; }
-.notificationTable td.notificationNoWrap { white-space: nowrap; }
+.notificationBroadcastTable td { vertical-align: middle; }
+.notificationTable td.notificationNoWrap,
+.notificationTable th.notificationNoWrap { white-space: nowrap; }
 .notificationTable td.notificationMutedCell { color: #98a2b3; }
 .notificationReadCell { display: flex; flex-direction: column; gap: 2px; }
 .notificationReadRate { font-size: 11px; color: var(--lg-muted); }
@@ -581,7 +584,7 @@
 .notificationChannelFilter { width: 150px; flex: 0 0 150px; }
 .notificationDateRange { display: inline-flex; align-items: center; gap: 6px; }
 .notificationDateInput { width: 140px; height: 34px; padding: 0 8px; font-size: 12px; }
-.notificationRecipientCell > span { display: block; }
+.notificationRecipientCell > span { display: block; overflow-wrap: anywhere; }
 .notificationTestTag { display: inline-flex; width: auto; margin-left: 8px; vertical-align: middle; }
 .notificationStatusBadge {
   display: inline-flex;
@@ -593,6 +596,7 @@
   font-weight: 600;
 }
 .notificationStatusOk { background: #dcfce7; color: #15803d; }
+.notificationStatusDelivered { background: #f1f5f9; color: #475569; }
 .notificationStatusFailed { background: #fee2e2; color: #b91c1c; }
 .notificationStatusSent { background: #e0f2fe; color: #0369a1; }
 .notificationStatusWithdrawn { background: #f1f5f9; color: #475569; }

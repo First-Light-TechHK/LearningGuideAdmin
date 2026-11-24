@@ -30,7 +30,8 @@ const STATUSES: NotificationLogStatus[] = ['delivered', 'read', 'withdrawn', 'se
 
 function statusClass(status: NotificationLogStatus): string {
   if (status === 'failed') return 'notificationStatusBadge notificationStatusFailed'
-  if (status === 'read' || status === 'delivered') return 'notificationStatusBadge notificationStatusOk'
+  if (status === 'read') return 'notificationStatusBadge notificationStatusOk'
+  if (status === 'delivered') return 'notificationStatusBadge notificationStatusDelivered'
   if (status === 'sent') return 'notificationStatusBadge notificationStatusSent'
   return 'notificationStatusBadge notificationStatusWithdrawn'
 }
@@ -201,11 +202,11 @@ export function SendLogTab({
         <table className="table notificationTable notificationLogTable" data-testid="send-log-table">
           <colgroup>
             <col style={{ width: '17%' }} />
-            <col style={{ width: '25%' }} />
+            <col style={{ width: '24%' }} />
             <col style={{ width: '25%' }} />
             <col style={{ width: '9%' }} />
-            <col style={{ width: '16%' }} />
-            <col style={{ width: '8%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '11%' }} />
           </colgroup>
           <thead>
             <tr>
@@ -272,7 +273,7 @@ function SendLogDrawer({
 }) {
   const locale = useLocale()
   return (
-    <div className="smDrawerBackdrop" role="dialog" aria-modal="true" aria-label="Send log detail">
+    <div className="smDrawerBackdrop" role="dialog" aria-modal="true" aria-label={t(locale, 'notification.sendLog.detailLabel')}>
       <div className="smDrawer">
         <div className="smDrawerHead">
           <div>
@@ -300,13 +301,18 @@ function SendLogDrawer({
                   <p className="notificationDetailLink">{detail.message.buttonText}</p>
                 ) : null}
                 <div className="smDrawerMeta">
-                  <span>
-                    {t(locale, 'notification.sendLog.language')}:{' '}
-                    {detail.message.language === 'zh' ? '中文' : 'English'}
-                  </span>
-                  {detail.message.category ? <span>{detail.message.category}</span> : null}
-                  {detail.message.readAt ? <span>Read {formatHktDateTime(detail.message.readAt)}</span> : null}
-                  {detail.message.withdrawnAt ? <span>Withdrawn {formatHktDateTime(detail.message.withdrawnAt)}</span> : null}
+                  {[
+                    `${t(locale, 'notification.sendLog.language')}: ${detail.message.language === 'zh' ? '中文' : 'English'}`,
+                    detail.message.category ? t(locale, `notification.categories.${detail.message.category}`) : null,
+                    detail.message.readAt
+                      ? t(locale, 'notification.sendLog.readAt', { date: formatHktDateTime(detail.message.readAt) })
+                      : null,
+                    detail.message.withdrawnAt
+                      ? t(locale, 'notification.sendLog.withdrawnAt', { date: formatHktDateTime(detail.message.withdrawnAt) })
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </div>
               </>
             ) : (
@@ -326,7 +332,7 @@ function SendLogDrawer({
             </ul>
           </section>
           <section className="smSection">
-            <h3 className="smSectionTitle">Details</h3>
+            <h3 className="smSectionTitle">{t(locale, 'notification.sendLog.details')}</h3>
             <dl className="smGrid">
               <dt>{t(locale, 'notification.sendLog.recipient')}</dt>
               <dd>

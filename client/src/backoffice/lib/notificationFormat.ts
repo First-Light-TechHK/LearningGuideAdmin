@@ -88,10 +88,11 @@ export function categoryLabel(category: NotificationCategory): string {
 
 export function groupTemplates(
   templates: readonly NotificationTemplate[],
+  label: (category: NotificationCategory) => string = categoryLabel,
 ): Array<{ category: NotificationCategory; label: string; items: NotificationTemplate[] }> {
   return NOTIFICATION_CATEGORY_ORDER.map((category) => ({
     category,
-    label: categoryLabel(category),
+    label: label(category),
     items: templates.filter((template) => template.category === category),
   })).filter((group) => group.items.length > 0)
 }

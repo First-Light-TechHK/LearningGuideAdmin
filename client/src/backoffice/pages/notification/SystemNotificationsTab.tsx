@@ -64,7 +64,7 @@ export function SystemNotificationsTab({
   const [notice, setNotice] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const groups = groupTemplates(templates)
+  const groups = groupTemplates(templates, (category) => t(locale, `notification.categories.${category}`))
 
   async function setEnabled(template: NotificationTemplate, enabled: boolean) {
     setBusy(true)
@@ -109,11 +109,11 @@ export function SystemNotificationsTab({
       <div className="tableWrap">
         <table className="table notificationTable" data-testid="system-notifications-table">
           <colgroup>
-            <col style={{ width: '24%' }} />
+            <col style={{ width: '23%' }} />
             <col />
+            <col style={{ width: '112px' }} />
             <col style={{ width: '124px' }} />
-            <col style={{ width: '150px' }} />
-            <col style={{ width: '232px' }} />
+            <col style={{ width: '184px' }} />
           </colgroup>
           <thead>
             <tr>
@@ -466,12 +466,12 @@ export function NotificationEditor({
           {t(locale, 'notification.backToSettings')}
         </button>
         <span aria-hidden="true">/</span>
-        <span>{template.en.title || template.id}</span>
+        <span>{template.name ?? template.en.title ?? template.id}</span>
       </div>
 
       <div className="notificationEditorHead">
         <div>
-          <h1 className="notificationEditorTitle">{template.en.title || template.id}</h1>
+          <h1 className="notificationEditorTitle">{template.name ?? template.en.title ?? template.id}</h1>
           <div className="notificationEditorMeta">
             <span className="notificationIdInline">{template.id}</span>
             {template.category === 'subscription' ? (

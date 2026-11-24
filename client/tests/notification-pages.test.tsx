@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import type {
   NotificationBroadcast,
@@ -30,6 +30,15 @@ const employee = {
   emailVerification: 'VERIFIED' as const,
   displayStatus: 'Active' as const,
   isBootstrapAdmin: false,
+}
+
+/** The broadcast editor reads the signed-in operator (Send test to me). */
+function BroadcastEditorAsAdmin(props: React.ComponentProps<typeof BroadcastEditor>) {
+  return (
+    <EmployeeContext.Provider value={employee}>
+      <BroadcastEditor {...props} />
+    </EmployeeContext.Provider>
+  )
 }
 
 function ok<T>(data: T) {
@@ -272,11 +281,27 @@ test('system notification rows use the fixed catalogue name when the Portal send
   assert.ok(row.querySelector('.notificationStatusCell [data-testid="notification-edit-SUB_RENEWAL_REMINDER"]'))
 })
 
+test('group headings follow the interface language (A-11)', () => {
+  render(
+    <MemoryRouter initialEntries={['/zh-CN/x']}>
+      <Routes>
+        <Route
+          path="/:locale/x"
+          element={
+            <SystemNotificationsTab templates={[template()]} loading={false} errorMessage={null} onReload={() => {}} onEdit={() => {}} />
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  )
+  assert.ok(screen.getByText('订阅 · 1'))
+})
+
 test('the broadcast preview has no sample-values note, the system preview has one (B05)', () => {
   globalThis.fetch = (() => ok({ ok: true, all: 1, paid: 1 })) as typeof fetch
   const { unmount } = render(
     <MemoryRouter>
-      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+      <BroadcastEditorAsAdmin onBack={() => {}} onSaved={() => {}} />
     </MemoryRouter>,
   )
   const preview = screen.getByTestId('notification-preview')
@@ -297,7 +322,7 @@ test('new broadcast validates the button pair and shows an announcement preview 
   globalThis.fetch = (() => ok({ ok: true, all: 12500, paid: 3200 })) as typeof fetch
   render(
     <MemoryRouter>
-      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+      <BroadcastEditorAsAdmin onBack={() => {}} onSaved={() => {}} />
     </MemoryRouter>,
   )
   fireEvent.change(screen.getByPlaceholderText('e.g. Learn more'), {
@@ -359,6 +384,10 @@ test('send log renders statuses, failure reasons, Test tags and filters (B06)', 
 
   assert.ok(await screen.findByText('margaret.h@gmail.com'))
   assert.ok(screen.getAllByText('Delivered').length > 0)
+  // Delivered is neutral, only Read is green (A-07)
+  const delivered = within(screen.getByTestId('send-log-row-log-1')).getByText('Delivered')
+  assert.ok(delivered.className.includes('notificationStatusDelivered'))
+  assert.ok(!delivered.className.includes('notificationStatusOk'))
   assert.ok(screen.getAllByText('Failed').length > 0)
   assert.ok(screen.getByText('Bounced: mailbox not found'))
   assert.ok(screen.getByText('Test'))
@@ -371,6 +400,77 @@ test('send log renders statuses, failure reasons, Test tags and filters (B06)', 
   assert.match(requested, /send-log\?/)
   assert.match(requested, /from=\d{4}-\d{2}-\d{2}/)
   assert.match(requested, /to=\d{4}-\d{2}-\d{2}/)
+})
+
+test('editor heading and breadcrumb keep the fixed name when the English title changes (A-02)', () => {
+  globalThis.fetch = (() => ok({ ok: true })) as typeof fetch
+  render(
+    <MemoryRouter>
+      <EmployeeContext.Provider value={employee}>
+        <NotificationEditor
+          template={template({ name: 'Renewal reminder (D-5)' })}
+          onBack={() => {}}
+          onReload={() => {}}
+          onSaved={() => {}}
+        />
+      </EmployeeContext.Provider>
+    </MemoryRouter>,
+  )
+  fireEvent.change(screen.getByDisplayValue('Your subscription renews soon'), { target: { value: 'Renews very soon' } })
+  const heading = screen.getByRole('heading', { level: 1 })
+  assert.equal(heading.textContent, 'Renewal reminder (D-5)')
+  assert.ok(heading.closest('[data-testid="notification-editor"]')?.querySelector('.notificationBreadcrumb')?.textContent?.includes('Renewal reminder (D-5)'))
+})
+
+test('send log drawer is translated and separates its details with a dot in Chinese (A-03)', async () => {
+  const entry = {
+    id: 'log-1',
+    occurredAt: '2026-11-02T02:00:00.000Z',
+    recipientEmail: 'margaret.h@gmail.com',
+    recipientName: 'Margaret Hughes',
+    notificationId: 'n1',
+    templateId: 'SUB_RENEWAL_REMINDER',
+    broadcastId: null,
+    notificationName: 'Renewal reminder (D-5)',
+    channel: 'in_app',
+    status: 'read',
+    failureReason: null,
+    isTest: false,
+    related: null,
+  }
+  globalThis.fetch = ((url: string) =>
+    String(url).includes('send-log/log-1')
+      ? ok({
+          ok: true,
+          entry,
+          message: {
+            notificationId: 'n1',
+            title: 'Renews soon',
+            body: 'Body',
+            buttonText: null,
+            buttonLink: null,
+            language: 'en',
+            category: 'subscription',
+            createdAt: '2026-11-02T02:00:00.000Z',
+            readAt: '2026-11-02T03:00:00.000Z',
+            withdrawnAt: null,
+          },
+          timeline: [],
+          isTest: false,
+        })
+      : ok({ ok: true, items: [entry], total: 1, page: 1, pageSize: 20 })) as typeof fetch
+  render(
+    <MemoryRouter initialEntries={['/zh-CN/log']}>
+      <Routes>
+        <Route path="/:locale/log" element={<SendLogTab templates={[template()]} broadcasts={[]} />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+  fireEvent.click(await screen.findByText('查看'))
+  const drawer = await screen.findByRole('dialog', { name: '发送日志详情' })
+  assert.ok(within(drawer).getByText('详情'))
+  assert.ok(within(drawer).getByText(/^语言: English · 订阅 · 已读于 /))
+  assert.equal(within(drawer).queryByText('Details'), null)
 })
 
 type Recorded = { method: string; url: string; body: Record<string, unknown> | null }
@@ -398,7 +498,7 @@ const okBody = (data: unknown) => json(200, { success: true, data, error: null, 
 async function sendEditedDraft() {
   render(
     <MemoryRouter>
-      <BroadcastEditor
+      <BroadcastEditorAsAdmin
         broadcast={broadcast({ id: 'b2', status: 'draft', sentAt: null })}
         onBack={() => {}}
         onSaved={() => {}}
@@ -446,7 +546,7 @@ test('Send now on a new broadcast creates the draft, then sends', async () => {
   })
   render(
     <MemoryRouter>
-      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+      <BroadcastEditorAsAdmin onBack={() => {}} onSaved={() => {}} />
     </MemoryRouter>,
   )
   const inputs = screen.getAllByRole('textbox')
@@ -462,13 +562,61 @@ test('Send now on a new broadcast creates the draft, then sends', async () => {
   assert.deepEqual(writes[1].body, { action: 'send' })
 })
 
-test('the broadcast editor has no "Send test to me" control (NTF-BC-014 not delivered in P0)', () => {
-  globalThis.fetch = (() => ok({ ok: true, all: 1, paid: 1 })) as typeof fetch
+test('Send now frees the buttons when the saved draft comes back without an id (A-13)', async () => {
+  const requests = recordFetch((request) =>
+    request.method === 'GET' ? okBody({ all: 12500, paid: 3200 }) : okBody({ ok: true }),
+  )
   render(
     <MemoryRouter>
-      <BroadcastEditor onBack={() => {}} onSaved={() => {}} />
+      <BroadcastEditorAsAdmin onBack={() => {}} onSaved={() => {}} />
     </MemoryRouter>,
   )
-  assert.equal(screen.queryByRole('button', { name: /Send test|发送测试/ }), null)
-  assert.ok(screen.getByRole('button', { name: 'Send now' }))
+  const inputs = screen.getAllByRole('textbox')
+  fireEvent.change(inputs[0], { target: { value: 'Hello' } })
+  fireEvent.change(inputs[1], { target: { value: 'World' } })
+  fireEvent.click(screen.getByTestId('broadcast-send-now'))
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Send now' }))
+  await waitFor(() => assert.ok(screen.queryByRole('dialog') === null))
+  assert.equal(requests.filter((r) => r.method === 'PATCH').length, 0)
+  assert.equal((screen.getByTestId('broadcast-send-now') as HTMLButtonElement).disabled, false)
+})
+
+test('"Send test to me" sends the on-screen content without saving, and says who got it (NTF-BC-014)', async () => {
+  const requests = recordFetch((request) =>
+    request.method === 'GET' ? okBody({ all: 12500, paid: 3200 }) : okBody({ ok: true }),
+  )
+  render(
+    <MemoryRouter>
+      <BroadcastEditorAsAdmin
+        broadcast={broadcast({ id: 'b2', status: 'draft', sentAt: null })}
+        onBack={() => {}}
+        onSaved={() => {}}
+      />
+    </MemoryRouter>,
+  )
+  fireEvent.change(screen.getByDisplayValue('Scheduled maintenance on 15 Nov'), {
+    target: { value: 'Unsaved wording' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Send test to me' }))
+  assert.ok(await screen.findByText(/jack@example\.com/))
+  const writes = requests.filter((r) => r.method !== 'GET')
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].method, 'POST')
+  assert.match(writes[0].url, /broadcasts\/test$/)
+  assert.equal(writes[0].body?.titleEn, 'Unsaved wording')
+  assert.equal(writes[0].body?.language, 'en')
+  assert.equal('operatorEmail' in (writes[0].body ?? {}), false)
+})
+
+test('"Send test to me" does not send invalid content (NTF-BC-014)', async () => {
+  const requests = recordFetch(() => okBody({ all: 1, paid: 1 }))
+  render(
+    <MemoryRouter>
+      <BroadcastEditorAsAdmin onBack={() => {}} onSaved={() => {}} />
+    </MemoryRouter>,
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Send test to me' }))
+  assert.ok(await screen.findByRole('alert'))
+  assert.equal(requests.filter((r) => r.method !== 'GET').length, 0)
 })

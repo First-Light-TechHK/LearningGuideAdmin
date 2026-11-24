@@ -83,6 +83,12 @@
       "note": "Subscription notifications can't be turned off. If a Chinese version is missing, Chinese-language learners get the English version. Payment receipts and card-expiry emails are sent by Stripe and set up in the Stripe Dashboard, not here.",
       "noCreateDelete": "System notifications are fixed at 13. They can't be created or deleted here."
     },
+    "categories": {
+      "subscription": "Subscription",
+      "support": "Support",
+      "course": "Course",
+      "study_group": "Study group"
+    },
     "columns": {
       "notification": "Notification",
       "trigger": "Trigger",
@@ -142,6 +148,7 @@
       "readOnly": "Your account can view this page but not change it."
     },
     "broadcasts": {
+      "column": "Broadcast",
       "count": "{count} broadcasts",
       "new": "+ New broadcast",
       "newTitle": "New broadcast",
@@ -172,6 +179,7 @@
       "buttonPlaceholder": "e.g. Learn more",
       "linkPlaceholder": "https://…",
       "announcement": "ANNOUNCEMENT",
+      "testSent": "Test message sent to the learner account for {email}",
       "sendNowNote": "“Send now” sends the in-app message straight away to everyone in the audience at that moment. You can withdraw it later from the Broadcasts list.",
       "sendConfirmTitle": "Send this broadcast now?",
       "sendConfirmBody": "Send to about {count} learners now? You can't edit it after sending.",
@@ -208,6 +216,10 @@
       "test": "Test",
       "footer": "In-app: Delivered → Read · Email: Sent → Delivered or Failed · Logs kept for 180 days",
       "detailTitle": "Message detail",
+      "detailLabel": "Send log detail",
+      "details": "Details",
+      "readAt": "Read {date}",
+      "withdrawnAt": "Withdrawn {date}",
       "language": "Language",
       "timeline": "Status history",
       "failureReason": "Failure reason",

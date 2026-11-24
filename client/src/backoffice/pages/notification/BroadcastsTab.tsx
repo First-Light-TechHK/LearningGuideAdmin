@@ -10,6 +10,7 @@ import type {
   NotificationCopy,
   NotificationLanguage,
 } from '../../contracts/notifications'
+import { useEmployee } from '../../employeeSession'
 import { t } from '../../lib/i18n/messages'
 import { useLocale } from '../../lib/navigation'
 import { notificationsApi } from '../../lib/notificationsApi'
@@ -138,22 +139,22 @@ export function BroadcastsTab({
       <div className="tableWrap">
         <table className="table notificationTable notificationBroadcastTable" data-testid="broadcast-table">
           <colgroup>
-            <col style={{ width: '25%' }} />
-            <col style={{ width: '15%' }} />
+            <col style={{ width: '22%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '17%' }} />
             <col style={{ width: '10%' }} />
-            <col style={{ width: '15%' }} />
             <col style={{ width: '11%' }} />
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '15%' }} />
+            <col style={{ width: '16%' }} />
           </colgroup>
           <thead>
             <tr>
-              <th>Broadcast</th>
+              <th>{t(locale, 'notification.broadcasts.column')}</th>
               <th>{t(locale, 'notification.broadcasts.audience')}</th>
               <th>{t(locale, 'notification.columns.status')}</th>
               <th>{t(locale, 'notification.broadcasts.sentAt')}</th>
               <th>{t(locale, 'notification.broadcasts.recipientsRead')}</th>
-              <th>{t(locale, 'notification.broadcasts.createdBy')}</th>
+              <th className="notificationNoWrap">{t(locale, 'notification.broadcasts.createdBy')}</th>
               <th aria-label={t(locale, 'notification.columns.actions')} />
             </tr>
           </thead>
@@ -173,7 +174,7 @@ export function BroadcastsTab({
                     <span className="notificationId">{broadcastLanguageLabel(broadcast)}</span>
                   )}
                 </td>
-                <td className="notificationNoWrap">
+                <td>
                   {broadcast.audience === 'paid'
                     ? t(locale, 'notification.broadcasts.audiencePaid')
                     : t(locale, 'notification.broadcasts.audienceAll')}
@@ -391,6 +392,8 @@ export function BroadcastEditor({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmSend, setConfirmSend] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const employee = useEmployee()
 
   useEffect(() => {
     void notificationsApi.audiences().then((result) => {
@@ -488,6 +491,16 @@ export function BroadcastEditor({
     if (id) onSaved(t(locale, 'notification.broadcasts.saved'))
   }
 
+  async function sendTest() {
+    if (!validate()) return
+    setBusy(true)
+    setNotice(null)
+    const result = await notificationsApi.testBroadcast({ ...draft, language })
+    setBusy(false)
+    if (result.success) setNotice(t(locale, 'notification.broadcasts.testSent', { email: employee.loginEmail }))
+    else setError(errorText(locale, result))
+  }
+
   async function sendNow() {
     if (!validate()) return
     setConfirmSend(true)
@@ -498,6 +511,7 @@ export function BroadcastEditor({
     setBusy(true)
     const id = await saveDraft(true)
     if (!id) {
+      setBusy(false)
       setConfirmSend(false)
       return
     }
@@ -545,12 +559,22 @@ export function BroadcastEditor({
           <button type="button" className="button buttonGhost buttonCompact" onClick={() => void onSaveDraft()} disabled={busy}>
             {t(locale, 'notification.broadcasts.saveDraft')}
           </button>
+          <button
+            type="button"
+            className="button buttonGhost buttonCompact"
+            onClick={() => void sendTest()}
+            disabled={busy}
+            data-testid="broadcast-send-test"
+          >
+            {t(locale, 'notification.sendTestToMe')}
+          </button>
           <button type="button" className="button buttonCompact" onClick={() => void sendNow()} disabled={busy} data-testid="broadcast-send-now">
             {t(locale, 'notification.broadcasts.sendNow')}
           </button>
         </div>
       </div>
 
+      {notice ? <div className="alert alertOk" role="status">{notice}</div> : null}
       {error ? <div className="alert alertError" role="alert">{error}</div> : null}
 
       <div className="notificationEditorGrid notificationBroadcastEditor">
