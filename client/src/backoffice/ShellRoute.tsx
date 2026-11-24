@@ -39,7 +39,8 @@ export function ShellRoute() {
   const [capabilities, setCapabilities] = useState<ReadonlySet<CapabilityId> | null>(null)
   // undefined = 会话还没回来；null = 旧服务端（不额外限制）；Set = 该账号生效的功能键
   const [accountFeatures, setAccountFeatures] = useState<AccountFeatures | undefined>(undefined)
-  const [appEnv, setAppEnv] = useState<string | null>(null)
+  // undefined = health has not answered yet (grey wall, keystone without a name); null = read failed ("Unknown environment")
+  const [appEnv, setAppEnv] = useState<string | null | undefined>(undefined)
   const [envLabel, setEnvLabel] = useState<string | null>(null)
 
   const load = useCallback(() => {
@@ -146,6 +147,7 @@ export function ShellRoute() {
         menus={menus}
         workspace={menu !== null && WORKSPACE_MENUS.has(menu)}
         initialCollapsed={state.sidebarState === 'collapsed'}
+        environment={environment}
       >
         <Outlet />
       </AppShell>

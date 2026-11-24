@@ -3404,7 +3404,8 @@
 
 .hdReviewLayout {
   position: relative;
-  flex: 1 0 520px;
+  /* 440, not 520: the environment wall takes about 70px of the screen height, and one screen must still hold the primary button */
+  flex: 1 0 440px;
   min-height: 0;
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);

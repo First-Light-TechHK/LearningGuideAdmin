@@ -30,6 +30,16 @@ for (const item of cases) {
   })
 }
 
+test('environment identity: not answered yet is pending and unnamed, failed read is Unknown', () => {
+  const waiting = resolveEnvironment(undefined, null)
+  assert.equal(waiting.kind, 'neutral')
+  assert.equal(waiting.pending, true)
+  assert.equal(environmentName('en-GB', waiting), '')
+  const failed = resolveEnvironment(null, null)
+  assert.equal(failed.pending, undefined)
+  assert.equal(environmentName('en-GB', failed), 'Unknown environment')
+})
+
 test('environment identity: blank code becomes null', () => {
   assert.equal(resolveEnvironment('  ', null).code, null)
   assert.equal(resolveEnvironment(' uat ', null).code, 'UAT')

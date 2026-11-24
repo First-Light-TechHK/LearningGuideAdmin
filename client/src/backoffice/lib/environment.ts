@@ -15,6 +15,8 @@ export type EnvironmentIdentity = {
   code: string | null
   /** 环境端点的 label；没有时为 null */
   label: string | null
+  /** true while /api/health has not answered yet: neutral wall, keystone without a name (not "Unknown") */
+  pending?: boolean
 }
 
 const NEUTRAL_UNKNOWN: EnvironmentIdentity = { kind: 'neutral', code: null, label: null }
@@ -28,6 +30,8 @@ export function resolveEnvironment(
   appEnv: string | null | undefined,
   label: string | null | undefined,
 ): EnvironmentIdentity {
+  // undefined = health has not answered yet; null = it answered and failed
+  if (appEnv === undefined) return { kind: 'neutral', code: null, label: clean(label), pending: true }
   const code = clean(appEnv)?.toUpperCase() ?? null
   const kind: EnvironmentKind =
     code === 'SANDBOX' ? 'sandbox' : code === 'PROD' || code === 'PRODUCTION' ? 'production' : 'neutral'
@@ -35,6 +39,7 @@ export function resolveEnvironment(
 }
 
 export function environmentName(locale: Locale, identity: EnvironmentIdentity): string {
+  if (identity.pending) return ''
   if (identity.kind === 'sandbox') return t(locale, 'shell.environment.sandbox')
   if (identity.kind === 'production') return t(locale, 'shell.environment.production')
   // 服务端在没配 ENVIRONMENT_LABEL 时按版本号规则推出 Sandbox / Production，不是真名，不采用
