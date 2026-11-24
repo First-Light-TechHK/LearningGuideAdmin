@@ -16,6 +16,8 @@ import { cachedPreviewEntry } from '../lib/capabilities';
 import { useCoursePermissions } from '../lib/coursePermissions';
 import { categoryLabel } from '../lib/categoryLabel';
 import { FailureProvider } from './course-editor/feedback';
+import { versionName } from './course-editor/versionNumbering';
+import { runEchoMotion } from './course-editor/versionMotion';
 
 import { CourseInfoSection } from './course-editor/CourseInfoSection';
 import { CourseContentSection } from './course-editor/CourseContentSection';
@@ -160,6 +162,24 @@ export function CourseEditorPage() {
     () => categories.map((category) => ({ ...category, name: categoryLabel(locale, category.name) })),
     [categories, locale],
   );
+  const [copied, setCopied] = useState(false);
+  const copyCode = () => {
+    if (!course) return;
+    // Only say "Copied" when the browser really accepted the text.
+    if (!navigator.clipboard?.writeText) return;
+    void navigator.clipboard.writeText(course.code).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
+  };
+  const jumpToBlock = (block: 'current' | 'versions' | 'history') => {
+    const el = document.getElementById(`versions-block-${block}`);
+    el?.scrollIntoView?.({ block: 'start' });
+    el?.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
+  };
   const stepLabel = (complete: boolean) => L(locale, complete ? '已完成' : '未完成', complete ? 'Complete' : 'Incomplete');
 
   if (loading || !course) {
@@ -171,8 +191,10 @@ export function CourseEditorPage() {
     { id: 'info' as Tab, index: 1, label: L(locale, '课程信息', 'Course Information'), complete: course.completeness.steps.courseInformation.complete },
     { id: 'content' as Tab, index: 2, label: L(locale, '课程内容', 'Course Content'), complete: course.completeness.steps.content.complete },
     { id: 'trial' as Tab, index: 3, label: L(locale, '试看设置', 'Trial'), complete: course.completeness.steps.trial.complete },
-    { id: 'versions' as Tab, index: null, label: L(locale, '版本与发布', 'Versions & publishing'), complete: true },
+    // No mark on Versions: it is a place, not a step, so a tick there would only suggest that publishing is done.
+    { id: 'versions' as Tab, index: null, label: L(locale, '版本与发布', 'Versions & publishing'), complete: false },
   ];
+  const courseTitle = course.localizations.find((item) => item.language === 'en-GB')?.title?.trim() || course.localizations.find((item) => item.title.trim())?.title || course.code;
   const liveDotClass = course.liveStatus === 'ONLINE' ? 'isOnline' : course.liveStatus === 'HIDDEN' ? 'isHidden' : course.liveStatus === 'OFFLINE' ? 'isOffline' : '';
 
   return (
@@ -180,20 +202,32 @@ export function CourseEditorPage() {
     <section className="card cardGrow course-ui-page" data-testid="course-editor-page">
       <header className="course-ui-head">
         <div className="course-ui-headMain">
-          <button type="button" className="course-ui-back" style={buttonStyle} onClick={() => navigate(`/${locale}/course`)}>← {L(locale, '课程列表', 'Course Overview')}</button>
-          <div className="course-ui-headTitles">
-            <h1 className="course-ui-title">{course.localizations.find((item) => item.language === 'en-GB')?.title?.trim() || course.localizations.find((item) => item.title.trim())?.title || course.code}</h1>
-            <div className="course-ui-meta">
-              <span>{course.code}</span>
-              <span>·</span>
-              <span>{course.category ? categoryLabel(locale, course.category.name) : L(locale, '未分类', 'Uncategorized')}</span>
-              <span>·</span>
-              <span>{learningModeLabel(locale, course.learningMode)}</span>
-              <span>·</span>
-              <span>{course.learningLanguages.map((language) => languageLabel(locale, language)).join(locale.startsWith('zh') ? '、' : ', ')}</span>
-              <span>·</span>
-              <span>{course.lessons.length} {L(locale, '个课时', 'lessons')}</span>
-            </div>
+          <nav className="course-ui-crumb" aria-label={t(locale as Locale, 'course.ui.header.breadcrumb')}>
+            <button type="button" className="course-ui-crumbLink" onClick={() => navigate(`/${locale}/course`)}>‹ {L(locale, '课程列表', 'Course Overview')}</button>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page" className="course-ui-crumbHere">{courseTitle}</span>
+          </nav>
+          <div className="course-ui-titleRow">
+            <h1 className="course-ui-title">{courseTitle}</h1>
+            <span className="course-ui-meta">
+              <span className="course-ui-idChip">
+                {course.code}
+                <button type="button" className="course-ui-copy" aria-label={t(locale as Locale, 'course.ui.header.copyId')} title={t(locale as Locale, 'course.ui.header.copyId')} onClick={copyCode}>
+                  {copied
+                    ? <span className="course-ui-copied" aria-hidden="true">{t(locale as Locale, 'course.ui.header.copied')}</span>
+                    : <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h1" /></svg>}
+                </button>
+              </span>
+              <span role="status" className="visuallyHidden">{copied ? t(locale as Locale, 'course.ui.header.copied') : ''}</span>
+              {' · '}
+              {course.category ? categoryLabel(locale, course.category.name) : L(locale, '未分类', 'Uncategorized')}
+              {' · '}
+              {learningModeLabel(locale, course.learningMode)}
+              {' · '}
+              {course.learningLanguages.map((language) => languageLabel(locale, language)).join(locale.startsWith('zh') ? '、' : ', ')}
+              {' · '}
+              {course.lessons.length} {L(locale, '个课时', 'lessons')}
+            </span>
           </div>
         </div>
         <div className="course-ui-headActions">
@@ -203,14 +237,13 @@ export function CourseEditorPage() {
               ? L(locale, '生成预览链接…', 'Creating preview link…')
               : previewEntry === 'portal'
                 ? L(locale, '在 Portal 中预览', 'Preview in Portal')
-                : L(locale, '学员视角预览', 'Preview as learner')}
+                : L(locale, '以用户视角预览', 'Preview as learner')}
           </button>
-          <button type="button" style={primaryBtn} onClick={() => setTab('versions')}>{L(locale, '版本与发布', 'Versions & publishing')}</button>
         </div>
       </header>
 
       <div className="course-ui-summary" data-testid="course-status-summary">
-        <span className="course-ui-summaryGroup" data-testid="course-summary-draft">
+        <span className="course-ui-summaryGroup course-ui-summaryDraft" data-testid="course-summary-draft">
           <span className="course-ui-summaryLabel">{L(locale, '草稿', 'DRAFT')}</span>
           <span className="course-ui-summaryStrong">{course.hasDraft ? L(locale, '未发布', 'Not published') : L(locale, '无草稿', 'No draft')}</span>
           {course.hasDraft && (
@@ -225,15 +258,15 @@ export function CourseEditorPage() {
               <span>{L(locale, `已完成 ${course.completeness.completedSteps}/3 步`, `${course.completeness.completedSteps} of 3 steps complete`)}</span>
             </>
           )}
+          {tab !== 'versions' && <button type="button" className="course-ui-summaryLink" onClick={() => { setTab('versions'); window.setTimeout(runEchoMotion, 60); }}>{L(locale, '前往版本 →', 'Go to Versions →')}</button>}
         </span>
-        <span className="course-ui-summaryDivider" aria-hidden="true" />
-        <span className="course-ui-summaryGroup" data-testid="course-summary-live">
+        <span className="course-ui-summaryGroup course-ui-summaryLive" data-testid="course-summary-live">
           <span className="course-ui-summaryLabel">{L(locale, '线上', 'LIVE')}</span>
           {liveVersion ? (
             <>
               <span className={`course-ui-statusDot ${liveDotClass}`} aria-hidden="true" />
               <span className="course-ui-summaryStrong">{liveStatusLabel(locale, course.liveStatus)}</span>
-              <span>{liveVersion.versionLabel}</span>
+              <span>{versionName(locale, liveVersion.versionLabel)}</span>
               <span className="course-ui-summarySep">·</span>
               <span>{fmtDate(liveVersion.wentLiveAt ?? liveVersion.createdAt, locale)}</span>
             </>
@@ -241,7 +274,6 @@ export function CourseEditorPage() {
             <span>{L(locale, '从未发布', 'Not published')}</span>
           )}
         </span>
-        <button type="button" className="course-ui-summaryLink" onClick={() => setTab('versions')}>{L(locale, '前往版本 →', 'Go to Versions →')}</button>
       </div>
 
       <div className="course-ui-tabs" data-testid="course-tabs">
@@ -257,21 +289,30 @@ export function CourseEditorPage() {
           >
             {item.index !== null && <span className="course-ui-tabIndex">{item.index}</span>}
             <span>{item.label}</span>
-            <span
-              className={item.complete ? 'course-ui-tabMark isComplete' : 'course-ui-tabMark'}
-              role="img"
-              aria-label={stepLabel(item.complete)}
-              title={stepLabel(item.complete)}
-            >
-              {item.complete ? '✓' : '○'}
-            </span>
+            {item.index !== null && (
+              <span
+                className={item.complete ? 'course-ui-tabMark isComplete' : 'course-ui-tabMark'}
+                role="img"
+                aria-label={stepLabel(item.complete)}
+                title={stepLabel(item.complete)}
+              >
+                {item.complete ? '✓' : null}
+              </span>
+            )}
           </button>
         ))}
         <span className="course-ui-tabSpacer" aria-hidden="true" />
-        {course.learningLanguages.length > 1 && (
+        {tab === 'versions' && (
+          <div className="course-ui-onTab">
+            <button type="button" data-testid="versions-segment-history" onClick={() => jumpToBlock('history')}>
+              {t(locale as Locale, 'course.ui.versions.toHistory')}
+            </button>
+          </div>
+        )}
+        {tab !== 'versions' && course.learningLanguages.length > 1 && (
           <div className="course-ui-lang">
             <span>{L(locale, '内容语言', 'Content language')}</span>
-            <select value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
+            <select aria-label={L(locale, '内容语言', 'Content language')} value={contentLanguage} onChange={(event) => setContentLanguage(event.target.value)} style={inputStyle}>
               {course.learningLanguages.map((language) => <option key={language} value={language}>{languageLabel(locale, language)}</option>)}
             </select>
           </div>

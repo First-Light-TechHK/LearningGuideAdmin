@@ -32,8 +32,21 @@ describe('course editor history formatting', () => {
   })
 
   test('formats restore and delete draft details', () => {
-    assert.equal(historyDetailText(item('RESTORE', { restoredFrom: 'Version 2' }), 'zh-CN'), '从 Version 2 恢复')
+    assert.equal(historyDetailText(item('RESTORE', { restoredFrom: 'Version 2' }), 'zh-CN'), '从 版本 2 恢复')
     assert.equal(historyDetailText(item('DELETE_DRAFT', { keptVersion: 'Version 4' }), 'en-GB'), 'Kept Version 4')
+  })
+
+  test('shows the one version name and never the internal sequence number', () => {
+    assert.equal(historyDetailText(item('PUBLISH', { versionLabel: '4.2' }, 9), 'en-GB'), 'Version 4.2')
+    assert.equal(historyDetailText(item('EXPORT_PACKAGE', { versionLabel: 'V4.2' }, 9), 'en-GB').includes('9'), false)
+    assert.equal(historyDetailText(item('PUBLISH', null, 9), 'en-GB'), '—')
+  })
+
+  test('writes the created course in plain words', () => {
+    assert.equal(
+      historyDetailText(item('CREATE_COURSE', { courseCode: 'C001', learningMode: 'VIDEO_AND_TEXT', learningLanguages: ['en-GB', 'zh-CN'] }), 'en-GB'),
+      'C001 · Video & text · English / Chinese',
+    )
   })
 
   test('falls back to readable key/value pairs for unknown details', () => {
