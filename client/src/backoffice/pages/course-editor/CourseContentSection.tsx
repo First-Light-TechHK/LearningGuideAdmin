@@ -635,9 +635,9 @@ export function CourseContentSection({
     >
       <aside data-testid="content-lessons" data-panel="content-lessons" style={{ ...card, marginTop: 0, padding: 14, overflow: 'auto', minWidth: 0, minHeight: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 15 }}>{L(locale, '课时', 'Lessons')}</h3>
+          <h3 className="course-ui-blockTitle">{L(locale, '课时', 'Lessons')}</h3>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => setImportMenuOpen((value) => !value)}>{L(locale, '导入', 'Import')}</button>
+            <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} aria-haspopup="menu" aria-expanded={importMenuOpen} onClick={() => setImportMenuOpen((value) => !value)}>{L(locale, '导入', 'Import')} ▾</button>
             <button type="button" style={{ ...buttonStyle, padding: '4px 8px' }} onClick={() => void addLesson()}>+ {L(locale, '添加', 'Add')}</button>
           </div>
         </div>
@@ -671,7 +671,7 @@ export function CourseContentSection({
           <div style={{ ...card, marginTop: 0, padding: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 18 }}>{L(locale, '课时', 'Lesson')} {activeLesson.sortOrder} · {loc(activeLesson, contentLanguage)?.title ?? activeLesson.code}</h2>
+                <h2 className="course-ui-blockTitle">{L(locale, '课时', 'Lesson')} {activeLesson.sortOrder} · {loc(activeLesson, contentLanguage)?.title ?? activeLesson.code}</h2>
                 <div style={{ fontSize: 12, color: '#5A6577', marginTop: 4 }}>{activeLesson.code} · {activeLesson.id}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

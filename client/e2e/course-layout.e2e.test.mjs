@@ -95,6 +95,7 @@ async function open(viewport, locale = 'en-GB') {
     const url = new URL(route.request().url())
     const path = url.pathname
     if (path === '/api/session') return route.fulfill(ok(SESSION))
+    if (path === '/api/health') return route.fulfill(ok({ status: 'ok', service: 'learning-guide-admin', environment: 'SANDBOX' }))
     if (path === '/api/backoffice/environment') return route.fulfill(ok({ label: 'Sandbox', publicSiteUrl: 'https://sandbox.example.com', versionNumberingMode: 'sandbox', stripeConfigured: false }))
     if (path === '/api/backoffice/courses/categories') return route.fulfill(ok(CATEGORIES))
     if (path === '/api/backoffice/courses/media-limits') return route.fulfill(ok(MEDIA_LIMITS))
@@ -127,7 +128,21 @@ async function scrollState(page, pageTestId) {
   }, pageTestId)
 }
 
+/** 环境墙：钥石可见并写着 Sandbox；应用面在墙内（墙内缩只让外壳变小，不产生页面滚动）。 */
+async function assertWall(page, label) {
+  const keystone = page.getByTestId('env-keystone')
+  await keystone.waitFor()
+  assert.ok(await keystone.isVisible(), `${label}: 钥石应可见`)
+  assert.match(await keystone.innerText(), /sandbox/i, `${label}: 钥石应写着 Sandbox`)
+  const boxes = await page.evaluate(() => {
+    const rect = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, r: r.right, b: r.bottom } }
+    return { wall: rect(document.querySelector('.envWall')), surface: rect(document.querySelector('.appSurface')) }
+  })
+  assert.ok(boxes.surface.x >= boxes.wall.x && boxes.surface.y >= boxes.wall.y && boxes.surface.r <= boxes.wall.r + 0.5 && boxes.surface.b <= boxes.wall.b + 0.5, `${label}: .appSurface 应在 .envWall 内`)
+}
+
 async function assertPageDoesNotScroll(page, pageTestId, label) {
+  await assertWall(page, label)
   const m = await scrollState(page, pageTestId)
   const { width, height } = m.viewport
   assert.ok(m.document.scrollY <= height + 1, `${label}: 文档不应纵向滚动（scrollHeight ${m.document.scrollY} > innerHeight ${height}）`)
@@ -179,6 +194,30 @@ async function assertScrollable(page, testId, label) {
   })
 }
 
+/** 版本页：同一屏看草稿板、线上板和列表（两栏），内容在 versions-scroll 内滚动，文档不滚动。 */
+async function assertVersionsPane(page, label) {
+  await page.getByTestId('course-tab-versions').click()
+  await page.waitForTimeout(250)
+  // one "History ↓" link replaces the old three-link row (the pane already shows Current and Versions together)
+  assert.equal(await page.getByTestId('versions-segment-history').count(), 1, `${label}: 应有 History 跳转`)
+  assert.equal(await page.getByTestId('versions-segment-current').count(), 0, `${label}: 不再有 Current 跳转`)
+  // Live tag text is whole inside its cell
+  const tag = page.locator('.course-ui-liveTag').first()
+  assert.equal((await tag.innerText()).trim(), 'Live', `${label}: Live 标签文字可见`)
+  const tagBox = await tag.boundingBox()
+  const cellBox = await tag.locator('xpath=ancestor::td[1]').boundingBox()
+  assert.ok(tagBox.width >= 24 && tagBox.x + tagBox.width <= cellBox.x + cellBox.width + 1, `${label}: Live 标签应完整落在单元格内`)
+  const draftBox = await page.getByTestId('versions-current-draft').boundingBox()
+  const liveBox = await page.getByTestId('versions-current-live').boundingBox()
+  const listBox = await page.getByTestId('versions-list').boundingBox()
+  assert.ok(draftBox && liveBox && listBox, `${label}: 草稿板、线上板、列表应同时存在`)
+  assert.ok(Math.abs(draftBox.x - liveBox.x) <= 2, `${label}: 草稿板与线上板应同列（x ${draftBox.x} vs ${liveBox.x}）`)
+  assert.ok(draftBox.y + draftBox.height <= liveBox.y + 1, `${label}: 草稿板应在线上板上方`)
+  assert.ok(draftBox.x + draftBox.width < listBox.x && liveBox.x + liveBox.width < listBox.x, `${label}: 两块板都应在列表左侧`)
+  await assertScrollable(page, 'versions-scroll', `${label} 版本页`)
+  await assertPageDoesNotScroll(page, 'course-editor-page', `${label} 版本页`)
+}
+
 const EDITOR_TABS = [
   ['info', 'Course Information'],
   ['content', 'Course Content'],
@@ -207,6 +246,8 @@ test('1672×941：课程编辑每个页签页面本体不滚动、吸顶页签�
     const summaryText = await summary.innerText()
     assert.match(summaryText, /Draft/i, '状态摘要应包含 Draft 完成度')
     assert.match(summaryText, /Live/i, '状态摘要应包含 Live 版本')
+    assert.equal(Math.round((await summary.boundingBox()).height), 40, '状态摘要应是一行 40px 高')
+    assert.equal(await page.locator('[data-testid="course-editor-page"] > header').getByRole('button', { name: /Versions & publishing/ }).count(), 0, '页头不应再有“Versions & publishing”按钮')
     const tabsText = await page.getByTestId('course-tabs').innerText()
     assert.doesNotMatch(tabsText, /Online|Hidden|Offline/, '页签不应重复线上状态')
 
@@ -214,49 +255,19 @@ test('1672×941：课程编辑每个页签页面本体不滚动、吸顶页签�
       await editorTabState(page, '1672', tabId)
     }
 
-    // 版本与发布：Current / Versions / History 分段，不纵向堆叠。
-    await page.getByTestId('course-tab-versions').click()
-    await page.waitForTimeout(200)
-    const segments = ['current', 'versions', 'history']
-    for (const segment of segments) {
-      assert.equal(await page.getByTestId(`versions-segment-${segment}`).count(), 1, `应有 ${segment} 分段`)
-    }
+    // 版本与发布：Draft 板在上、Live 板在下（同一列），列表在它们右侧；整页在 versions-scroll 内滚动。
+    await assertVersionsPane(page, '1672')
+    await shot(page, 'editor-versions-1672')
 
-    // Current：Draft / Live 两卡并排（同一行）且都在一屏内。
-    await page.getByTestId('versions-segment-current').click()
-    await page.waitForTimeout(150)
-    const draftBox = await page.getByTestId('versions-current-draft').boundingBox()
-    const liveBox = await page.getByTestId('versions-current-live').boundingBox()
-    assert.ok(draftBox && liveBox, 'Current 应同时显示 Draft 和 Live 卡')
-    assert.ok(Math.abs(draftBox.y - liveBox.y) <= 2, `Draft/Live 卡应并排（y ${draftBox.y} vs ${liveBox.y}）`)
-    assert.ok(draftBox.x < liveBox.x, 'Draft 卡应在 Live 卡左侧')
-    const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
-    assert.ok(liveBox.x + liveBox.width <= viewport.width + 1, 'Live 卡不应超出视口右边')
-    assert.ok(draftBox.y + draftBox.height <= viewport.height + 1, 'Current 卡不应超出视口底边')
-    await shot(page, 'editor-versions-current-1672')
-
-    // Versions：表格在面板内滚动。
-    await page.getByTestId('versions-segment-versions').click()
-    await page.waitForTimeout(150)
-    await assertScrollable(page, 'versions-list-scroll', '1672 版本列表')
-    await assertPageDoesNotScroll(page, 'course-editor-page', '1672 版本列表')
-    assert.ok(await page.getByTestId('versions-current-draft').count() === 0, 'Versions 分段不应再渲染 Current 卡片（不纵向堆叠）')
-    await shot(page, 'editor-versions-list-1672')
-
-    // History：独立分段，表格内滚动，分页固定在面板底部不动。
+    // 三个“本页内容”按钮只在 Versions 页签出现；点 History 把历史带进视野，分页可达。
     await page.getByTestId('versions-segment-history').click()
-    await page.waitForTimeout(150)
-    await assertScrollable(page, 'versions-history-scroll', '1672 历史记录')
+    await page.waitForTimeout(250)
     const pagination = page.getByTestId('versions-history-pagination')
     await pagination.waitFor()
-    const before = await pagination.boundingBox()
-    await page.getByTestId('versions-history-scroll').evaluate((node) => {
-      node.scrollTop = 160
-    })
-    const after = await pagination.boundingBox()
-    assert.ok(Math.abs(before.y - after.y) <= 1, '历史记录分页应固定在面板底部，不随表格滚动')
+    assert.ok(await pagination.isVisible(), '历史记录分页应可达')
     await assertPageDoesNotScroll(page, 'course-editor-page', '1672 历史记录')
-    await shot(page, 'editor-versions-history-1672')
+    await page.getByTestId('course-tab-info').click()
+    assert.equal(await page.getByTestId('versions-segment-history').count(), 0, '其它页签不应有“本页内容”按钮')
   } finally {
     await context.close()
   }
@@ -297,16 +308,19 @@ test('1280×800：同样的布局契约仍然成立', async () => {
   try {
     await page.goto(`${base}/en-GB/course/c1`)
     await page.waitForLoadState('networkidle')
+    assert.equal(Math.round((await page.getByTestId('course-status-summary').boundingBox()).height), 40, '1280: 状态摘要应是 40px 高')
+    assert.ok((await page.getByTestId('course-tabs').boundingBox()).height < 60, '1280: 页签行不应折成两行')
     for (const [tabId] of EDITOR_TABS) {
       await editorTabState(page, '1280', tabId)
     }
-    await page.getByTestId('versions-segment-versions').click()
-    await page.waitForTimeout(150)
-    await assertScrollable(page, 'versions-list-scroll', '1280 版本列表')
+    await assertVersionsPane(page, '1280')
 
     await page.goto(`${base}/en-GB/course`)
     await page.waitForLoadState('networkidle')
     await page.getByTestId('course-overview-table-wrap').waitFor()
+    const wrap = await page.getByTestId('course-overview-table-wrap').boundingBox()
+    const actions = await page.getByRole('button', { name: /^Actions/ }).first().boundingBox()
+    assert.ok(actions.x >= wrap.x - 1 && actions.x + actions.width <= wrap.x + wrap.width + 1, '1280: Actions 按钮应完整落在表格可见区内')
     await assertPageDoesNotScroll(page, 'course-overview-page', '1280 课程列表')
     await assertScrollable(page, 'course-overview-table-wrap', '1280 课程表格')
     await shot(page, 'course-overview-1280')
@@ -325,12 +339,11 @@ test('1000×800（<1100）：分栏纵向折叠，仍无横向溢出且页面不
     await assertPageDoesNotScroll(page, 'course-editor-page', '1000 课程编辑')
     await assertTabsStickyAndPanelBounded(page, '1000 课程编辑')
 
-    // Current 的两张卡在 <1100 折叠为单列（上下排列）。
-    await page.getByTestId('versions-segment-current').click()
-    await page.waitForTimeout(150)
-    const draftBox = await page.getByTestId('versions-current-draft').boundingBox()
+    // <1240：板在上、列表在线上板下方（堆叠），无横向溢出。
     const liveBox = await page.getByTestId('versions-current-live').boundingBox()
-    assert.ok(liveBox.y >= draftBox.y + draftBox.height - 1, `<1100 时 Draft/Live 卡应纵向折叠（draft 底 ${draftBox.y + draftBox.height}，live 顶 ${liveBox.y}）`)
+    const listBox = await page.getByTestId('versions-list').boundingBox()
+    assert.ok(listBox.y >= liveBox.y + liveBox.height - 1, `<1240 时列表应在线上板下方（live 底 ${liveBox.y + liveBox.height}，列表顶 ${listBox.y}）`)
+    await shot(page, 'editor-versions-1000')
 
     await page.goto(`${base}/en-GB/course`)
     await page.waitForLoadState('networkidle')

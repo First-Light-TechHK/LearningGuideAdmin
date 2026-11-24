@@ -109,8 +109,9 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const employeeTable = useResizableColumns({
-    storageKey: "employee-list",
-    defaultWidths: [300, 180, 140, 240, 158],
+    // Total 840 so Last Login and Actions stay whole inside the wall at 1280 wide.
+    storageKey: "employee-list-v2",
+    defaultWidths: [250, 140, 110, 190, 150],
   });
 
   /** 功能权限只在编辑既有账号时加载（新建还没有 employeeId）；失败走页面既有错误码机制。 */

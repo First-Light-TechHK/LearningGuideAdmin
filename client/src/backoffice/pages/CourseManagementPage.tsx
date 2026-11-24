@@ -20,6 +20,7 @@ import { useLocale } from '../lib/navigation'
 import { MENU_SEGMENT } from '../rbac/permissions'
 import { MenuGuard } from './ModulePages'
 import { languageLabel, learningModeLabel } from './course-editor/shared-utils';
+import { versionName } from './course-editor/versionNumbering';
 
 type JobView = {
   jobId: string
@@ -58,12 +59,14 @@ function uploadErrorText(locale: string, code: string, detail?: string, failure?
   return zh ? `导入失败：${reason}` : `Import failed: ${reason}`
 }
 
-function formatWhen(value: string | null | undefined, locale: string): string {
+function formatPart(value: string | null | undefined, locale: string, options: Intl.DateTimeFormatOptions): string {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
-  return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
+  return new Intl.DateTimeFormat(locale, options).format(date)
 }
+const formatDay = (value: string | null | undefined, locale: string) => formatPart(value, locale, { year: 'numeric', month: 'short', day: 'numeric' })
+const formatClock = (value: string | null | undefined, locale: string) => formatPart(value, locale, { hour: '2-digit', minute: '2-digit' })
 
 /**
  * Course Overview（PRD CM01）：列表 + Category 筛选 + 新建 / 从包导入 / Operations 入口。
@@ -120,8 +123,9 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
   const rawFileRef = useRef<HTMLInputElement | null>(null)
   const openCourse = (id: string) => navigate(`/${locale}/course/${id}`)
   const courseTable = useResizableColumns({
-    storageKey: 'course-list',
-    defaultWidths: [300, 104, 120, 160, 130, 136, 176],
+    // Total 900 so the Actions column stays whole inside the wall at 1280 wide.
+    storageKey: 'course-list-v2',
+    defaultWidths: [240, 90, 100, 130, 130, 100, 110],
   })
 
   const fetchLoad = useCallback(() => {
@@ -458,7 +462,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
     <section className="card cardGrow course-ui-overview" data-testid="course-overview-page">
       <div className="pageHead course-ui-overviewHead">
         <div className="course-ui-overviewHeadMain">
-          <h1 className="cardTitle">{L('课程概览', 'Course Overview')}</h1>
+          <h1 className="cardTitle course-ui-pageTitle">{L('课程概览', 'Course Overview')}</h1>
         </div>
         {(canCreate || canImport || canOperations) && (
           <div className="course-ui-overviewActions">
@@ -467,21 +471,16 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                 {L('运营位', 'Operations')}
               </button>
             )}
-            {canCreate && (
-              <button type="button" className="button buttonGhost" disabled={busy} onClick={() => setShowCreate(true)}>
-                {L('新建课程', 'Create course')}
-              </button>
-            )}
             {canImport && <div className="course-ui-importAnchor">
               <button
                 type="button"
-                className="button"
+                className="button buttonGhost"
                 aria-haspopup="menu"
                 aria-expanded={importMenuOpen}
                 disabled={busy}
                 onClick={() => setImportMenuOpen((current) => !current)}
               >
-                {L('导入', 'Import')} ▾
+                {L('导入课程', 'Import course')} ▾
               </button>
               {importMenuOpen && (
                 <div role="menu" aria-label={L('导入', 'Import')} className="course-ui-importMenu">
@@ -497,6 +496,11 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
                 </div>
               )}
             </div>}
+            {canCreate && (
+              <button type="button" className="button" disabled={busy} onClick={() => setShowCreate(true)}>
+                {L('新建课程', 'Create course')}
+              </button>
+            )}
           </div>
         )}
         <input
@@ -555,22 +559,24 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setShowCreate(false)
           }}
-          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          className="modalBackdrop course-ui-scrim" style={{ zIndex: 40 }}
         >
           <form
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-course-title"
             action={(form) => void createCourse(form)}
-            style={{ width: 'min(640px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}
+            className="course-ui-dialog"
+            style={{ width: 'min(640px, 100%)', maxHeight: '90vh', overflowY: 'auto' }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+            <div className="modalHead">
               <div>
-                <h2 id="create-course-title" style={{ margin: 0, fontSize: 20 }}>{L('新建课程', 'Create course')}</h2>
+                <h2 id="create-course-title" className="modalTitle" style={{ margin: 0 }}>{L('新建课程', 'Create course')}</h2>
                 <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>{L('创建后会进入课程编辑页，可继续填写内容、试看和价格。', 'After creating, you will enter the course editor to continue with content, trial and pricing.')}</p>
               </div>
-              <button type="button" aria-label={L('关闭', 'Close')} onClick={() => setShowCreate(false)} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+              <button type="button" className="modalClose" aria-label={L('关闭', 'Close')} onClick={() => setShowCreate(false)}>×</button>
             </div>
+            <div className="course-ui-dRule" aria-hidden="true" />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（英文）', 'Course title (English)')} *<input name="titleEn" required autoFocus style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
               <label style={{ fontSize: 13, fontWeight: 600 }}>{L('课程名称（中文）', 'Course title (Chinese)')} *<input name="titleZh" required style={{ display: 'block', width: '100%', marginTop: 6, padding: 10, borderRadius: 8, border: '1px solid #D5DCE8' }} /></label>
@@ -607,7 +613,7 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
       {(showImport || importJob) && (
         <div
           role="presentation"
-          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          className="modalBackdrop course-ui-scrim" style={{ zIndex: 40 }}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !busy) {
               setShowImport(false)
@@ -617,14 +623,15 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
             }
           }}
         >
-          <div role="dialog" aria-modal="true" aria-labelledby="import-package-title" style={{ width: 'min(760px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 16 }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="import-package-title" className="course-ui-dialog" style={{ width: 'min(760px, 100%)', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modalHead">
               <div>
-                <h2 id="import-package-title" style={{ margin: 0, fontSize: 20 }}>{L('导入课程包', 'Import course package')}</h2>
+                <h2 id="import-package-title" className="modalTitle" style={{ margin: 0 }}>{L('导入课程包', 'Import course package')}</h2>
                 <p style={{ margin: '6px 0 0', fontSize: 13, opacity: 0.7 }}>{L('上传 .lgcourse.zip 或 .zip 课程包，系统会校验结构、课时、媒体和学习点。', 'Upload a .lgcourse.zip or .zip package. The system validates structure, lessons, media and learning points.')}</p>
               </div>
-              <button type="button" aria-label={L('关闭', 'Close')} disabled={busy} onClick={() => { setShowImport(false); setImportJob(null); setPackageFile(null); if (fileRef.current) fileRef.current.value = '' }} style={{ border: 0, background: 'transparent', fontSize: 22, cursor: busy ? 'not-allowed' : 'pointer', lineHeight: 1, padding: 4 }}>×</button>
+              <button type="button" className="modalClose" aria-label={L('关闭', 'Close')} disabled={busy} onClick={() => { setShowImport(false); setImportJob(null); setPackageFile(null); if (fileRef.current) fileRef.current.value = '' }}>×</button>
             </div>
+            <div className="course-ui-dRule" aria-hidden="true" />
 
             {!importJob && (
               <div
@@ -670,10 +677,11 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
         <div
           role="presentation"
           onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setStatusCourse(null) }}
-          style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(16, 24, 40, 0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+          className="modalBackdrop course-ui-scrim" style={{ zIndex: 50 }}
         >
-          <div role="dialog" aria-modal="true" aria-labelledby="change-status-title" style={{ width: 'min(520px, 100%)', background: '#fff', borderRadius: 16, padding: 24, boxShadow: '0 24px 64px rgba(16, 24, 40, 0.24)' }}>
-            <h2 id="change-status-title" style={{ margin: 0, fontSize: 20 }}>{L('更改状态', 'Change status')}</h2>
+          <div role="dialog" aria-modal="true" aria-labelledby="change-status-title" className="course-ui-dialog" style={{ width: 'min(520px, 100%)' }}>
+            <h2 id="change-status-title" className="modalTitle" style={{ margin: 0 }}>{L('更改状态', 'Change status')}</h2>
+            <div className="course-ui-dRule" aria-hidden="true" />
             <p style={{ margin: '8px 0 0', fontSize: 13, opacity: 0.7 }}>{statusCourse.code} · {statusCourse.title}</p>
             <p style={{ margin: '8px 0 0', fontSize: 12, opacity: 0.65 }}>{L('更改状态不会生成新版本。', 'Changing the status does not create a version.')}</p>
             <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
@@ -732,33 +740,39 @@ function CourseManagementInner({ locale }: { locale: ReturnType<typeof useLocale
               {list.courses.map((course) => (
                 <tr key={course.id}>
                   <td>
-                    <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: '#1d6bff', cursor: 'pointer', textAlign: 'left' }}>{course.title}</button>
-                    <div style={{ opacity: 0.7, fontSize: 12 }}>
+                    <button type="button" onClick={() => openCourse(course.id)} style={{ fontWeight: 600, background: 'none', border: 0, padding: 0, color: 'var(--cl-text)', cursor: 'pointer', textAlign: 'left', fontSize: 13.5 }}>{course.title}</button>
+                    <div className="course-ui-cellSub">
                       {learningModeLabel(locale, course.learningMode)} · {course.learningLanguages.map((language) => languageLabel(locale, language)).join(', ')} · {course.lessonCount} {L('课时', 'lessons')}
                       {course.trialEnabled ? ` · ${L('含试看', 'trial')}` : ''}
                     </div>
                   </td>
-                  <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{course.code}</td>
+                  <td style={{ fontFamily: 'var(--cl-mono)', fontSize: 12.5 }}>{course.code}</td>
                   <td>{course.category ? categoryLabel(locale, course.category.name) : '—'}</td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span style={{ fontWeight: 600 }}>{course.liveVersionLabel ?? '—'}</span>
-                      {course.hasDraft ? <span style={{ fontSize: 11, color: '#9A6B00' }}>{L('有未发布草稿', 'Draft not published')}</span> : <span style={{ fontSize: 11, opacity: 0.6 }}>{L('无草稿', 'No draft')}</span>}
+                      <span style={{ fontWeight: 500 }}>{course.liveVersionLabel ? versionName(locale, course.liveVersionLabel) : '—'}</span>
+                      {course.hasDraft ? <span className="course-ui-cellSub" style={{ color: 'var(--cl-amber-ink)' }}>{L('有未发布草稿', 'Draft not published')}</span> : <span className="course-ui-cellSub">{L('无草稿', 'No draft')}</span>}
                     </div>
                   </td>
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {course.published ? (
-                        <span style={{ color: course.liveStatus === 'ONLINE' ? '#1E7A3C' : '#5A6577', fontWeight: 600 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span className={`course-ui-statusDot ${course.liveStatus === 'ONLINE' ? 'isOnline' : course.liveStatus === 'HIDDEN' ? 'isHidden' : 'isOffline'}`} aria-hidden="true" />
                           {course.liveStatus === 'ONLINE' ? L('在线', 'Online') : course.liveStatus === 'HIDDEN' ? L('已隐藏', 'Hidden') : course.liveStatus === 'OFFLINE' ? L('已下线', 'Offline') : course.liveStatus}
                         </span>
                       ) : (
-                        <span style={{ opacity: 0.65 }}>{L('未发布', 'Not published')}</span>
+                        <span style={{ color: 'var(--cl-text-3)' }}>{L('未发布', 'Not published')}</span>
                       )}
-                      {course.published && course.liveVersionWentLiveAt && <span style={{ fontSize: 11, opacity: 0.65 }}>{formatWhen(course.liveVersionWentLiveAt, locale)}</span>}
+                      {course.published && course.liveVersionWentLiveAt && <span className="course-ui-cellSub">{t(locale, 'course.ui.header.since', { date: formatDay(course.liveVersionWentLiveAt, locale) })}</span>}
                     </div>
                   </td>
-                  <td style={{ fontSize: 12, opacity: 0.8 }}>{formatWhen(course.updatedAt, locale)}</td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span>{formatDay(course.updatedAt, locale)}</span>
+                      <span className="course-ui-cellSub">{formatClock(course.updatedAt, locale)}</span>
+                    </div>
+                  </td>
                   <td>
                     <div style={{ position: 'relative', display: 'inline-block' }}>
                       <button
