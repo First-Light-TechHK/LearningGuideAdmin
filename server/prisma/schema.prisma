@@ -1469,6 +1469,31 @@ model CoursePackageJob {
   @@index([actorEmployeeId, createdAt])
 }
 
+/// Sandbox 课程内容重置作业（Sandbox 专项，docs/sandbox/partitioning.md §4）：
+/// 只在 APP_ENV=SANDBOX 且 SANDBOX_RESET_ENABLED=true 时可用；单活由迁移里的部分唯一索引兜底。
+/// 状态：QUEUED | RUNNING | SUCCEEDED | FAILED | CANCELLED；阶段：PRECHECK | JOBS | STAGING | MEDIA | DATABASE | VERIFY。
+model SandboxResetJob {
+  id          String    @id @default(uuid())
+  status      String
+  stage       String?
+  progress    Int       @default(0)
+  /// { courses, media, staging, packageJobs, resetCodeCounters }
+  scope       Json
+  requestedBy String?   @db.Uuid
+  reason      String
+  /// 删除前的 impact 快照；report 是删除后的结果
+  counts      Json?
+  report      Json?
+  error       String?
+  heartbeatAt DateTime?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, createdAt])
+}
+
 /// 写入流水线的改动记录（迁移 20261109000000_helpdesk_faq_change_pipeline）：一次命令一行，只追加；
 /// 同时是发件箱，消费者按 seq 往后读。读写见 pipeline/faqCommandBus.ts（原生 SQL）。
 model HelpdeskFaqChange {

@@ -1,0 +1,349 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment */
+import type { CommerceCourseConfig } from './commerce.config';
+import {
+  DEFAULT_SANDBOX_RESET_SCOPE,
+  normalizeSandboxResetScope,
+  SandboxResetService,
+  sandboxResetScopeIsEmpty,
+} from './sandbox-reset.service';
+
+jest.mock('../backoffice/repositories/auditRepository', () => ({
+  tryRecordAuditEvent: jest.fn().mockResolvedValue(undefined),
+}));
+
+type AnyPrisma = Record<string, any>;
+
+function makePrisma(): AnyPrisma {
+  const prisma: AnyPrisma = {
+    sandboxResetJob: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
+      count: jest.fn().mockResolvedValue(0),
+      create: jest.fn(),
+      update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    coursePackageJob: {
+      count: jest.fn().mockResolvedValue(0),
+      deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+    },
+    commerceCourse: {
+      count: jest.fn().mockResolvedValue(0),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    courseVersion: { count: jest.fn().mockResolvedValue(3) },
+    courseMediaAsset: {
+      count: jest.fn().mockResolvedValue(4),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { size: 1024 } }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    popularCourseEntry: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    discoveryBanner: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    coursePlan: { deleteMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    courseCodeCounter: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 5 }),
+    },
+    $transaction: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 'job-1' }]),
+  };
+  prisma.$transaction = jest.fn((callback: (tx: AnyPrisma) => unknown) =>
+    callback(prisma),
+  );
+  return prisma;
+}
+
+function makeStorage(): {
+  clearStagingRoot: jest.Mock;
+  removeMedia: jest.Mock;
+} {
+  return {
+    clearStagingRoot: jest.fn().mockResolvedValue(undefined),
+    removeMedia: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeConfig(
+  patch: Partial<CommerceCourseConfig> = {},
+): CommerceCourseConfig {
+  return {
+    environmentLabel: 'Sandbox',
+    publicSiteUrl: '',
+    versionNumberingMode: 'sandbox',
+    mediaRoot: '',
+    packageStagingRoot: '',
+    maxImageBytes: 0,
+    maxVideoBytes: 0,
+    maxAudioBytes: 0,
+    maxPdfBytes: 0,
+    maxModelBytes: 0,
+    packageMaxBytes: 0,
+    packageDirectUploadBytes: 0,
+    packageExportTtlHours: 24,
+    jobConcurrency: 2,
+    jobPollMs: 2000,
+    jobHeartbeatMs: 10000,
+    jobStaleMs: 600000,
+    jobMaxAttempts: 3,
+    sandboxResetEnabled: true,
+    ...patch,
+  };
+}
+
+function job(scope: unknown, status = 'RUNNING') {
+  return {
+    id: 'job-1',
+    status,
+    stage: null,
+    progress: 0,
+    scope,
+    requestedBy: '11111111-1111-1111-1111-111111111111',
+    reason: 'text',
+    counts: { courses: 1 },
+    report: null,
+    error: null,
+    heartbeatAt: null,
+    startedAt: null,
+    finishedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+describe('sandbox reset scope', () => {
+  it('defaults every key to true when omitted and ignores unknown keys', () => {
+    expect(normalizeSandboxResetScope(undefined)).toEqual(
+      DEFAULT_SANDBOX_RESET_SCOPE,
+    );
+    expect(normalizeSandboxResetScope({ courses: false, nope: true })).toEqual({
+      ...DEFAULT_SANDBOX_RESET_SCOPE,
+      courses: false,
+    });
+  });
+
+  it('detects an empty scope', () => {
+    expect(sandboxResetScopeIsEmpty(DEFAULT_SANDBOX_RESET_SCOPE)).toBe(false);
+    expect(
+      sandboxResetScopeIsEmpty({
+        courses: false,
+        media: false,
+        staging: false,
+        packageJobs: false,
+        resetCodeCounters: false,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('SandboxResetService guards', () => {
+  const originalEnv = process.env.APP_ENV;
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = originalEnv;
+  });
+
+  it('is available only when the flag is on and APP_ENV=SANDBOX', () => {
+    process.env.APP_ENV = 'SANDBOX';
+    const enabled = new SandboxResetService(
+      makePrisma() as never,
+      makeStorage() as never,
+      makeConfig({ sandboxResetEnabled: true }),
+    );
+    expect(enabled.isAvailable()).toBe(true);
+
+    const flagOff = new SandboxResetService(
+      makePrisma() as never,
+      makeStorage() as never,
+      makeConfig({ sandboxResetEnabled: false }),
+    );
+    expect(flagOff.isAvailable()).toBe(false);
+
+    process.env.APP_ENV = 'UAT';
+    expect(enabled.isAvailable()).toBe(false);
+  });
+
+  it('state() returns 403 SANDBOX_RESET_DISABLED outside a sandbox', async () => {
+    process.env.APP_ENV = 'UAT';
+    const service = new SandboxResetService(
+      makePrisma() as never,
+      makeStorage() as never,
+      makeConfig(),
+    );
+    await expect(service.state()).rejects.toMatchObject({
+      code: 'SANDBOX_RESET_DISABLED',
+      status: 403,
+    });
+  });
+});
+
+describe('SandboxResetService.create', () => {
+  const originalEnv = process.env.APP_ENV;
+
+  beforeAll(() => {
+    process.env.APP_ENV = 'SANDBOX';
+  });
+
+  afterAll(() => {
+    if (originalEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = originalEnv;
+  });
+
+  function service(prisma = makePrisma()) {
+    return new SandboxResetService(
+      prisma as never,
+      makeStorage() as never,
+      makeConfig(),
+    );
+  }
+
+  it('requires the exact confirmation phrase and a reason', async () => {
+    const reset = service();
+    await expect(
+      reset.create({ confirm: 'reset sandbox', reason: 'why' }, null, null),
+    ).rejects.toMatchObject({
+      code: 'RESET_CONFIRMATION_REQUIRED',
+      status: 409,
+    });
+    await expect(
+      reset.create({ confirm: 'RESET SANDBOX', reason: '   ' }, null, null),
+    ).rejects.toMatchObject({
+      code: 'RESET_CONFIRMATION_REQUIRED',
+      status: 409,
+    });
+  });
+
+  it('rejects an empty scope with 422', async () => {
+    await expect(
+      service().create(
+        {
+          confirm: 'RESET SANDBOX',
+          reason: 'why',
+          scope: {
+            courses: false,
+            media: false,
+            staging: false,
+            packageJobs: false,
+            resetCodeCounters: false,
+          },
+        },
+        null,
+        null,
+      ),
+    ).rejects.toMatchObject({ code: 'RESET_SCOPE_EMPTY', status: 422 });
+  });
+
+  it('refuses to start while import/export jobs are active', async () => {
+    const prisma = makePrisma();
+    prisma.coursePackageJob.count.mockResolvedValue(1);
+    await expect(
+      service(prisma).create(
+        { confirm: 'RESET SANDBOX', reason: 'why' },
+        null,
+        null,
+      ),
+    ).rejects.toMatchObject({ code: 'RESET_BUSY', status: 409 });
+  });
+
+  it('creates a queued job and records the requested audit event', async () => {
+    const prisma = makePrisma();
+    prisma.sandboxResetJob.create.mockResolvedValue(
+      job(DEFAULT_SANDBOX_RESET_SCOPE, 'QUEUED'),
+    );
+    const created = await service(prisma).create(
+      { confirm: 'RESET SANDBOX', reason: 'fresh import', scope: {} },
+      '11111111-1111-1111-1111-111111111111',
+      '127.0.0.1',
+    );
+    expect(created.status).toBe('QUEUED');
+    expect(created.scope).toEqual(DEFAULT_SANDBOX_RESET_SCOPE);
+  });
+});
+
+describe('SandboxResetService.execute', () => {
+  const originalEnv = process.env.APP_ENV;
+
+  beforeAll(() => {
+    process.env.APP_ENV = 'SANDBOX';
+  });
+
+  afterAll(() => {
+    if (originalEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = originalEnv;
+  });
+
+  it('clears jobs, staging, media objects and the course database in order', async () => {
+    const prisma = makePrisma();
+    prisma.sandboxResetJob.findUnique.mockResolvedValue(
+      job(DEFAULT_SANDBOX_RESET_SCOPE),
+    );
+    prisma.courseMediaAsset.findMany.mockResolvedValue([
+      { storageKey: 'course-media/c1/a.png' },
+    ]);
+    const storage = makeStorage();
+    const service = new SandboxResetService(
+      prisma as never,
+      storage as never,
+      makeConfig(),
+    );
+
+    await service.execute('job-1');
+
+    expect(prisma.coursePackageJob.deleteMany).toHaveBeenCalled();
+    expect(storage.clearStagingRoot).toHaveBeenCalled();
+    expect(storage.removeMedia).toHaveBeenCalledWith('course-media/c1/a.png');
+    expect(prisma.coursePlan.deleteMany).toHaveBeenCalled();
+    expect(prisma.commerceCourse.deleteMany).toHaveBeenCalled();
+    expect(prisma.courseCodeCounter.deleteMany).toHaveBeenCalled();
+    expect(prisma.sandboxResetJob.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-1' },
+        data: expect.objectContaining({ status: 'SUCCEEDED' }),
+      }),
+    );
+  });
+
+  it('leaves the database untouched when removing a media object fails', async () => {
+    const prisma = makePrisma();
+    prisma.sandboxResetJob.findUnique.mockResolvedValue(
+      job(DEFAULT_SANDBOX_RESET_SCOPE),
+    );
+    prisma.courseMediaAsset.findMany.mockResolvedValue([
+      { storageKey: 'course-media/c1/a.png' },
+    ]);
+    const storage = makeStorage();
+    storage.removeMedia.mockRejectedValue(new Error('S3 down'));
+    const service = new SandboxResetService(
+      prisma as never,
+      storage as never,
+      makeConfig(),
+    );
+
+    await service.execute('job-1');
+
+    expect(prisma.commerceCourse.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.sandboxResetJob.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'FAILED' }),
+      }),
+    );
+  });
+
+  it('keeps code counters when resetCodeCounters is false', async () => {
+    const prisma = makePrisma();
+    prisma.sandboxResetJob.findUnique.mockResolvedValue(
+      job({ ...DEFAULT_SANDBOX_RESET_SCOPE, resetCodeCounters: false }),
+    );
+    const service = new SandboxResetService(
+      prisma as never,
+      makeStorage() as never,
+      makeConfig(),
+    );
+
+    await service.execute('job-1');
+
+    expect(prisma.courseCodeCounter.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.commerceCourse.deleteMany).toHaveBeenCalled();
+  });
+});

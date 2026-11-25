@@ -26,10 +26,15 @@ import { EnvironmentController } from './environment.controller';
 import { CourseAuthoringService } from './course-authoring.service';
 import { MediaUploadService } from './media-upload.service';
 import { DraftRevisionInterceptor } from './draft-revision';
+import { SandboxResetService } from './sandbox-reset.service';
+import { SandboxResetWorker } from './sandbox-reset.worker';
+import { SandboxResetController } from './sandbox-reset.controller';
+import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
 
 /**
  * 商品课程 v2（Commerce Course）：课程管理、课程包导入/导出、Portal v1 投影。
  * P1b：Draft → Publish → Version、History、Operations、Stripe、学员预览。
+ * Sandbox 重置：Sandbox-only 的课程内容清空/全量重发（作业化 + 三层守卫）。
  */
 @Module({
   controllers: [
@@ -37,6 +42,7 @@ import { DraftRevisionInterceptor } from './draft-revision';
     PortalCoursesController,
     OperationsController,
     EnvironmentController,
+    SandboxResetController,
   ],
   providers: [
     {
@@ -67,6 +73,9 @@ import { DraftRevisionInterceptor } from './draft-revision';
     MediaUploadService,
     PortalProjectionService,
     PortalPreviewService,
+    SandboxResetService,
+    SandboxResetWorker,
+    SandboxMaintenanceGuard,
   ],
 })
 export class CommerceCoursesModule {}

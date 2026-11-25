@@ -113,6 +113,11 @@ psql "$SANDBOX_DATABASE_URL" -c "select count(*) from orm_rows where domain='use
 ### B8 数据重置演练（产品/ops，按 `provisioning-request.md` §7 Q5 结论执行）
 
 - 重置测试学员（订单/订阅/权益/学习记录）后：账号可重新订阅与学习；课程内容不受影响；重置操作有审计记录。
+- **课程内容重置是独立工具（Q5b，不与学员重置合并）**：Admin Sandbox › Settings › Sandbox Reset（仅 ADMIN；`APP_ENV=SANDBOX` 且 `SANDBOX_RESET_ENABLED=true`）。验证：
+  - 作业完成后 `CommerceCourse` / `CourseVersion` / `CourseMediaAsset` / `CoursePackageJob` 为 0，staging 清空；员工、设置、课程分类、知识库、审计仍在；
+  - 需要保留内容时先按 PRD 68 导出课程包，重置不影响已下载的导出包；
+  - 在 UAT/SIT/Production 配置下调用接口 → 403 `SANDBOX_RESET_DISABLED`；OPERATION_ADMIN → 403；
+  - 审计表出现 `SANDBOX_RESET_REQUESTED` / `SANDBOX_RESET_COMPLETED`（或 `..._FAILED`）。
 
 ### B9 成本与监控（ops）
 

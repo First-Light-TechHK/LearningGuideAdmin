@@ -29,6 +29,7 @@ import { CourseEditorPage } from './backoffice/pages/CourseEditorPage'
 import { CoursePreviewPage } from './backoffice/pages/CoursePreviewPage'
 import { PortalCoursePreviewPage } from './backoffice/pages/PortalCoursePreviewPage'
 import { OperationsPage } from './backoffice/pages/OperationsPage'
+import { SandboxResetPage } from './backoffice/pages/SandboxResetPage'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
@@ -176,6 +177,7 @@ function App() {
                 element={<SettingsEntryPage section="notificationConfiguration" />}
               />
               <Route path="settings/learning-access" element={<LearningAccessPage />} />
+              <Route path="settings/sandbox-reset" element={<SandboxResetPage />} />
             </Route>
           </Route>
           <Route path="*" element={<LocaleFallback />} />

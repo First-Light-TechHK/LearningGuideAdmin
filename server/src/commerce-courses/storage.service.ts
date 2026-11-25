@@ -116,6 +116,11 @@ class LocalDriver implements StorageDriver {
   }
 
   async removePrefix(prefix: string): Promise<void> {
+    // 空前缀 = 清空整个 staging 根（Sandbox 重置专用）；其余前缀仍走安全解析。
+    if (prefix === '') {
+      await fs.rm(path.resolve(this.root), { recursive: true, force: true });
+      return;
+    }
     await fs.rm(this.resolve(prefix), { recursive: true, force: true });
   }
 }
@@ -335,6 +340,32 @@ export class CourseStorageService {
 
   clearStagingPrefix(jobId: string): Promise<void> {
     return this.staging.removePrefix(jobId);
+  }
+
+  /**
+   * 清空整个课程包 staging 根（Sandbox 课程内容重置用）。
+   * 只在 Sandbox 的专用桶/专用根目录上调用；前缀为空时明确拒绝，避免误删整桶或整个工作目录。
+   */
+  clearStagingRoot(): Promise<void> {
+    if (this.config.mediaBucket) {
+      if ((this.config.stagingPrefix ?? '').trim() === '') {
+        return Promise.reject(
+          new Error(
+            'Refusing to clear the whole staging bucket: COURSE_PACKAGE_PREFIX is empty',
+          ),
+        );
+      }
+    } else if (
+      path.resolve(this.config.packageStagingRoot) ===
+      path.resolve(process.cwd())
+    ) {
+      return Promise.reject(
+        new Error(
+          'Refusing to clear the whole working directory: COURSE_PACKAGE_ROOT is empty',
+        ),
+      );
+    }
+    return this.staging.removePrefix('');
   }
 
   /** 只读诊断：返回当前生效的存储驱动信息（不含密钥），用于确认是否用上 S3。 */

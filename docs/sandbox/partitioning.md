@@ -93,6 +93,7 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 - 唯一允许按环境参数化的是**部署工具**（如 `scripts/provision-admin-dev.mjs` 按 `ADMIN_ENV` 生成资源名/桶名/分支约束），它描述“怎么部署”，不改变产品行为。
 - 能力差异用**能力开关 + 环境矩阵**表达（见 §5），不在路由里写环境判断。
 - `APP_ENV=SANDBOX` 只是运行标识（健康检查、审计、helpdesk seed 判定）；`AppEnvName` 已把它作为独立值保留，不借用 DEV/UAT 语义（`server/src/backoffice/lib/env.ts`，本分支）。
+- **唯一允许的环境安全断言（2026-11-25）**：Sandbox 课程内容重置（`/api/backoffice/sandbox/reset`）在服务端 fail-closed 要求 `APP_ENV` 显式等于 `SANDBOX`，并叠加配置开关 `SANDBOX_RESET_ENABLED=true`（默认关）与 ADMIN 角色。这是破坏性运维动作的环境断言，不是产品行为分支：不按环境隐藏任何产品功能，只在非 Sandbox 环境拒绝该运维接口（403 `SANDBOX_RESET_DISABLED`）。实现见 `server/src/commerce-courses/sandbox-reset.service.ts`；范围与保留项见 §5.3 与 `provisioning-request.md` Q5b。
 
 ## 5. 能力与角色（Owner 2026-11-16 拍板，2026-11-24 修订：全部打开）
 
@@ -128,6 +129,7 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 - **交付包规格**（`.lgcourse.zip` / manifest / import-export 格式）保持接手前原样。当前基线导出为 **v1 包**（`source.environment=Sandbox`、`sourceVersion`），**不含 v2 provenance**；v2 与 provenance 门按 owner 决定**不做**（范围外，交付以 v1 为准）。
 - **媒体上传规格**（格式白名单、大小上限、分块、时长探测、封面尺寸）保持接手前原样。
 - 课程管理底层不大改；上游已知行为（如 webm 无时长导致 Study 不完整、试看截止点为展示级）**记录不改**，见 `verify-takeover-20261116/upstream-preview-media-as-is.md`。
+- **课程内容重置（Q5b）不改变上述冻结项**：只清理本环境课程域与对象存储中的课程媒体/staging，不修改交付包格式、媒体上传规格或课程存储模型；Sandbox → Production 仍按 PRD 68 用「导出课程包 → 导入 Production」。
 
 **生产（目标态）= import-only**：只导入 Sandbox 导出的课程包，经 provenance 门（`provenance.sourceEnv=sandbox`）校验；生产禁止编辑/新建/结构变更（403 `CAPABILITY_DISABLED`）。
 

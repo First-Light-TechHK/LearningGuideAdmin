@@ -5,6 +5,7 @@ import {
   CAPABILITY_IDS,
   parseEnabledCapabilities,
 } from '../common/capabilities';
+import { appEnvName } from '../backoffice/lib/env';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 
 /** 环境信息：两套环境同一套代码，差异只在配置（PRD §3.1）。 */
@@ -31,6 +32,10 @@ export class EnvironmentController {
       // 预览入口（PREVIEW_ENTRY）：learner（缺省，旧前端忽略该字段）/ portal（生产投影渲染草稿）。
       // 缺省字段兜底 learner，端点始终返回明确值。
       previewEntry: this.config.previewEntry ?? 'learner',
+      // Sandbox 课程内容重置入口（只读）：开关默认关，且必须同时是 APP_ENV=SANDBOX。
+      // 前端只在为 true 时显示 Settings › Sandbox Reset；服务端另有三层守卫。
+      sandboxResetEnabled:
+        this.config.sandboxResetEnabled === true && appEnvName() === 'SANDBOX',
     };
   }
 }

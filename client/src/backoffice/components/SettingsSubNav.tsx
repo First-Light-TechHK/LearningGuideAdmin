@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { usePathname } from "../lib/navigation";
 
 import type { EmployeeRole } from "../contracts/employee";
-import { cachedAccountFeatures, cachedCapabilities } from "../lib/capabilities";
+import { cachedAccountFeatures, cachedCapabilities, cachedSandboxResetEnabled } from "../lib/capabilities";
 import { t } from "../lib/i18n/messages";
 import { useLocale } from "../lib/navigation";
 import {
@@ -17,6 +17,7 @@ const SUB_LABEL: Record<SettingsSubKey, string> = {
   paymentGateway: "nav.paymentGateway",
   notificationConfiguration: "nav.notificationConfiguration",
   learningAccess: "nav.learningAccess",
+  sandboxReset: "nav.sandboxReset",
 };
 
 /**
@@ -30,7 +31,12 @@ export function SettingsSubNav({ role }: { role: EmployeeRole }) {
 
   return (
     <nav className="subNav" aria-label={t(locale, "nav.settings")}>
-      {visibleSettingsSubs(role, cachedCapabilities(), cachedAccountFeatures()).map((sub) => {
+      {visibleSettingsSubs(
+        role,
+        cachedCapabilities(),
+        cachedAccountFeatures(),
+        cachedSandboxResetEnabled(),
+      ).map((sub) => {
         const href = settingsSubHref(locale, sub);
         return (
           <Link
