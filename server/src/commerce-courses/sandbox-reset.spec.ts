@@ -46,7 +46,15 @@ function makePrisma(): AnyPrisma {
       deleteMany: jest.fn().mockResolvedValue({ count: 5 }),
     },
     $transaction: jest.fn(),
-    $queryRaw: jest.fn().mockResolvedValue([{ id: 'job-1' }]),
+    $queryRaw: jest.fn().mockResolvedValue([
+      {
+        id: 'job-1',
+        liveVersionIds: 0n,
+        planCourseIds: 0n,
+        popularCourseIds: 0n,
+        bannerCourseIds: 0n,
+      },
+    ]),
   };
   prisma.$transaction = jest.fn((callback: (tx: AnyPrisma) => unknown) =>
     callback(prisma),
@@ -345,5 +353,85 @@ describe('SandboxResetService.execute', () => {
 
     expect(prisma.courseCodeCounter.deleteMany).not.toHaveBeenCalled();
     expect(prisma.commerceCourse.deleteMany).toHaveBeenCalled();
+  });
+
+  it('records pre-existing dangling references in the report', async () => {
+    const prisma = makePrisma();
+    prisma.sandboxResetJob.findUnique.mockResolvedValue(
+      job(DEFAULT_SANDBOX_RESET_SCOPE),
+    );
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          liveVersionIds: 2n,
+          planCourseIds: 1n,
+          popularCourseIds: 0n,
+          bannerCourseIds: 0n,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          liveVersionIds: 0n,
+          planCourseIds: 0n,
+          popularCourseIds: 0n,
+          bannerCourseIds: 0n,
+        },
+      ]);
+    const service = new SandboxResetService(
+      prisma as never,
+      makeStorage() as never,
+      makeConfig(),
+    );
+
+    await service.execute('job-1');
+
+    const last = prisma.sandboxResetJob.update.mock.calls.at(-1)[0];
+    expect(last.data.status).toBe('SUCCEEDED');
+    expect(last.data.report.integrityBefore).toEqual({
+      liveVersionIds: 2,
+      planCourseIds: 1,
+      popularCourseIds: 0,
+      bannerCourseIds: 0,
+    });
+  });
+
+  it('fails the job when dangling references remain after the reset', async () => {
+    const prisma = makePrisma();
+    prisma.sandboxResetJob.findUnique.mockResolvedValue(
+      job(DEFAULT_SANDBOX_RESET_SCOPE),
+    );
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          liveVersionIds: 0n,
+          planCourseIds: 0n,
+          popularCourseIds: 0n,
+          bannerCourseIds: 0n,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          liveVersionIds: 1n,
+          planCourseIds: 0n,
+          popularCourseIds: 0n,
+          bannerCourseIds: 0n,
+        },
+      ]);
+    const service = new SandboxResetService(
+      prisma as never,
+      makeStorage() as never,
+      makeConfig(),
+    );
+
+    await service.execute('job-1');
+
+    expect(prisma.sandboxResetJob.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'FAILED',
+          error: expect.stringContaining('dangling reference'),
+        }),
+      }),
+    );
   });
 });

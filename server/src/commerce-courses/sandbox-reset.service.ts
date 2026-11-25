@@ -34,6 +34,14 @@ export interface SandboxResetImpact {
   packageJobs: number;
 }
 
+/** 重置前后的悬空引用计数（指针还在、目标行不在）。 */
+export interface SandboxDanglingReferences {
+  liveVersionIds: number;
+  planCourseIds: number;
+  popularCourseIds: number;
+  bannerCourseIds: number;
+}
+
 export type SandboxResetJobView = {
   jobId: string;
   status: string;
@@ -359,6 +367,9 @@ export class SandboxResetService {
       // 1. PRECHECK：再次确认环境与开关（防止运行中途配置被改）。
       this.assertAvailable();
       await this.progress(jobId, 'PRECHECK', 5);
+      // 重置前先记录悬空引用（例如历史清理留下的 liveVersionId 悬空），
+      // 便于在报告里区分“原本就有”与“重置造成”。
+      report.integrityBefore = await this.danglingReferences();
 
       // 2. JOBS：先取消排队中的作业，再删除全部作业行。
       if (scope.packageJobs) {
@@ -470,14 +481,18 @@ export class SandboxResetService {
     });
   }
 
-  private async verify(
-    scope: SandboxResetScope,
-  ): Promise<{ courses: number; leftover: number; attempts: number }> {
+  private async verify(scope: SandboxResetScope): Promise<{
+    courses: number;
+    leftover: number;
+    attempts: number;
+    dangling: SandboxDanglingReferences;
+  }> {
     if (!scope.courses) {
       return {
         courses: await this.prisma.commerceCourse.count(),
         leftover: 0,
         attempts: 0,
+        dangling: await this.danglingReferences(),
       };
     }
     let attempts = 0;
@@ -487,7 +502,57 @@ export class SandboxResetService {
       attempts += 1;
       remaining = await this.prisma.commerceCourse.count();
     }
-    return { courses: remaining, leftover: remaining, attempts };
+    // 重置后课程域必须干净：任何“指针还在、目标行不在”的残留都说明
+    // 清理不完整（或并发写入），按失败处理，避免再次出现悬空 liveVersionId。
+    const dangling = await this.danglingReferences();
+    const danglingTotal = Object.values(dangling).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    if (danglingTotal > 0) {
+      throw new SandboxResetError(
+        'SANDBOX_RESET_INTEGRITY_FAILED',
+        500,
+        `Reset left ${danglingTotal} dangling reference(s): ${JSON.stringify(dangling)}`,
+      );
+    }
+    return { courses: remaining, leftover: remaining, attempts, dangling };
+  }
+
+  /**
+   * 悬空引用检查：课程/版本/运营位等指针指向不存在的行。
+   * 典型来源：直接删版本行或课程行，却没有同步 liveVersionId / 关联行。
+   */
+  private async danglingReferences(): Promise<SandboxDanglingReferences> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        liveVersionIds: bigint | number;
+        planCourseIds: bigint | number;
+        popularCourseIds: bigint | number;
+        bannerCourseIds: bigint | number;
+      }>
+    >`
+      SELECT
+        (SELECT count(*) FROM "CommerceCourse" c
+           LEFT JOIN "CourseVersion" v ON v.id = c."liveVersionId"
+          WHERE c."liveVersionId" IS NOT NULL AND v.id IS NULL) AS "liveVersionIds",
+        (SELECT count(*) FROM "CoursePlan" p
+           LEFT JOIN "CommerceCourse" c ON c.id = p."courseId"
+          WHERE p."courseId" IS NOT NULL AND c.id IS NULL) AS "planCourseIds",
+        (SELECT count(*) FROM "PopularCourseEntry" e
+           LEFT JOIN "CommerceCourse" c ON c.id = e."courseId"
+          WHERE c.id IS NULL) AS "popularCourseIds",
+        (SELECT count(*) FROM "DiscoveryBanner" b
+           LEFT JOIN "CommerceCourse" c ON c.id = b."courseId"
+          WHERE b."courseId" IS NOT NULL AND c.id IS NULL) AS "bannerCourseIds"
+    `;
+    const row = rows[0];
+    return {
+      liveVersionIds: Number(row?.liveVersionIds ?? 0),
+      planCourseIds: Number(row?.planCourseIds ?? 0),
+      popularCourseIds: Number(row?.popularCourseIds ?? 0),
+      bannerCourseIds: Number(row?.bannerCourseIds ?? 0),
+    };
   }
 
   private async progress(
