@@ -20,36 +20,37 @@ type SnapshotLocalization = VersionSnapshot['course']['localizations'][number];
 export class PortalProjectionService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listCourses(limit = 50) {
-    const rows = await this.prisma.commerceCourse.findMany({
-      where: {
-        liveStatus: 'ONLINE',
-        liveVersionId: { not: null },
-        archivedAt: null,
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: limit,
-      include: { category: true, cover: true, localizations: true },
-    });
-    const versions = await this.prisma.courseVersion.findMany({
-      where: {
-        id: {
-          in: rows
-            .map((row) => row.liveVersionId)
-            .filter((id): id is string => Boolean(id)),
+  async listCourses(limit = 50, pagination?: { afterId?: string }) {
+    const summaries: ReturnType<PortalProjectionService['toSummary']>[] = [];
+    let cursor: string | undefined;
+    while (summaries.length < limit) {
+      const take = limit - summaries.length;
+      const rows = await this.prisma.commerceCourse.findMany({
+        where: {
+          liveStatus: 'ONLINE', liveVersionId: { not: null }, archivedAt: null,
+          ...(pagination?.afterId ? { id: { gt: pagination.afterId } } : {}),
         },
-      },
-      select: { id: true, snapshotData: true },
-    });
-    const snapshotById = new Map(
-      versions.map((version) => [
-        version.id,
-        version.snapshotData as unknown as VersionSnapshot,
-      ]),
-    );
-    return rows.map((row) =>
-      this.toSummary(row, snapshotById.get(row.liveVersionId ?? '') ?? null),
-    );
+        orderBy: pagination ? { id: 'asc' } : [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        include: { category: true, cover: true, localizations: true },
+      });
+      if (!rows.length) break;
+      const versions = await this.prisma.courseVersion.findMany({
+        where: { id: { in: rows.map(row => row.liveVersionId).filter((id): id is string => Boolean(id)) } },
+        select: { id: true, courseId: true, snapshotData: true },
+      });
+      const byId = new Map(versions.map(version => [version.id, version]));
+      for (const row of rows) {
+        const version = byId.get(row.liveVersionId ?? '');
+        if (version && version.courseId === row.id) {
+          summaries.push(this.toSummary(row, version.snapshotData as unknown as VersionSnapshot));
+        }
+      }
+      cursor = rows[rows.length - 1].id;
+      if (rows.length < take) break;
+    }
+    return summaries;
   }
 
   async getCourseById(id: string) {
@@ -75,9 +76,9 @@ export class PortalProjectionService {
       return null;
     const version = await this.prisma.courseVersion.findUnique({
       where: { id: row.liveVersionId },
-      select: { snapshotData: true },
+      select: { courseId: true, snapshotData: true },
     });
-    if (!version) return null;
+    if (!version || version.courseId !== row.id) return null;
     const snapshot = version.snapshotData as unknown as VersionSnapshot;
     return this.toDetail(row, snapshot);
   }
@@ -128,6 +129,7 @@ export class PortalProjectionService {
       select: {
         liveStatus: true,
         archivedAt: true,
+        liveVersionId: true,
         cover: { select: { storageKey: true, extension: true, size: true } },
       },
     });
@@ -135,9 +137,11 @@ export class PortalProjectionService {
       !course ||
       course.liveStatus !== 'ONLINE' ||
       course.archivedAt ||
-      !course.cover
+      !course.cover ||
+      !course.liveVersionId
     )
       return null;
+    if (!await this.prisma.courseVersion.findFirst({ where: { id: course.liveVersionId, courseId }, select: { id: true } })) return null;
     return {
       storageKey: course.cover.storageKey,
       extension: course.cover.extension,
@@ -148,10 +152,11 @@ export class PortalProjectionService {
   async getMediaBytes(courseId: string, assetId: string) {
     const course = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
-      select: { liveStatus: true, archivedAt: true },
+      select: { liveStatus: true, archivedAt: true, liveVersionId: true },
     });
-    if (!course || course.liveStatus !== 'ONLINE' || course.archivedAt)
+    if (!course || course.liveStatus !== 'ONLINE' || course.archivedAt || !course.liveVersionId)
       return null;
+    if (!await this.prisma.courseVersion.findFirst({ where: { id: course.liveVersionId, courseId }, select: { id: true } })) return null;
     const asset = await this.prisma.courseMediaAsset.findFirst({
       where: { id: assetId, courseId },
       select: { storageKey: true, extension: true, size: true },

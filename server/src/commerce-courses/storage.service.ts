@@ -1,4 +1,4 @@
-﻿import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  HeadBucketCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
@@ -42,11 +43,25 @@ export function isObjectNotFoundError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const e = error as { name?: unknown; Code?: unknown; code?: unknown };
   return (
-    e.name === 'NotFound' ||
     e.name === 'NoSuchKey' ||
     e.Code === 'NoSuchKey' ||
     e.code === 'NoSuchKey'
   );
+}
+
+async function resolvedExistingPath(target: string): Promise<string> {
+  let current = path.resolve(target);
+  const missing: string[] = [];
+  for (;;) {
+    try { return path.join(await fs.realpath(current), ...missing.reverse()); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
 
 class LocalDriver implements StorageDriver {
@@ -106,7 +121,7 @@ class LocalDriver implements StorageDriver {
     } catch (error) {
       // 只有“确实不存在”才返回 false；EACCES/ENOSPC/非法 key 等是存储故障，必须上抛。
       const code = (error as NodeJS.ErrnoException | undefined)?.code;
-      if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+      if (code === 'ENOENT') return false;
       throw error;
     }
   }
@@ -214,6 +229,12 @@ class S3Driver implements StorageDriver {
     } catch (error) {
       // NoSuchBucket/AccessDenied/凭证/网络错误不能被当成“对象不存在”
       if (isObjectNotFoundError(error)) return false;
+      // HeadObject's generic 404 may mean either a missing key or a missing bucket.
+      // Only treat it as a missing key after the bucket itself is confirmed reachable.
+      if (typeof error === 'object' && error !== null && (error as { name?: string }).name === 'NotFound') {
+        await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+        return false;
+      }
       throw error;
     }
   }
@@ -239,12 +260,13 @@ class S3Driver implements StorageDriver {
         .filter((k): k is string => Boolean(k))
         .map((k) => ({ Key: k }));
       if (objects.length > 0) {
-        await this.client.send(
+        const deleted = await this.client.send(
           new DeleteObjectsCommand({
             Bucket: this.bucket,
             Delete: { Objects: objects },
           }),
         );
+        if (deleted.Errors?.length) throw new Error(`S3 delete failed for ${deleted.Errors.length} object(s)`);
       }
       token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
     } while (token);
@@ -317,6 +339,11 @@ export class CourseStorageService {
     return this.media.remove(key);
   }
 
+  /** Remove the course-media namespace including objects without database rows. */
+  clearCourseMediaRoot(): Promise<void> {
+    return this.media.removePrefix(this.config.mediaBucket ? 'course-media/' : 'course-media');
+  }
+
   // ===== 课程包 staging =====
   stagingKey(jobId: string, name: string): string {
     return `${jobId}/${name}`;
@@ -346,26 +373,29 @@ export class CourseStorageService {
    * 清空整个课程包 staging 根（Sandbox 课程内容重置用）。
    * 只在 Sandbox 的专用桶/专用根目录上调用；前缀为空时明确拒绝，避免误删整桶或整个工作目录。
    */
-  clearStagingRoot(): Promise<void> {
+  async assertStagingRootSafe(): Promise<void> {
     if (this.config.mediaBucket) {
-      if ((this.config.stagingPrefix ?? '').trim() === '') {
-        return Promise.reject(
-          new Error(
-            'Refusing to clear the whole staging bucket: COURSE_PACKAGE_PREFIX is empty',
-          ),
-        );
+      const stagingPrefix = (this.config.stagingPrefix ?? '').trim();
+      const mediaPrefix = `${this.config.mediaPrefix ?? ''}course-media/`;
+      const sameBucket = (this.config.stagingBucket ?? this.config.mediaBucket) === this.config.mediaBucket;
+      if (!stagingPrefix || !stagingPrefix.endsWith('/') ||
+          (sameBucket && (stagingPrefix.startsWith(mediaPrefix) || mediaPrefix.startsWith(stagingPrefix)))) {
+        throw new Error('Refusing to clear an unsafe or overlapping staging bucket prefix');
       }
-    } else if (
-      path.resolve(this.config.packageStagingRoot) ===
-      path.resolve(process.cwd())
-    ) {
-      return Promise.reject(
-        new Error(
-          'Refusing to clear the whole working directory: COURSE_PACKAGE_ROOT is empty',
-        ),
-      );
+    } else {
+      const staging = await resolvedExistingPath(this.config.packageStagingRoot);
+      const media = await resolvedExistingPath(this.config.mediaRoot);
+      const cwd = await resolvedExistingPath(process.cwd());
+      if (staging === path.parse(staging).root || staging === cwd || cwd.startsWith(staging + path.sep) ||
+          staging === media || staging.startsWith(media + path.sep) || media.startsWith(staging + path.sep)) {
+        throw new Error('Refusing to clear an unsafe or overlapping staging directory');
+      }
     }
-    return this.staging.removePrefix('');
+  }
+
+  async clearStagingRoot(): Promise<void> {
+    await this.assertStagingRootSafe();
+    await this.staging.removePrefix('');
   }
 
   /** 只读诊断：返回当前生效的存储驱动信息（不含密钥），用于确认是否用上 S3。 */

@@ -11,6 +11,10 @@ import {
 import { clientIp } from '../backoffice/nest/request-context';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 import { SandboxResetService } from './sandbox-reset.service';
+import { PackageJobsService } from './package-jobs.service';
+import { BadRequestException, UseGuards, UseInterceptors } from '@nestjs/common';
+import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
+import { SandboxLockReleaseInterceptor } from './sandbox-lock-release.interceptor';
 
 /**
  * Sandbox 课程内容重置（Sandbox 专项，docs/sandbox/partitioning.md §4）。
@@ -21,7 +25,7 @@ import { SandboxResetService } from './sandbox-reset.service';
  */
 @Controller('backoffice/sandbox/reset')
 export class SandboxResetController {
-  constructor(private readonly resets: SandboxResetService) {}
+  constructor(private readonly resets: SandboxResetService, private readonly packages: PackageJobsService) {}
 
   @Get()
   state() {
@@ -40,6 +44,18 @@ export class SandboxResetController {
       request.employee?.employeeId ?? null,
       clientIp(request),
     );
+  }
+
+  /** Explicit Admin-only recovery of an invalid live pointer using a validated package. */
+  @UseGuards(SandboxMaintenanceGuard)
+  @UseInterceptors(SandboxLockReleaseInterceptor)
+  @Post('recover-live/:jobId')
+  recoverLive(@Param('jobId') jobId: string, @Body() body: { confirm?: string; reason?: string }, @Req() request: BackofficeRequest) {
+    this.resets.assertAvailable();
+    if (body?.confirm !== 'RECOVER COURSE' || typeof body.reason !== 'string' || !body.reason.trim()) {
+      throw new BadRequestException({ code: 'RECOVERY_CONFIRMATION_REQUIRED', message: 'Type RECOVER COURSE and provide a reason.' });
+    }
+    return this.packages.recoverInvalidLiveImport(jobId, body.reason, request.employee?.employeeId ?? null);
   }
 
   @Get(':jobId')

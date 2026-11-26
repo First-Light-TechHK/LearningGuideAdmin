@@ -1,50 +1,34 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import type { Request } from 'express';
-
+import { appEnvName } from '../backoffice/lib/env';
+import { SANDBOX_LOCK_LEASE } from './sandbox-lock-release.interceptor';
 import { PrismaService } from '../prisma/prisma.service';
 import { SandboxResetError } from './sandbox-reset.service';
+import { SandboxWriteLock } from './sandbox-write-lock';
 
-/**
- * 重置维护守卫：Sandbox 重置作业 RUNNING 期间，课程写请求返回 409 SANDBOX_MAINTENANCE，
- * 避免重置与编辑/导入并发（plan §5.5）。只作用于课程控制器；只读请求放行。
- * 作业只可能在 Sandbox 创建（服务层三层守卫），因此其它环境不会命中。
- * 结果缓存 1 秒，避免每个写请求都查库。
- */
+/** Course writes retain a shared database lock through the HTTP response. */
 @Injectable()
 export class SandboxMaintenanceGuard implements CanActivate {
-  private checkedAt = 0;
-  private active = false;
-
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly locks: SandboxWriteLock) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<Request>();
+    const http = context.switchToHttp();
+    const request = http.getRequest<Request>();
     const method = (request.method ?? 'GET').toUpperCase();
-    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
-      return true;
-    }
-    if (!(await this.isActive())) return true;
-    throw new SandboxResetError(
-      'SANDBOX_MAINTENANCE',
-      409,
-      'A sandbox reset is running; course changes are temporarily blocked.',
-    );
-  }
-
-  private async isActive(): Promise<boolean> {
-    const now = Date.now();
-    if (now - this.checkedAt < 1000) return this.active;
-    this.checkedAt = now;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS' || appEnvName() !== 'SANDBOX') return true;
+    let lease;
     try {
-      this.active =
-        (await this.prisma.sandboxResetJob.count({
-          where: { status: 'RUNNING' },
-        })) > 0;
-    } catch {
-      // 查询失败时不阻断正常写请求（fail-open）：重置本身有单活约束，
-      // 这里的守卫只是防并发，不应让数据库抖动变成写请求全挂。
-      this.active = false;
+      lease = await this.locks.acquire('shared');
+      if (!lease) throw new SandboxResetError('SANDBOX_MAINTENANCE', 409, 'A sandbox reset is running; course changes are temporarily blocked.');
+      const active = await this.prisma.sandboxResetJob.count({where: {status: {in: ['QUEUED', 'RUNNING']}}});
+      if (active) throw new SandboxResetError('SANDBOX_MAINTENANCE', 409, 'A sandbox reset is active; course changes are temporarily blocked.');
+      (request as Request & { [SANDBOX_LOCK_LEASE]?: typeof lease })[SANDBOX_LOCK_LEASE] = lease;
+
+      return true;
+    } catch (error) {
+      if (lease) await lease.release().catch(() => undefined);
+      if (error instanceof SandboxResetError) throw error;
+      throw new SandboxResetError('SANDBOX_MAINTENANCE_UNAVAILABLE', 503, 'Unable to verify whether sandbox maintenance is active. Please retry.');
     }
-    return this.active;
   }
 }

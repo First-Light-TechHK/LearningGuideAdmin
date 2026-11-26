@@ -10,7 +10,7 @@
     "npm": ">=10"
   },
   "scripts": {
-    "build": "nest build",
+    "build": "nest build && node scripts/write-build-info.cjs",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",

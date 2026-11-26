@@ -6,6 +6,7 @@ import { tryRecordAuditEvent } from '../backoffice/repositories/auditRepository'
 import { PrismaService } from '../prisma/prisma.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 import { CourseStorageService } from './storage.service';
+import { SandboxWriteLock } from './sandbox-write-lock';
 
 /** 确认短语：必须完全匹配（大小写、空格）。 */
 export const SANDBOX_RESET_CONFIRM = 'RESET SANDBOX';
@@ -137,6 +138,7 @@ export class SandboxResetService {
     private readonly prisma: PrismaService,
     private readonly storage: CourseStorageService,
     @Inject(COMMERCE_CONFIG) private readonly config: CommerceCourseConfig,
+    private readonly locks: SandboxWriteLock,
   ) {}
 
   /** 配置开关 + 环境断言都满足时才可用。 */
@@ -322,17 +324,10 @@ export class SandboxResetService {
 
   // ===== Worker 支撑 =====
 
-  /** 把心跳过期的 RUNNING 作业放回队列（多实例安全）。 */
+  /** A stale heartbeat does not prove the former worker has stopped deleting.
+   * Leave RUNNING jobs in maintenance until an operator confirms worker shutdown. */
   async reclaimStale(): Promise<void> {
-    if (!this.isAvailable()) return;
-    const staleBefore = new Date(Date.now() - this.config.jobStaleMs);
-    await this.prisma.sandboxResetJob.updateMany({
-      where: {
-        status: 'RUNNING',
-        OR: [{ heartbeatAt: null }, { heartbeatAt: { lt: staleBefore } }],
-      },
-      data: { status: 'QUEUED', startedAt: null, heartbeatAt: null },
-    });
+    // Recovery is an explicit offline operation; see docs/sandbox/partitioning.md.
   }
 
   /** 领取一条 QUEUED 作业；没有则 null。 */
@@ -360,16 +355,36 @@ export class SandboxResetService {
       where: { id: jobId },
     });
     if (!job || job.status !== 'RUNNING') return;
+    const lease = await this.locks.acquire('exclusive');
+    if (!lease) {
+      // No destructive work has started. Stay in maintenance while waiting for writers to drain.
+      await this.prisma.sandboxResetJob.updateMany({where: {id: jobId, status: 'RUNNING'}, data: {status: 'QUEUED', startedAt: null, heartbeatAt: null}});
+      return;
+    }
     const scope = normalizeSandboxResetScope(job.scope);
     const report: Record<string, unknown> = {};
+    const heartbeat = setInterval(() => {
+      void this.prisma.sandboxResetJob.updateMany({
+        where: { id: jobId, status: 'RUNNING' },
+        data: { heartbeatAt: new Date() },
+      }).catch((error: unknown) => this.logger.warn(`Reset heartbeat failed: ${error instanceof Error ? error.message : String(error)}`));
+    }, Math.max(100, this.config.jobHeartbeatMs));
+    heartbeat.unref();
 
     try {
       // 1. PRECHECK：再次确认环境与开关（防止运行中途配置被改）。
       this.assertAvailable();
       await this.progress(jobId, 'PRECHECK', 5);
+      const activePackageJobs = await this.prisma.coursePackageJob.count({
+        where: { status: { in: ACTIVE_PACKAGE_JOB_STATUSES as never[] } },
+      });
+      if (activePackageJobs > 0) throw new SandboxResetError('RESET_BUSY', 409,
+        `Reset stopped: ${activePackageJobs} import or export job(s) are active.`);
       // 重置前先记录悬空引用（例如历史清理留下的 liveVersionId 悬空），
       // 便于在报告里区分“原本就有”与“重置造成”。
       report.integrityBefore = await this.danglingReferences();
+      if (scope.staging || scope.media) await this.storage.assertStagingRootSafe();
+      if (scope.media) await this.assertMediaKeysSafe();
 
       // 2. JOBS：先取消排队中的作业，再删除全部作业行。
       if (scope.packageJobs) {
@@ -387,7 +402,9 @@ export class SandboxResetService {
       // 4. MEDIA：先删对象，再删 DB（对象失败则 DB 不动，便于重试修复）。
       if (scope.media) {
         await this.progress(jobId, 'MEDIA', 55);
-        report.mediaObjects = await this.clearMediaObjects();
+        report.mediaObjects = await this.prisma.courseMediaAsset.count();
+        await this.storage.clearCourseMediaRoot();
+        report.mediaOrphans = 'namespace cleared';
       }
 
       // 5. DATABASE：单事务删除课程域；保留员工/设置/分类/知识库/审计。
@@ -396,11 +413,16 @@ export class SandboxResetService {
         report.database = await this.clearDatabase(scope);
       }
 
-      // 6. VERIFY：复核课程数为 0（并发写入最多再删 3 轮）。
+      // 6. VERIFY：报告剩余课程；不删除验证期间出现的新数据。
       await this.progress(jobId, 'VERIFY', 90);
-      report.verify = await this.verify(scope);
+      const verification = await this.verify(scope);
+      report.verify = verification;
+      if (scope.courses && verification.leftover > 0) {
+        throw new SandboxResetError('SANDBOX_RESET_INCOMPLETE', 500,
+          `Reset left ${verification.leftover} course(s) after database cleanup; no additional courses were deleted during verification.`);
+      }
 
-      await this.finish(jobId, 'SUCCEEDED', report, null);
+      await lease.finishReset(jobId, 'SUCCEEDED', report, null);
       await this.auditCompleted(job, scope, report);
     } catch (error) {
       const message =
@@ -409,7 +431,7 @@ export class SandboxResetService {
         `Sandbox reset job ${jobId} failed: ${message}`,
         error instanceof Error ? error.stack : undefined,
       );
-      await this.finish(jobId, 'FAILED', report, message);
+      await lease.finishReset(jobId, 'FAILED', report, message);
       await tryRecordAuditEvent({
         eventName: 'SANDBOX_RESET_FAILED',
         actorEmployeeId: job.requestedBy,
@@ -418,6 +440,9 @@ export class SandboxResetService {
         newValue: JSON.stringify({ jobId, scope, report, error: message }),
         result: 'FAILURE',
       });
+    } finally {
+      clearInterval(heartbeat);
+      await lease.release().catch((error: unknown) => this.logger.error(`Reset lock release failed: ${String(error)}`));
     }
   }
 
@@ -428,24 +453,14 @@ export class SandboxResetService {
     return deleted.count;
   }
 
-  private async clearMediaObjects(): Promise<number> {
-    const assets = await this.prisma.courseMediaAsset.findMany({
-      select: { storageKey: true },
-    });
-    let removed = 0;
-    for (const asset of assets) {
-      try {
-        await this.storage.removeMedia(asset.storageKey);
-        removed += 1;
-      } catch (error) {
-        throw new Error(
-          `Failed to remove media object ${asset.storageKey}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
+  private async assertMediaKeysSafe(): Promise<void> {
+    const assets = await this.prisma.courseMediaAsset.findMany({ select: { storageKey: true } });
+    const unsafe = assets.filter(({ storageKey }) =>
+      !/^course-media\/[^/]+\/[^/]+$/.test(storageKey) || storageKey.includes('..') || storageKey.includes('\\'));
+    if (unsafe.length) {
+      throw new SandboxResetError('SANDBOX_RESET_UNSAFE_MEDIA_KEY', 409,
+        `Reset stopped: ${unsafe.length} media record(s) have unsafe storage keys. Inspect them before retrying.`);
     }
-    return removed;
   }
 
   private async clearDatabase(
@@ -495,13 +510,8 @@ export class SandboxResetService {
         dangling: await this.danglingReferences(),
       };
     }
-    let attempts = 0;
-    let remaining = await this.prisma.commerceCourse.count();
-    while (remaining > 0 && attempts < 3) {
-      await this.prisma.commerceCourse.deleteMany({});
-      attempts += 1;
-      remaining = await this.prisma.commerceCourse.count();
-    }
+    const attempts = 0;
+    const remaining = await this.prisma.commerceCourse.count();
     // 重置后课程域必须干净：任何“指针还在、目标行不在”的残留都说明
     // 清理不完整（或并发写入），按失败处理，避免再次出现悬空 liveVersionId。
     const dangling = await this.danglingReferences();
@@ -534,7 +544,7 @@ export class SandboxResetService {
     >`
       SELECT
         (SELECT count(*) FROM "CommerceCourse" c
-           LEFT JOIN "CourseVersion" v ON v.id = c."liveVersionId"
+           LEFT JOIN "CourseVersion" v ON v.id = c."liveVersionId" AND v."courseId" = c.id
           WHERE c."liveVersionId" IS NOT NULL AND v.id IS NULL) AS "liveVersionIds",
         (SELECT count(*) FROM "CoursePlan" p
            LEFT JOIN "CommerceCourse" c ON c.id = p."courseId"
@@ -566,26 +576,6 @@ export class SandboxResetService {
     });
   }
 
-  private async finish(
-    jobId: string,
-    status: 'SUCCEEDED' | 'FAILED',
-    report: Record<string, unknown>,
-    error: string | null,
-  ): Promise<void> {
-    await this.prisma.sandboxResetJob.update({
-      where: { id: jobId },
-      data: {
-        status,
-        stage: status === 'SUCCEEDED' ? 'DONE' : 'FAILED',
-        progress: 100,
-        report: report as unknown as Prisma.InputJsonValue,
-        error,
-        finishedAt: new Date(),
-        heartbeatAt: new Date(),
-      },
-    });
-  }
-
   private async auditCompleted(
     job: ResetJobRow,
     scope: SandboxResetScope,
@@ -610,7 +600,7 @@ export class SandboxResetService {
     return {
       jobId: job.id,
       status: job.status,
-      stage: job.stage,
+      stage: job.status === 'RUNNING' && (!job.heartbeatAt || Date.now() - job.heartbeatAt.getTime() > this.config.jobStaleMs) ? 'STALLED' : job.stage,
       progress: job.progress,
       scope: normalizeSandboxResetScope(job.scope),
       reason: job.reason,

@@ -164,3 +164,30 @@ Secrets  learning-guide/<admin/|>sandbox/<snake_case 键名>
 | 版本编号 | 发布 `1.1` → `1.2`；导出后再发布 `2.1` |
 | 能力/角色 | 不设置 `ADMIN_CAPABILITIES` / `APP_ROLES`：全部模块菜单可见（按角色权限），`/api/helpdesk/**`、`/api/user/**`、`/api/ks/**` 已挂载；未配置密钥的 Helpdesk 返回 503、AI 端点返回未配置错误（不是 404）；显式裁剪时才出现 404 `MODULE_NOT_ENABLED` |
 | 分支契约 | `git rev-parse sandbox` 与最近一次生产发布（UAT）部署 SHA 一致；CI 通过后工作流发布 |
+
+---
+
+# Recovering a stalled Sandbox reset
+
+A RUNNING reset with an expired heartbeat is shown as STALLED. It remains RUNNING in the database and continues to block course writes. A heartbeat alone cannot prove an old worker has stopped: an object deletion may still be in flight. Workers therefore never automatically reclaim a stale reset.
+
+1. Confirm this is the isolated Sandbox and record the job ID, stage, report, logs and a verified backup. Do not apply these instructions to Production.
+2. Stop every Admin worker instance and wait until its processes have exited. Confirm no in-flight storage deletion can still complete. If that cannot be established, leave the job in maintenance and investigate; do not requeue it.
+3. With all workers stopped, have an authorised database operator mark only the identified RUNNING job FAILED with a recovery note and finished time. Preserve its report and audit trail. Do not delete the job, modify course/version pointers or pick an arbitrary version.
+4. Inspect the partially completed stages, storage configuration, remaining records and backup. Restart workers. If appropriate, submit a new reset through the normal confirmation and audit flow; the operations are designed to tolerate already removed course-media objects. Verify its complete report and all expected counts before importing a verified course package and publishing it again.
+
+This procedure requires operational verification of worker termination and storage activity. It is not an automatic repair and does not establish transaction-level isolation from requests already in flight before maintenance began.
+
+## Recovering one invalid live pointer from a verified course package
+
+If export reports `LIVE_VERSION_INTEGRITY_ERROR`, first inspect the course and verify a trusted backup. Never assign a guessed historical version. Only in Sandbox, an ADMIN may upload and validate a package using the normal import flow, then call `POST /api/backoffice/sandbox/reset/recover-live/<jobId>` with `{"confirm":"RECOVER COURSE","reason":"<reason>"}`. This is separate from ordinary import; the caller must have an Admin session and the Sandbox reset capability must be enabled. The job must be a validated import from a package with the existing Course ID and no reset may be active.
+
+The operation locks the course, verifies that its live pointer is missing or belongs to another course, applies the package as a draft and clears the invalid pointer in the same transaction. A healthy live pointer or an unpublished course is refused. Existing version history is not rebound or deleted. After successful recovery, review the draft, explicitly publish it and bring it ONLINE; the recovery itself does neither. Inspect the audit record and the package import job result. This procedure does not repair missing source media; restore those from verified backups first.
+
+## In-flight write draining
+
+In Sandbox only, course and operations writes take PostgreSQL shared advisory lock `721743920411` before checking maintenance. The outer request interceptor releases it when the handler chain completes or errors, including an upload parser error. A socket close alone does not prove an asynchronous handler stopped; if the chain is cancelled without completion, the lock is intentionally retained until the process exits. Stop and confirm the affected worker and any in-flight storage operations have exited before retrying.
+
+A reset worker attempts the matching exclusive lock. If a prior writer holds a shared lock, the job returns to QUEUED without deleting anything. The QUEUED/RUNNING state rejects new course writes; after taking the exclusive lock the worker rechecks active package jobs. Terminal status is recorded on the same PostgreSQL session that holds the exclusive lock, before releasing it. Recovery requests use the shared guard too. Locks use a dedicated pool and do not change non-Sandbox writes.
+
+A database session loss can release an advisory lock while application code continues. Advisory locks do not fence external object storage against a network partition: monitor database connectivity and process health, and never automatically reclaim a stale reset. The recovery instructions above require explicit confirmation that old workers and their in-flight storage operations have stopped.

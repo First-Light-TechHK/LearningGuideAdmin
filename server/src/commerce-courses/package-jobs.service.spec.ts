@@ -577,3 +577,15 @@ describe('PackageJobsService — staging 存储故障（导入同步链路）', 
     });
   });
 });
+
+describe('sandbox invalid-live recovery access', () => {
+  const originalEnv = process.env.APP_ENV;
+  afterEach(() => { if (originalEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = originalEnv; });
+  it('rejects outside Sandbox or without an explicit reason before loading a job', async () => {
+    const jobs = new PackageJobsService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, { sandboxResetEnabled: true } as never);
+    process.env.APP_ENV = 'PROD';
+    await expect(jobs.recoverInvalidLiveImport('j1', 'reason', 'admin')).rejects.toMatchObject({code: 'RECOVERY_DISABLED'});
+    process.env.APP_ENV = 'SANDBOX';
+    await expect(jobs.recoverInvalidLiveImport('j1', '', 'admin')).rejects.toMatchObject({code: 'RECOVERY_REASON_REQUIRED'});
+  });
+});

@@ -20,7 +20,7 @@ describe('isObjectNotFoundError', () => {
       isObjectNotFoundError(
         Object.assign(new Error('x'), { name: 'NotFound' }),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isObjectNotFoundError(
         Object.assign(new Error('x'), { name: 'NoSuchKey' }),
@@ -80,6 +80,8 @@ describe('CourseStorageService.hasStaging — 本地驱动', () => {
       await expect(svc.hasStaging('../escape')).rejects.toThrow(
         /Illegal storage key/,
       );
+      await fs.writeFile(path.join(root, 'not-a-directory'), 'x');
+      await expect(svc.hasStaging('not-a-directory/chunk')).rejects.toMatchObject({code: 'ENOTDIR'});
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -104,7 +106,11 @@ describe('CourseStorageService.hasStaging — S3 驱动', () => {
         $metadata: { httpStatusCode: 404 },
       }),
     );
+    send.mockResolvedValueOnce({}); // HeadBucket confirms the bucket exists.
     await expect(svc.hasStaging('missing.bin')).resolves.toBe(false);
+    send.mockRejectedValueOnce(Object.assign(new Error('NotFound'), { name: 'NotFound' }));
+    send.mockRejectedValueOnce(Object.assign(new Error('NoSuchBucket'), { name: 'NoSuchBucket' }));
+    await expect(svc.hasStaging('ambiguous.bin')).rejects.toThrow('NoSuchBucket');
 
     const noSuchBucket = Object.assign(
       new Error('The specified bucket does not exist'),
@@ -119,5 +125,58 @@ describe('CourseStorageService.hasStaging — S3 驱动', () => {
     });
     send.mockRejectedValueOnce(accessDenied);
     await expect(svc.hasStaging('chunk/1')).rejects.toBe(accessDenied);
+  });
+});
+
+describe('Sandbox media cleanup', () => {
+  it('removes course-media orphans while preserving neighbouring files', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-media-clean-'));
+    try {
+      const svc = new CourseStorageService(config({ mediaRoot: root, packageStagingRoot: path.join(root, 'staging') }));
+      await svc.putMedia('course-media/orphan/file.bin', Buffer.from('orphan'));
+      await svc.putMedia('course-media-unrelated/keep.bin', Buffer.from('keep'));
+      await svc.clearCourseMediaRoot();
+      expect(await svc.hasMedia('course-media/orphan/file.bin')).toBe(false);
+      expect(await svc.hasMedia('course-media-unrelated/keep.bin')).toBe(true);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('fails if S3 reports per-object deletion errors', async () => {
+    const svc = new CourseStorageService(config({ mediaBucket: 'test', mediaPrefix: 'sandbox/' }));
+    const driver = (svc as unknown as { media: { client: { send: (command: unknown) => Promise<unknown> } } }).media;
+    const send = jest.spyOn(driver.client, 'send');
+    send.mockResolvedValueOnce({ Contents: [{ Key: 'sandbox/course-media/a' }] });
+    send.mockResolvedValueOnce({ Errors: [{ Key: 'sandbox/course-media/a', Code: 'AccessDenied' }] });
+    await expect(svc.clearCourseMediaRoot()).rejects.toThrow(/delete/i);
+  });
+});
+
+describe('Sandbox staging cleanup safety', () => {
+  it.each(['/', '/tmp/media', '/tmp/media/sub'])('refuses a dangerous local staging root %s', async (stagingRoot) => {
+    const svc = new CourseStorageService(config({ mediaRoot: '/tmp/media', packageStagingRoot: stagingRoot }));
+    const driver = (svc as unknown as { staging: { removePrefix: (prefix: string) => Promise<void> } }).staging;
+    const remove = jest.spyOn(driver, 'removePrefix').mockResolvedValue();
+    await expect(svc.clearStagingRoot()).rejects.toThrow(/refus/i);
+    expect(remove).not.toHaveBeenCalled();
+  });
+  it('refuses a staging path reached through a symlink', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lg-reset-symlink-'));
+    try {
+      await fs.mkdir(path.join(root, 'media'));
+      await fs.symlink(path.join(root, 'media'), path.join(root, 'alias'));
+      const svc = new CourseStorageService(config({ mediaRoot: path.join(root, 'media'), packageStagingRoot: path.join(root, 'alias', 'stage') }));
+      const driver = (svc as unknown as { staging: { removePrefix: (prefix: string) => Promise<void> } }).staging;
+      const remove = jest.spyOn(driver, 'removePrefix').mockResolvedValue();
+      await expect(svc.clearStagingRoot()).rejects.toThrow(/refus/i);
+      expect(remove).not.toHaveBeenCalled();
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
+
+  it('refuses overlapping namespaces in the same S3 bucket', async () => {
+    const svc = new CourseStorageService(config({ mediaBucket: 'test', stagingBucket: 'test', mediaPrefix: 'sandbox/', stagingPrefix: 'sandbox/course-media/' }));
+    const driver = (svc as unknown as { staging: { removePrefix: (prefix: string) => Promise<void> } }).staging;
+    const remove = jest.spyOn(driver, 'removePrefix').mockResolvedValue();
+    await expect(svc.clearStagingRoot()).rejects.toThrow(/refus/i);
+    expect(remove).not.toHaveBeenCalled();
   });
 });

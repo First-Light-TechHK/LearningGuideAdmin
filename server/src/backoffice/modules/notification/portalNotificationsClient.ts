@@ -12,6 +12,13 @@ import { Logger } from '@nestjs/common';
  */
 
 const DEFAULT_TIMEOUT_MS = 8_000;
+const BROADCAST_SEND_TIMEOUT_MS = 120_000;
+
+export function notificationTimeoutMs(method: string, path: string, body: unknown): number {
+  return method === 'PATCH' && /^\/broadcasts\/[^/]+$/.test(path) &&
+    typeof body === 'object' && body !== null && 'action' in body && body.action === 'send'
+    ? BROADCAST_SEND_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+}
 
 export class NotificationsError extends Error {
   constructor(
@@ -98,13 +105,13 @@ export function createPortalNotificationsClient(
   const logger = new Logger('PortalNotificationsClient');
   const fetchImpl: typeof fetch =
     options.fetchImpl ?? ((input, init) => fetch(input, init));
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   async function request(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH',
     path: string,
     body?: unknown,
   ): Promise<Record<string, unknown>> {
+    const timeoutMs = options.timeoutMs ?? notificationTimeoutMs(method, path, body);
     const config = portalNotificationsConfig();
     if (!config) throw notConnected();
     const headers: Record<string, string> = {

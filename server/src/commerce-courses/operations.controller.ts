@@ -1,3 +1,6 @@
+import { UseGuards, UseInterceptors } from '@nestjs/common';
+import { SandboxLockReleaseInterceptor } from './sandbox-lock-release.interceptor';
+import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
 import {
   Body,
   Controller,
@@ -15,6 +18,8 @@ function actor(request: BackofficeRequest): string | null {
 }
 
 /** Operations（PRD §19）：从 Course Overview 右上角进入。 */
+@UseGuards(SandboxMaintenanceGuard)
+@UseInterceptors(SandboxLockReleaseInterceptor)
 @Controller('backoffice/operations')
 export class OperationsController {
   constructor(private readonly operations: OperationsService) {}

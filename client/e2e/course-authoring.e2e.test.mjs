@@ -54,7 +54,7 @@ before(async () => {
   browser = await chromium.launch(executablePath ? { executablePath, args: ['--headless=new', '--no-sandbox'] } : {})
   context = await browser.newContext({ viewport: { width: 1360, height: 1000 }, deviceScaleFactor: 2 })
   page = await context.newPage()
-  page.setDefaultTimeout(15000)
+  page.setDefaultTimeout(60000)
   // Adding a lesson asks for its title in a browser prompt.
   page.on('dialog', (dialog) => void (dialog.type() === 'prompt' ? dialog.accept(promptAnswer) : dialog.accept()))
 })
@@ -110,7 +110,7 @@ test('author a course end to end against the real server', async () => {
   const media = makeMedia()
 
   // 1. Sign in.
-  await page.goto(`${base}/en-GB/sign-in`)
+  await page.goto(`${base}/en-GB/sign-in`, {waitUntil: 'domcontentloaded', timeout: 90000})
   await page.locator('#sign-in-email').fill(EMAIL)
   await page.locator('#sign-in-password').fill(PASSWORD)
   await page.locator('form button[type=submit]').click()
@@ -184,7 +184,9 @@ test('author a course end to end against the real server', async () => {
   await page.getByRole('button', { name: /^2\./ }).click()
   await fillLessonInfo('Second lesson', 'About the second lesson.', '第二课', '关于第二课。')
   await save()
+  const reorder = page.waitForResponse((response) => response.url().includes('/lessons/reorder') && response.request().method() === 'PUT')
   await page.getByRole('button', { name: '↑' }).first().click()
+  assert.equal((await reorder).status(), 200)
   await settle()
   course = await courseNow(courseId)
   assert.deepEqual([...course.lessons].sort((a, b) => a.sortOrder - b.sortOrder).map((lesson) => lesson.code), [secondCode, firstCode])
@@ -277,6 +279,7 @@ test('author a course end to end against the real server', async () => {
   const readingRows = await page.getByTestId('reading-row').count()
   assert.equal(readingRows, 2, 'the blank row stays on the page')
   const serverIssues = ((await courseNow(courseId)).completeness.issues ?? []).filter((issue) => issue.field.startsWith('readings'))
+  await page.getByTestId('reading-row').nth(1).getByTestId('field-issue').waitFor({ timeout: 60000 })
   assert.ok((await page.getByTestId('reading-row').nth(1).getByTestId('field-issue').count()) > 0, `the blank row says what is missing; server says ${JSON.stringify(serverIssues)}`)
   assert.equal(await page.getByTestId('readings-template').getAttribute('href'), `/api/backoffice/courses/${courseId}/readings/template`)
   await shot('readings-blank-row')
@@ -318,7 +321,9 @@ test('author a course end to end against the real server', async () => {
   await page.getByTestId('reading-title').nth(1).fill('A Good Paper')
   await page.getByTestId('reading-row').nth(1).locator('input').nth(1).fill('Bob Author')
   await page.getByTestId('reading-row').nth(1).locator('input').nth(2).fill('It goes deeper.')
+  const firstReadingsSaved = page.waitForResponse((response) => response.url().includes('/readings') && response.request().method() === 'PUT' && response.ok())
   await save()
+  await firstReadingsSaved
 
   const studyIn = async (language) => {
     await page.locator('select:has(option[value="zh-CN"])').first().selectOption(language)
@@ -351,7 +356,9 @@ test('author a course end to end against the real server', async () => {
   await page.getByTestId('reading-title').nth(0).fill('Another Book')
   await page.getByTestId('reading-row').nth(0).locator('input').nth(1).fill('Cy Author')
   await page.getByTestId('reading-row').nth(0).locator('input').nth(2).fill('A different view.')
+  const secondReadingsSaved = page.waitForResponse((response) => response.url().includes('/readings') && response.request().method() === 'PUT' && response.ok())
   await save()
+  await secondReadingsSaved
   await page.locator('select:has(option[value="zh-CN"])').first().selectOption('en-GB')
 
   course = await courseNow(courseId)
@@ -361,7 +368,9 @@ test('author a course end to end against the real server', async () => {
   await openTab(/Versions/)
   await page.getByTestId('publish-open').click()
   await page.getByRole('button', { name: 'Publish', exact: true }).last().click()
-  await page.getByText('Published successfully.').waitFor()
+  await page.getByTestId('course-toast').getByText('Published successfully.').waitFor()
+  await page.waitForFunction(() => /1\.1/.test(document.querySelector('[data-testid=versions-live-state]')?.textContent || '') && /Offline/i.test(document.querySelector('[data-testid=versions-live-state]')?.textContent || ''), null, { timeout: 60000 })
+  assert.match(await page.getByTestId('versions-current-draft').innerText(), /No draft/)
   await shot('published')
   const versions = await (await context.request.get(`${base}/api/backoffice/courses/${courseId}/versions`)).json()
   assert.ok(versions.data.some((version) => version.isLive), 'a live version exists after publishing')

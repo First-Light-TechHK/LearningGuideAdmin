@@ -29,6 +29,8 @@ import { DraftRevisionInterceptor } from './draft-revision';
 import { SandboxResetService } from './sandbox-reset.service';
 import { SandboxResetWorker } from './sandbox-reset.worker';
 import { SandboxResetController } from './sandbox-reset.controller';
+import { SandboxWriteLock } from './sandbox-write-lock';
+import { SandboxLockReleaseInterceptor } from './sandbox-lock-release.interceptor';
 import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
 
 /**
@@ -76,6 +78,8 @@ import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
     SandboxResetService,
     SandboxResetWorker,
     SandboxMaintenanceGuard,
+    SandboxWriteLock,
+    SandboxLockReleaseInterceptor,
   ],
 })
 export class CommerceCoursesModule {}

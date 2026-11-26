@@ -5,7 +5,9 @@ COPY package*.json ./
 COPY prisma ./prisma
 RUN npm ci && npx prisma generate
 COPY . .
-RUN npm run build
+# The release builder supplies the exact source commit; provenance must bind this value to the image.
+ARG BUILD_COMMIT
+RUN BUILD_COMMIT="$BUILD_COMMIT" npm run build
 
 FROM node:22-alpine
 WORKDIR /app

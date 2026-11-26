@@ -120,6 +120,7 @@ export function createNotificationsService(deps: {
     request: unknown,
     work: () => Promise<T>,
     before?: () => Promise<unknown>,
+    auditAfter?: (result: T) => unknown,
   ): Promise<T> {
     const previous = before ? await before().catch(() => undefined) : undefined;
     try {
@@ -128,7 +129,7 @@ export function createNotificationsService(deps: {
         employee,
         eventName,
         action,
-        { before: previous, after: request },
+        { before: previous, after: auditAfter ? auditAfter(result) : request },
         'SUCCESS',
       );
       return result;
@@ -234,6 +235,8 @@ export function createNotificationsService(deps: {
       'notification-broadcast',
       payload,
       () => portal.send('POST', '/broadcasts', payload),
+      undefined,
+      (result) => ({ request: payload, broadcastId: (result.broadcast as { id?: unknown } | undefined)?.id ?? null }),
     );
   }
 
@@ -252,7 +255,7 @@ export function createNotificationsService(deps: {
       employee,
       'test_sent',
       'notification-broadcast',
-      { titleEn: body.titleEn },
+      { titleEn: body.titleEn, audience: body.audience, language: body.language, channel: 'in_app' },
       () => portal.send('POST', '/broadcasts/test', payload),
     );
   }

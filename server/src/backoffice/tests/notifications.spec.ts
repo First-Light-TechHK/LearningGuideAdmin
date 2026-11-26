@@ -447,6 +447,15 @@ describe('notification service', () => {
     });
   });
 
+  it('records the created broadcast identity and audience in the audit', async () => {
+    const { portal } = fakePortal();
+    const { events, audit } = fakeAudit();
+    const service = createNotificationsService({ portal, audit });
+    await service.createBroadcast(employee, { titleEn: 'Hello', bodyEn: 'Body', audience: 'paid' });
+    assert.equal(events[0].eventName, 'broadcast_draft_saved');
+    assert.deepEqual(JSON.parse(events[0].newValue!), { request: { titleEn: 'Hello', bodyEn: 'Body', audience: 'paid', operator: 'Jack' }, broadcastId: 'b1' });
+  });
+
   it('records broadcast_sent and injects the operator', async () => {
     const { portal, calls } = fakePortal();
     const { events, audit } = fakeAudit();
@@ -677,5 +686,14 @@ describe('notification events', () => {
       },
     );
     assert.equal(ok, false);
+  });
+});
+
+describe('notification broadcast timeouts', () => {
+  it('allows the 20,000-recipient send more time without changing other requests', async () => {
+    const { notificationTimeoutMs } = await import('../modules/notification/portalNotificationsClient');
+    assert.equal(notificationTimeoutMs('PATCH','/broadcasts/abc',{action:'send'}),120000);
+    assert.equal(notificationTimeoutMs('PATCH','/broadcasts/abc',{action:'update'}),8000);
+    assert.equal(notificationTimeoutMs('GET','/broadcasts',undefined),8000);
   });
 });

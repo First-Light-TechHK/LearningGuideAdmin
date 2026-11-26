@@ -45,6 +45,7 @@ import { sendMedia } from './media-stream';
 import { CourseStorageService } from './storage.service';
 import { DraftRevisionInterceptor } from './draft-revision';
 import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
+import { SandboxLockReleaseInterceptor } from './sandbox-lock-release.interceptor';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
@@ -66,6 +67,7 @@ function wrap<T>(fn: () => Promise<T>): Promise<T> {
  * SandboxMaintenanceGuard：Sandbox 重置 RUNNING 期间阻断写请求（409 SANDBOX_MAINTENANCE）。
  */
 @UseGuards(SandboxMaintenanceGuard)
+@UseInterceptors(SandboxLockReleaseInterceptor)
 @Controller('backoffice/courses')
 export class CommerceCoursesController {
   constructor(
