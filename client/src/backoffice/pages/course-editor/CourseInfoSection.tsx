@@ -57,6 +57,7 @@ export function CourseInfoSection({
   const [languageOpen, setLanguageOpen] = useState(false);
   const [newLanguage, setNewLanguage] = useState('zh-CN');
   const [coverBusy, setCoverBusy] = useState(false);
+  const coverInFlight = useRef(false);
   const [coverPct, setCoverPct] = useState<number | null>(null);
   const [coverError, setCoverError] = useState('');
   const mediaLimits = useMediaLimits();
@@ -211,6 +212,7 @@ export function CourseInfoSection({
   }
 
   async function uploadCover(file: File) {
+    if (coverInFlight.current) return;
     if (mediaLimits && file.size > mediaLimits.imageBytes) {
       setCoverError(
         L(
@@ -221,39 +223,49 @@ export function CourseInfoSection({
       );
       return;
     }
-    const fitted = await fitCover(file);
-    if (!fitted) {
-      setCoverError(L(locale, '请使用有效的 JPG 或 PNG 图片。', 'Use a valid JPG or PNG image.'));
-      return;
-    }
-    if (mediaLimits && fitted.size > mediaLimits.imageBytes) {
-      setCoverError(L(locale, '适配后的封面超过单文件上限，请使用较简单的图片。', 'The fitted cover exceeds the per-file limit. Please use a simpler image.'));
-      return;
-    }
+    coverInFlight.current = true;
     setCoverBusy(true);
     setCoverError('');
     setCoverPct(0);
-    const result = await uploadFileWithProgress(`/api/backoffice/courses/${course.id}/cover`, fitted, setCoverPct);
-    setCoverPct(null);
-    setCoverBusy(false);
-    if (result.success) {
-      onNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
-      await onReload();
-    } else {
-      setCoverError(result.errorMessage ?? L(locale, '封面上传失败。', 'Cover upload failed.'));
+    try {
+      const fitted = await fitCover(file);
+      if (!fitted) {
+        setCoverError(L(locale, '请使用有效的 JPG 或 PNG 图片。', 'Use a valid JPG or PNG image.'));
+        return;
+      }
+      if (mediaLimits && fitted.size > mediaLimits.imageBytes) {
+        setCoverError(L(locale, '适配后的封面超过单文件上限，请使用较简单的图片。', 'The fitted cover exceeds the per-file limit. Please use a simpler image.'));
+        return;
+      }
+      const result = await uploadFileWithProgress(`/api/backoffice/courses/${course.id}/cover`, fitted, setCoverPct);
+      if (result.success) {
+        onNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
+        await onReload();
+      } else {
+        setCoverError(result.errorMessage ?? L(locale, '封面上传失败。', 'Cover upload failed.'));
+      }
+    } finally {
+      coverInFlight.current = false;
+      setCoverPct(null);
+      setCoverBusy(false);
     }
   }
 
   async function removeCover() {
-    if (!window.confirm(L(locale, '移除当前封面？', 'Remove the current cover?'))) return;
+    if (coverInFlight.current || !window.confirm(L(locale, '移除当前封面？', 'Remove the current cover?'))) return;
+    coverInFlight.current = true;
     setCoverBusy(true);
-    const result = await boRequest(`/api/backoffice/courses/${course.id}/cover`, { method: 'DELETE' });
-    setCoverBusy(false);
-    if (result.success) {
-      onNotice(L(locale, '封面已移除。', 'Cover removed.'));
-      await onReload();
-    } else {
-      setCoverError(result.message ?? L(locale, '移除封面失败。', 'Could not remove the cover.'));
+    try {
+      const result = await boRequest(`/api/backoffice/courses/${course.id}/cover`, { method: 'DELETE' });
+      if (result.success) {
+        onNotice(L(locale, '封面已移除。', 'Cover removed.'));
+        await onReload();
+      } else {
+        setCoverError(result.message ?? L(locale, '移除封面失败。', 'Could not remove the cover.'));
+      }
+    } finally {
+      coverInFlight.current = false;
+      setCoverBusy(false);
     }
   }
 

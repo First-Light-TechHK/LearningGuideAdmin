@@ -36,9 +36,29 @@ async function main() {
         const ctx = canvas.getContext('2d'); ctx.fillStyle = 'red'; ctx.fillRect(0, 0, w, h)
         return canvas.toDataURL('image/png').split(',')[1]
       }, [width, height])
-      const pending = page.waitForResponse(r => r.url().endsWith('/cover') && r.request().method() === 'POST')
-      await page.locator('input[type=file]').first().setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(data, 'base64') })
-      assert.ok([200, 201].includes((await pending).status()))
+      const pending = page.waitForResponse(r => r.url().endsWith('/cover') && r.request().method() === 'POST').catch(() => null)
+      await page.locator('input[type=file]:enabled').first().waitFor({ state: 'attached' })
+      const input = page.locator('input[type=file]').first()
+      if (width === 100) {
+        await page.evaluate(() => {
+          const decode = window.createImageBitmap
+          window.createImageBitmap = async (...args) => {
+            window.createImageBitmap = decode
+            await new Promise(resolve => { window.resumeQaCoverDecode = resolve })
+            return decode.apply(window, args)
+          }
+        })
+      }
+      await input.setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(data, 'base64') })
+      if (width === 100) {
+        await page.waitForFunction(() => typeof window.resumeQaCoverDecode === 'function')
+        try {
+          assert.equal(await input.isDisabled(), true, 'cover selection stays disabled during image decoding')
+        } finally {
+          await page.evaluate(() => window.resumeQaCoverDecode())
+        }
+      }
+      assert.ok([200, 201].includes((await pending)?.status()))
       const actual = await page.evaluate(async courseId => {
         const response = await fetch(`/api/backoffice/courses/${courseId}/cover`, { cache: 'no-store' })
         const image = await createImageBitmap(await response.blob())
