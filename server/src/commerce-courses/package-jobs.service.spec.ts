@@ -262,11 +262,17 @@ describe('PackageJobsService — 分块拼包后直接校验（不做 Excel 转�
       {} as never,
       config as never,
     );
+    let validationStarted!: () => void;
+    const validationReached = new Promise<void>((resolve) => {
+      validationStarted = resolve;
+    });
     const validate = jest
       .spyOn(svc as never, 'runValidationFromFile')
-      .mockResolvedValue(undefined as never);
+      .mockImplementation(async () => {
+        validationStarted();
+      });
     await svc.completePackageUpload('j1');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await validationReached;
     expect(storage.getStaging).toHaveBeenCalledTimes(2);
     expect(validate).toHaveBeenCalledWith(
       'j1',
