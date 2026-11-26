@@ -69,9 +69,18 @@ async function main() {
       assert.deepEqual([actual.width, actual.height], [400, 185])
       assert.deepEqual(actual.center, [255, 0, 0, 255])
       assert.deepEqual(actual.corner, [255, 255, 255, 255])
+      await page.locator('input[type=file]:enabled').first().waitFor({ state: 'attached' })
+      const previewEdge = await page.locator('img[src*="/cover?asset="]').evaluate(async img => {
+        await img.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = 400; canvas.height = 185
+        const context = canvas.getContext('2d'); context.drawImage(img, 0, 0)
+        return [...context.getImageData(10, 92, 1, 1).data]
+      })
+      assert.deepEqual(previewEdge, width === 100 ? [255, 255, 255, 255] : [255, 0, 0, 255])
     }
     await page.reload()
-    const cover = page.locator('img[src$="/cover"]')
+    const cover = page.locator('img[src*="/cover?asset="]')
     await cover.waitFor()
     if (process.env.E2E_SHOTS) {
       require('node:fs').mkdirSync(process.env.E2E_SHOTS, { recursive: true })

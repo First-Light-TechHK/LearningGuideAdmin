@@ -383,7 +383,7 @@ export function CourseInfoSection({
           >
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               {course.cover ? (
-                <img src={`/api/backoffice/courses/${course.id}/cover`} alt="" style={{ width: 120, maxWidth: '100%', height: 'auto', aspectRatio: '400 / 185', objectFit: 'contain', borderRadius: 8, border: '1px solid #E8EDF5' }} />
+                <img src={`/api/backoffice/courses/${course.id}/cover?asset=${encodeURIComponent(course.cover.id)}`} alt="" style={{ width: 120, maxWidth: '100%', height: 'auto', aspectRatio: '400 / 185', objectFit: 'contain', borderRadius: 8, border: '1px solid #E8EDF5' }} />
               ) : (
                 <div style={{ width: 120, height: 56, borderRadius: 8, background: '#F3F5F9', display: 'grid', placeItems: 'center', fontSize: 12, color: '#5A6577' }}>
                   {L(locale, '未上传', 'No image')}
