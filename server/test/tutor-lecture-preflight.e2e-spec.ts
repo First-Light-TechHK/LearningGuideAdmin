@@ -1,3 +1,4 @@
+import type { ProfessorAnswer } from '../src/ai/tutor/professor-qa-coverage';
 import { prepareReviewedLecture } from '../src/ai/tutor/lecture-teaching';
 import { lectureReferenceMarkdown } from '../src/ai/tutor/lecture-references';
 import { teachingReferenceCatalogue } from '../src/ks/contract/teaching-references';
@@ -214,6 +215,41 @@ run(
       const requests: LlmStreamOptions[] = [];
       const model = {
         async *stream(options: LlmStreamOptions) {
+          const system = options.messages[0].content;
+          if (system.startsWith('Select a single published answer')) {
+            const { currentQuestion, candidates } = JSON.parse(
+              options.messages[1].content,
+            ) as { currentQuestion: string; candidates: ProfessorAnswer[] };
+            const candidate = candidates.find(
+              (row) => row.question === currentQuestion,
+            );
+            const need = /^(what is|什么是)/i.test(currentQuestion)
+              ? 'definition'
+              : 'fact';
+            yield JSON.stringify(
+              candidate
+                ? {
+                    cardId: candidate.cardId,
+                    coverage: 'full',
+                    conditionsMatch: true,
+                    missingRequirements: [],
+                    support: [
+                      {
+                        part: currentQuestion,
+                        need,
+                        provides: need,
+                        excerpts: [candidate.answerMd],
+                      },
+                    ],
+                  }
+                : { coverage: 'none', missingRequirements: [] },
+            );
+            return;
+          }
+          if (system.startsWith('Classify a learner question')) {
+            yield JSON.stringify({ topic: null, confidence: 0 });
+            return;
+          }
           requests.push(options);
           const question = options.messages.at(-1)?.content ?? '';
           if (question.includes('V1+V2')) {
@@ -374,7 +410,7 @@ run(
           sortOrder: 0,
         },
       });
-      await cards.save(
+      const refAnswer = await cards.save(
         other.id,
         undefined,
         undefined,
@@ -430,8 +466,26 @@ run(
           frozen.teachingPackage as Record<string, unknown>,
         ).get(refEntry.id)!;
         expect(item.code).toBe(code);
-        for (const q of ['解释L1-F01', '怎么相加？', 'How do I add?']) {
-          const turn = prepareReviewedLecture(frozen, q);
+        for (const q of ['解释L1-F01', '怎么相加？']) {
+          const turn = prepareReviewedLecture(
+            frozen,
+            q,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            q === '怎么相加？'
+              ? {
+                  professorEvidence: {
+                    cardId: refAnswer.id,
+                    coverage: 'full',
+                    scope: q,
+                    excerpts: [link],
+                    missingRequirements: [],
+                  },
+                }
+              : undefined,
+          );
           expect(turn.kind).toBe(
             q.startsWith('解释') ? 'reference' : 'reviewed',
           );
@@ -442,7 +496,11 @@ run(
             lectureReferenceMarkdown(turn.references[0], other.id),
           ).toContain(code);
         }
-        expect(prepareReviewedLecture(frozen, '数学').kind).toBe('wiki');
+        for (const q of ['数学', 'How do I add?']) {
+          const turn = prepareReviewedLecture(frozen, q);
+          expect(turn.kind).toBe('wiki');
+          expect(turn.kind === 'wiki' && turn.directCandidate).toBeUndefined();
+        }
       }
     } finally {
       await prisma.$disconnect();
