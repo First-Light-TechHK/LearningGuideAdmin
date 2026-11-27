@@ -134,7 +134,7 @@ function StudentManagementInner() {
 
   return (
     <section className="card cardGrow" data-testid="students-page">
-      <div className="pageHead">
+      <div className="pageHead smStudentPageHead">
         <div>
           <h1 className="cardTitle">{t(locale, 'students.title')}</h1>
           <p className="cardSubtitle">{t(locale, 'students.subtitle')}</p>

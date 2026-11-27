@@ -4,10 +4,40 @@
  * Figma 没有画的状态（停用横幅、只读、未保存、紧急关闭等）复用现有样式，标「待视觉验收」。
  */
 
-.smAccountCounts { display: flex; flex-wrap: wrap; gap: 12px 40px; margin: 0 0 20px; }
-.smAccountCounts div { min-width: 120px; }
-.smAccountCounts dt { font-size: 12px; color: var(--lg-muted); }
-.smAccountCounts dd { margin: 4px 0 0; font-size: 22px; font-weight: 700; color: var(--lg-heading); }
+.smAccountCounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 20px;
+}
+.smAccountCount {
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--lg-line-soft);
+  border-radius: 10px;
+  background: #f2f6fb;
+}
+.smAccountCount dt { font-size: 13px; font-weight: 600; color: var(--lg-slate-soft); }
+.smAccountCount dd { margin: 0; }
+.smAccountCountValue {
+  display: block;
+  margin-top: 3px;
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--lg-heading);
+  overflow-wrap: anywhere;
+}
+.smAccountCountHelp { display: block; margin-top: 3px; font-size: 12px; color: var(--lg-slate-soft); }
+@media (max-width: 900px) {
+  .smAccountCounts { grid-template-columns: 1fr; gap: 8px; }
+  .smAccountCountValue { font-size: 22px; }
+}
+
+@media (max-width: 600px) {
+  .smStudentPageHead { align-items: flex-start; flex-direction: column; gap: 12px; }
+}
 
 .smPill {
   display: inline-flex;
