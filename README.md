@@ -32,6 +32,7 @@ client/      前端（React + Vite + Ant Design 5.x，Phase 1 已搭建）
 - **用户裁决**：所有方案性建议经用户同意后执行，不得擅自变更已拍板决策
 - **变更同步**：增删改查模块 / 接口 / 表结构变更，先改设计文档再实现（单一事实来源）
 - **双智能体**：[Dev Agent](agents/dev-agent.md)（开发）+ [Review Agent](agents/review-agent.md)（测试与代码审查）
+- **缺陷回归**：记录发生环境、版本和症状；先写可重复的复现并确认原版本失败，再做最小修复。用原入口复检，保留行为回归测试，并通过相关 lint、测试和 CI。缺陷若可表达为明确的静态约束，将其加入现有 lint，核实旧实现会被拦截、正常实现能通过。
 - **审查门禁**：每次开发变更必须经 Review Agent 独立审查（新上下文），APPROVE 才算完成
 - **Git**：`feature/<task>` 分支日常开发；大迭代（Phase 完成/阶段性交付）推送分支并发 PR 到 main，合并条件 = 审查通过（大迭代完整定义见 [.trae/rules/project_rules.md](.trae/rules/project_rules.md)）
 - **注册智能体**：将 agents/ 下两个文件的「系统提示词」段落粘贴到 Trae 智能体创建界面即可；项目协作规则见 [.trae/rules/project_rules.md](.trae/rules/project_rules.md)
