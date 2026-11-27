@@ -101,9 +101,6 @@ export function ShellRoute() {
     rememberEnvironmentIdentity(environment)
   }, [environment])
 
-  if (state.kind === 'loading' || capabilities === null || accountFeatures === undefined) {
-    return <div className="shellLoading">{t(locale, 'common.loading')}</div>
-  }
   if (state.kind === 'unavailable') {
     return (
       <div className="shellLoading">
@@ -116,6 +113,9 @@ export function ShellRoute() {
   }
   if (state.kind === 'signedOut') {
     return <Navigate to={`/${locale}/sign-in`} replace />
+  }
+  if (state.kind === 'loading' || capabilities === null || accountFeatures === undefined) {
+    return <div className="shellLoading">{t(locale, 'common.loading')}</div>
   }
 
   const segments = pathname.split('/').filter(Boolean).slice(1)

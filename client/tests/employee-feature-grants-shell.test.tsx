@@ -5,11 +5,11 @@ import './support/dom'
 import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 
 import { ShellRoute } from '../src/backoffice/ShellRoute'
-import { employee, installFakeServer } from './support/helpdesk-fake'
+import { deferred, employee, installFakeServer, type Reply } from './support/helpdesk-fake'
 
 afterEach(cleanup)
 
@@ -22,6 +22,7 @@ function renderShell(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route path="/:locale/sign-in" element={<LocationProbe />} />
         <Route path="/:locale" element={<ShellRoute />}>
           <Route path="*" element={<LocationProbe />} />
         </Route>
@@ -173,6 +174,41 @@ test('Settings 子项：module.accounts 只开员工账号；其它子项被 mod
     await waitFor(() =>
       assert.equal(screen.getByTestId('location').textContent, '/en-GB/settings'),
     )
+  } finally {
+    server.restore()
+  }
+})
+
+test('初次会话返回 401 时，无需等环境能力便跳转到登录页', async () => {
+  const server = serve({})
+  const environment = deferred<Reply>()
+  server.on('GET', '/api/backoffice/environment', () => environment.promise)
+  server.on('GET', '/api/session', { status: 401, error: 'INVALID_EMPLOYEE_ACCOUNT' })
+  try {
+    renderShell('/zh-CN/course')
+    assert.equal((await screen.findByTestId('location')).textContent, '/zh-CN/sign-in')
+  } finally {
+    cleanup()
+    environment.resolve({})
+    server.restore()
+  }
+})
+
+test('初次会话返回 503 时显示重试，重试成功后打开课程外壳', async () => {
+  const server = serve({ features: ['module.course', 'course.view'], capabilities: ['course'] })
+  let requests = 0
+  server.on('GET', '/api/session', () => {
+    requests++
+    return requests === 1
+      ? { status: 503, error: 'INTERNAL_ERROR' }
+      : { data: { employee: employee('ADMIN'), features: ['module.course', 'course.view'] } }
+  })
+  try {
+    renderShell('/en-GB/course')
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }))
+    assert.equal((await screen.findByTestId('location')).textContent, '/en-GB/course')
+    assert.equal(requests, 2)
+    assert.deepEqual(await menuKeys(['course']), ['course'])
   } finally {
     server.restore()
   }
