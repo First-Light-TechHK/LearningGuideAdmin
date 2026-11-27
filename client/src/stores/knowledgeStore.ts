@@ -11,10 +11,11 @@ import {
   type TagItem,
 } from '../api/knowledge'
 
-/** 编辑器草稿状态（§3.3：编辑期间每 5 分钟自动保存，离开编辑页/切页立即保存） */
+/** 编辑器草稿状态（§3.3：编辑期间每 5 秒自动保存，离开编辑页/切页立即保存） */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
 
 interface PageDraft {
+  workspaceStamp?: string
   pageId: string
   title: string
   contentMd: string
@@ -54,6 +55,7 @@ interface KnowledgeState {
   deleteCourse: (id: string) => Promise<void>
   createPage: (courseId: string, title: string) => Promise<void>
   deletePage: (courseId: string, pageId: string) => Promise<void>
+  clearCoursePages: (courseId: string, expectedPageIds: string[]) => Promise<void>
   /** 批量重排 Course 下 Page 顺序（§5.1.2，2026-10-19：左侧树拖拽排序） */
   reorderPages: (courseId: string, orderedIds: string[]) => Promise<void>
 
@@ -86,10 +88,10 @@ interface KnowledgeState {
 
 /**
  * 自动保存节奏（2026-10-29 用户指定）：
- * - 编辑期间每 5 分钟自动保存一次；
+ * - 编辑期间每 5 秒自动保存一次；
  * - 离开编辑页 / 切换页面 / 切换课程时立即保存（flushSave）。
  */
-const AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000
+const AUTOSAVE_INTERVAL_MS = 5_000
 let autosaveTimer: ReturnType<typeof setInterval> | null = null
 /** 当前在飞的保存请求（串行化，防止乱序 PUT 覆盖新内容） */
 let savingPromise: Promise<boolean> | null = null
@@ -214,6 +216,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       lastPageIdByCourse: { ...get().lastPageIdByCourse, [courseId]: pageId },
       draft: {
         pageId,
+        workspaceStamp: get().details[courseId]?.updatedAt,
         title: page.title,
         contentMd: page.contentMd,
         sectionTags: page.sectionTags ?? {},
@@ -229,7 +232,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       draft: { ...draft, ...patch, saveState: 'dirty' },
     })
     // 2026-10-29：不再每次编辑都防抖保存（1 次全量序列化 + 1 次写库太贵），
-    // 改为编辑期间每 5 分钟自动保存；离开编辑页/切页时由 flushSave 立即保存。
+    // 改为编辑期间每 5 秒自动保存；离开编辑页/切页时由 flushSave 立即保存。
     startAutosave()
   },
 
@@ -274,7 +277,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
           title: snapshot.title,
           contentMd: snapshot.contentMd,
           sectionTags: snapshot.sectionTags,
-        })
+        }, draft.workspaceStamp)
         const courseId = get().selectedCourseId
         if (courseId) await get().refreshDetail(courseId)
         return true
@@ -370,10 +373,12 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   async afterActivateRelease(courseId) {
     // 2026-10-19 既有裁决：激活版本后服务端已用快照整体替换可编辑内容，
     // 必须丢弃草稿（不得回写激活前的旧内容），并清除本地兜底草稿。
-    const leavingPageId = get().draft?.pageId ?? null
-    stopAutosave()
-    set({ draft: null, selectedPageId: null })
-    clearLocalDraft(leavingPageId)
+    if (get().selectedCourseId === courseId) {
+      const leavingPageId = get().draft?.pageId
+      stopAutosave()
+      set({ draft: null, selectedPageId: null })
+      clearLocalDraft(leavingPageId)
+    }
     await get().refreshDetail(courseId)
   },
 
@@ -395,8 +400,15 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
 
   async createPage(courseId, title) {
     // 标题单独显示在编辑器上方，正文从空白开始，不再把标题复制成正文首行 H1（BUG-0222）
-    await knowledgeApi.createPage(courseId, { title, contentMd: '' })
-    await get().refreshDetail(courseId)
+    const page = await knowledgeApi.createPage(courseId, { title, contentMd: '' })
+    set((state) => {
+      const detail = state.details[courseId]
+      const course = detail ?? state.courses.find((course) => course.id === courseId)
+      if (!course) return state
+      return { details: { ...state.details, [courseId]: { ...course, pages: [...(detail?.pages ?? []), page] } } }
+    })
+    // POST 已成功：目录刷新失败不能再报创建失败，否则重试会写入第二个页面。
+    await get().refreshDetail(courseId).catch(() => {})
   },
 
   async deletePage(courseId, pageId) {
@@ -406,6 +418,34 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     if (get().selectedPageId === pageId) {
       set({ draft: null, selectedPageId: null })
     }
+  },
+
+  async clearCoursePages(courseId, expectedPageIds) {
+    if (get().selectedCourseId === courseId) await savingPromise
+    const { deletedPageIds } = await knowledgeApi.clearCoursePages(courseId, expectedPageIds)
+      .catch(async (error: Error & { code?: string }) => {
+        if (error.code === 'CONFLICT') await get().refreshDetail(courseId).catch(() => {})
+        throw error
+      })
+
+    deletedPageIds.forEach(clearLocalDraft)
+    const deleted = new Set(deletedPageIds)
+    set((state) => {
+      const detail = state.details[courseId]
+      const lastPageIdByCourse = { ...state.lastPageIdByCourse }
+      if (deleted.has(lastPageIdByCourse[courseId])) delete lastPageIdByCourse[courseId]
+      const selectedPageDeleted = state.selectedPageId !== null && deleted.has(state.selectedPageId)
+      if (selectedPageDeleted) stopAutosave()
+      return {
+        lastPageIdByCourse,
+        details: detail
+          ? { ...state.details, [courseId]: { ...detail, pages: detail.pages.filter(({ id }) => !deleted.has(id)) } }
+          : state.details,
+        ...(selectedPageDeleted ? { selectedPageId: null, draft: null, tocScrollTarget: null } : {}),
+      }
+    })
+    // 删除已提交，即使刷新失败也要保留更新后的目录，避免误报并重复确认。
+    await get().refreshDetail(courseId).catch(() => {})
   },
 
   async reorderPages(courseId, orderedIds) {

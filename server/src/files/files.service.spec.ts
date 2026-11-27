@@ -7,6 +7,12 @@ import sharp from 'sharp';
 import {
   Document,
   ImageRun,
+  Math as WordMath,
+  MathFraction,
+  MathRun,
+  MathSuperScript,
+  HeadingLevel,
+  TextRun,
   Packer,
   Paragraph,
   Table,
@@ -14,6 +20,7 @@ import {
   TableRow,
 } from 'docx';
 import { FilesService, ALLOWED_EXTENSIONS } from './files.service';
+import { prepareDocxMath } from './docx-math';
 
 /**
  * FilesService 单元测试（§3.2.3/§10，两步流程改拍后）：白名单/空文件校验、
@@ -35,6 +42,7 @@ describe('FilesService', () => {
     },
     page: { findMany: jest.fn() },
     release: { findMany: jest.fn() },
+    tutorTeachingCard: { findMany: jest.fn() },
   };
 
   const mkFile = (name: string, buffer: Buffer): Express.Multer.File =>
@@ -54,6 +62,7 @@ describe('FilesService', () => {
     prisma.knowledgeImageAsset.delete.mockReset().mockResolvedValue(undefined);
     prisma.page.findMany.mockReset().mockResolvedValue([]);
     prisma.release.findMany.mockReset().mockResolvedValue([]);
+    prisma.tutorTeachingCard.findMany.mockReset().mockResolvedValue([]);
     service = new FilesService(storage as never, prisma as never);
   });
 
@@ -413,6 +422,72 @@ ODE & Ordinary differential equation
     expect(prisma.knowledgeImageAsset.delete).toHaveBeenCalledTimes(1);
   });
 
+  it('课程草稿已清空时保留只有旧 Release 快照引用的图片', async () => {
+    prisma.knowledgeImageAsset.findMany.mockResolvedValue([
+      {
+        id: 'old-release-image',
+        courseId: 'course-1',
+        storageKey: 'knowledge-pages/course-1/old.png',
+        createdAt: new Date('2026-11-01T00:00:00Z'),
+      },
+    ]);
+    prisma.page.findMany.mockResolvedValue([]);
+    prisma.release.findMany.mockResolvedValue([
+      { snapshotData: { pages: [] } },
+      {
+        snapshotData: {
+          pages: [
+            {
+              contentMd:
+                '![旧图](/api/files/images/course-1/old-release-image.png)',
+            },
+          ],
+        },
+      },
+    ]);
+
+    await service.cleanupUnreferencedImages(new Date('2026-11-03T00:00:00Z'));
+
+    expect(prisma.release.findMany).toHaveBeenCalledWith({
+      where: { courseId: 'course-1' },
+      select: { snapshotData: true },
+    });
+    expect(storage.removeMedia).not.toHaveBeenCalled();
+    expect(prisma.knowledgeImageAsset.delete).not.toHaveBeenCalled();
+  });
+
+  it('保留只有旧 Release 教学包引用的图片', async () => {
+    const id = 'b93daf8a-0e57-466d-9431-f04dc7e80805';
+    prisma.knowledgeImageAsset.findMany.mockResolvedValue([
+      {
+        id,
+        courseId: 'course-1',
+        storageKey: `knowledge-pages/course-1/${id}.png`,
+        createdAt: new Date('2026-11-01T00:00:00Z'),
+      },
+    ]);
+    prisma.page.findMany.mockResolvedValue([]);
+    prisma.release.findMany.mockResolvedValue([
+      {
+        snapshotData: {
+          pages: [],
+          teachingPackage: {
+            cards: [
+              {
+                approvedPayload: {
+                  refObjects: [{ kind: 'image', value: `${id}.png` }],
+                },
+              },
+            ],
+          },
+        },
+      },
+    ]);
+    await service.cleanupUnreferencedImages(new Date('2026-11-03T00:00:00Z'));
+    expect(storage.removeMedia).not.toHaveBeenCalled();
+    expect(prisma.knowledgeImageAsset.delete).not.toHaveBeenCalled();
+  });
+
   it('拒绝解压后单张图片超过 8 MB 的 DOCX', async () => {
     const zip = new JSZip();
     zip.file('[Content_Types].xml', '<Types/>');
@@ -424,6 +499,96 @@ ODE & Ordinary differential equation
         'course-1',
       ),
     ).rejects.toThrow('DOCX 解压内容超过安全限制');
+  });
+
+  it('DOCX 标题保留两个独立公式，分式和导数不会合并或被 Markdown 转义', async () => {
+    const fraction = new MathFraction({
+      numerator: [new MathRun('df')],
+      denominator: [new MathRun('dt')],
+    });
+    const prime = new MathSuperScript({
+      children: [new MathRun('f')],
+      superScript: [new MathRun("'")],
+    });
+    const buffer = await Packer.toBuffer(
+      new Document({
+        sections: [
+          {
+            children: [
+              new Paragraph({
+                heading: HeadingLevel.HEADING_4,
+                children: [
+                  new TextRun('1. Rate of change ('),
+                  new WordMath({ children: [fraction] }),
+                  new TextRun(' and '),
+                  new WordMath({ children: [prime, new MathRun('(x)')] }),
+                  new TextRun(')'),
+                ],
+              }),
+            ],
+          },
+        ],
+      }),
+    );
+    const { markdown } = await service.convertFile(
+      mkFile('lesson.docx', buffer),
+    );
+    expect(markdown).toBe(
+      '#### 1\\. Rate of change ($\\frac{df}{dt}$ and ${f}^{\\prime}(x)$)',
+    );
+  });
+
+  const docxWithEquation = async (equation: string) => {
+    const base = await Packer.toBuffer(
+      new Document({ sections: [{ children: [new Paragraph('Equation')] }] }),
+    );
+    const zip = await JSZip.loadAsync(base);
+    const xml = await zip.file('word/document.xml')!.async('string');
+    zip.file(
+      'word/document.xml',
+      xml.replace(/<w:r><w:t[^>]*>Equation<\/w:t><\/w:r>/, () => equation),
+    );
+    return zip.generateAsync({ type: 'nodebuffer' });
+  };
+
+  it('DOCX 独立公式保留矩阵、根号、下标和向量结构', async () => {
+    const run = (s: string) => `<m:r><m:t>${s}</m:t></m:r>`;
+    const root = `<m:rad><m:deg/><m:e>${run('2')}</m:e></m:rad>`;
+    const vector = `<m:acc><m:accPr><m:chr m:val="⃗"/></m:accPr><m:e>${run('D')}</m:e></m:acc>`;
+    const sub = `<m:sSub><m:e>${vector}</m:e><m:sub>${run('1')}</m:sub></m:sSub>`;
+    const row = (s: string) => `<m:mr><m:e>${s}</m:e></m:mr>`;
+    const matrix = `<m:m>${row(root)}${row(run('0'))}</m:m>`;
+    const buffer = await docxWithEquation(
+      `<m:oMathPara><m:oMath>${sub}${run('=')}<m:d><m:e>${matrix}</m:e></m:d></m:oMath></m:oMathPara>`,
+    );
+    const { markdown } = await service.convertFile(
+      mkFile('vectors.docx', buffer),
+    );
+    expect(markdown).toBe(
+      '$$\n{\\vec{D}}_{1}=\\left(\\begin{matrix}{\\sqrt{2}} \\\\ {0}\\end{matrix}\\right)\n$$',
+    );
+  });
+
+  it('中间转换器漏掉公式时拒绝返回成功结果', async () => {
+    const buffer = await docxWithEquation(
+      '<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>',
+    );
+    const prepared = await prepareDocxMath(
+      await JSZip.loadAsync(buffer),
+      buffer,
+    );
+    expect(() => prepared.restore('only text survived')).toThrow(
+      'DOCX 公式导入不完整（0/1）',
+    );
+  });
+
+  it('DOCX 含未支持的公式时明确提示，避免导入看似完整的残缺页面', async () => {
+    const buffer = await docxWithEquation(
+      '<m:oMath><m:groupChr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:groupChr></m:oMath>',
+    );
+    await expect(
+      service.convertFile(mkFile('expression.docx', buffer)),
+    ).rejects.toThrow('Word 公式结构（groupChr）');
   });
 
   const docxWithImages = async () => {
@@ -449,7 +614,12 @@ ODE & Ordinary differential equation
                     children: [
                       new TableCell({
                         children: [
-                          new Paragraph('阅读时间：'),
+                          new Paragraph({
+                            children: [
+                              new TextRun('阅读时间：'),
+                              new WordMath({ children: [new MathRun('t')] }),
+                            ],
+                          }),
                           new Paragraph({
                             children: [picture(), picture()],
                             bullet: { level: 0 },
@@ -479,6 +649,9 @@ ODE & Ordinary differential equation
     expect(result.markdown).toContain('阅读时间：');
     expect(result.markdown).toContain('第21回：唐僧渡过沙河。');
     expect(result.markdown).toContain('<table>');
+    expect(result.markdown).toContain(
+      '<code class="language-math math-inline">t</code>',
+    );
     const urls = result.markdown.match(
       /\/api\/files\/images\/course-1\/[0-9a-f-]+\.png/g,
     );

@@ -25,11 +25,28 @@ const entry = {
 
 describe('AiChatLogger（§4.4.2 第 7 步）', () => {
   it('可记录编译指纹，不保存完整 Prompt 或密钥', async () => {
-    await new AiChatLogger().write({ ...entry, promptHash: 'a'.repeat(64) });
+    const evidence = {
+      route: 'course_context' as const,
+      context: 'retrieval' as const,
+      sources: [
+        {
+          pageTitle: 'Lesson 1',
+          heading: 'State',
+          sourceLevel: 'lesson' as const,
+          contentHash: 'b'.repeat(64),
+        },
+      ],
+    };
+    await new AiChatLogger().write({
+      ...entry,
+      promptHash: 'a'.repeat(64),
+      evidence,
+    });
     const parsed = JSON.parse(
       mockedAppend.mock.calls[0][1] as string,
     ) as Record<string, unknown>;
     expect(parsed.promptHash).toBe('a'.repeat(64));
+    expect(parsed.evidence).toEqual(evidence);
     expect(parsed).not.toHaveProperty('systemPrompt');
     expect(parsed).not.toHaveProperty('apiKey');
   });

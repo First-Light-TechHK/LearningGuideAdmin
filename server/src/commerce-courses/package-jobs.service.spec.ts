@@ -262,11 +262,17 @@ describe('PackageJobsService — 分块拼包后直接校验（不做 Excel 转�
       {} as never,
       config as never,
     );
+    let validationStarted!: () => void;
+    const validationReached = new Promise<void>((resolve) => {
+      validationStarted = resolve;
+    });
     const validate = jest
       .spyOn(svc as never, 'runValidationFromFile')
-      .mockResolvedValue(undefined as never);
+      .mockImplementation(async () => {
+        validationStarted();
+      });
     await svc.completePackageUpload('j1');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await validationReached;
     expect(storage.getStaging).toHaveBeenCalledTimes(2);
     expect(validate).toHaveBeenCalledWith(
       'j1',
@@ -575,5 +581,17 @@ describe('PackageJobsService — staging 存储故障（导入同步链路）', 
       code: 'RAW_UPLOAD_INCOMPLETE',
       httpStatus: 400,
     });
+  });
+});
+
+describe('sandbox invalid-live recovery access', () => {
+  const originalEnv = process.env.APP_ENV;
+  afterEach(() => { if (originalEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = originalEnv; });
+  it('rejects outside Sandbox or without an explicit reason before loading a job', async () => {
+    const jobs = new PackageJobsService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, { sandboxResetEnabled: true } as never);
+    process.env.APP_ENV = 'PROD';
+    await expect(jobs.recoverInvalidLiveImport('j1', 'reason', 'admin')).rejects.toMatchObject({code: 'RECOVERY_DISABLED'});
+    process.env.APP_ENV = 'SANDBOX';
+    await expect(jobs.recoverInvalidLiveImport('j1', '', 'admin')).rejects.toMatchObject({code: 'RECOVERY_REASON_REQUIRED'});
   });
 });

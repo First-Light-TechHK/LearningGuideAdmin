@@ -1,3 +1,4 @@
+import { employeeWorkspace } from './workspaceSession'
 import { create } from 'zustand'
 import { serverText } from '../backoffice/lib/i18n/serverText'
 import {
@@ -213,7 +214,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       // config / Release 列表，否则新建的 Release 不会出现在版本下拉中。
       await get().refreshActiveCourse()
     } else if (courses.length > 0) {
-      await get().selectCourse(courses[0].id)
+      const remembered = employeeWorkspace(ownerId).read<string>('ai.course')
+      await get().selectCourse(courses.find(course => course.id === remembered)?.id ?? courses[0].id)
     }
   },
 
@@ -260,6 +262,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       ])
       if (get().ownerId !== ownerId || get().selectionId !== selectionId) return
       const form = buildForm(config, templates, editMode)
+      if (ownerId) employeeWorkspace(ownerId).write('ai.course', courseId)
       const stored = loadChat(ownerId, courseId, config.releaseId, config.runningSolution)
       set({
         selectedCourseId: courseId,

@@ -19,6 +19,7 @@ import { useKText } from './i18n'
 interface Props {
   view: EditorView | null
   disabled?: boolean
+  onCourseReference?: () => void
 }
 
 interface ActiveState {
@@ -67,7 +68,7 @@ function computeActive(state: EditorState): ActiveState {
   }
 }
 
-export function MarkdownToolbar({ view, disabled }: Props) {
+export function MarkdownToolbar({ view, disabled, onCourseReference }: Props) {
   const { text } = useKText()
 
   // 选区/光标变化时刷新高亮（CM6 无 React 状态，这里用原生事件兜住）
@@ -162,6 +163,7 @@ export function MarkdownToolbar({ view, disabled }: Props) {
             insertSnippet(view, `[${linkText}](https://)`, { select: { from: 1, to: 1 + linkText.length } })
           },
         )}
+        {onCourseReference && btn(text('teaching.courseRef'), text('teaching.insert'), false, onCourseReference)}
       </Space>
       <Space size={2}>
         {btn('•', text('toolbar.bullet'), active.bullet, () => view && toggleLinePrefix(view, () => '- ', /^(\s*)([-*+])(\s)/))}

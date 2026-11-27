@@ -1,5 +1,6 @@
 import {
   buildAnchoredChunks,
+  buildReviewedExcerpt,
   type AnchoredChunk,
   type SnapshotPage,
 } from './anchored-chunks';
@@ -59,7 +60,6 @@ export function verifyAnchoredChunk(input: {
   snapshot: { pages: SnapshotPage[] };
   candidate: unknown;
 }): ChunkVerification {
-  const candidates = buildAnchoredChunks(input);
   try {
     if (
       input.candidate === null ||
@@ -71,7 +71,11 @@ export function verifyAnchoredChunk(input: {
     const candidate = input.candidate as Record<string, unknown>;
     if (typeof candidate.id !== 'string' || !candidate.id)
       return { valid: false, reason: 'INVALID_CANDIDATE' };
-    const expected = candidates.find((chunk) => chunk.id === candidate.id);
+    const expected =
+      candidate.chunkerVersion === 'reviewed-excerpt-v1' &&
+      typeof candidate.content === 'string'
+        ? buildReviewedExcerpt({ ...input, excerpt: candidate.content })
+        : buildAnchoredChunks(input).find((chunk) => chunk.id === candidate.id);
     if (!expected) return { valid: false, reason: 'CHUNK_NOT_FOUND' };
     return canonicalSnapshot(candidate) === canonicalSnapshot(expected)
       ? { valid: true, chunk: expected }

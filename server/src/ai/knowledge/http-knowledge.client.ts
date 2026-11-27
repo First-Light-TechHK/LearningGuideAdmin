@@ -5,7 +5,9 @@ import {
   type KnowledgeCourse,
   type KnowledgeRelease,
   type KnowledgeReleaseMeta,
+  type KnowledgeReleasePage,
   type RetrievedChunk,
+  type ProfessorQaSearch,
 } from '../../ks/contract/knowledge-client';
 
 /** 读接口超时：KS 慢了不能拖住 Tutor（docs/Engine_Split_Implementation.md 规则 5） */
@@ -65,6 +67,19 @@ export class HttpKnowledgeClient implements KnowledgeClient {
     return this.request('GET', `/releases/${encodeURIComponent(releaseId)}`);
   }
 
+  async getCourseDraftPages(
+    courseId: string,
+    pageIds: string[],
+  ): Promise<KnowledgeReleasePage[]> {
+    return (
+      (await this.request<KnowledgeReleasePage[]>(
+        'POST',
+        `/courses/${encodeURIComponent(courseId)}/draft-pages`,
+        { pageIds },
+      )) ?? []
+    );
+  }
+
   setTestRelease(
     courseId: string,
     releaseId: string,
@@ -79,6 +94,22 @@ export class HttpKnowledgeClient implements KnowledgeClient {
     return this.write(`/courses/${encodeURIComponent(courseId)}/tutor-online`, {
       online,
     });
+  }
+
+  async retrieveProfessorQa(
+    courseId: string,
+    releaseId: string,
+    query: string,
+    allowedIds: string[],
+    teachingIds?: string[],
+  ): Promise<ProfessorQaSearch> {
+    return (
+      (await this.request<ProfessorQaSearch>(
+        'POST',
+        '/releases/' + encodeURIComponent(releaseId) + '/qa/retrieve',
+        { courseId, query, allowedIds, teachingIds },
+      )) ?? { status: 'missing', cardIds: [] }
+    );
   }
 
   retrieveChunks(

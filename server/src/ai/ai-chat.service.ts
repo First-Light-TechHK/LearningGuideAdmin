@@ -32,8 +32,11 @@ import {
   visibleTutorAnswer,
 } from './tutor/dialogue-runtime';
 import { buildTutorContext, loadTutorRelease } from './tutor/course-context';
+import { jackLectureImage } from './tutor/jack-lecture-images';
+import { JackLectureOutput } from './tutor/jack-lecture-output';
 import {
   imageAfterParagraph,
+  knowledgeImageMarkdown,
   selectKnowledgeImages,
 } from './tutor/knowledge-images';
 import { selectRecentCompleteTurns } from './tutor/conversation-history';
@@ -177,6 +180,12 @@ export class AiChatService {
   async *streamLearnerChat(
     dto: LearnerChatStreamDto,
     signal?: AbortSignal,
+    onComplete?: (runtime: {
+      requestId: string;
+      releaseId: string | null;
+      model: string;
+      promptHash?: string;
+    }) => void,
   ): AsyncGenerator<string> {
     if (this.yong) {
       const course = await this.knowledge.getCourseByExternalId(
@@ -189,7 +198,7 @@ export class AiChatService {
           course.currentReleaseId,
         )) === 'dialogue-yong'
       ) {
-        yield* this.yong.streamLearnerChat(dto, signal);
+        yield* this.yong.streamLearnerChat(dto, signal, onComplete);
         return;
       }
     }
@@ -203,6 +212,7 @@ export class AiChatService {
       quota: dto.channel ?? 'portal',
       userId: dto.userId,
       signal,
+      onComplete,
       resolve: async () => {
         const course = await this.knowledge.getCourseByExternalId(
           dto.externalCourseId,
@@ -238,6 +248,12 @@ export class AiChatService {
     userId?: string;
     signal?: AbortSignal;
     evaluation?: EvaluationExecution;
+    onComplete?: (runtime: {
+      requestId: string;
+      releaseId: string | null;
+      model: string;
+      promptHash?: string;
+    }) => void;
     testRoute?: { model: string; useKnowledge: boolean };
     resolve: () => Promise<{
       courseId: string;
@@ -437,22 +453,51 @@ export class AiChatService {
         context = await buildContext(`${recentTopics} ${question}`);
         if (context === null) progress('retrieval_context_empty');
       }
-      if (context === null && !isTutorConversationOpener(question)) {
-        answer = broadCourseHelp
+      const lecture = input.mode === 'LECTURE';
+      const selection = lecture
+        ? jackLectureImage(
+            question,
+            courseId,
+            input.testRoute?.useKnowledge === false ? [] : release.pages,
+            context ?? '',
+          )
+        : undefined;
+      if (selection?.requested && selection.image) {
+        const figure = selection.image;
+        context = [
+          JSON.stringify({
+            source: figure.source,
+            exhibit: figure.number,
+            evidence: figure.context,
+          }),
+          context,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+      }
+      if (
+        context === null &&
+        !isTutorConversationOpener(question)
+      ) {
+        answer = selection?.requested
           ? english
-            ? 'I can help you work through the lesson. Which concept or example is most confusing? We can start there.'
-            : '可以一起梳理这节课。你最不清楚的是哪个概念或例子？我们从那里开始。'
-          : input.mode === 'SOCRATIC'
-            ? history.length > 0
-              ? english
-                ? 'I cannot confirm this from the course material yet. Which course concept or example does your question refer to?'
-                : '我暂时无法依据课程材料确认这一点。你指的是本课哪个概念或例子？'
+            ? 'I could not identify the requested figure in the selected course release. Which exhibit number or title do you mean?'
+            : '在所选课程版本中未找到能确定匹配的图片。你指的是哪个图号或图名？'
+          : broadCourseHelp
+            ? english
+              ? 'I can help you work through the lesson. Which concept or example is most confusing? We can start there.'
+              : '可以一起梳理这节课。你最不清楚的是哪个概念或例子？我们从那里开始。'
+            : input.mode === 'SOCRATIC'
+              ? history.length > 0
+                ? english
+                  ? 'I cannot confirm this from the course material yet. Which course concept or example does your question refer to?'
+                  : '我暂时无法依据课程材料确认这一点。你指的是本课哪个概念或例子？'
+                : english
+                  ? 'I can only help with this course. Which course concept or example would you like to explore?'
+                  : '我只能围绕本课程回答。你想从本课哪个概念或例子开始？'
               : english
-                ? 'I can only help with this course. Which course concept or example would you like to explore?'
-                : '我只能围绕本课程回答。你想从本课哪个概念或例子开始？'
-            : english
-              ? 'This question is outside what I can answer from the current course materials. Feel free to ask another question about this course. If you mean a specific course topic, please tell me which one.'
-              : '这个问题暂时不在我能依据当前课程资料回答的范围内。欢迎换一个与本课程相关的问题；如果你问的是课程中的具体内容，也可以告诉我相关主题。';
+                ? 'This question is outside what I can answer from the current course materials. Feel free to ask another question about this course. If you mean a specific course topic, please tell me which one.'
+                : '这个问题暂时不在我能依据当前课程资料回答的范围内。欢迎换一个与本课程相关的问题；如果你问的是课程中的具体内容，也可以告诉我相关主题。';
         yield answer;
         finished = true;
         return;
@@ -467,17 +512,29 @@ export class AiChatService {
         pageTitles: release.pages.map((page) => page.title),
         mode: input.mode,
         message: input.message,
-        systemPrompt: prompts.systemPrompt,
+        systemPrompt: lecture
+          ? [
+              prompts.systemPrompt,
+              'The application displays approved course images. Write the explanation in text without Markdown images. Put the delimiters of multiline display math on separate lines and put citations after the block.',
+              selection?.requested &&
+                (selection.image
+                  ? 'Explain the selected figure supplied in the first evidence block.'
+                  : 'The requested figure could not be identified in this release. Say so briefly and answer the supported parts.'),
+            ]
+              .filter(Boolean)
+              .join('\n')
+          : prompts.systemPrompt,
         context: context ?? '',
         history,
       });
       const messages = compiled.messages;
       promptHash = compiled.promptHash;
-      const images = selectKnowledgeImages(
-        context ?? '',
-        courseId,
-        question,
-      ).map((image) =>
+      const selectedImages = selection
+        ? selection.image
+          ? [selection.image]
+          : []
+        : selectKnowledgeImages(context ?? '', courseId, question);
+      const images = selectedImages.map((image) =>
         input.channel === 'learner'
           ? {
               ...image,
@@ -501,6 +558,20 @@ export class AiChatService {
         let visibleLength = 0;
         let pending = '';
         const placedImages = new Set<string>();
+        const lectureOutput = lecture ? new JackLectureOutput() : undefined;
+        const formatDelta = (delta: string, final = false) => {
+          const text = lectureOutput ? lectureOutput.push(delta, final) : delta;
+          if (
+            (text.trim() || final) &&
+            selection?.requested &&
+            images[0] &&
+            !placedImages.size
+          ) {
+            placedImages.add(images[0].url);
+            return knowledgeImageMarkdown(images[0]) + '\n\n' + text;
+          }
+          return text;
+        };
         let recorded = false;
         const attemptStartedAt = Date.now();
         const reasoningEffort =
@@ -550,9 +621,10 @@ export class AiChatService {
             attemptAnswer += delta;
             const visible = visibleTutorAnswer(attemptAnswer, input.mode);
             if (visible.length > visibleLength) {
-              pending += visible.slice(visibleLength);
+              pending += formatDelta(visible.slice(visibleLength));
               visibleLength = visible.length;
-              if (images.length) {
+              if (!pending) continue;
+              if (images.length && !selection?.requested) {
                 let boundary = pending.indexOf('\n\n');
                 while (boundary >= 0) {
                   const paragraph = pending.slice(0, boundary);
@@ -607,7 +679,12 @@ export class AiChatService {
             input.mode,
             true,
           );
-          pending += finalAnswer.slice(visibleLength);
+          pending += formatDelta(finalAnswer.slice(visibleLength), true);
+          if (lecture && !answer.trim() && !pending.trim()) {
+            pending = english
+              ? 'The reply did not include a text explanation.'
+              : '本次回答未生成文字说明。';
+          }
           if (pending) {
             const candidate = images.find(
               (item) =>
@@ -660,6 +737,8 @@ export class AiChatService {
     } finally {
       // 未正常结束且未报错 → 客户端断开（生成器被提前 return）
       if (!finished && status === 'ok') status = 'aborted';
+      if (finished && status === 'ok')
+        input.onComplete?.({ requestId, releaseId, model, promptHash });
       progress(status);
       // 旁路写日志（§4.4.2 第 7 步）：不 await，不影响对话主流程
       void this.chatLogger

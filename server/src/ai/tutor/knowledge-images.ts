@@ -93,9 +93,13 @@ export function imageAfterParagraph(
   const matchesLabel =
     label.length >= 3 && paragraph.toLowerCase().includes(label.toLowerCase());
   if (!matchesLabel && overlap(paragraph, image.context) < 2) return '';
+  return '\n\n' + knowledgeImageMarkdown(image);
+}
+
+export function knowledgeImageMarkdown(image: KnowledgeImage): string {
   const escaped = image.alt
     .replace(/\\/g, '\\\\')
     .replace(/\[/g, '\\[')
     .replace(/\]/g, '\\]');
-  return `\n\n![${escaped}](${image.url})`;
+  return `![${escaped}](${image.url})`;
 }

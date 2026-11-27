@@ -82,7 +82,7 @@ export function TutorComparison({ initial, models, releases, en }: Props) {
   }
   return <div className="ai-comparison">
     <Space>
-      <Button disabled={locked || routes.length === 2} onClick={() => setRoutes((values) => values.length >= 2 ? values : [...values, { id: crypto.randomUUID(), config: { ...values[0].config, runningSolution: values[0].config.runningSolution === 'grounded-jack' ? 'dialogue-yong' : 'grounded-jack' }, turns: [] }])}>{L('添加对比', 'Add comparison')}</Button>
+      <Button disabled={locked || routes.length === 2} onClick={() => setRoutes((values) => values.length >= 2 ? values : [...values, { id: crypto.randomUUID(), config: { ...values[0].config }, turns: [] }])}>{L('添加对比', 'Add comparison')}</Button>
       <Button disabled={busy} onClick={() => { sessions.current.clear(); setRoutes((values) => values.map((r) => ({ ...r, turns: [] }))); setInput('') }}>{L('新测试', 'New test')}</Button>
       <Button disabled={!busy} onClick={() => controllers.current.forEach((c) => c.abort())}>{L('停止全部', 'Stop all')}</Button>
       <Button disabled={busy || !routes.some((r) => r.turns.length)} onClick={() => { const url = URL.createObjectURL(new Blob([JSON.stringify(routes, null, 2)], { type: 'application/json' })); const a = document.createElement('a'); a.href = url; a.download = 'tutor-comparison.json'; a.click(); URL.revokeObjectURL(url) }}>{L('导出对比', 'Export comparison')}</Button>
@@ -91,7 +91,6 @@ export function TutorComparison({ initial, models, releases, en }: Props) {
       {routes.map((route, index) => <section key={route.id} aria-label={`Tutor ${index + 1}`} className="ai-tutor-panel">
         <div className="ai-tutor-heading"><strong>Tutor {index + 1}</strong>{routes.length === 2 && <Button disabled={locked} onClick={() => setRoutes((values) => values.filter((r) => r.id !== route.id))}>{L('移除', 'Remove')}</Button>}</div>
         <div className="ai-tutor-config">
-          <Select aria-label={`Tutor ${index + 1} method`} disabled={locked} value={route.config.runningSolution} onChange={(runningSolution) => patch(route.id, { runningSolution })} options={[{ value: 'grounded-jack', label: 'Jack' }, { value: 'dialogue-yong', label: 'Yong' }]} style={{ width: '100%' }} />
           <Select title={route.config.model} aria-label={`Tutor ${index + 1} model`} disabled={locked} value={route.config.model} onChange={(model) => patch(route.id, { model })} options={models.map((value) => ({ value, label: value.split('/').at(-1) }))} style={{ width: '100%' }} />
           <Select title={releases.find((r) => r.id === route.config.releaseId)?.versionTag} aria-label={`Tutor ${index + 1} release`} disabled={locked} value={route.config.releaseId} onChange={(releaseId) => patch(route.id, { releaseId })} options={releases.map((r) => ({ value: r.id, label: r.versionTag }))} style={{ width: '100%' }} />
           <Select aria-label={`Tutor ${index + 1} mode`} disabled={locked} value={route.config.modes[0]} onChange={(mode) => patch(route.id, { modes: [mode] })} options={[{ value: 'LECTURE', label: 'Lecture' }, { value: 'SOCRATIC', label: 'Socratic' }]} style={{ width: '100%' }} />

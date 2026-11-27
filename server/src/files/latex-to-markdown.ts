@@ -1,24 +1,50 @@
 import { BadRequestException } from '@nestjs/common';
 
-function readTitle(
-  source: string,
-): { start: number; end: number; value: string } | null {
-  const command = /\\title\s*\{/.exec(source);
-  if (!command) return null;
-  const start = command.index;
-  const contentStart = start + command[0].length;
+function groupEnd(source: string, start: number): number | null {
+  if (source[start] !== '{') return null;
   let depth = 1;
-  for (let index = contentStart; index < source.length; index++) {
-    if (source[index - 1] === '\\') continue;
+  for (let index = start + 1; index < source.length; index++) {
+    if (source[index] === '\\') {
+      index++;
+      continue;
+    }
     if (source[index] === '{') depth++;
-    if (source[index] === '}' && --depth === 0)
-      return {
-        start,
-        end: index + 1,
-        value: source.slice(contentStart, index),
-      };
+    if (source[index] === '}' && --depth === 0) return index + 1;
   }
   return null;
+}
+
+function readTitle(source: string) {
+  const command = /\\title\s*\{/.exec(source);
+  if (!command) return null;
+  const contentStart = command.index + command[0].length;
+  const end = groupEnd(source, contentStart - 1);
+  return end
+    ? { start: command.index, end, value: source.slice(contentStart, end - 1) }
+    : null;
+}
+
+function styledParagraph(line: string): string {
+  const group = line.trim();
+  const bold = group.startsWith('\\textbf{');
+  const start = bold ? '\\textbf'.length : 0;
+  if (groupEnd(group, start) !== group.length) return line;
+  const content = group.slice(start + 1, -1);
+  const style =
+    /^(?:(?:\\(?:Large|large|small|normalsize|bfseries)\b|\\color\{[\w-]+\})\s*)+/.exec(
+      content,
+    );
+  if (!style) return line;
+  const body = content
+    .slice(style[0].length)
+    .replace(/\\par\s*$/, '')
+    .trim();
+  if (/^\\hrule(?:\s+height\s+[\d.]+pt)?$/.test(body)) return '\n\n---\n\n';
+  if (/\\(?:Large|large)\b/.test(style[0]) && /\\bfseries\b/.test(style[0]))
+    return `\n\n# ${body}\n\n`;
+  return bold || /\\bfseries\b/.test(style[0])
+    ? `\n\n**${body}**\n\n`
+    : `\n\n${body}\n\n`;
 }
 
 /** 单文件 LaTeX 的保守转换：无法保真处理的命令保留在预览中。 */
@@ -85,15 +111,33 @@ export function latexToMarkdown(source: string): string {
         .join('\n')}\n\n`,
   );
   text = text.replace(
-    /\\begin\{tabular\}\{[^{}]*\}([\s\S]*?)\\end\{tabular\}/g,
-    (match, body: string) => {
+    /\\begin\{(tabularx?)\}([\s\S]*?)\\end\{\1\}/g,
+    (match, kind: string, source: string) => {
+      let body = source.trimStart();
+      for (let arg = 0; arg < (kind === 'tabularx' ? 2 : 1); arg++) {
+        const end = groupEnd(body, 0);
+        if (!end) return match;
+        body = body.slice(end).trimStart();
+      }
+      // 嵌套环境有自己的 & 和 \\，不能按外层表格拆分。
+      if (/\\begin\{/.test(body)) return match;
       const rows = body
-        .replace(/\\hline\b/g, '')
-        .split(/\\\\/)
+        .replace(/\\(?:hline|toprule|midrule|bottomrule)\b/g, '')
+        .split(/\\\\(?:\[[+-]?[\d.]+(?:pt|em|ex|cm|mm|in)\])?/)
         .map((row) => row.trim())
         .filter(Boolean);
       const cells = rows.map((row) =>
-        row.split(/(?<!\\)&/).map((cell) => cell.trim()),
+        row.split(/(?<!\\)&/).map((cell) =>
+          cell
+            .trim()
+            .replace(/\s*\n\s*/g, ' ')
+            .replace(/\$[^$\n]+\$/g, (math) =>
+              math
+                .replace(/\\\|(?=[a-zA-Z])/g, '\\Vert ')
+                .replace(/\\\|/g, '\\Vert'),
+            )
+            .replace(/(?<!\\)\|/g, '\\|'),
+        ),
       );
       const columns = cells[0]?.length ?? 0;
       if (
@@ -168,6 +212,11 @@ export function latexToMarkdown(source: string): string {
         : formula.trim();
       return `\n\n$$\n${body}\n$$\n\n`;
     },
+  );
+  // 仅展开独占一行的正文样式组，保留展示公式内部的分组和字体命令。
+  text = text.replace(
+    /^\$\$[ \t]*\n[\s\S]*?^\$\$[ \t]*$|^[ \t]*(?:\\textbf)?\{\\[^\n]+$/gm,
+    (block) => (block.startsWith('$$') ? block : styledParagraph(block)),
   );
   const stack: string[] = [];
   text = text.replace(

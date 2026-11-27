@@ -1,10 +1,12 @@
+import { useWorkspace, useWorkspaceValue, useWorkspaceScroll } from '../../stores/workspaceSession'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Dropdown, Empty, Input, Modal, Panel, Tag } from '../ui'
+import { Alert, App, Button, Dropdown, Empty, Input, Modal, Panel, Spin, Tag } from '../ui'
 import type { MenuProps } from '../ui'
 import { EditOutlined, EyeOutlined } from '@ant-design/icons'
 import { KnowledgeMarkdown } from './KnowledgeMarkdown'
+import { CourseReferencePicker } from './CourseReferencePicker'
 import type { EditorView } from '@codemirror/view'
-import { EditorSelection } from '@codemirror/state'
+import { EditorSelection, type SelectionRange, type Text } from '@codemirror/state'
 import { clearLocalDraft, localDraftKey, registerDraftFlusher, useKnowledgeStore } from '../../stores/knowledgeStore'
 import { MarkdownSourceEditor } from './MarkdownSourceEditor'
 import { MarkdownToolbar } from './MarkdownToolbar'
@@ -15,6 +17,7 @@ import { useKText } from './i18n'
 import { IMAGE_UPLOAD_ACCEPT, IMAGE_UPLOAD_FORMATS, IMAGE_UPLOAD_MAX_BYTES, IMAGE_UPLOAD_MAX_MIB, IMAGE_UPLOAD_UNIT, knowledgeApi } from '../../api/knowledge'
 import { formatDateTime } from '../../backoffice/lib/i18n/format'
 import { extractWikiSources } from './wikiSources'
+import { teachingCardsApi, type TeachingRef } from '../../api/teachingCards'
 
 /**
  * Page 编辑器（2026-10-29 改版：Markdown 源码编辑 + 预览）。
@@ -30,10 +33,19 @@ import { extractWikiSources } from './wikiSources'
 
 /** 浏览器刷新/关闭页面时的本地草稿兜底 key（与 store 共用，保持单一 key 规则） */
 interface LocalDraft {
+  workspaceStamp?: string
   contentMd?: string
   title?: string
   sectionTags?: Record<string, string[]>
   savedAt?: number
+}
+
+interface ReferencePicker {
+  target: EditorView
+  document: Text
+  range: SelectionRange
+  pageId: string
+  courseId: string
 }
 
 /** 本地草稿时间展示（恢复确认弹窗用） */
@@ -64,18 +76,31 @@ function scrollToHeading(view: EditorView, headingText: string) {
 
 export function PageEditor() {
   const draft = useKnowledgeStore((s) => s.draft)
+  const courseId = useKnowledgeStore((s) => s.selectedCourseId)
   const editDraft = useKnowledgeStore((s) => s.editDraft)
   const tocScrollTarget = useKnowledgeStore((s) => s.tocScrollTarget)
   const clearTocScrollTarget = useKnowledgeStore((s) => s.clearTocScrollTarget)
-  const { modal } = App.useApp()
+  const { modal, message } = App.useApp()
   const { locale, text } = useKText()
   /** PRD §3.2/§3.3：View 角色只读，Edit/Full 才可改既有内容 */
   const access = useWorkspaceAccess()
 
   /** 预览态：只读渲染 contentMd（与 Portal 渲染一致） */
-  const [preview, setPreview] = useState(false)
+  const workspace = useWorkspace()
+  const pageKey = 'page.' + courseId + '.' + draft?.pageId
+  const preview = !!useWorkspaceValue<boolean>(workspace, pageKey + '.preview') && !tocScrollTarget
+  const previewScroll = useWorkspaceScroll(workspace, pageKey + '.previewScroll', preview)
+  const [picker, setPicker] = useState<ReferencePicker | null>(null)
+  const [referenceLoad, setReferenceLoad] = useState<{ courseId: string; items?: TeachingRef[]; error?: string } | null>(null)
+  const [referenceRetry, setReferenceRetry] = useState(0)
   /** 编辑器实例（供常驻工具条使用；CM6 非受控，需要 React 侧拿到 view） */
   const [view, setView] = useState<EditorView | null>(null)
+  useWorkspaceScroll(workspace, pageKey + '.editorScroll', !preview, view?.scrollDOM ?? null)
+  const activePicker = !preview && picker?.pageId === draft?.pageId && picker?.target === view && picker?.courseId === courseId
+    ? picker : null
+  const previewReferences = preview && draft?.contentMd.includes('refobj:')
+  const referenceCourseId = previewReferences ? courseId : null
+  const currentLoad = referenceLoad?.courseId === referenceCourseId ? referenceLoad : null
   /** 标题编辑态（§3.3.1）：默认展示态（大标题 + 常显铅笔），点击铅笔进入编辑态 */
   const [editingTitle, setEditingTitle] = useState(false)
   /** P2: 插入表格弹窗的行列数 */
@@ -106,7 +131,7 @@ export function PageEditor() {
     if (!view) return
     const md = view.state.doc.toString()
     const cur = useKnowledgeStore.getState().draft
-    if (md !== cur?.contentMd) editDraft({ contentMd: md })
+    if (cur && cur.pageId === draft?.pageId && md !== cur.contentMd) editDraft({ contentMd: md })
   }
   useLayoutEffect(() => {
     commitRef.current = commitNow
@@ -145,17 +170,21 @@ export function PageEditor() {
     }
   }, [])
 
-  // 切换页面：退出预览态，回到源码编辑
-  const [previewPage, setPreviewPage] = useState(draft?.pageId)
-  if (previewPage !== draft?.pageId) {
-    setPreviewPage(draft?.pageId)
-    setPreview(false)
-  }
-  if (tocScrollTarget && preview) setPreview(false)
+  useEffect(() => {
+    if (!referenceCourseId) return
+    const controller = new AbortController()
+    teachingCardsApi.references(referenceCourseId, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setReferenceLoad({ courseId: referenceCourseId, items })
+    }).catch((error: Error) => {
+      if (!controller.signal.aborted) setReferenceLoad({ courseId: referenceCourseId, error: error.message })
+    })
+    return () => controller.abort()
+  }, [referenceCourseId, referenceRetry])
 
   // TOC 跳转：源码态直接定位；预览态先切回编辑再定位
   useEffect(() => {
     if (!tocScrollTarget) return
+    workspace.write(pageKey + '.preview', false)
     const target = tocScrollTarget.trim()
     const view = viewRef.current
     if (view && target) {
@@ -164,7 +193,7 @@ export function PageEditor() {
       pendingHeadingRef.current = target
     }
     clearTocScrollTarget()
-  }, [tocScrollTarget, clearTocScrollTarget])
+  }, [tocScrollTarget, clearTocScrollTarget, workspace, pageKey])
 
   /** 刷新/关闭标签页/切到后台时：仅在「确实未保存」时写本地草稿，避免为已保存内容留陈旧快照 */
   useEffect(() => {
@@ -180,6 +209,7 @@ export function PageEditor() {
             contentMd: cur.contentMd,
             title: cur.title,
             sectionTags: cur.sectionTags,
+            workspaceStamp: cur.workspaceStamp,
             savedAt: Date.now(),
           } satisfies LocalDraft),
         )
@@ -216,7 +246,7 @@ export function PageEditor() {
     } catch {
       local = null
     }
-    if (!local || typeof local.contentMd !== 'string') return
+    if (!local || local.workspaceStamp !== d.workspaceStamp || typeof local.contentMd !== 'string') return
     // 只在「当前内存草稿已落库(idle/saved)」时提示恢复：否则内存里的编辑比本地快照更新，
     // 「恢复」会用更旧的快照覆盖更新内容。
     if (d.saveState !== 'idle' && d.saveState !== 'saved') return
@@ -299,6 +329,33 @@ export function PageEditor() {
     insertSnippet(target, template, { select: { from: idx, to: idx + marker.length }, block: true })
   }
 
+  const openCourseReference = () => {
+    const target = viewRef.current
+    if (!target || !courseId || !access.canEdit) return
+    setPicker({ target, courseId, pageId: draft.pageId, document: target.state.doc, range: target.state.selection.main })
+  }
+
+  const insertCourseReference = (selectedReference: TeachingRef) => {
+    if (!activePicker || !access.canEdit) return
+    const { target, document, range } = activePicker
+    setPicker(null)
+    if (target.state.doc !== document) {
+      message.warning(text('teaching.refEditorChanged'))
+      return
+    }
+    if (!target.state.selection.main.eq(range)) target.dispatch({ selection: range })
+    insertSnippet(target, `[${selectedReference.label}](refobj:${selectedReference.id})`)
+    commitRef.current()
+  }
+
+  const referenceLoadError = currentLoad?.error && <Alert
+    type="error" showIcon message={currentLoad.error}
+    action={<Button size="small" onClick={() => {
+      setReferenceLoad(null)
+      setReferenceRetry((value) => value + 1)
+    }}>{text('common.retry')}</Button>}
+  />
+
   /** 右键插入菜单（M1）：表格 / 公式 / 图片 / 代码块 / 引用 / 分割线。
    * 图标用 Plan A 「符号前置」风格：Unicode 符号 + 文案，和 MarkdownToolbar（H1/B/¶/$x$）
    * 保持一致的轻量字符化视觉，不引入额外图标依赖。 */
@@ -317,6 +374,7 @@ export function PageEditor() {
     ] },
     { key: 'code',      icon: sym('⌨'), label: text('editor.insert.code') },
     { key: 'quote',     icon: sym('❝'), label: text('editor.insert.quote') },
+    { key: 'courseReference', icon: sym('↗'), label: text('teaching.courseRef'), disabled: !courseId },
     { key: 'divider',   icon: sym('―'), label: text('editor.insert.divider') },
   ]
 
@@ -359,6 +417,8 @@ export function PageEditor() {
       insertWithSelection(`\`\`\`\n${text('editor.snippet.code')}\n\`\`\``, text('editor.snippet.code'))
     } else if (key === 'quote') {
       toggleLinePrefix(target, () => '> ', /^(\s*)(>)(\s)/)
+    } else if (key === 'courseReference') {
+      openCourseReference()
     } else if (key === 'divider') {
       insertSnippet(target, '---', { block: true })
     }
@@ -455,14 +515,19 @@ export function PageEditor() {
             icon={preview ? <EditOutlined /> : <EyeOutlined />}
             onClick={() => {
               // 切到预览前先把最新文本写回 draft，保证预览内容与编辑器一致
-              if (!preview) commitRef.current()
-              setPreview((v) => !v)
+              if (!preview) {
+                commitRef.current()
+                setReferenceLoad(null)
+              }
+              workspace.write(pageKey + '.preview', !preview)
             }}
           >
             {preview ? text('editor.edit') : text('editor.preview')}
           </Button>
         </div>
       </div>
+      {activePicker && <CourseReferencePicker key={activePicker.courseId} courseId={activePicker.courseId}
+        onCancel={() => { setPicker(null); activePicker.target.focus() }} onInsert={insertCourseReference} />}
       {draft.saveState === 'error' && (
         <div
           style={{
@@ -484,7 +549,7 @@ export function PageEditor() {
         </div>
       )}
       {preview ? (
-        <div
+        <div ref={previewScroll}
           data-color-mode="light"
           style={{
             ...borderStyle,
@@ -494,14 +559,15 @@ export function PageEditor() {
             padding: `${tokens.spacing.md}px ${tokens.spacing.lg}px`,
           }}
         >
-          <KnowledgeMarkdown source={draft.contentMd} />
+          {previewReferences && (referenceLoadError || (!currentLoad && <Spin />))}
+          <KnowledgeMarkdown source={draft.contentMd} courseId={courseId ?? undefined} references={currentLoad?.items} />
         </div>
       ) : (
         <div style={{ ...borderStyle, flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {/* 常驻格式工具条（M1）：选中时高亮当前格式，点击即包裹选区 / 切换行前缀 */}
           {access.canEdit && (
             <div style={{ padding: `0 ${tokens.spacing.sm}px` }}>
-              <MarkdownToolbar view={view} />
+              <MarkdownToolbar view={view} onCourseReference={courseId ? openCourseReference : undefined} />
             </div>
           )}
           <div style={{ flex: 1, minHeight: 0 }}>

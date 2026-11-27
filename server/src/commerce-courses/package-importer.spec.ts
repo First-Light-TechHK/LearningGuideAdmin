@@ -175,3 +175,17 @@ describe('PackageImporter — 竞态下的冲突策略错误码', () => {
     });
   });
 });
+
+describe('sandbox live pointer recovery', () => {
+  it('allows only an existing corrupt pointer and rejects healthy or unpublished courses', async () => {
+    const { assertRecoverableLivePointer } = await import('./package-importer');
+    const tx = { $queryRaw: jest.fn(), courseVersion: { findFirst: jest.fn() } };
+    tx.$queryRaw.mockResolvedValue([{ liveVersionId: 'v1' }]);
+    tx.courseVersion.findFirst.mockResolvedValue(null);
+    await expect(assertRecoverableLivePointer(tx as never, 'c1')).resolves.toBeUndefined();
+    tx.courseVersion.findFirst.mockResolvedValue({ id: 'v1' });
+    await expect(assertRecoverableLivePointer(tx as never, 'c1')).rejects.toMatchObject({code:'RECOVERY_NOT_APPLICABLE'});
+    tx.$queryRaw.mockResolvedValue([{ liveVersionId: null }]);
+    await expect(assertRecoverableLivePointer(tx as never, 'c1')).rejects.toMatchObject({code:'RECOVERY_NOT_APPLICABLE'});
+  });
+});

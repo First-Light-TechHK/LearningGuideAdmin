@@ -99,6 +99,10 @@ describe('route access classification', () => {
       routeAccess('POST', '/api/ai/config/c1/reset'),
       menu(['aiTutor'], 'EDIT_EXISTING'),
     );
+    assert.deepEqual(
+      routeAccess('PATCH', '/api/ai/evaluation/tasks/t1/name'),
+      menu(['aiTutor'], 'EDIT_EXISTING'),
+    );
   });
 
   it('shares the course and release reads the AI Tutor page needs', () => {
@@ -115,6 +119,13 @@ describe('route access classification', () => {
     assert.deepEqual(
       routeAccess('POST', '/api/courses/c1/set-live'),
       menu(shared, 'PUBLISH'),
+    );
+  });
+
+  it('requires Knowledge delete access to clear a course draft', () => {
+    assert.deepEqual(
+      routeAccess('DELETE', '/api/courses/c1/pages'),
+      menu(['knowledge'], 'DELETE'),
     );
   });
 
@@ -252,7 +263,22 @@ describe('route access classification', () => {
       ['DELETE', '/api/courses/c1', 'DELETE'],
       ['POST', '/api/courses/c1/release', 'PUBLISH'],
       ['POST', '/api/courses/c1/activate-release', 'PUBLISH'],
+      ['POST', '/api/releases/r1/rebuild-index', 'PUBLISH'],
       ['DELETE', '/api/releases/r1', 'DELETE'],
+      ['GET', '/api/releases/r1/package', 'VIEW'],
+      ['POST', '/api/courses/c1/release-package/preview', 'PUBLISH'],
+      ['POST', '/api/courses/c1/release-package/apply', 'PUBLISH'],
+      ['POST', '/api/courses/c1/teaching-cards', 'CREATE'],
+      ['PATCH', '/api/courses/c1/teaching-cards/t1', 'EDIT_EXISTING'],
+      ['GET', '/api/courses/c1/teaching-cards/import/deleted-codes', 'VIEW'],
+      ['POST', '/api/courses/c1/teaching-cards/import/references', 'CREATE'],
+      [
+        'PATCH',
+        '/api/courses/c1/teaching-cards/import/references',
+        'EDIT_EXISTING',
+      ],
+      ['POST', '/api/courses/c1/teaching-cards/deletion-preview', 'DELETE'],
+      ['DELETE', '/api/courses/c1/teaching-cards', 'DELETE'],
       ['POST', '/api/courses/c1/pages', 'CREATE'],
       ['PUT', '/api/courses/c1/pages/reorder', 'EDIT_EXISTING'],
       ['PUT', '/api/pages/p1', 'EDIT_EXISTING'],

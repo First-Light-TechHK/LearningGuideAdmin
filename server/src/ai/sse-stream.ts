@@ -9,6 +9,7 @@ import type { Response } from 'express';
 export async function pipeSse(
   gen: AsyncGenerator<string>,
   res: Response,
+  metadata?: () => unknown,
 ): Promise<void> {
   const first = await gen.next();
 
@@ -25,7 +26,8 @@ export async function pipeSse(
   try {
     if (!first.done) write({ delta: first.value });
     for await (const delta of gen) write({ delta });
-    write({ done: true });
+    const runtime = metadata?.();
+    write(runtime ? { done: true, runtime } : { done: true });
   } catch (err) {
     write({
       error:
@@ -42,12 +44,13 @@ export async function pipeSse(
 export async function pipeSseWithAbort(
   createGenerator: (signal: AbortSignal) => AsyncGenerator<string>,
   res: Response,
+  metadata?: () => unknown,
 ): Promise<void> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   res.once('close', abort);
   try {
-    await pipeSse(createGenerator(controller.signal), res);
+    await pipeSse(createGenerator(controller.signal), res, metadata);
   } finally {
     res.off('close', abort);
   }

@@ -1,0 +1,54 @@
+[
+  {
+    "row": 4,
+    "question": "什么是 state variable（状态变量）？"
+  },
+  {
+    "row": 5,
+    "question": "What determines which state variable we should choose?",
+    "proposedAnswer": "State variables describe the condition of a system. Sometimes, because of reasons such limited computing power, we can decide which state variables to focus on. There are no strict rules for this choice, but two main principles can help. First, the variables should be relevant to the system you want to model. Second, your choices must make scientific sense. For example, if you are studying sweating, your assumptions should not go against basic ideas in thermodynamics or biology.\n\nFor example, if you are studying how a cup of coffee cools down, temperature would be your state variable. If you care more about evaporation, then volume or mass matters."
+  },
+  {
+    "row": 6,
+    "question": "为什么状态变量要有数值和单位？",
+    "proposedAnswer": "数值和单位是构成状态变量的两大核心要素。简单来说，数值告诉我们“有多少”，帮助我们量化事物的状态；而单位则告诉我们“是什么”，明确了该变量所代表的具体度量标准。打个比方，当我们身处一个闷热的房间时，如果没有数值和单位，只能模糊地说一句“这里很热”。但如果有了数值和单位，我们就可以精确地说“现在室温是30°C”，并据此采取行动：“把空调开到27°C，这样会舒服些。”这就体现了量化带来的可操作性。\n同样地，在对复杂系统进行建模时，状态变量不能仅仅是抽象的数字或模糊的标签，它们必须带有明确的单位 [1, 2]。比如，温度可以用开尔文（K）来度量，而动物种群的数量单位则是“个体数” [1]。只有将数值与单位结合起来，我们才能精准地定量描述系统在某一时刻的真实状态，并科学地研究它随时间变化的规律 [1]。"
+  },
+  {
+    "row": 7,
+    "question": "What is a state space?",
+    "proposedAnswer": "The state space is the set of all possible states of a system. A state space can be a set of events. For instance a state space could be all the work you have to do today, or the classes you have to attend today. It can be a set of elements. A state space could be the set of candies in a basket (say chocolate, gummy and toffee). It can also be a set of actions. Your cat's daily actions would be a state space (eating, sleeping, playing, walking on your keyboard)."
+  },
+  {
+    "row": 8,
+    "question": "鲨鱼–金枪鱼空间就是鲨鱼和金枪鱼生活的海洋吗？",
+    "proposedAnswer": "鲨鱼－金枪鱼空间在本课程中指的是状态空间（state space），即系统所有可能状态的集合。对于鲨鱼－金枪鱼模型而言，每一个状态都对应某一时刻的鲨鱼数量和金枪鱼数量，因此状态空间中的每一个点都代表一种可能的生态系统状态。 \n如果研究的问题是生物在海洋中的分布情况，那么海洋本身可以被视为生物活动的物理空间（physical space）。然而，鲨鱼－金枪鱼状态空间与海洋并不是同一个概念。状态空间并不描述鲨鱼和金枪鱼位于海洋中的什么位置，而是描述它们的种群数量处于什么状态。 \n因此，鲨鱼－金枪鱼状态空间可以理解为生态学家为了研究种群动态而建立的一个抽象数学空间，用来描述某一海域内鲨鱼和金枪鱼数量随时间的变化，并据此分析该生态系统当前所处的状态以及未来可能的发展趋势。换言之，海洋是生物实际生活的物理空间，而状态空间则是研究生态系统变化规律的数学空间，两者属于不同层面的概念。"
+  },
+  {
+    "row": 9,
+    "question": "According this lesson, what is a vector"
+  },
+  {
+    "row": 10,
+    "question": "如果 V1=(2,5)，V2=(3,7)，V1+V2 是多少？"
+  },
+  {
+    "row": 11,
+    "question": "什么是 trajectory（轨迹）？",
+    "proposedAnswer": "轨迹（trajectory）是系统状态随着时间变化时，在状态空间中所留下的一条连续路径。它就像雪地上的脚印、天空中的飞机航迹，或地图上的行车路线，记录了系统从一个状态变化到另一个状态所经过的过程。 \n\n在向量场图中，可以把系统想象成一个沿着箭头方向移动的点。当这个点随着时间不断移动时，所经过的位置会连成一条曲线，这条曲线就是轨迹。因此，轨迹可以看作是系统在向量场中运动时所留下的“痕迹”或“路线”。 \n\n轨迹记录了系统经历过哪些状态，以及这些状态出现的先后顺序。例如，在鲨鱼－金枪鱼模型中，一个轨迹可能显示生态系统如何从“鲨鱼较少、金枪鱼较多”的状态，逐渐演变到“鲨鱼较多、金枪鱼较少”的状态，再继续向其他状态发展。 \n\n需要注意的是，轨迹主要描述的是系统状态变化的路径，而不是变化的快慢。换句话说，轨迹告诉我们系统经过了哪些状态，但仅凭轨迹本身，通常无法直接判断系统在每个阶段移动得有多快。 \n\n一个常见的误区是将轨迹与时间序列图混淆。实际上，轨迹展示的是系统在状态空间中的变化路径；而时间序列图则展示某个状态变量如何随时间变化。例如，在鲨鱼－金枪鱼模型中，轨迹描述的是鲨鱼数量与金枪鱼数量共同形成的变化路线，而时间序列图则分别显示鲨鱼数量和金枪鱼数量如何随时间增加或减少。"
+  },
+  {
+    "row": 12,
+    "question": "这些 state space、vector、trajectory 对生物学到底有什么用？给一个本课里的例子。",
+    "proposedAnswer": "在生物学中，这些概念用于模拟动物种群随时间的变化 [1]。通过将生物系统的状态量化为数字和向量，我们可以研究不同生物变量之间是如何相互影响和演化的 [1, 2]。\n\n本课中的一个经典例子是鲨鱼与金枪鱼的捕食者-猎物关系 [1]：\n\n* 状态空间：这里的“鲨鱼-金枪鱼空间”是一个二维状态空间，其两个维度分别代表鲨鱼和金枪鱼的数量，而不是它们实际生活的物理海洋空间 [1]。\n* 向量：状态向量表示某一时刻鲨鱼和金枪鱼的数量 [1, 2]。切线向量表示系统中任意两个状态的变化。\n* 轨迹：随着时间推移，鲨鱼和金枪鱼的数量不断变化，状态点在向量场中移动所描绘出的曲线就是轨迹，它展示了这两个种群数量随时间演化的动态过程 [1, 2]。"
+  },
+  {
+    "row": 13,
+    "question": "学生：“鲨鱼–金枪鱼空间基本就是一张表示鲨鱼和金枪鱼在海里位置的地图，对吗？”",
+    "proposedAnswer": "这个理解并不准确。\n\n在本课程讨论的模型中，状态空间（state space）并不是像海洋那样真实存在的物理空间。鲨鱼－金枪鱼状态空间是生态学家为了研究种群动态而建立的一个抽象数学空间，其坐标轴表示的是鲨鱼和金枪鱼的数量，而不是它们在海洋中的地理位置。\n\n因此，状态空间中的每一个点代表的是某一时刻鲨鱼和金枪鱼种群数量的组合。例如，点 ((20,100)) 表示系统处于「20 条鲨鱼与 100 条金枪鱼」的状态，而不是表示鲨鱼和金枪鱼位于海洋中的某个位置。\n\n换句话说，海洋描述的是生物“在哪里”（Where），而状态空间描述的是生物“有多少”（How many）。前者属于物理空间的概念，后者则是为了分析生态系统变化而建立的数学空间，两者虽然都可以用“空间”来描述，但代表的是完全不同的概念。"
+  },
+  {
+    "row": 14,
+    "question": "学生：“状态变量可以只是‘热’、‘冷’或者‘大’，不需要数字和单位。”",
+    "proposedAnswer": "“冷”、“热”或“大”这类词语，通常只是对某种状态的模糊定性描述，因此它们本身不能作为状态变量。真正的状态变量，必须是能够被测量并用具体数值表达的量，用来精准量化系统当前的状态。\n举个例子：对于一杯水，“热”不是状态变量，“温度 80°C”才是；对于一只动物，“大”不是状态变量，“体重 50 kg”或“体长 1.2 m”才是。\n所以说，一个合格的状态变量不仅要有明确的数值，还必须带有相应的单位（比如 °C、kg、m，或者表示数量的“个”），这样才能准确、定量地描述系统的真实状态。"
+  }
+]

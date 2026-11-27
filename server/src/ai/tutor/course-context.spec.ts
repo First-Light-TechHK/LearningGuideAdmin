@@ -1,4 +1,11 @@
-import { buildTutorContext, loadTutorRelease } from './course-context';
+import { createHash } from 'node:crypto';
+import {
+  boundedQuestionExcerpt,
+  comparisonSubjects,
+  buildTutorContext,
+  loadTutorRelease,
+  type passageSource,
+} from './course-context';
 import type {
   KnowledgeClient,
   KnowledgeRelease,
@@ -18,17 +25,83 @@ const release: KnowledgeRelease = {
 };
 
 describe('母版式 Release 上下文', () => {
+  it.each([
+    ["What's the difference between a basin and a ridge?", 'basin', 'ridge'],
+    ['流域和山脊有什么区别？', '流域', '山脊'],
+  ])(
+    'retrieves the missing side once while retaining the first side: %s',
+    async (question, first, second) => {
+      const chunk = (content: string) => ({
+        pageTitle: 'Terrain',
+        heading: 'Shapes',
+        content,
+        score: 1,
+        tokenCount: 8,
+      });
+      const search = jest.fn((_id: string, q: string) =>
+        Promise.resolve([chunk(q === second ? second : first)]),
+      );
+      const result = await buildTutorContext(
+        { retrieveChunks: search } as unknown as KnowledgeClient,
+        {
+          ...release,
+          pages: [{ title: 'Book', contentMd: 'x'.repeat(25000) }],
+        },
+        question,
+        [],
+        'wiki',
+        [],
+        comparisonSubjects(question),
+      );
+      expect(search.mock.calls.map((c) => c[1])).toEqual([question, second]);
+      expect(result.passages).toEqual([second, first]);
+    },
+  );
+  it('keeps a scoped exercise excerpt within budget at a complete character boundary', () => {
+    const content = '题'.repeat(12000);
+    const excerpt = boundedQuestionExcerpt(content);
+    expect(content.startsWith(excerpt)).toBe(true);
+    expect(Buffer.byteLength(excerpt)).toBe(31998);
+    expect(boundedQuestionExcerpt('  Q3: Example  ')).toBe('Q3: Example');
+  });
+  it.each([
+    '几乎相同的初始测量为何导致不同的长期预测？',
+    'Can similar initial measurements lead to different long-term predictions?',
+  ])(
+    'includes the sensitive dependence concept when retrieving evidence for %s',
+    async (query) => {
+      const retrieveChunks = jest.fn().mockResolvedValue([]);
+      const large = {
+        ...release,
+        pages: [{ title: 'book', contentMd: 'x'.repeat(25000) }],
+      };
+      await buildTutorContext(
+        { retrieveChunks } as unknown as KnowledgeClient,
+        large,
+        query,
+      );
+      expect(retrieveChunks).toHaveBeenCalledWith(
+        'r1',
+        expect.stringContaining('Sensitive dependence on initial conditions'),
+      );
+    },
+  );
   it('Yong 小包按 Page 顺序使用完整 Wiki Markdown，Jack 保持结构化来源', async () => {
     const retrieveChunks = jest.fn();
     const knowledge = {
       retrieveChunks,
     } as unknown as KnowledgeClient;
+    const sources: ReturnType<typeof passageSource>[] = [];
     const yong = await buildTutorContext(
       knowledge,
       release,
       'state',
       [],
       'wiki',
+      sources,
+    );
+    expect(sources.map((source) => source.pageTitle)).toEqual(
+      release.pages.map((page) => page.title),
     );
     const jack = await buildTutorContext(knowledge, release, 'state');
     expect(yong.text).toBe(
@@ -96,6 +169,7 @@ describe('母版式 Release 上下文', () => {
   });
 
   it('大包保留课程摘要中的积分定义及课时边界，不再被 1100 预算挤掉', async () => {
+    const sources: ReturnType<typeof passageSource>[] = [];
     const retrieveChunks = jest.fn().mockResolvedValue([
       {
         pageTitle: 'Lesson 1',
@@ -127,7 +201,30 @@ describe('母版式 Release 上下文', () => {
         pages: [{ title: 'Lesson 1', contentMd: 'x'.repeat(25000) }],
       },
       '什么是积分？',
+      [],
+      'wiki',
+      sources,
     );
+    expect(sources).toEqual([
+      {
+        pageTitle: 'Lesson 1',
+        heading: 'Scope',
+        sourceLevel: 'lesson',
+        contentHash: createHash('sha256')
+          .update(
+            'Lesson 1 covers vectors; integration is developed in Chapter 2.',
+          )
+          .digest('hex'),
+      },
+      {
+        pageTitle: '全书七章精华提炼',
+        heading: '第二章：导数与积分',
+        sourceLevel: 'course_digest',
+        contentHash: createHash('sha256')
+          .update('积分把小块累积起来；已知变化率可以还原总量。')
+          .digest('hex'),
+      },
+    ]);
     expect(result.text).toContain('Lesson 1 covers vectors');
     expect(result.text).toContain('积分把小块累积起来');
     expect(result.text).toContain('"sourceLevel":"course_digest"');

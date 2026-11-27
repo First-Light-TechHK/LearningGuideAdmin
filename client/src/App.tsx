@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useWorkspace } from './stores/workspaceSession'
+import { useEffect } from 'react'
 import { App as AntApp, ConfigProvider } from 'antd'
 import enGB from 'antd/locale/en_GB'
 import zhCN from 'antd/locale/zh_CN'
-import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { MainLayout } from './components/layout/MainLayout'
 import { Sidebar } from './components/layout/Sidebar'
 import { KnowledgeTabBar, type KnowledgeTabKey } from './components/knowledge/KnowledgeTabBar'
@@ -29,6 +30,7 @@ import { CourseEditorPage } from './backoffice/pages/CourseEditorPage'
 import { CoursePreviewPage } from './backoffice/pages/CoursePreviewPage'
 import { PortalCoursePreviewPage } from './backoffice/pages/PortalCoursePreviewPage'
 import { OperationsPage } from './backoffice/pages/OperationsPage'
+import { SandboxResetPage } from './backoffice/pages/SandboxResetPage'
 import { DEFAULT_LOCALE, isLocale } from './backoffice/lib/i18n/config'
 import { WorkspaceAccessProvider } from './backoffice/lib/workspaceAccess'
 import { DEFAULT_LANDING_MENU, menuHref } from './backoffice/rbac/permissions'
@@ -69,10 +71,18 @@ const themeConfig = {
 
 /** Knowledge 工作区：整宽 Tab 栏；课程树仅在 "Knowledge Pages" Tab 显示 */
 function KnowledgeWorkspace() {
-  const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTabKey>('pages')
+  const [params, setParams] = useSearchParams()
+  const session = useWorkspace()
+  const selected = params.get('tab')
+  const knowledgeTab: KnowledgeTabKey = selected === 'publish' || selected === 'teaching' ? selected : 'pages'
   return (
     <MainLayout
-      topBar={<KnowledgeTabBar active={knowledgeTab} onChange={setKnowledgeTab} />}
+      topBar={<KnowledgeTabBar active={knowledgeTab} onChange={(tab) => setParams(() => {
+        const next = new URLSearchParams(session.read<string>("knowledge.tab." + tab))
+        if (tab === 'pages') next.delete('tab')
+        else next.set('tab', tab)
+        return next
+      })} />}
       sidebar={knowledgeTab === 'pages' ? <Sidebar /> : undefined}
     >
       <KnowledgeSystem tab={knowledgeTab} />
@@ -176,6 +186,7 @@ function App() {
                 element={<SettingsEntryPage section="notificationConfiguration" />}
               />
               <Route path="settings/learning-access" element={<LearningAccessPage />} />
+              <Route path="settings/sandbox-reset" element={<SandboxResetPage />} />
             </Route>
           </Route>
           <Route path="*" element={<LocaleFallback />} />

@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { lockCourseRow } from '../prisma/course-lock';
 import { CreatePageDto } from './dto/create-page.dto';
 import { UpdatePageDto } from './dto/update-page.dto';
 
@@ -43,7 +45,23 @@ export class PagesService {
     return page;
   }
 
-  async update(id: string, dto: UpdatePageDto) {
+  async update(id: string, dto: UpdatePageDto, stamp?: string) {
+    if (stamp !== undefined) {
+      return this.prisma.$transaction(async (tx) => {
+        const page = await tx.page.findUniqueOrThrow({
+          where: { id },
+          select: { courseId: true },
+        });
+        await lockCourseRow(tx, page.courseId);
+        const course = await tx.course.findUniqueOrThrow({
+          where: { id: page.courseId },
+          select: { updatedAt: true },
+        });
+        if (course.updatedAt.toISOString() !== stamp)
+          throw new ConflictException('工作区版本已变化，请重新加载后编辑');
+        return tx.page.update({ where: { id }, data: dto });
+      });
+    }
     await this.ensureExists(id);
     return this.prisma.page.update({ where: { id }, data: dto });
   }
@@ -85,6 +103,39 @@ export class PagesService {
     await this.ensureExists(id);
     await this.prisma.page.delete({ where: { id } });
     return { id };
+  }
+
+  async clearCoursePages(courseId: string, expectedPageIds: string[]) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockCourseRow(tx, courseId);
+      const course = await tx.course.findUnique({
+        where: { id: courseId },
+        select: { id: true },
+      });
+      if (!course) throw new NotFoundException('所属课程不存在');
+
+      const pages = await tx.page.findMany({
+        where: { courseId },
+        select: { id: true },
+      });
+      const expected = new Set(expectedPageIds);
+      const conflictMessage = '课程页面已变化，请重新确认后再清除';
+      if (
+        pages.length !== expected.size ||
+        pages.some(({ id }) => !expected.has(id))
+      ) {
+        throw new ConflictException(conflictMessage);
+      }
+
+      const deletedPageIds = pages.map(({ id }) => id);
+      const { count } = await tx.page.deleteMany({
+        where: { courseId, id: { in: deletedPageIds } },
+      });
+      if (count !== deletedPageIds.length) {
+        throw new ConflictException(conflictMessage);
+      }
+      return { deletedPageIds };
+    });
   }
 
   private async ensureExists(id: string): Promise<void> {

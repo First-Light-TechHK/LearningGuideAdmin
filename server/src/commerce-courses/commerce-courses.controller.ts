@@ -12,6 +12,7 @@ import {
   Res,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
@@ -43,6 +44,8 @@ import { PortalProjectionService } from './portal-projection.service';
 import { sendMedia } from './media-stream';
 import { CourseStorageService } from './storage.service';
 import { DraftRevisionInterceptor } from './draft-revision';
+import { SandboxMaintenanceGuard } from './sandbox-maintenance.guard';
+import { SandboxLockReleaseInterceptor } from './sandbox-lock-release.interceptor';
 import type { BackofficeRequest } from '../backoffice/nest/request-context';
 
 function actor(request: BackofficeRequest): string | null {
@@ -61,7 +64,10 @@ function wrap<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * 商品课程 v2 管理接口（P1a：列表/详情/工作流/导入导出）。
  * RBAC 见 backoffice route-access：courses/* 走 course 菜单，动作按 course.* 账号级开关拆分。
+ * SandboxMaintenanceGuard：Sandbox 重置 RUNNING 期间阻断写请求（409 SANDBOX_MAINTENANCE）。
  */
+@UseGuards(SandboxMaintenanceGuard)
+@UseInterceptors(SandboxLockReleaseInterceptor)
 @Controller('backoffice/courses')
 export class CommerceCoursesController {
   constructor(

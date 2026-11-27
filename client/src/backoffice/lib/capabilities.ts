@@ -32,6 +32,15 @@ export type EnvironmentResponse = {
   previewEntry?: unknown
   label?: string
   versionNumberingMode?: 'sandbox' | 'production'
+  /** Sandbox 课程内容重置入口：仅 Sandbox 且 SANDBOX_RESET_ENABLED=true 时为 true。 */
+  sandboxResetEnabled?: unknown
+}
+
+/** 解析 Sandbox 重置入口：只认布尔 true；缺失/旧服务端 = 关闭（不可见）。 */
+export function sandboxResetEnabledFromEnvironment(
+  payload: EnvironmentResponse | null | undefined,
+): boolean {
+  return payload?.sandboxResetEnabled === true
 }
 
 /** 解析环境端点返回的能力集：缺失 / 非数组 = 全开；未知标识忽略（未来服务端新增能力不拖垮老前端）。 */
@@ -72,10 +81,12 @@ let environmentCache: {
   capabilities: ReadonlySet<CapabilityId>
   previewEntry: PreviewEntry
   numberingMode: 'sandbox' | 'production' | null
+  sandboxResetEnabled: boolean
 } = {
   capabilities: ALL_CAPABILITIES,
   previewEntry: DEFAULT_PREVIEW_ENTRY,
   numberingMode: null,
+  sandboxResetEnabled: false,
 }
 
 /** 记住一次环境端点结果（ShellRoute 专用）；payload 为 null（读取失败）时回退全开 + learner。 */
@@ -89,6 +100,7 @@ export function rememberEnvironment(
       payload?.versionNumberingMode === 'sandbox' || payload?.versionNumberingMode === 'production'
         ? payload.versionNumberingMode
         : null,
+    sandboxResetEnabled: sandboxResetEnabledFromEnvironment(payload),
   }
 }
 
@@ -105,6 +117,11 @@ export function cachedCapabilities(): ReadonlySet<CapabilityId> {
 /** ShellRoute 拉过环境端点后的预览入口（PREVIEW_ENTRY）。 */
 export function cachedPreviewEntry(): PreviewEntry {
   return environmentCache.previewEntry
+}
+
+/** ShellRoute 拉过环境端点后的 Sandbox 重置入口（仅 Sandbox + 开关打开时为 true）。 */
+export function cachedSandboxResetEnabled(): boolean {
+  return environmentCache.sandboxResetEnabled
 }
 
 /**

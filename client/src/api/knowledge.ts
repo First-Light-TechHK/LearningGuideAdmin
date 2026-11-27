@@ -5,6 +5,17 @@ import { serverText } from '../backoffice/lib/i18n/serverText'
 // ============ 类型（与后端 Prisma 模型字段对齐，§2） ============
 
 export type SyncState = 'SYNCED' | 'STALE'
+export interface ReleasePackagePreview {
+  id: string | null
+  versionTag: string
+  sourceCourse: string
+  pages: number
+  cards: number
+  images: number
+  conflicts: string[]
+  types: {type: string; count: number}[]
+  duplicate: boolean
+}
 
 export interface PageNode {
   id: string
@@ -41,6 +52,9 @@ export interface ReleaseSummary {
   isTestSelected: boolean
   /** 是否为当前编辑版本（2026-10-20 新增：`Course.editingReleaseId`；历史弹窗 `editing` 标识） */
   isEditing: boolean
+  hasEditorSnapshot?: boolean
+  indexStatus?: 'building' | 'ready' | 'missing' | 'failed'
+  indexChunkCount?: number
 }
 
 export interface ReleaseDetail
@@ -50,6 +64,7 @@ export interface ReleaseDetail
   isTestSelected?: boolean
   isEditing?: boolean
   snapshotData: {
+    teachingPackage?: { cards: Array<{ approvedPayload?: { refObjects?: import('./teachingCards').TeachingRef[] } }> }
     pages: Array<{
       id: string
       title: string
@@ -111,9 +126,10 @@ export const knowledgeApi = {
   updatePage: (
     id: string,
     data: { title?: string; contentMd?: string; sectionTags?: Record<string, string[]>; sortOrder?: number },
+    workspaceStamp?: string,
   ) =>
     http
-      .put<PageNode>(`/pages/${id}`, data, { timeout: 120_000 })
+      .put<PageNode>(`/pages/${id}`, data, { timeout: 120_000, headers: { 'X-Workspace-Stamp': workspaceStamp } })
       .then((r) => r.data),
   /** 批量重排 Course 下 Page 顺序（§5.1.2，2026-10-19 新增，左侧树拖拽排序用） */
   reorderPages: (courseId: string, orderedIds: string[]) =>
@@ -122,6 +138,12 @@ export const knowledgeApi = {
       .then((r) => r.data),
   deletePage: (id: string) =>
     http.delete(`/pages/${id}`).then((r) => r.data),
+  clearCoursePages: (courseId: string, expectedPageIds: string[]) =>
+    http
+      .delete<{ deletedPageIds: string[] }>(`/courses/${courseId}/pages`, {
+        data: { expectedPageIds },
+      })
+      .then((r) => r.data),
 
   // 全局 Tag 词库（§5.1.6 / §3.3.3 方案 B）
   listTags: () => http.get<TagItem[]>('/tags').then((r) => r.data),
@@ -133,10 +155,15 @@ export const knowledgeApi = {
     http.delete(`/tags/${encodeURIComponent(name)}`).then((r) => r.data),
 
   // 发布与版本（§5.1.3）
-  publish: (courseId: string, revisionNotes: string) =>
-    http.post<ReleaseDetail>(`/courses/${courseId}/release`, { revisionNotes }).then((r) => r.data),
+  publish: (courseId: string, revisionNotes: string, teachingPackage?: Record<string, unknown>) =>
+    http.post<ReleaseDetail>(`/courses/${courseId}/release`, {
+      revisionNotes,
+      ...(teachingPackage ? { teachingPackage } : {}),
+    }).then((r) => r.data),
   listReleases: (courseId: string) =>
     http.get<ReleaseSummary[]>(`/courses/${courseId}/releases`).then((r) => r.data),
+  rebuildReleaseIndex: (releaseId: string) =>
+    http.post<{ id: string }>(`/releases/${releaseId}/rebuild-index`).then((r) => r.data),
   getRelease: (releaseId: string) =>
     http.get<ReleaseDetail>(`/releases/${releaseId}`).then((r) => r.data),
   /** 删除版本（§3.4.5，2026-10-20 新增）：Live / 后台测试所选版本后端返回 409 */
@@ -166,8 +193,9 @@ export const knowledgeApi = {
    */
   exportRelease: async (
     releaseId: string,
+    kind: 'export' | 'package' = 'export',
   ): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(`/api/releases/${releaseId}/export`, {
+    const res = await fetch(`/api/releases/${releaseId}/${kind}`, {
       credentials: 'include',
       headers: { Accept: 'application/zip' },
     })
@@ -193,6 +221,12 @@ export const knowledgeApi = {
       ? decodeURIComponent(match[1])
       : `${releaseId}.zip`
     return { blob, filename }
+  },
+
+  importReleasePackage: (courseId: string, file: File, action: 'preview' | 'apply') => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post<ReleasePackagePreview>(`/courses/${courseId}/release-package/${action}`, form, { timeout: 180000 }).then(r => r.data)
   },
 
   // 同步（§5.1.4 / §3.2.2 外部源接管模型）

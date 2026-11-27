@@ -1,4 +1,9 @@
-import { DEFAULT_MAIN_PROMPT, DEFAULT_PROMPTS } from './prompt-defaults';
+import {
+  DEFAULT_MAIN_PROMPT,
+  DEFAULT_PROMPTS,
+  promptTemplateSeeds,
+} from './prompt-defaults';
+import { compileMotherbaseDialogue } from './tutor/motherbase-dialogue';
 
 describe('默认提示词', () => {
   it('Base、Lecture、Socratic 保持原有职责', () => {
@@ -14,6 +19,59 @@ describe('默认提示词', () => {
     expect(socratic).toContain('Teaching mode: SOCRATIC.');
     expect(socratic).toContain('## ROUTING');
   });
+
+  it.each([
+    ['我的计算结果和书上不同，请检查这一步。', 'Chinese'],
+    ['Please show the complete derivation.', 'English'],
+  ])(
+    '默认 LECTURE 教学要求进入正文和审核卡两条路径：%s',
+    (message, language) => {
+      const modePrompt = DEFAULT_PROMPTS.LECTURE.systemPrompt;
+      expect(
+        promptTemplateSeeds().find((seed) => seed.id === 'lecture-default')
+          ?.systemPrompt,
+      ).toBe(modePrompt);
+      const rules = modePrompt.replace(/\s+/g, ' ');
+      for (const instruction of [
+        'defining features',
+        'describe both sides',
+        'give the criterion',
+        'connect the details of the case',
+        'each substantive step',
+        'prioritize troubleshooting',
+        'Stop at that checkpoint',
+        'first divergent step',
+        'one focused question',
+        'independent course question',
+        'what later material adds',
+      ]) {
+        expect(rules).toContain(instruction);
+      }
+      const input = {
+        mode: 'LECTURE' as const,
+        modePrompt,
+        basePrompt: DEFAULT_MAIN_PROMPT,
+        history: [],
+        message,
+        knowledgeMarkdown: 'Lesson text',
+      };
+      const wiki = compileMotherbaseDialogue(input).messages[0].content;
+      const reviewed = compileMotherbaseDialogue({
+        ...input,
+        reviewedLecture: {
+          planner: '{}',
+          course: '{}',
+          knowledge: 'Approved explanation',
+          outputContract: 'Use the supplied evidence.',
+        },
+      }).messages[0].content;
+      expect(wiki).toContain(modePrompt);
+      expect(reviewed).toContain('FIELD 5\n' + JSON.stringify(modePrompt));
+      for (const system of [wiki, reviewed]) {
+        expect(system).toContain('Write the explanation in ' + language);
+      }
+    },
+  );
 });
 
 describe('Tutor 内部知识边界', () => {

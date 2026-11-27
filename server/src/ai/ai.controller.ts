@@ -143,9 +143,14 @@ export class UserAiController {
     @Body() dto: LearnerChatStreamDto,
     @Res() res: Response,
   ) {
+    let runtime: unknown;
     await pipeSseWithAbort(
-      (signal) => this.chat.streamLearnerChat(dto, signal),
+      (signal) =>
+        this.chat.streamLearnerChat(dto, signal, (value) => {
+          runtime = value;
+        }),
       res,
+      () => runtime,
     );
   }
 }

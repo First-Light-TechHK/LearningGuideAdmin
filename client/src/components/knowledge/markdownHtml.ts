@@ -35,7 +35,7 @@ export function sanitizeHtml() {
 }
 
 /** DOCX 的合并单元格、列表等结构需保留 HTML，插入编辑器前只复制允许的元素与属性。 */
-export function renderHtmlTable(html: string): DocumentFragment {
+export function renderHtmlTable(html: string, renderMath: (latex: string, display: boolean) => string): DocumentFragment {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const fragment = document.createDocumentFragment()
   const copy = (source: Node, parent: Node) => {
@@ -44,6 +44,12 @@ export function renderHtmlTable(html: string): DocumentFragment {
       return
     }
     if (!(source instanceof Element) || !tags.has(source.localName)) return
+    if (source.localName === 'code' && source.classList.contains('language-math')) {
+      const span = document.createElement('span')
+      span.innerHTML = renderMath(source.textContent ?? '', source.classList.contains('math-display'))
+      parent.appendChild(span)
+      return
+    }
     if (source.localName === 'img' && !isSafeImageUrl(source.getAttribute('src') ?? '')) return
     const element = document.createElement(source.localName)
     if (source.localName === 'table') element.className = 'cm-md-table'

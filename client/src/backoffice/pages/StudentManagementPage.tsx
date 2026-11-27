@@ -6,6 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { usePageSize } from '../components/paginationState';
 import { SearchIcon } from '../components/icons'
 import { StudentDrawer } from '../components/StudentDrawer'
+import { StudentAccountCounts } from '../components/StudentAccountCounts'
 import {
   SPECIAL_FILTERS,
   STATUS_FILTERS,
@@ -133,7 +134,7 @@ function StudentManagementInner() {
 
   return (
     <section className="card cardGrow" data-testid="students-page">
-      <div className="pageHead">
+      <div className="pageHead smStudentPageHead">
         <div>
           <h1 className="cardTitle">{t(locale, 'students.title')}</h1>
           <p className="cardSubtitle">{t(locale, 'students.subtitle')}</p>
@@ -144,6 +145,8 @@ function StudentManagementInner() {
           </Link>
         ) : null}
       </div>
+
+      {data && !errorCode ? <StudentAccountCounts locale={locale} counts={data.counts} /> : null}
 
       <div className="filters smFilters">
         <label className="searchField">

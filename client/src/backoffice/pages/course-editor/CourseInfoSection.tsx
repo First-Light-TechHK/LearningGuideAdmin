@@ -57,6 +57,7 @@ export function CourseInfoSection({
   const [languageOpen, setLanguageOpen] = useState(false);
   const [newLanguage, setNewLanguage] = useState('zh-CN');
   const [coverBusy, setCoverBusy] = useState(false);
+  const coverInFlight = useRef(false);
   const [coverPct, setCoverPct] = useState<number | null>(null);
   const [coverError, setCoverError] = useState('');
   const mediaLimits = useMediaLimits();
@@ -184,21 +185,34 @@ export function CourseInfoSection({
     });
   }
 
-  async function readCover(file: File): Promise<{ ok: boolean; message?: string }> {
-    const invalidMessage = L(locale, '请使用 400 × 185 px 或同比例更大的 JPG 或 PNG。', 'Use a JPG or PNG at 400 × 185 px or larger, same ratio');
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      return { ok: false, message: invalidMessage };
+  async function fitCover(file: File): Promise<File | null> {
+    if (!['image/jpeg', 'image/png'].includes(file.type)) return null;
+    try {
+      const bitmap = await createImageBitmap(file);
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 400;
+        canvas.height = 185;
+        const context = canvas.getContext('2d');
+        if (!context) return null;
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        const scale = Math.min(canvas.width / bitmap.width, canvas.height / bitmap.height);
+        const width = bitmap.width * scale;
+        const height = bitmap.height * scale;
+        context.drawImage(bitmap, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+        return blob ? new File([blob], 'course-cover.png', { type: 'image/png' }) : null;
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      return null;
     }
-    const bitmap = await createImageBitmap(file);
-    const ratio = 400 / 185;
-    const close = Math.abs(bitmap.width / bitmap.height - ratio) < 0.03;
-    if (bitmap.width < 400 || bitmap.height < 185 || !close) {
-      return { ok: false, message: invalidMessage };
-    }
-    return { ok: true };
   }
 
   async function uploadCover(file: File) {
+    if (coverInFlight.current) return;
     if (mediaLimits && file.size > mediaLimits.imageBytes) {
       setCoverError(
         L(
@@ -209,35 +223,49 @@ export function CourseInfoSection({
       );
       return;
     }
-    const valid = await readCover(file);
-    if (!valid.ok) {
-      setCoverError(valid.message ?? L(locale, '请使用 400 × 185 px 或同比例更大的 JPG 或 PNG。', 'Use a JPG or PNG at 400 × 185 px or larger, same ratio'));
-      return;
-    }
+    coverInFlight.current = true;
     setCoverBusy(true);
     setCoverError('');
     setCoverPct(0);
-    const result = await uploadFileWithProgress(`/api/backoffice/courses/${course.id}/cover`, file, setCoverPct);
-    setCoverPct(null);
-    setCoverBusy(false);
-    if (result.success) {
-      onNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
-      await onReload();
-    } else {
-      setCoverError(result.errorMessage ?? L(locale, '封面上传失败。', 'Cover upload failed.'));
+    try {
+      const fitted = await fitCover(file);
+      if (!fitted) {
+        setCoverError(L(locale, '请使用有效的 JPG 或 PNG 图片。', 'Use a valid JPG or PNG image.'));
+        return;
+      }
+      if (mediaLimits && fitted.size > mediaLimits.imageBytes) {
+        setCoverError(L(locale, '适配后的封面超过单文件上限，请使用较简单的图片。', 'The fitted cover exceeds the per-file limit. Please use a simpler image.'));
+        return;
+      }
+      const result = await uploadFileWithProgress(`/api/backoffice/courses/${course.id}/cover`, fitted, setCoverPct);
+      if (result.success) {
+        onNotice(L(locale, '封面已上传。', 'Cover uploaded.'));
+        await onReload();
+      } else {
+        setCoverError(result.errorMessage ?? L(locale, '封面上传失败。', 'Cover upload failed.'));
+      }
+    } finally {
+      coverInFlight.current = false;
+      setCoverPct(null);
+      setCoverBusy(false);
     }
   }
 
   async function removeCover() {
-    if (!window.confirm(L(locale, '移除当前封面？', 'Remove the current cover?'))) return;
+    if (coverInFlight.current || !window.confirm(L(locale, '移除当前封面？', 'Remove the current cover?'))) return;
+    coverInFlight.current = true;
     setCoverBusy(true);
-    const result = await boRequest(`/api/backoffice/courses/${course.id}/cover`, { method: 'DELETE' });
-    setCoverBusy(false);
-    if (result.success) {
-      onNotice(L(locale, '封面已移除。', 'Cover removed.'));
-      await onReload();
-    } else {
-      setCoverError(result.message ?? L(locale, '移除封面失败。', 'Could not remove the cover.'));
+    try {
+      const result = await boRequest(`/api/backoffice/courses/${course.id}/cover`, { method: 'DELETE' });
+      if (result.success) {
+        onNotice(L(locale, '封面已移除。', 'Cover removed.'));
+        await onReload();
+      } else {
+        setCoverError(result.message ?? L(locale, '移除封面失败。', 'Could not remove the cover.'));
+      }
+    } finally {
+      coverInFlight.current = false;
+      setCoverBusy(false);
     }
   }
 
@@ -349,13 +377,13 @@ export function CourseInfoSection({
             label={L(locale, '课程封面 *', 'Course cover *')}
             hint={
               mediaLimits
-                ? L(locale, `400 × 185 px 或同比例更大尺寸，JPG 或 PNG，单文件最大 ${formatBytes(mediaLimits.imageBytes)}。`, `400 × 185 px or larger, same ratio. JPG or PNG, up to ${formatBytes(mediaLimits.imageBytes)}.`)
-                : L(locale, '400 × 185 px 或同比例更大尺寸，JPG 或 PNG。', '400 × 185 px or larger, same ratio. JPG or PNG.')
+                ? L(locale, `JPG 或 PNG，自动适配 400 × 185 px，单文件最大 ${formatBytes(mediaLimits.imageBytes)}。`, `JPG or PNG, fitted to 400 × 185 px, up to ${formatBytes(mediaLimits.imageBytes)}.`)
+                : L(locale, 'JPG 或 PNG，自动适配 400 × 185 px。', 'JPG or PNG, fitted to 400 × 185 px.')
             }
           >
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               {course.cover ? (
-                <img src={`/api/backoffice/courses/${course.id}/cover`} alt="" style={{ width: 120, height: 56, objectFit: 'cover', borderRadius: 8, border: '1px solid #E8EDF5' }} />
+                <img src={`/api/backoffice/courses/${course.id}/cover?asset=${encodeURIComponent(course.cover.id)}`} alt="" style={{ width: 120, maxWidth: '100%', height: 'auto', aspectRatio: '400 / 185', objectFit: 'contain', borderRadius: 8, border: '1px solid #E8EDF5' }} />
               ) : (
                 <div style={{ width: 120, height: 56, borderRadius: 8, background: '#F3F5F9', display: 'grid', placeItems: 'center', fontSize: 12, color: '#5A6577' }}>
                   {L(locale, '未上传', 'No image')}

@@ -1,3 +1,4 @@
+import { clearWorkspaceSessions } from "../../stores/workspaceSession";
 import { useAiStore } from "../../stores/aiStore";
 import { useKnowledgeStore } from "../../stores/knowledgeStore";
 import { clearEditorDrafts } from "./editorDraftStore";
@@ -8,11 +9,12 @@ import { clearEditorDrafts } from "./editorDraftStore";
  * 以及内存里的 AI / Knowledge 状态，同一浏览器换人登录时不会看到前一个人的内容。
  */
 export function clearEmployeeWorkspace(): void {
+  clearWorkspaceSessions();
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (key?.startsWith("aitutor.chat.")) keys.push(key);
+      if (key?.startsWith("aitutor.chat.") || key?.startsWith("kg.draft.")) keys.push(key);
     }
     for (const key of keys) localStorage.removeItem(key);
   } catch {

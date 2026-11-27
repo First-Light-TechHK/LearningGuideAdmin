@@ -233,7 +233,7 @@ describeDb('helpdesk demo data (PostgreSQL)', () => {
         'r.at < f.updated_at',
       ),
     ).toBe(0);
-  });
+  }, 30_000); // Real PostgreSQL seeding is not a five-second performance requirement.
 
   it('removes only demo rows, including candidates mined from demo turns, and keeps the guards on', async () => {
     // 真实数据：一条真审核、一张真候选；还有一张拿演示记录建的候选（夜间挖掘会这样做）

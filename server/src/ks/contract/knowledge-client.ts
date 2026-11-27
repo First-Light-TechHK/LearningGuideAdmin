@@ -30,6 +30,7 @@ export interface KnowledgeReleaseMeta {
 
 /** Release 快照中的一页 */
 export interface KnowledgeReleasePage {
+  id?: string;
   title: string;
   contentMd?: string;
   sectionTags?: Record<string, string[]>;
@@ -37,6 +38,8 @@ export interface KnowledgeReleasePage {
 
 export interface KnowledgeRelease extends KnowledgeReleaseMeta {
   pages: KnowledgeReleasePage[];
+  teachingPackage?: unknown;
+  indexedChunkCount?: number;
 }
 
 /** RAG 检索结果（2026-10-26 新增） */
@@ -49,13 +52,32 @@ export interface RetrievedChunk {
   tokenCount: number;
 }
 
+export interface ProfessorQaSearch {
+  status: 'ready' | 'missing' | 'degraded';
+  cardIds: string[];
+  teachingCardIds?: string[];
+  generation?: string;
+}
+
 export interface KnowledgeClient {
+  retrieveProfessorQa?(
+    courseId: string,
+    releaseId: string,
+    query: string,
+    allowedIds: string[],
+    teachingIds?: string[],
+  ): Promise<ProfessorQaSearch>;
   getCourse(courseId: string): Promise<KnowledgeCourse | null>;
   getCourseByExternalId(externalId: string): Promise<KnowledgeCourse | null>;
   /** 按标题升序；mappedOnly 只返回已对应 Portal 课程的 */
   listCourses(options?: { mappedOnly?: boolean }): Promise<KnowledgeCourse[]>;
   getReleaseMeta(releaseId: string): Promise<KnowledgeReleaseMeta | null>;
   getRelease(releaseId: string): Promise<KnowledgeRelease | null>;
+  /** Drafts are read only by the authenticated authoring workflow. */
+  getCourseDraftPages?(
+    courseId: string,
+    pageIds: string[],
+  ): Promise<KnowledgeReleasePage[]>;
   /**
    * RAG 混合检索：对 query 做向量及关键词召回，按融合排名返回当前 Release 的片段。
    * 返回空数组表示无相关结果或未建索引。

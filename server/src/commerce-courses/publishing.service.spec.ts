@@ -119,3 +119,20 @@ describe('parseChangeStatusBody', () => {
     }
   });
 });
+
+describe('export live-version integrity', () => {
+  it.each([null, { id: 'v1', courseId: 'other' }])('reports a missing or foreign live version as an integrity error', async (version) => {
+    const prisma = { commerceCourse: { findUnique: jest.fn().mockResolvedValue({ id: 'c1', code: 'C1', liveVersionId: 'v1' }) }, courseVersion: { findUnique: jest.fn().mockResolvedValue(version) } };
+    const { PublishingService } = await import('./publishing.service');
+    const service = new PublishingService(prisma as never, {} as never, {} as never);
+    await expect(service.assertExportable('c1')).rejects.toMatchObject({ response: expect.objectContaining({ code: 'LIVE_VERSION_INTEGRITY_ERROR' }) });
+  });
+});
+
+describe('publish revision gate', () => {
+  it('rejects a course changed after the pre-publish validation', async () => {
+    const { assertPublishRevision } = await import('./publishing.service');
+    expect(() => assertPublishRevision(4, 5)).toThrow(ConflictException);
+    expect(() => assertPublishRevision(4, 4)).not.toThrow();
+  });
+});

@@ -9,12 +9,13 @@ import { safeMarkdownPlugins } from './safeMarkdownPlugins'
 const KATEX = { throwOnError: false, strict: 'ignore', trust: false, maxExpand: 100, output: 'html' } as const
 const IMAGE_PATH = /^\/api\/files\/images\/([^/]+)\/([0-9a-f-]{36}\.(?:png|jpg|jpeg|gif|webp))$/i
 
-export const TutorMarkdown = memo(function TutorMarkdown({ content, courseId, sourcesLabel = 'Sources' }: {
+export const TutorMarkdown = memo(function TutorMarkdown({ content, courseId, sourcesLabel = 'Sources', jackLecture = false }: {
   content: string
   courseId?: string | null
   sourcesLabel?: string
+  jackLecture?: boolean
 }) {
-  const { markdown, sources } = tutorAnswerParts(content)
+  const { markdown, sources } = tutorAnswerParts(content, jackLecture)
   const components = useMemo<NonNullable<ComponentProps<typeof MDEditor.Markdown>['components']>>(() => ({
     a({ href, children }) {
       return /^https?:\/\//i.test(href || '') ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>

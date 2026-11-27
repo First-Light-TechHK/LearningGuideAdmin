@@ -87,7 +87,8 @@ Learning Guide 的课程生产流程要改为「Sandbox 创作与验收 → 导�
 | T7 | WeChat 网站应用申请 | 产品 | — | T3 前 |
 | T8 | 测试账号清单（邮箱/微信） | 产品 | — | 验收前 |
 | T9 | 邮件通道确认（163 SMTP 复用） | 产品/ops | — | 2026-11-20 |
-| T10 | 数据重置策略确认 | 产品 | — | 2026-11-20 |
+| T10 | 数据重置策略确认（学员数据） | 产品 | — | 2026-11-20 |
+| T10b | 课程内容重置工具确认（Admin Settings › Sandbox Reset；与 T10 分开） | 产品 | — | 2026-11-25 |
 | T11 | OpenRouter key + 预算（AI Tutor 已启用） | 产品/eng | — | 部署前 |
 | T12 | GitHub 变量与 CI 用户（两仓库 sandbox） | ops/eng | T3/T4 | 部署前 |
 

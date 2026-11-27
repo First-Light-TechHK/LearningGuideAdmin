@@ -38,6 +38,11 @@ export interface CommerceCourseConfig {
   jobHeartbeatMs: number;
   jobStaleMs: number;
   jobMaxAttempts: number;
+  /**
+   * Sandbox 课程内容重置开关（SANDBOX_RESET_ENABLED）：默认关。
+   * 只在 Sandbox 部署显式设置 true；服务层还会断言 APP_ENV=SANDBOX（见 sandbox-reset.service.ts）。
+   */
+  sandboxResetEnabled?: boolean;
 }
 
 const MB = 1024 * 1024;
@@ -97,6 +102,11 @@ export function commerceConfig(config: ConfigService): CommerceCourseConfig {
     jobHeartbeatMs: num('PACKAGE_JOB_HEARTBEAT_MS', 10_000),
     jobStaleMs: num('PACKAGE_JOB_STALE_MS', 10 * 60 * 1000),
     jobMaxAttempts: num('PACKAGE_JOB_MAX_ATTEMPTS', 3),
+    // 破坏性运维动作默认关；只有 Sandbox 部署显式设为 true（APP_ENV 断言在服务层）。
+    sandboxResetEnabled:
+      (config.get<string>('SANDBOX_RESET_ENABLED') ?? '')
+        .trim()
+        .toLowerCase() === 'true',
   };
 }
 

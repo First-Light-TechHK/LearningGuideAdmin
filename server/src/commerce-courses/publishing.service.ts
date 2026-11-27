@@ -76,6 +76,11 @@ export function courseLaunchEventParams(course: CourseLaunchSource): {
   };
 }
 
+/** Refuse publishing when the validated draft changed while waiting for the row lock. */
+export function assertPublishRevision(expected: number, current: number): void {
+  if (expected !== current) throw new ConflictException({ code: 'COURSE_CHANGED', message: 'The course changed during publication. Reload and retry.' });
+}
+
 /** 纯函数：下一次发布的版本编号（PRD §15.3）。 */
 export function nextVersionLabel(
   mode: VersionNumberingMode,
@@ -192,6 +197,7 @@ export class PublishingService {
         draftSourceEnvironment: true,
         draftSourceVersionLabel: true,
         archivedAt: true,
+        revision: true,
       },
     });
     if (!course)
@@ -229,9 +235,9 @@ export class PublishingService {
     const version = await this.prisma.$transaction(
       async (tx) => {
         const [locked] = await tx.$queryRaw<
-          { hasDraft: boolean; liveVersionId: string | null }[]
+          { hasDraft: boolean; liveVersionId: string | null; revision: number }[]
         >`
-          SELECT "hasDraft", "liveVersionId" FROM "CommerceCourse"
+          SELECT "hasDraft", "liveVersionId", "revision" FROM "CommerceCourse"
           WHERE id = ${courseId} FOR UPDATE`;
         if (!locked?.hasDraft) {
           throw new ConflictException({
@@ -239,6 +245,7 @@ export class PublishingService {
             message: 'There is no draft to publish.',
           });
         }
+        assertPublishRevision(course.revision, locked.revision);
         const snapshot = await captureVersionSnapshot(tx, courseId);
         const contentHash = await snapshotContentHash(tx, snapshot);
         // 草稿改回了线上内容（PRD §15.1）：清掉草稿标记，不生成重复版本。
@@ -646,12 +653,12 @@ export class PublishingService {
     }
     const live = await this.prisma.courseVersion.findUnique({
       where: { id: course.liveVersionId },
-      select: { id: true, versionLabel: true, snapshotData: true },
+      select: { id: true, courseId: true, versionLabel: true, snapshotData: true },
     });
-    if (!live)
-      throw new NotFoundException({
-        code: 'VERSION_NOT_FOUND',
-        message: 'Live version not found',
+    if (!live || live.courseId !== courseId)
+      throw new ConflictException({
+        code: 'LIVE_VERSION_INTEGRITY_ERROR',
+        message: 'The current live version is missing or belongs to another course. Restore the correct version from a verified backup, or follow the Sandbox recovery procedure; do not export until repaired.',
       });
     const trial = await this.trial.get(courseId);
     const completeness = computeCompleteness(

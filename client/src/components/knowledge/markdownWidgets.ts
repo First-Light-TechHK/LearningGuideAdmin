@@ -200,7 +200,7 @@ export class HtmlTableWidget extends WidgetType {
   toDOM() {
     const wrap = document.createElement('div')
     wrap.className = 'cm-md-table-widget'
-    wrap.appendChild(renderHtmlTable(this.html))
+    wrap.appendChild(renderHtmlTable(this.html, renderMath))
     if (!this.readOnly) {
       const button = document.createElement('button')
       button.type = 'button'

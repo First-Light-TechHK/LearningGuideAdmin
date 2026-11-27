@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useWorkspace, useWorkspaceValue, useWorkspaceScroll } from '../../stores/workspaceSession'
+import { useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Panel, Select, Typography } from '../ui'
 import { SearchBox } from '../knowledge/SearchBox'
 import { CourseTree } from '../knowledge/CourseTree'
@@ -22,13 +24,33 @@ export function Sidebar() {
   const loadExternalCourses = useKnowledgeStore((s) => s.loadExternalCourses)
   const selectExternal = useKnowledgeStore((s) => s.selectExternal)
 
-  const [keyword, setKeyword] = useState('')
+  const workspace = useWorkspace()
+  const [params] = useSearchParams()
+  const requestedCourse = params.get('courseId')
+  const keyword = useWorkspaceValue<string>(workspace, 'pages.search') ?? ''
+  const treeReady = useKnowledgeStore(s => s.courses.length > 0 && Object.keys(s.details).length > 0)
+  const treeScroll = useWorkspaceScroll(workspace, 'pages.treeScroll', treeReady)
   const { text } = useKText()
 
   // 首次进入拉取外部源列表
   useEffect(() => {
     void loadExternalCourses()
   }, [loadExternalCourses])
+
+  useEffect(() => {
+    if (!externalCourses.length) return
+    const saved = workspace.read<string>('pages.target')
+    const match = externalCourses.find(course => course.externalId === saved)
+    // A direct link to a different course must remain visible in the tree.
+    const target = match && (!requestedCourse || match.localCourseId === requestedCourse) ? match.externalId : null
+    if (useKnowledgeStore.getState().selectedExternalId !== target)
+      useKnowledgeStore.setState({ selectedExternalId: target })
+  }, [workspace, externalCourses, requestedCourse])
+
+  const changeTarget = async (id: string | null) => {
+    await selectExternal(id)
+    workspace.write('pages.target', useKnowledgeStore.getState().selectedExternalId)
+  }
 
   return (
     // 侧栏卡片化（2026-10-19）：根节点改为白色圆角面板（padding 默认 16），与右侧内容面板统一；
@@ -42,10 +64,10 @@ export function Sidebar() {
           style={{ width: '100%', marginTop: tokens.spacing.xs }}
           placeholder={text('sidebar.allCoursesPlaceholder')}
           value={selectedExternalId ?? undefined}
-          onSelect={(v: string) => void selectExternal(v)}
+          onSelect={(v: string) => void changeTarget(v)}
           // 清空目标回到全部课件视图（BUG-0227）
           allowClear
-          onClear={() => void selectExternal(null)}
+          onClear={() => void changeTarget(null)}
           options={externalCourses.map((e) => ({
             value: e.externalId,
             label: e.title,
@@ -57,10 +79,10 @@ export function Sidebar() {
           </Typography.Text>
         )}
       </div>
-      <SearchBox value={keyword} onChange={setKeyword} />
+      <SearchBox value={keyword} onChange={value => workspace.write('pages.search', value)} />
       {/* 2026-10-22：只允许纵向滚动；长 lesson/heading 名称用省略号，不出现横向滚动条 */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', marginTop: tokens.spacing.sm }}>
-        <CourseTree keyword={keyword} />
+      <div ref={treeScroll} style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', marginTop: tokens.spacing.sm }}>
+        <CourseTree keyword={keyword} linkedPage={requestedCourse ? params.get('pageId') : null} />
       </div>
       <div style={{ marginTop: tokens.spacing.sm }}>
         <SyncButtons />

@@ -1,7 +1,7 @@
 import { Link, Navigate } from 'react-router-dom'
 
 import { SettingsSubNav } from '../components/SettingsSubNav'
-import { cachedAccountFeatures, cachedCapabilities, menuEffectiveLevel } from '../lib/capabilities'
+import { cachedAccountFeatures, cachedCapabilities, cachedSandboxResetEnabled, menuEffectiveLevel } from '../lib/capabilities'
 import { t } from '../lib/i18n/messages'
 import { useLocale } from '../lib/navigation'
 import {
@@ -75,7 +75,12 @@ export function PlaceholderPage({ menu }: { menu: MenuKey }) {
 export function SettingsIndexPage() {
   const locale = useLocale()
   const employee = useEmployee()
-  const [first] = visibleSettingsSubs(employee.role, cachedCapabilities(), cachedAccountFeatures())
+  const [first] = visibleSettingsSubs(
+    employee.role,
+    cachedCapabilities(),
+    cachedAccountFeatures(),
+    cachedSandboxResetEnabled(),
+  )
   return <Navigate to={first ? settingsSubHref(locale, first) : menuHref(locale, DEFAULT_LANDING_MENU)} replace />
 }
 

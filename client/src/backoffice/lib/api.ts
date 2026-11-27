@@ -68,7 +68,11 @@ export function rememberCourseRevision(url: string, etag: string | null): void {
 
 export async function boRequest<T>(url: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
-    const response = await fetch(url, { credentials: 'same-origin', ...withCourseRevision(url, init) })
+    // The revision ETag tracks draft writes, while plans can change independently.
+    // Never reuse a cached course detail body based on that partial revision.
+    const courseDetail = /^\/api\/backoffice\/courses\/[0-9a-f-]{36}(?:\?.*)?$/i.test(url)
+    const request = withCourseRevision(url, init)
+    const response = await fetch(url, { credentials: 'same-origin', ...request, ...(courseDetail && (!request?.method || request.method.toUpperCase() === 'GET') ? { cache: 'no-store' } : {}) })
     if (response.ok) rememberCourseRevision(url, response.headers.get('etag'))
     // 401 / 403 可能是会话失效或角色刚被改：让外壳重读 /api/session 刷新菜单。
     // /api/session 自己就是外壳读取会话的请求，排除掉以免循环。

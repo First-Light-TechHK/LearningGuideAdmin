@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useWorkspace } from "../../stores/workspaceSession";
+import { Link, useLocation } from "react-router-dom";
 
 import { usePathname, useRouter } from "../lib/navigation";
 
@@ -89,6 +90,29 @@ export function AppShell({
   const [passwordOpen, setPasswordOpen] = useState(false);
   const envName = environmentName(locale, environment);
 
+  const session = useWorkspace();
+  const { search } = useLocation();
+  useEffect(() => {
+    if (!activeMenu) return;
+    const params = new URLSearchParams(search);
+    const safe = new URLSearchParams();
+    for (const key of ['tab', 'courseId', 'pageId', 'entryId', 'draftId', 'lessonId', 'versionId', 'student', 'candidate']) {
+      if (params.has(key)) safe.set(key, params.get(key)!);
+    }
+    const relativePath = pathname.split('/').slice(2).join('/');
+    session.write('menu.' + activeMenu, relativePath + (safe.size ? '?' + safe.toString() : ''));
+    if (activeMenu === 'knowledge') session.write('knowledge.tab.' + (safe.get('tab') ?? 'pages'), safe.toString());
+  }, [session, activeMenu, pathname, search]);
+  useEffect(() => {
+    const onHidden = () => { if (document.visibilityState === 'hidden') session.flush() };
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', session.flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', session.flush);
+      session.flush();
+    };
+  }, [session]);
   const roleLabel = t(locale, `roles.${employee.role}`);
 
   /** PORT-NAV-003：折叠状态按账号落库，失败不阻断交互。 */
@@ -189,11 +213,12 @@ export function AppShell({
 
           {menus.map((menu) => {
             const Icon = MENU_ICON[menu];
+            const saved = session.read<string>("menu." + menu);
             return (
               <Link
                 key={menu}
                 className={menu === activeMenu ? "navItem navItemActive" : "navItem"}
-                to={menuHref(locale, menu)}
+                to={saved && menu !== activeMenu ? `/${locale}/${saved}` : menuHref(locale, menu)}
                 title={t(locale, MENU_LABEL[menu])}
                 data-menu={menu}
               >

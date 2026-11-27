@@ -1,0 +1,19 @@
+import './support/dom'
+import assert from 'node:assert/strict'
+import { test, afterEach } from 'node:test'
+import { cleanup, render, screen } from '@testing-library/react'
+import { StudentAccountCounts } from '../src/backoffice/components/StudentAccountCounts'
+afterEach(cleanup)
+test('shows global account totals with localized labels', () => {
+  render(<StudentAccountCounts locale="en-GB" counts={{total: 6, active: 5, inactive: 1}} />)
+  assert.match(screen.getByTestId('student-account-counts').textContent ?? '', /Total students\s*6\s*Registered accounts/)
+  assert.match(screen.getByTestId('student-account-counts').textContent ?? '', /Active accounts\s*5\s*Can sign in/)
+  assert.match(screen.getByTestId('student-account-counts').textContent ?? '', /Inactive accounts\s*1\s*Access suspended/)
+})
+test('shows the same totals with Chinese labels', () => {
+  render(<StudentAccountCounts locale="zh-CN" counts={{total: 2, active: 1, inactive: 1}} />)
+  const text = screen.getByTestId('student-account-counts').textContent ?? ''
+  assert.match(text, /学生总数\s*2\s*已注册账号/)
+  assert.match(text, /启用账号\s*1\s*可登录/)
+  assert.match(text, /停用账号\s*1\s*已暂停访问/)
+})

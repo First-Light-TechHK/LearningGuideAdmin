@@ -16,8 +16,8 @@ describe('KS 混合检索', () => {
     const integral = evidence('积分是把小块累积起来。', 0.2);
     const query = jest
       .fn()
-      .mockResolvedValueOnce([vectors])
-      .mockResolvedValueOnce([integral]);
+      .mockResolvedValueOnce([integral])
+      .mockResolvedValueOnce([vectors]);
     const embedQuery = jest.fn().mockResolvedValue([1, 0]);
     const client = new PrismaKnowledgeClient(
       { $queryRawUnsafe: query } as unknown as PrismaService,
@@ -29,13 +29,23 @@ describe('KS 混合检索', () => {
     );
     expect(embedQuery).toHaveBeenCalledWith('什么是积分？');
     expect(query).toHaveBeenNthCalledWith(
-      2,
-      expect.stringContaining('WHERE "releaseId" = $2'),
-      '[1,0]',
+      1,
+      expect.stringContaining('WHERE "releaseId" = $1'),
       'live-release',
       ['积分'],
       6,
     );
+  });
+
+  it('retains same-release lexical evidence during an embedding outage', async () => {
+    const chunk = evidence('integral', 0);
+    const client = new PrismaKnowledgeClient(
+      {
+        $queryRawUnsafe: jest.fn().mockResolvedValue([chunk]),
+      } as unknown as PrismaService,
+      { embedQuery: jest.fn().mockRejectedValue(new Error('offline')) },
+    );
+    expect(await client.retrieveChunks('release', 'integral')).toEqual([chunk]);
   });
 
   it('无有效关键词时保留向量阈值和调用方指定的片段数', async () => {

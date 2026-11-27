@@ -16,6 +16,7 @@ const TYPE_ORDER = [
   'boundary',
   'rubric',
   'teaching_move',
+  'professor_qa',
 ];
 
 function compareIds(a: string, b: string): number {
@@ -115,6 +116,8 @@ export function selectPackageContext(input: {
   teachingPackage: ReviewedTeachingPackage;
   planner: TutorPlannerSlice;
   candidateScores: Array<{ cardId: string; score: number }>;
+  requiredCardIds?: string[];
+  defaultTeachingMove?: 'explain';
   minCards?: number;
   maxCards?: number;
   maxTokens?: number;
@@ -127,7 +130,7 @@ export function selectPackageContext(input: {
     !Number.isSafeInteger(maxCards) ||
     minCards < 1 ||
     maxCards < minCards ||
-    maxCards > 5 ||
+    maxCards > 12 ||
     !Number.isSafeInteger(maxTokens) ||
     maxTokens < 1 ||
     !isDenseArray(input.candidateScores)
@@ -198,9 +201,14 @@ export function selectPackageContext(input: {
     return 'added';
   };
 
-  const requiredIds = [...new Set(plannerRequiredIds(input.planner))].sort(
-    compareIds,
-  );
+  const requiredIds = [
+    ...new Set([
+      ...plannerRequiredIds(input.planner).filter(
+        (id) => id !== input.defaultTeachingMove || cardsById.has(id),
+      ),
+      ...(input.requiredCardIds ?? []),
+    ]),
+  ].sort(compareIds);
   for (const id of requiredIds) {
     if (!cardsById.has(id))
       return { valid: false, reason: 'REQUIRED_CARD_MISSING' };
@@ -283,15 +291,29 @@ function renderKnowledge(
     };
   });
   const knowledgeText = JSON.stringify({
-    cards: cards.map((card) => ({
-      topic: card.topic,
-      canonicalPoint: card.canonicalPoint,
-      summary: card.bilingual.summary,
-      approvedPayload: card.approvedPayload,
-      useWhen: card.useWhen,
-      doNotUseWhen: card.doNotUseWhen,
-      sources: card.sourceSupport.map((id) => sourceRefs.get(id)),
-    })),
+    cards: cards.map((card) => {
+      const definition = card.approvedPayload as Record<string, unknown> | null;
+      if (
+        card.type === 'concept' &&
+        typeof definition?.definitionName === 'string'
+      )
+        return {
+          concept: definition.definitionName,
+          supplementaryDefinition: definition.answerMd,
+          linkedScriptPassages: card.sourceSupport.map((id) =>
+            sourceRefs.get(id),
+          ),
+        };
+      return {
+        topic: card.topic,
+        canonicalPoint: card.canonicalPoint,
+        summary: card.bilingual.summary,
+        approvedPayload: card.approvedPayload,
+        useWhen: card.useWhen,
+        doNotUseWhen: card.doNotUseWhen,
+        sources: card.sourceSupport.map((id) => sourceRefs.get(id)),
+      };
+    }),
     evidence: sources.map((source, index) => ({
       reference: `S${index + 1}`,
       title: [source.pageTitle, ...source.anchor.headingPath]

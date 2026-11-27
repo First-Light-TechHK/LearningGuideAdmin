@@ -15,6 +15,21 @@ import {
   KNOWLEDGE_CLIENT,
   type KnowledgeClient,
 } from '../ks/contract/knowledge-client';
+import { teachingReferenceCatalogue } from '../ks/contract/teaching-references';
+
+function hasTeachingPackageImage(teachingPackage: unknown, assetId: string) {
+  if (!teachingPackage || typeof teachingPackage !== 'object') return false;
+  try {
+    const references = teachingReferenceCatalogue(
+      teachingPackage as Record<string, unknown>,
+    );
+    return [...references.values()].some(
+      (reference) => reference.kind === 'image' && reference.value === assetId,
+    );
+  } catch {
+    return false;
+  }
+}
 
 @Controller('user/courses')
 export class LearnerImageController {
@@ -39,15 +54,20 @@ export class LearnerImageController {
     if (!course?.aiTutorOnline || !course.currentReleaseId)
       throw new NotFoundException('图片不存在');
     const release = await this.knowledge.getRelease(course.currentReleaseId);
-    const url = `/api/files/images/${course.id}/${assetId}`;
     if (
       release?.id !== course.currentReleaseId ||
-      release.courseId !== course.id ||
+      release.courseId !== course.id
+    )
+      throw new NotFoundException('图片不存在');
+
+    const url = `/api/files/images/${course.id}/${assetId}`;
+    if (
       !release.pages.some((page) =>
         [
           ...(page.contentMd ?? '').matchAll(/!\[[^\]\n]*\]\(([^\s)]+)\)/g),
         ].some((match) => match[1] === url),
-      )
+      ) &&
+      !hasTeachingPackageImage(release.teachingPackage, assetId)
     )
       throw new NotFoundException('图片不存在');
     const image = await this.files.getImage(course.id, assetId);

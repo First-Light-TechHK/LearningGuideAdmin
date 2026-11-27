@@ -75,6 +75,14 @@ function actionFor(method: string, segments: string[]): ActionKind {
   if (method === 'GET' || method === 'HEAD') return 'VIEW';
   const [first, second, third] = segments;
   if (first === 'ai') {
+    if (
+      method === 'PATCH' &&
+      second === 'evaluation' &&
+      third === 'tasks' &&
+      segments.length === 5 &&
+      segments[4] === 'name'
+    )
+      return 'EDIT_EXISTING';
     // 后台测试对话不改任何数据，只读角色也可试用
     if (second === 'chat-stream') return 'VIEW';
     if (second === 'config') {
@@ -88,10 +96,27 @@ function actionFor(method: string, segments: string[]): ActionKind {
   if (first === 'files' && ['convert', 'images'].includes(second ?? ''))
     return 'EDIT_EXISTING';
   if (first === 'sync') return 'CREATE';
+  if (method === 'POST' && first === 'courses' && third === 'release-package')
+    return 'PUBLISH';
+  if (
+    first === 'releases' &&
+    method === 'POST' &&
+    segments.length === 3 &&
+    third === 'rebuild-index'
+  )
+    return 'PUBLISH';
   if (first === 'courses' && segments.length === 3) {
     if (['release', 'activate-release', 'set-live'].includes(third ?? ''))
       return 'PUBLISH';
   }
+  if (
+    method === 'POST' &&
+    first === 'courses' &&
+    third === 'teaching-cards' &&
+    segments.length === 4 &&
+    segments[3] === 'deletion-preview'
+  )
+    return 'DELETE';
   if (method === 'DELETE') return 'DELETE';
   if (method === 'PUT' || method === 'PATCH') return 'EDIT_EXISTING';
   return 'CREATE';
@@ -240,6 +265,10 @@ export function routeAccess(method: string, path: string): RouteAccess {
         feature: 'module.operations',
       };
     }
+    // Sandbox 课程内容重置（/api/backoffice/sandbox/**）：破坏性运维动作，只给 ADMIN。
+    // 不新增环境能力（未设置 ADMIN_CAPABILITIES = 全开，会连带把生产打开）；
+    // 环境与开关守卫在 SandboxResetService（SANDBOX_RESET_ENABLED + APP_ENV=SANDBOX）。
+    if (second === 'sandbox') return { kind: 'employeeAdmin' };
     // 只有 courses 前缀归课程菜单；其它未登记的 /api/backoffice/<x> 一律 Admin-only，
     // 避免以后新增控制器忘记登记时被所有 course VIEW 账号读到（fail-closed）。
     if (second !== 'courses') return { kind: 'employeeAdmin' };

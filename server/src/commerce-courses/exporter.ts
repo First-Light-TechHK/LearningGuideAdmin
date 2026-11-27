@@ -20,6 +20,19 @@ import { defaultLanguageRows, defaultLanguageTest } from './lesson-tests';
 import type { VersionSnapshot } from './version-snapshot';
 
 type AggregateLesson = CourseAggregate['lessons'][number];
+/** Present storage failures without exposing object keys or bucket details. */
+export async function readExportMedia(storage: CourseStorageService, key: string, packagePath: string): Promise<Buffer> {
+  try {
+    return await storage.getMedia(key);
+  } catch (error) {
+    const e = error as { code?: string; name?: string } | null;
+    if (e?.code === 'ENOENT' || e?.code === 'NoSuchKey' || e?.name === 'NoSuchKey') {
+      throw new Error(`Export failed: media object is missing for ${packagePath}. Restore it from a verified backup and retry.`);
+    }
+    throw new Error('Export failed: media storage unavailable. Check the Sandbox storage configuration and retry.');
+  }
+}
+
 /** 草稿读出来的聚合：测试按语言存，落成包之前先取默认内容语言的那一份。 */
 type DraftAggregate = Omit<CourseAggregate, 'lessons'> & {
   lessons: Array<
@@ -171,7 +184,7 @@ export async function buildCoursePackageFromSnapshot(
     if (!assetId) return undefined;
     const asset = assetById.get(assetId);
     if (!asset) throw new Error(`Export failed: media missing for ${path}`);
-    const bytes = await storage.getMedia(asset.storageKey);
+    const bytes = await readExportMedia(storage, asset.storageKey, path);
     zip.file(path, bytes);
     checksums.push(`${CourseStorageService.sha256(bytes)}  ${path}`);
     return path;

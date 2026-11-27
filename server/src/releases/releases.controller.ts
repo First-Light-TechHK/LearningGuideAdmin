@@ -4,14 +4,35 @@ import {
   Delete,
   Get,
   Header,
+  Headers,
+  HttpCode,
+  HttpStatus,
+  ParseIntPipe,
   Param,
+  Patch,
   Post,
+  Req,
   Res,
+  UnauthorizedException,
+  BadRequestException,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ReleasePackagesService } from './release-packages.service';
+import { PACKAGE_BYTES } from './release-package';
+import type { Request, Response } from 'express';
 import { ReleasesService } from './releases.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
+import { TeachingCardsService } from './teaching-cards.service';
+
+type TeachingCardRequest = Request & { employee?: { employeeId: string } };
+
+function employeeId(request: TeachingCardRequest): string {
+  if (!request.employee?.employeeId) throw new UnauthorizedException();
+  return request.employee.employeeId;
+}
 
 /**
  * §5.1.4 发布与版本。
@@ -19,7 +40,137 @@ import { ActivateReleaseDto } from './dto/activate-release.dto';
  */
 @Controller()
 export class ReleasesController {
-  constructor(private readonly releasesService: ReleasesService) {}
+  constructor(
+    private readonly releasesService: ReleasesService,
+    private readonly teachingCards: TeachingCardsService,
+    private readonly packages: ReleasePackagesService,
+  ) {}
+
+  @Get('releases/:releaseId/package')
+  async downloadPackage(@Param('releaseId') id: string, @Res() res: Response) {
+    const { buffer, filename } = await this.packages.download(id);
+    res.setHeader(
+      'Content-Disposition',
+      "attachment; filename*=UTF-8''" + encodeURIComponent(filename),
+    );
+    res.type('application/zip').send(buffer);
+  }
+
+  @Post('courses/:id/release-package/:action')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: PACKAGE_BYTES + 1, files: 1 },
+    }),
+  )
+  async importPackage(
+    @Param('id') id: string,
+    @Param('action') action: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file || !['preview', 'apply'].includes(action))
+      throw new BadRequestException('请选择知识版本 ZIP');
+    return this.packages.import(id, file.buffer, action === 'apply');
+  }
+
+  @Get('courses/:id/teaching-cards')
+  async listTeachingCards(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { stamp, entries } = await this.teachingCards.listWithStamp(id);
+    res.setHeader('X-Workspace-Stamp', stamp);
+    return entries;
+  }
+
+  @Get('courses/:id/teaching-cards/import/deleted-codes')
+  deletedReferenceCodes(@Param('id') id: string) {
+    return this.teachingCards.deletedReferenceCodes(id);
+  }
+
+  @Post('courses/:id/teaching-cards/import/references')
+  importReferences(
+    @Param('id') id: string,
+    @Body('items') items: unknown,
+    @Req() request: TeachingCardRequest,
+  ) {
+    return this.teachingCards.importReferences(
+      id,
+      items,
+      false,
+      employeeId(request),
+    );
+  }
+
+  @Patch('courses/:id/teaching-cards/import/references')
+  updateReferences(
+    @Param('id') id: string,
+    @Body('items') items: unknown,
+    @Req() request: TeachingCardRequest,
+  ) {
+    return this.teachingCards.importReferences(
+      id,
+      items,
+      true,
+      employeeId(request),
+    );
+  }
+
+  @Post('courses/:id/teaching-cards/deletion-preview')
+  previewTeachingCardDeletion(
+    @Param('id') id: string,
+    @Body('items') items: unknown,
+    @Headers('x-workspace-stamp') stamp?: string,
+  ) {
+    return this.teachingCards.deleteSelection(id, items, true, stamp);
+  }
+
+  @Delete('courses/:id/teaching-cards')
+  deleteTeachingCards(
+    @Param('id') id: string,
+    @Body('items') items: unknown,
+    @Headers('x-workspace-stamp') stamp?: string,
+  ) {
+    return this.teachingCards.deleteSelection(id, items, false, stamp);
+  }
+
+  @Get('courses/:id/teaching-references')
+  listTeachingReferences(@Param('id') id: string) {
+    return this.teachingCards.listReferences(id);
+  }
+
+  @Post('courses/:id/teaching-cards')
+  createTeachingCard(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() request: TeachingCardRequest,
+  ) {
+    return this.teachingCards.save(
+      id,
+      undefined,
+      undefined,
+      body,
+      employeeId(request),
+      request.get('X-Workspace-Stamp'),
+    );
+  }
+
+  @Patch('courses/:id/teaching-cards/:cardId')
+  updateTeachingCard(
+    @Param('id') id: string,
+    @Param('cardId') cardId: string,
+    @Body('revision', ParseIntPipe) revision: number,
+    @Body('draft') draft: unknown,
+    @Req() request: TeachingCardRequest,
+  ) {
+    return this.teachingCards.save(
+      id,
+      cardId,
+      revision,
+      draft,
+      employeeId(request),
+      request.get('X-Workspace-Stamp'),
+    );
+  }
 
   @Post('courses/:id/release')
   publish(@Param('id') id: string, @Body() dto: CreateReleaseDto) {
@@ -45,6 +196,12 @@ export class ReleasesController {
   @Get('releases/:releaseId')
   findOne(@Param('releaseId') releaseId: string) {
     return this.releasesService.findByReleaseId(releaseId);
+  }
+
+  @Post('releases/:releaseId/rebuild-index')
+  @HttpCode(HttpStatus.ACCEPTED)
+  rebuildIndex(@Param('releaseId') releaseId: string) {
+    return this.releasesService.rebuildIndex(releaseId);
   }
 
   /**

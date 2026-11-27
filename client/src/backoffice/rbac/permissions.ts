@@ -175,7 +175,12 @@ export function employeeAccountHref(locale: string): string {
  * PRD §2 范围说明 + §8.5：Settings 有子导航，其中 Employee Account 仅 Admin 可见；
  * Payment Gateway 与 Notification Configuration 在 P0 只是占位入口。
  */
-export type SettingsSubKey = "employeeAccount" | "paymentGateway" | "notificationConfiguration" | "learningAccess";
+export type SettingsSubKey =
+  | "employeeAccount"
+  | "paymentGateway"
+  | "notificationConfiguration"
+  | "learningAccess"
+  | "sandboxReset";
 
 export const SETTINGS_SUB_ORDER = [
   "employeeAccount",
@@ -183,6 +188,8 @@ export const SETTINGS_SUB_ORDER = [
   "notificationConfiguration",
   // Student Management PRD §7：紧跟 Notification Configuration；能看 Settings 的角色都能看（只读角色只读）
   "learningAccess",
+  // Sandbox 专项：仅环境端点返回 sandboxResetEnabled=true 时出现（见 visibleSettingsSubs）
+  "sandboxReset",
 ] as const;
 
 export const SETTINGS_SUB_SEGMENT: Record<SettingsSubKey, string> = {
@@ -190,6 +197,7 @@ export const SETTINGS_SUB_SEGMENT: Record<SettingsSubKey, string> = {
   paymentGateway: "payment-gateway",
   notificationConfiguration: "notification-configuration",
   learningAccess: "learning-access",
+  sandboxReset: "sandbox-reset",
 };
 
 export function settingsSubHref(locale: string, sub: SettingsSubKey): string {
@@ -200,14 +208,18 @@ export function settingsSubHref(locale: string, sub: SettingsSubKey): string {
  * Settings 子项 = 角色可见 ∩ 环境能力 ∩ 账号功能键。
  * - capabilities / features 传 null = 旧调用（只按角色过滤，保持既有行为）；
  * - employeeAccount 由 module.accounts（环境能力 accounts 或 settings）单独控制；
- * - 其它子项仍要 module.settings（环境能力 settings）。
+ * - 其它子项仍要 module.settings（环境能力 settings）；
+ * - sandboxReset 还要环境端点明确返回 sandboxResetEnabled=true（默认不出现）。
  */
 export function visibleSettingsSubs(
   role: EmployeeRole,
   capabilities: ReadonlySet<string> | null = null,
-  features: ReadonlySet<string> | null = null
+  features: ReadonlySet<string> | null = null,
+  sandboxResetEnabled = false
 ): SettingsSubKey[] {
   return SETTINGS_SUB_ORDER.filter((sub) => {
+    if (sub === "sandboxReset" && (!sandboxResetEnabled || !canAccessEmployeeAccount(role)))
+      return false
     if (sub === "employeeAccount" && !canAccessEmployeeAccount(role)) return false
     if (capabilities !== null) {
       const anyOf = sub === "employeeAccount" ? ["settings", "accounts"] : ["settings"]

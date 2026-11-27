@@ -16,7 +16,7 @@ import {
 } from './code-allocator';
 import { validateMediaFile } from './media-validate';
 import { mp4DurationSeconds } from './media-duration';
-import { applyVersionSnapshot, type VersionSnapshot } from './version-snapshot';
+import { applyVersionSnapshot, applyVersionSnapshotInTx, type VersionSnapshot } from './version-snapshot';
 import { HISTORY_ACTIONS } from './publishing.service';
 
 export interface ImportOptions {
@@ -34,6 +34,17 @@ export class ImportError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+/** Called inside the import transaction; serializes recovery against publishing. */
+export async function assertRecoverableLivePointer(tx: Prisma.TransactionClient, courseId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ liveVersionId: string | null }>>`
+    SELECT "liveVersionId" FROM "CommerceCourse" WHERE id = ${courseId} FOR UPDATE
+  `;
+  const id = rows[0]?.liveVersionId;
+  if (!id || await tx.courseVersion.findFirst({ where: { id, courseId }, select: { id: true } })) {
+    throw new ImportError('RECOVERY_NOT_APPLICABLE', 409, 'Recovery requires a missing or foreign live version. A healthy or unpublished course cannot use this operation.');
   }
 }
 
@@ -201,6 +212,7 @@ export class PackageImporter {
     files: Map<string, Buffer>,
     actorEmployeeId: string | null,
     sourceFileName?: string | null,
+    recoverInvalidLive = false,
   ): Promise<PackageImportResult> {
     const existing = await this.prisma.commerceCourse.findUnique({
       where: { id: courseId },
@@ -239,12 +251,17 @@ export class PackageImporter {
         categoryId,
         mediaKeyMap,
       );
-      await applyVersionSnapshot(this.prisma, courseId, snapshot);
+      if (!recoverInvalidLive) await applyVersionSnapshot(this.prisma, courseId, snapshot);
       await this.prisma.$transaction(async (tx) => {
+        if (recoverInvalidLive) {
+          await assertRecoverableLivePointer(tx, courseId);
+          await applyVersionSnapshotInTx(tx, courseId, snapshot);
+        }
         await tx.commerceCourse.update({
           where: { id: courseId },
           data: {
             hasDraft: true,
+            ...(recoverInvalidLive ? { liveVersionId: null, liveStatus: 'OFFLINE' as const } : {}),
             lifecycleStatus: 'WORKING',
             // 导入整包覆盖草稿：已打开的编辑页再保存会收到 409，而不是覆盖导入结果
             revision: { increment: 1 },
@@ -382,7 +399,7 @@ export class PackageImporter {
             },
           },
         });
-      });
+      }, { timeout: 60_000 });
       return { courseId, warnings };
     } catch (error) {
       await this.rollbackMedia(courseId, mediaKeyMap);

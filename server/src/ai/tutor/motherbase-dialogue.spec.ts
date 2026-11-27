@@ -18,11 +18,11 @@ describe('通用 Dialogue 母版消息编译', () => {
     const result = compileMotherbaseDialogue({ ...base, history });
 
     expect(result.messages).toHaveLength(22);
-    expect(result.messages[0].content).toBe(
-      'BASE\n\nLECTURE\n\nCurrent Knowledge Wiki release markdown:\n# Unit\n\n$a^2+b^2$\n\n' +
-        'Response language rule for this turn:\nThe latest student input language is English.\n' +
-        'Answer only in English, regardless of the language used in internal course context, examples, or previous responses.\n' +
-        "Do not translate the student's question unless they explicitly ask for translation.",
+    expect(result.messages[0].content).toContain(
+      'BASE\n\nLECTURE\n\nCurrent Knowledge Wiki release markdown:\n# Unit\n\n$a^2+b^2$',
+    );
+    expect(result.messages[0].content).toContain(
+      'Write the explanation in Chinese.',
     );
     expect(result.messages[1]).toEqual({ role: 'user', content: 'user 1' });
     expect(result.messages[20]).toEqual({
@@ -36,6 +36,48 @@ describe('通用 Dialogue 母版消息编译', () => {
     expect(result.temperature).toBe(0.35);
     expect(result.maxOutputTokens).toBe(4096);
   });
+
+  it.each([
+    '只给定义，不要举例。',
+    '请用咖啡杯举例。',
+    'What does T mean in this exhibit?',
+  ])(
+    'uses the same Lecture output rules for Wiki and reviewed turns: %s',
+    (message) => {
+      const input = {
+        ...base,
+        message,
+        exhibits: { allowedIds: ['coffee'], followUp: false },
+      };
+      const wiki = compileMotherbaseDialogue(input).messages[0].content;
+      const reviewed = compileMotherbaseDialogue({
+        ...input,
+        reviewedLecture: {
+          planner: '{}',
+          course: '{}',
+          knowledge: 'APPROVED DATA',
+          outputContract: 'COURSE RULE',
+        },
+      }).messages[0].content;
+      const field = (id: number) =>
+        JSON.parse(
+          reviewed.split('FIELD ' + id + '\n')[1].split('\n\nFIELD ')[0],
+        ) as string;
+      expect(field(4)).toBe('APPROVED DATA');
+      const rules = field(7).slice('COURSE RULE\n\n'.length);
+      expect(wiki.endsWith(rules)).toBe(true);
+      expect(rules).toContain('omit examples and analogies');
+      expect(rules).toContain('give one relevant example');
+      expect(rules).toContain('definitions from properties of a subtype');
+      expect(rules).toContain('whether endpoints are included');
+      expect(rules).toContain('complete sentence before an exhibit marker');
+      expect(rules).toContain('separate from exhibit markers');
+      expect(rules).toContain('[[ref:coffee]]');
+      expect(rules).toContain(
+        'Preserve exhibit names, symbols, units and LaTeX',
+      );
+    },
+  );
 
   it('无知识时使用母版文案，Socratic 参数与中文语言规则生效', () => {
     const result = compileMotherbaseDialogue({

@@ -1,0 +1,33 @@
+.course-reference-picker .ant-modal-body {
+  --row-height: 44px;
+  display: grid;
+  grid-template-rows: auto minmax(0, min(calc(5 * var(--row-height)), 53%)) minmax(0, 1fr);
+  gap: 12px;
+  height: min(424px, calc(100dvh - 160px));
+}
+.course-reference-results { min-height: 0; overflow: auto; }
+.course-reference-list {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.course-reference-row {
+  height: var(--row-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-inline: 8px;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #eee);
+  cursor: pointer;
+}
+.course-reference-row:has(:checked), .course-reference-row:hover {
+  background: var(--ant-color-primary-bg, #e6f4ff);
+}
+.course-reference-row:focus-within { outline: 2px solid #1677ff; outline-offset: -2px; }
+.course-reference-row .ant-tag { flex: none; margin: 0; }
+.course-reference-name, .course-reference-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-reference-name { flex: 1; }
+.course-reference-row small { max-width: 30%; }
+.course-reference-preview { min-height: 0; overflow: auto; }
+.course-reference-preview img { max-height: min(144px, 18dvh); max-width: 100%; object-fit: contain; }

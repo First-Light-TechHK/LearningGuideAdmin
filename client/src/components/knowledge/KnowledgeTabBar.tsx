@@ -2,7 +2,7 @@ import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 
 /** Knowledge 模块顶部 Tab 键 */
-export type KnowledgeTabKey = 'pages' | 'publish'
+export type KnowledgeTabKey = 'pages' | 'publish' | 'teaching'
 
 interface KnowledgeTabBarProps {
   active: KnowledgeTabKey
@@ -11,6 +11,7 @@ interface KnowledgeTabBarProps {
 
 const TABS: { key: KnowledgeTabKey; labelKey: string }[] = [
   { key: 'pages', labelKey: 'tabs.pages' },
+  { key: 'teaching', labelKey: 'teaching.title' },
   { key: 'publish', labelKey: 'tabs.publish' },
 ]
 

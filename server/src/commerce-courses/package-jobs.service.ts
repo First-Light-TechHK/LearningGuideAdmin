@@ -6,6 +6,8 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { appEnvName } from '../backoffice/lib/env';
+import { tryRecordAuditEvent } from '../backoffice/repositories/auditRepository';
 import { CourseStorageService } from './storage.service';
 import { COMMERCE_CONFIG, type CommerceCourseConfig } from './commerce.config';
 import { PackageInspector, PackageError } from './package-inspector';
@@ -955,6 +957,23 @@ export class PackageJobsService {
     );
   }
 
+  /** Admin-only Sandbox recovery entry point for an already validated import. */
+  async recoverInvalidLiveImport(jobId: string, reason: string, actorEmployeeId: string | null) {
+    if (appEnvName() !== 'SANDBOX' || !this.config.sandboxResetEnabled) {
+      throw new PackageError('RECOVERY_DISABLED', 403, 'Sandbox recovery is disabled.');
+    }
+    if (typeof reason !== 'string' || !reason.trim()) {
+      throw new PackageError('RECOVERY_REASON_REQUIRED', 400, 'A recovery reason is required.');
+    }
+    const active = await this.prisma.sandboxResetJob.count({ where: { status: { in: ['QUEUED', 'RUNNING'] } } });
+    if (active) throw new PackageError('SANDBOX_MAINTENANCE', 409, 'A sandbox reset is active.');
+    const result = await this.confirmImport(jobId, { overwriteDraft: true }, actorEmployeeId, true);
+    if (!('courseId' in result)) throw new PackageError('RECOVERY_NOT_APPLICABLE', 409, 'The course could not be recovered.');
+    await tryRecordAuditEvent({ eventName: 'SANDBOX_LIVE_POINTER_RECOVERED', actorEmployeeId, targetEmployeeId: null,
+      action: 'SANDBOX_RECOVERY', newValue: JSON.stringify({ jobId, reason: reason.trim(), courseId: result.courseId }), result: 'SUCCESS' });
+    return result;
+  }
+
   async confirmImport(
     jobId: string,
     body: {
@@ -963,6 +982,7 @@ export class PackageJobsService {
       overwriteDraft?: boolean;
     },
     actorEmployeeId: string | null,
+    recoverInvalidLive = false,
   ) {
     const job = await this.prisma.coursePackageJob.findUnique({
       where: { id: jobId },
@@ -1034,6 +1054,10 @@ export class PackageJobsService {
 
     // 目标课程：来自「导入到已有课程」（Versions 页）时直接写入该课草稿，始终允许。
     let targetCourseId: string | null = job.courseId;
+    if (recoverInvalidLive && targetCourseId) {
+      await releaseClaim();
+      throw new PackageError('RECOVERY_NOT_APPLICABLE', 409, 'Recovery requires an import from a validated package with matching Course ID.');
+    }
 
     if (!targetCourseId) {
       // 从包新建：按 Course ID（Excel 中的 Course ID 字段）判断是否已存在
@@ -1042,7 +1066,10 @@ export class PackageJobsService {
         select: { id: true, code: true, liveVersionId: true },
       });
       if (existing) {
-        if (existing.liveVersionId) {
+        if (existing.liveVersionId && recoverInvalidLive) {
+          const valid = await this.prisma.courseVersion.findFirst({ where: { id: existing.liveVersionId, courseId: existing.id }, select: { id: true } });
+          if (valid) { await releaseClaim(); throw new PackageError('RECOVERY_NOT_APPLICABLE', 409, 'The current live version is valid; recovery is refused.'); }
+        } else if (existing.liveVersionId) {
           // 已上线课程：拒绝，避免影响线上内容（保持作业可取消，不置为 FAILED）
           await releaseClaim();
           return {
@@ -1052,6 +1079,10 @@ export class PackageJobsService {
             existingCourseCode: existing.code,
             message: `Course ${existing.code} is already live. The import is refused: only draft courses (never published) can be overwritten, so live content is never affected.`,
           };
+        }
+        if (recoverInvalidLive && !existing.liveVersionId) {
+          await releaseClaim();
+          throw new PackageError('RECOVERY_NOT_APPLICABLE', 409, 'The course has no corrupt live pointer.');
         }
         // 用户显式确认覆盖 → 替换该草稿课程的沙盒草稿内容（保留原有覆盖行为）
         if (!request.overwriteDraft) {
@@ -1073,6 +1104,9 @@ export class PackageJobsService {
         }
         // 覆盖既有草稿
         targetCourseId = existing.id;
+      } else if (recoverInvalidLive) {
+        await releaseClaim();
+        throw new PackageError('RECOVERY_NOT_APPLICABLE', 409, 'No matching course exists for this package.');
       } else if (onConflict === 'NEW_VERSION') {
         // NEW_VERSION 只适用于"目标已存在同 code"；没有目标时明确拒绝，不静默新建
         await releaseClaim();
@@ -1092,6 +1126,7 @@ export class PackageJobsService {
             files,
             actorEmployeeId,
             job.sourceFileName,
+            recoverInvalidLive,
           )
         : await this.importer.importPackage(manifest, files, {
             onConflict,

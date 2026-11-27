@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { readBuildCommit } from './build-identity';
 
 /**
  * App Runner 健康检查（DEV 栈 scripts/provision-admin-dev.mjs）。
@@ -14,6 +15,7 @@ export class HealthController {
   check() {
     return {
       status: 'ok',
+      buildCommit: readBuildCommit(),
       service: 'learning-guide-admin',
       environment: this.config.get<string>('APP_ENV') ?? 'DEV',
     };

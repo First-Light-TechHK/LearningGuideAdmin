@@ -26,8 +26,15 @@ export class PortalCoursesController {
   ) {}
 
   @Get('courses')
-  list(@Query('limit') limit?: string) {
-    return this.projection.listCourses(limit ? Number(limit) : undefined);
+  list(
+    @Query('limit') limit?: string,
+    @Query('paged') paged?: string,
+    @Query('afterId') afterId?: string,
+  ) {
+    const parsedLimit = limit ? Number(limit) : undefined;
+    return paged === '1'
+      ? this.projection.listCourses(parsedLimit, { afterId })
+      : this.projection.listCourses(parsedLimit);
   }
 
   @Get('courses/:id')

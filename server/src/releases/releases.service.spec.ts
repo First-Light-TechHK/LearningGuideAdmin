@@ -1,9 +1,14 @@
 import type { Prisma } from '@prisma/client';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ReleasesService } from './releases.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FilesService } from '../files/files.service';
 import sharp from 'sharp';
+import { compileTeachingPublication } from '../ai/tutor/teaching-package-publication';
 
 /**
  * ReleasesService 单元测试（2026-10-16 扁平化：lessons → pages）。
@@ -21,7 +26,13 @@ describe('ReleasesService', () => {
       findFirst: jest.fn(),
       delete: jest.fn(),
     },
-    page: { deleteMany: jest.fn(), create: jest.fn() },
+    page: { deleteMany: jest.fn(), createMany: jest.fn() },
+    tutorTeachingCard: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     knowledgeChunk: { count: jest.fn() },
   };
   const mockPrisma = {
@@ -33,19 +44,24 @@ describe('ReleasesService', () => {
   };
 
   let service: ReleasesService;
-  let mockIndexing: { indexRelease: jest.Mock };
+  let mockIndexing: { indexRelease: jest.Mock; status: jest.Mock };
   const mockFiles = { getImage: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockTx.tutorTeachingCard.findMany.mockResolvedValue([]);
     mockIndexing = {
       indexRelease: jest.fn().mockResolvedValue(undefined),
+      status: jest.fn((_: string, count: number) =>
+        count ? 'ready' : 'missing',
+      ),
     };
     mockFiles.getImage.mockReset();
     service = new ReleasesService(
       mockPrisma as unknown as PrismaService,
       mockIndexing as never,
       mockFiles as never,
+      compileTeachingPublication,
     );
   });
 
@@ -54,7 +70,13 @@ describe('ReleasesService', () => {
       id: 'c1',
       title: '数学基础',
       pages: [
-        { id: 'p1', title: '第一章', contentMd: '# hi', sectionTags: null },
+        {
+          id: 'p1',
+          syncState: 'SYNCED',
+          title: '第一章',
+          contentMd: '# hi',
+          sectionTags: null,
+        },
       ],
     });
     mockTx.release.create.mockImplementation(({ data }: { data: unknown }) =>
@@ -66,7 +88,8 @@ describe('ReleasesService', () => {
     })) as { versionTag: string; snapshotData: unknown; revisionNotes: string };
 
     expect(result.versionTag).toMatch(/^数学基础_\d{12}$/);
-    expect(result.snapshotData).toEqual({
+    expect(result.snapshotData).toMatchObject({
+      editor: { version: 1, cards: [] },
       pages: [
         { id: 'p1', title: '第一章', contentMd: '# hi', sectionTags: null },
       ],
@@ -79,13 +102,13 @@ describe('ReleasesService', () => {
       data: { editingReleaseId: 'r1', aiTestReleaseId: 'r1' },
     });
     expect(mockTx.courseAiConfig.create).not.toHaveBeenCalled();
-    // 快照仅收录 SYNCED 节点：事务内查询条件应带 syncState 过滤
+    // 编辑快照同时需要未同步页面。
     const courseQuery = (
       mockTx.course.findUnique.mock.calls as Array<
         [Prisma.CourseFindUniqueArgs]
       >
     )[0][0];
-    expect(JSON.stringify(courseQuery)).toContain('SYNCED');
+    expect(JSON.stringify(courseQuery)).not.toContain('SYNCED');
   });
 
   it('publish：沿用 Live 版本的 AI 配置，且不改动已有测试所选版本（QA A3/A6）', async () => {
@@ -125,6 +148,114 @@ describe('ReleasesService', () => {
     });
   });
 
+  it('rejects a Wiki-only dangling reference before writing a release', async () => {
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      title: 'Vectors',
+      pages: [
+        {
+          id: 'p1',
+          syncState: 'SYNCED',
+          title: 'Definitions',
+          contentMd: '[Diagram](refobj:missing)',
+        },
+      ],
+    });
+    mockTx.release.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.publish('c1', { revisionNotes: 'with broken link' }),
+    ).rejects.toThrow('页面「Definitions」的课程引用不可用：missing');
+
+    expect(mockTx.release.create).not.toHaveBeenCalled();
+    expect(mockTx.course.update).not.toHaveBeenCalled();
+    expect(mockIndexing.indexRelease).not.toHaveBeenCalled();
+  });
+
+  it('publishes reviewed evidence against the new snapshot without switching Live', async () => {
+    const evidence = 'Vectors are elements of a vector space.';
+    const label = { en: 'vector', zh: '向量' };
+    const reference = {
+      id: 'vector-square',
+      kind: 'latex',
+      label: 'Square',
+      value: 'x^2',
+      requires: [],
+    };
+    const contentMd = `${evidence}\n\n[Square](refobj:vector-square)`;
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      title: 'Vectors',
+      currentReleaseId: 'live',
+      pages: [
+        {
+          id: 'p1',
+          syncState: 'SYNCED',
+          title: 'Definitions',
+          contentMd,
+          sectionTags: null,
+        },
+      ],
+    });
+    mockTx.courseAiConfig.findUnique.mockResolvedValue(null);
+    mockTx.release.findFirst.mockResolvedValue(null);
+    mockTx.release.create.mockImplementation(
+      ({ data }: { data: Prisma.ReleaseUncheckedCreateInput }) =>
+        Promise.resolve(data),
+    );
+    const input = {
+      glossary: [{ conceptId: 'vector', label, aliases: { en: [], zh: [] } }],
+      cards: [
+        {
+          cardId: 'vector-definition',
+          conceptId: 'vector',
+          type: 'concept',
+          topic: 'vectors',
+          canonicalPoint: evidence,
+          approvedPayload: { explanation: evidence, refObjects: [reference] },
+          bilingual: {
+            conceptLabel: label,
+            summary: { en: evidence, zh: '向量是向量空间的元素。' },
+            triggers: { en: ['vector'], zh: ['向量'] },
+          },
+          useWhen: ['*'],
+          doNotUseWhen: [],
+          evidence: [evidence],
+          links: [],
+          priority: 1,
+          reviewerId: 'professor',
+        },
+      ],
+    };
+    const released = await service.publish('c1', {
+      revisionNotes: 'reviewed',
+      teachingPackage: input,
+    });
+    expect(released.snapshotData).toMatchObject({
+      pages: [{ contentMd }],
+      teachingPackage: {
+        manifest: { courseId: 'c1', releaseId: released.id },
+        sources: [{ content: evidence, anchor: { pageId: 'p1' } }],
+        cards: [{ approvedPayload: { refObjects: [reference] } }],
+      },
+    });
+    expect(mockTx.course.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { editingReleaseId: released.id },
+    });
+    mockTx.release.create.mockClear();
+    await expect(
+      service.publish('c1', {
+        revisionNotes: 'invalid',
+        teachingPackage: {
+          ...input,
+          cards: [{ ...input.cards[0], evidence: ['missing'] }],
+        },
+      }),
+    ).rejects.toThrow('教学包校验失败');
+    expect(mockTx.release.create).not.toHaveBeenCalled();
+  });
+
   it('setLive / remove：校验前先锁 Course 行（QA A7）', async () => {
     mockTx.course.findUnique.mockResolvedValue({
       id: 'c1',
@@ -147,8 +278,17 @@ describe('ReleasesService', () => {
       id: 'c1',
       title: 'Course',
       currentReleaseId: 'r1',
+      editingReleaseId: 'r2',
       aiTestReleaseId: 'r1',
-      pages: [{ id: 'p1', title: 'L1', contentMd: 'x', sectionTags: [] }],
+      pages: [
+        {
+          id: 'p1',
+          syncState: 'SYNCED',
+          title: 'L1',
+          contentMd: 'x',
+          sectionTags: [],
+        },
+      ],
     });
     // jsonb 读回后的键顺序与写入时不同
     const previous = {
@@ -157,6 +297,19 @@ describe('ReleasesService', () => {
       revisionNotes: 'v2',
       createdAt: new Date(),
       snapshotData: {
+        editor: {
+          version: 1,
+          cards: [],
+          pages: [
+            {
+              sectionTags: [],
+              contentMd: 'x',
+              title: 'L1',
+              id: 'p1',
+              syncState: 'SYNCED',
+            },
+          ],
+        },
         pages: [{ sectionTags: [], contentMd: 'x', title: 'L1', id: 'p1' }],
       },
     };
@@ -194,13 +347,29 @@ describe('ReleasesService', () => {
       editingReleaseId: 'r2',
     });
     mockPrisma.release.findMany.mockResolvedValue([
-      { id: 'r1', versionTag: 'v1', revisionNotes: 'a', createdAt: 't1' },
-      { id: 'r2', versionTag: 'v2', revisionNotes: 'b', createdAt: 't2' },
+      {
+        id: 'r1',
+        versionTag: 'v1',
+        revisionNotes: 'a',
+        createdAt: 't1',
+        _count: { knowledgeChunks: 12 },
+      },
+      {
+        id: 'r2',
+        versionTag: 'v2',
+        revisionNotes: 'b',
+        createdAt: 't2',
+        _count: { knowledgeChunks: 0 },
+      },
     ]);
     const list = await service.findAllByCourse('c1');
     expect(list.map((r) => r.isActive)).toEqual([true, false]);
     expect(list.map((r) => r.isTestSelected)).toEqual([false, true]);
     expect(list.map((r) => r.isEditing)).toEqual([false, true]);
+    expect(list.map((r) => [r.indexStatus, r.indexChunkCount])).toEqual([
+      ['ready', 12],
+      ['missing', 0],
+    ]);
     const select = (
       mockPrisma.release.findMany.mock.calls as Array<
         [Prisma.ReleaseFindManyArgs]
@@ -209,6 +378,25 @@ describe('ReleasesService', () => {
       select: { snapshotData?: unknown };
     };
     expect(select.select.snapshotData).toBeUndefined();
+  });
+
+  it('重建只读取指定版本的快照并触发索引', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue({
+      snapshotData: { pages: [{ contentMd: '正文' }] },
+    });
+    await expect(service.rebuildIndex('r1')).resolves.toEqual({ id: 'r1' });
+    expect(mockIndexing.indexRelease).toHaveBeenCalledWith('r1');
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('快照没有正文时拒绝重建', async () => {
+    mockPrisma.release.findUnique.mockResolvedValue({
+      snapshotData: { pages: [{ contentMd: ' ' }] },
+    });
+    await expect(service.rebuildIndex('r1')).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(mockIndexing.indexRelease).not.toHaveBeenCalled();
   });
 
   it('remove：Live 版本拒绝删除 409（§3.4.5 双保护）', async () => {
@@ -281,14 +469,23 @@ describe('ReleasesService', () => {
   });
 
   it('activate：事务内重建 Page 草稿并置 editingReleaseId，不改动 currentReleaseId（§3.4.2 二次/三次改拍）', async () => {
-    mockPrisma.course.findUnique.mockResolvedValue({ id: 'c1' });
-    mockPrisma.release.findUnique.mockResolvedValue({
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      editingReleaseId: null,
+    });
+    mockTx.release.findUnique.mockResolvedValue({
       id: 'r2',
       courseId: 'c1',
       versionTag: '数学基础_202610150000',
       snapshotData: {
         pages: [
-          { id: 'p1', title: '第一章', contentMd: '# old', sectionTags: null },
+          {
+            id: 'p1',
+            syncState: 'SYNCED',
+            title: '第一章',
+            contentMd: '# old',
+            sectionTags: null,
+          },
           {
             id: 'p2',
             title: '第二章',
@@ -310,10 +507,13 @@ describe('ReleasesService', () => {
       where: { courseId: 'c1' },
     });
     // 快照节点重建：2 pages，sortOrder 按快照顺序
-    expect(mockTx.page.create).toHaveBeenCalledTimes(2);
+    expect(mockTx.page.createMany).toHaveBeenCalledTimes(1);
     expect(
-      (mockTx.page.create.mock.calls as Array<[Prisma.PageCreateArgs]>)[1][0]
-        .data,
+      (
+        (mockTx.page.createMany.mock.calls as [unknown][])[0][0] as {
+          data: Prisma.PageCreateManyInput[];
+        }
+      ).data[1],
     ).toMatchObject({
       title: '第二章',
       contentMd: '# keep',
@@ -326,16 +526,19 @@ describe('ReleasesService', () => {
     });
   });
 
-  it('activate：releaseId 不属于该课程时 404，且不触碰事务', async () => {
-    mockPrisma.course.findUnique.mockResolvedValue({ id: 'c1' });
-    mockPrisma.release.findUnique.mockResolvedValue({
+  it('activate：releaseId 不属于该课程时 404，且不替换草稿', async () => {
+    mockTx.course.findUnique.mockResolvedValue({
+      id: 'c1',
+      editingReleaseId: null,
+    });
+    mockTx.release.findUnique.mockResolvedValue({
       id: 'r9',
       courseId: 'other',
     });
     await expect(service.activate('c1', { releaseId: 'r9' })).rejects.toThrow(
       NotFoundException,
     );
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockTx.page.deleteMany).not.toHaveBeenCalled();
   });
 
   // —— exportZip（2026-10-30，仅打包 pages/*.md，无 manifest.json）——
@@ -619,5 +822,60 @@ describe('ReleasesService', () => {
     expect(pageFiles).toHaveLength(1);
     expect(pageFiles[0]).not.toMatch(/[\\:*?"<>|]/);
     expect(pageFiles[0]).toBe('page_with_slash.md');
+  });
+  it('restores the original answer without retired fields or derived alternate questions', async () => {
+    const original = {
+      type: 'professor_qa',
+      approvedPayload: {
+        question: 'Q',
+        answerMd: 'A',
+        variants: ['Q', 'other'],
+        keywords: ['k'],
+      },
+      bilingual: { triggers: { en: ['Q', 'other', 'keep'], zh: [] } },
+    };
+    const expected = {
+      type: 'professor_qa',
+      approvedPayload: { question: 'Q', answerMd: 'A' },
+      bilingual: { triggers: { en: ['Q', 'keep'], zh: [] } },
+    };
+    mockTx.course.findUnique.mockResolvedValue({ editingReleaseId: null });
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'old',
+      courseId: 'c1',
+      snapshotData: {
+        pages: [],
+        editor: {
+          version: 1,
+          pages: [],
+          cards: [{ id: 'qa', draft: original, approved: original }],
+        },
+      },
+    });
+    await service.activate('c1', { releaseId: 'old' });
+    expect(mockTx.tutorTeachingCard.createMany).toHaveBeenCalledWith({
+      data: [{ courseId: 'c1', id: 'qa', draft: expected, approved: expected }],
+    });
+    expect(original.approvedPayload.variants).toEqual(['Q', 'other']);
+  });
+
+  it('distinguishes an empty versioned collection from missing legacy entries', async () => {
+    mockTx.course.findUnique.mockResolvedValue({ editingReleaseId: null });
+    const release = { id: 'old', courseId: 'c1', snapshotData: { pages: [] } };
+    mockTx.release.findUnique.mockResolvedValue(release);
+    mockTx.tutorTeachingCard.count.mockResolvedValue(1);
+    await expect(service.activate('c1', { releaseId: 'old' })).rejects.toThrow(
+      ConflictException,
+    );
+    expect(mockTx.page.deleteMany).not.toHaveBeenCalled();
+    expect(mockTx.tutorTeachingCard.deleteMany).not.toHaveBeenCalled();
+    mockTx.release.findUnique.mockResolvedValue({
+      ...release,
+      snapshotData: { pages: [], editor: { version: 1, cards: [], pages: [] } },
+    });
+    await service.activate('c1', { releaseId: 'old' });
+    expect(mockTx.tutorTeachingCard.deleteMany).toHaveBeenCalledWith({
+      where: { courseId: 'c1' },
+    });
   });
 });

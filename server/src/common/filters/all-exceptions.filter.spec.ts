@@ -180,6 +180,25 @@ describe('AllExceptionsFilter（§5.3 统一错误格式、§9 不泄露内部�
     expect(error.code).toBe('NOT_FOUND');
   });
 
+  it.each(['P2021', 'P2022'])(
+    'Prisma %s 返回可诊断的 503，且不暴露表或字段名',
+    (code) => {
+      filter.catch(
+        new Prisma.PrismaClientKnownRequestError('missing TutorTeachingCard', {
+          code,
+          meta: { modelName: 'TutorTeachingCard' },
+          clientVersion: '6.19.3',
+        }),
+        mockHost,
+      );
+      expect(mockResponse.status).toHaveBeenCalledWith(503);
+      expect(getBody().error).toEqual({
+        code: 'SCHEMA_NOT_READY',
+        message: 'SCHEMA_NOT_READY',
+      });
+    },
+  );
+
   it('未知异常应返回 500 + INTERNAL_ERROR，响应体不含堆栈/SQL/内部路径', () => {
     const secret = new Error(
       'connect ECONNREFUSED postgresql://admin:密码@127.0.0.1:5432 at C:\\internal\\path\\service.ts',

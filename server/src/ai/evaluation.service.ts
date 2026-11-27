@@ -2,7 +2,10 @@ import {
   KNOWLEDGE_CLIENT,
   type KnowledgeClient,
 } from '../ks/contract/knowledge-client';
-import { loadTutorRelease } from './tutor/course-context';
+import {
+  assertTutorReleaseReady,
+  loadTutorRelease,
+} from './tutor/course-context';
 import {
   BadRequestException,
   ConflictException,
@@ -47,6 +50,7 @@ export interface EvaluationConfig {
 }
 export interface EvaluationTask {
   id: string;
+  name?: string;
   owner: string;
   status: 'queued' | 'running' | 'stopping' | 'stopped' | 'completed';
   config: EvaluationConfig;
@@ -117,6 +121,28 @@ export class EvaluationService implements OnModuleInit, OnModuleDestroy {
     if (!rows[0]) throw new NotFoundException('TASK_NOT_FOUND');
     return unpack(rows[0]);
   }
+
+  async rename(owner: string, id: string, value: unknown) {
+    const name = typeof value === 'string' ? value.trim() : '';
+    if (
+      !name ||
+      name.length > 80 ||
+      [...name].some((char) => {
+        const code = char.charCodeAt(0);
+        return code < 32 || code === 127;
+      })
+    ) {
+      throw new BadRequestException(
+        '任务名称须为 1–80 个字符，且不能包含控制字符',
+      );
+    }
+    const rows = await this.db.query<{ id: string }>(
+      "UPDATE ai_evaluation_tasks SET payload=payload || jsonb_build_object('name', $1::text) WHERE id=$2 AND owner=$3 RETURNING id",
+      [name, id, owner],
+    );
+    if (!rows.length) throw new NotFoundException('TASK_NOT_FOUND');
+    return { id, name };
+  }
   async create(
     owner: string,
     config: EvaluationConfig,
@@ -138,7 +164,17 @@ export class EvaluationService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('INVALID_MODES');
     const errors = validateQuestions(questions, config.modes, config.kind);
     if (errors.length) throw new BadRequestException(errors.join('; '));
-    await loadTutorRelease(this.knowledge, config.courseId, config.releaseId);
+    const release = await loadTutorRelease(
+      this.knowledge,
+      config.courseId,
+      config.releaseId,
+    );
+    if (
+      release.teachingPackage === undefined ||
+      config.modes.includes('SOCRATIC')
+    )
+      assertTutorReleaseReady(release, 'wiki');
+    config = { ...config, runningSolution: 'dialogue-yong' };
     if (!this.configs.availableModels().includes(config.model))
       throw new BadRequestException('MODEL_UNAVAILABLE');
     const snapshots = restart?.snapshots ?? (await this.snapshot(config));
@@ -239,7 +275,8 @@ export class EvaluationService implements OnModuleInit, OnModuleDestroy {
   private async save(task: EvaluationTask, expected: EvaluationTask['status']) {
     const { id, owner, status, ...payload } = task;
     const rows = await this.db.query(
-      'UPDATE ai_evaluation_tasks SET payload=$1::jsonb,status=$2 WHERE id=$3 AND owner=$4 AND status=$5 RETURNING id',
+      // 保留 worker 读到任务后，由用户写入的最新名称。
+      "UPDATE ai_evaluation_tasks SET payload=payload || ($1::jsonb - 'name'),status=$2 WHERE id=$3 AND owner=$4 AND status=$5 RETURNING id",
       [JSON.stringify(payload), status, id, owner, expected],
     );
     return rows.length > 0;

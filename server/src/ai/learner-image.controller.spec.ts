@@ -5,6 +5,29 @@ import { LearnerImageController } from './learner-image.controller';
 
 describe('LearnerImageController', () => {
   const asset = '12345678-1234-1234-1234-123456789abc.png';
+  const teachingImageRelease = {
+    id: 'r1',
+    courseId: 'c1',
+    pages: [],
+    teachingPackage: {
+      cards: [
+        {
+          approvedPayload: {
+            refObjects: [
+              {
+                id: 'exhibit-112',
+                label: 'Exhibit 1.12',
+                requires: [],
+                kind: 'image',
+                value: asset,
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+
   function setup() {
     const knowledge = {
       getCourseByExternalId: jest.fn().mockResolvedValue({
@@ -38,7 +61,7 @@ describe('LearnerImageController', () => {
     };
   }
 
-  it('只返回上线快照引用的本课程图片', async () => {
+  it('返回上线页面正文引用的本课程图片', async () => {
     const { get, files, res } = setup();
     await get();
     expect(files.getImage).toHaveBeenCalledWith('c1', asset);
@@ -47,6 +70,57 @@ describe('LearnerImageController', () => {
       'private, no-store',
     );
     expect(res.send).toHaveBeenCalledWith(Buffer.from('png'));
+  });
+
+  it('返回只在上线教学包中登记的图片', async () => {
+    const { get, knowledge, files, res } = setup();
+    knowledge.getRelease.mockResolvedValue(teachingImageRelease);
+
+    await get();
+
+    expect(knowledge.getRelease).toHaveBeenCalledWith('r1');
+    expect(files.getImage).toHaveBeenCalledWith('c1', asset);
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'image/png');
+    expect(res.send).toHaveBeenCalledWith(Buffer.from('png'));
+  });
+
+  it('只读取上线版本，即使测试版登记了图片', async () => {
+    const { get, knowledge, files } = setup();
+    knowledge.getCourseByExternalId.mockResolvedValue({
+      id: 'c1',
+      aiTutorOnline: true,
+      currentReleaseId: 'r1',
+      aiTestReleaseId: 'r2',
+    });
+    knowledge.getRelease.mockImplementation((id: string) =>
+      Promise.resolve(
+        id === 'r2'
+          ? { ...teachingImageRelease, id: 'r2' }
+          : { id: 'r1', courseId: 'c1', pages: [] },
+      ),
+    );
+
+    await expect(get()).rejects.toBeInstanceOf(NotFoundException);
+    expect(knowledge.getRelease).toHaveBeenCalledTimes(1);
+    expect(knowledge.getRelease).toHaveBeenCalledWith('r1');
+    expect(files.getImage).not.toHaveBeenCalled();
+  });
+
+  it('损坏的教学包不会放行图片', async () => {
+    const { get, knowledge, files } = setup();
+    knowledge.getRelease.mockResolvedValue({
+      ...teachingImageRelease,
+      teachingPackage: {
+        cards: [
+          {
+            approvedPayload: { refObjects: [{ kind: 'image', value: asset }] },
+          },
+        ],
+      },
+    });
+
+    await expect(get()).rejects.toBeInstanceOf(NotFoundException);
+    expect(files.getImage).not.toHaveBeenCalled();
   });
 
   it.each(['../secret.png', 'invalid.png'])('拒绝非法路径 %s', async (id) => {
@@ -63,9 +137,8 @@ describe('LearnerImageController', () => {
         knowledge.getCourseByExternalId.mockResolvedValue(null);
       if (scenario === 'wrong-course')
         knowledge.getRelease.mockResolvedValue({
-          id: 'r1',
+          ...teachingImageRelease,
           courseId: 'c2',
-          pages: [],
         });
       if (scenario === 'unpublished-image')
         knowledge.getRelease.mockResolvedValue({
@@ -73,8 +146,13 @@ describe('LearnerImageController', () => {
           courseId: 'c1',
           pages: [],
         });
-      if (scenario === 'missing-file') files.getImage.mockResolvedValue(null);
+      if (scenario === 'missing-file') {
+        knowledge.getRelease.mockResolvedValue(teachingImageRelease);
+        files.getImage.mockResolvedValue(null);
+      }
       await expect(get()).rejects.toBeInstanceOf(NotFoundException);
+      if (scenario === 'wrong-course')
+        expect(files.getImage).not.toHaveBeenCalled();
     },
   );
 });
