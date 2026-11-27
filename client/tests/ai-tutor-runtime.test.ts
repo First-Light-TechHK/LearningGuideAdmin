@@ -4,6 +4,7 @@ import { afterEach, test } from 'node:test'
 import { aiApi, chatStream, type AiConfigView } from '../src/api/ai'
 import { knowledgeApi } from '../src/api/knowledge'
 import { useAiStore } from '../src/stores/aiStore'
+import { clearWorkspaceSessions } from '../src/stores/workspaceSession'
 
 const initial = useAiStore.getState()
 const originalFetch = globalThis.fetch
@@ -18,6 +19,7 @@ const success = () => response(['data: {"delta":"ok"}\n\n', 'data: {"done":true}
 
 afterEach(() => {
   useAiStore.getState().cancel()
+  clearWorkspaceSessions()
   useAiStore.setState(initial, true)
   globalThis.fetch = originalFetch
   Object.assign(aiApi, originalAi)
@@ -94,6 +96,28 @@ test('Release 与账号切换隔离历史，旧无归属历史不迁入', async 
   aiApi.getConfig = async () => config('r1')
   await useAiStore.getState().init('e2')
   assert.deepEqual(useAiStore.getState().messages.map((m) => m.content), ['Welcome'])
+})
+
+test('Tutor restores an accessible course per employee and reloads its current release', async () => {
+  let available = ['first', 'second']
+  let release = 'r1'
+  knowledgeApi.listCourses = async () => available.map(id => ({ id })) as Awaited<ReturnType<typeof knowledgeApi.listCourses>>
+  knowledgeApi.listReleases = async () => []
+  aiApi.listModels = async () => []
+  aiApi.listPrompts = async () => []
+  aiApi.getConfig = async () => config(release)
+  await useAiStore.getState().init('author')
+  await useAiStore.getState().selectCourse('second')
+  useAiStore.setState(initial, true)
+  release = 'r2'
+  await useAiStore.getState().init('author')
+  assert.equal(useAiStore.getState().selectedCourseId, 'second')
+  assert.equal(useAiStore.getState().config?.releaseId, 'r2')
+  await useAiStore.getState().init('other')
+  assert.equal(useAiStore.getState().selectedCourseId, 'first')
+  available = ['first']
+  await useAiStore.getState().init('author')
+  assert.equal(useAiStore.getState().selectedCourseId, 'first')
 })
 
 test('旧账号的延迟请求不能覆盖新账号的消息或 streaming 状态', async () => {

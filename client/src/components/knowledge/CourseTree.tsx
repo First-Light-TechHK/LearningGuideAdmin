@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { App, Dropdown, Tree, Modal, Input, Tooltip, Empty } from '../ui'
 import type { TreeDataNode } from '../ui'
 import {
@@ -44,7 +44,7 @@ function parseHeadings(contentMd: string): HeadingInfo[] {
  * - Heading 节点点击→编辑器滚动定位
  * - Page 菜单：新建页面、上传文档建页、删除页面
  */
-export function CourseTree({ keyword }: { keyword: string }) {
+export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPage?: string | null }) {
   const { message, modal } = App.useApp()
   const { text } = useKText()
   /** PRD §3.2/§3.3：新建/删除是 CREATE/DELETE 级写操作，View/Edit 角色不显示 */
@@ -59,6 +59,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
   const createPage = useKnowledgeStore((s) => s.createPage)
   const deleteCourse = useKnowledgeStore((s) => s.deleteCourse)
   const deletePage = useKnowledgeStore((s) => s.deletePage)
+  const clearCoursePages = useKnowledgeStore((s) => s.clearCoursePages)
   const reorderPages = useKnowledgeStore((s) => s.reorderPages)
   const scrollToHeading = useKnowledgeStore((s) => s.scrollToHeading)
 
@@ -68,6 +69,8 @@ export function CourseTree({ keyword }: { keyword: string }) {
     courseId: string
   } | null>(null)
   const [inputValue, setInputValue] = useState('')
+  const creatingRef = useRef(false)
+  const [creating, setCreating] = useState(false)
   const [uploadTarget, setUploadTarget] = useState<{
     courseId: string
     courseTitle: string
@@ -136,7 +139,8 @@ export function CourseTree({ keyword }: { keyword: string }) {
   // 目标课程变化：自动展开 + 加载详情 + 恢复上次编辑页
   useEffect(() => {
     if (showAll) return
-    if (!visibleCourseId) return
+    if (!visibleCourseId || linkedPage) return
+    let active = true
     void (async () => {
       const st = useKnowledgeStore.getState()
       if (!st.details[visibleCourseId]) {
@@ -145,11 +149,12 @@ export function CourseTree({ keyword }: { keyword: string }) {
       const last = st.lastPageIdByCourse[visibleCourseId]
       const detail = useKnowledgeStore.getState().details[visibleCourseId]
       const exists = detail?.pages.some((p) => p.id === last)
-      if (last && exists && st.selectedPageId !== last) {
+      if (active && last && exists && st.selectedPageId !== last) {
         await st.selectPage(visibleCourseId, last)
       }
     })()
-  }, [showAll, visibleCourseId])
+    return () => { active = false }
+  }, [showAll, visibleCourseId, linkedPage])
 
   const kw = keyword.trim().toLowerCase()
 
@@ -310,13 +315,19 @@ export function CourseTree({ keyword }: { keyword: string }) {
   }
 
   const submitCreate = async () => {
-    if (!inputState || !inputValue.trim()) return
+    if (creatingRef.current || !inputState || !inputValue.trim()) return
     const { courseId } = inputState
+    // ref 同步拦截同一轮事件中的回车/连点，不能只依赖下一次渲染的 loading。
+    creatingRef.current = true
+    setCreating(true)
     try {
       await createPage(courseId, inputValue.trim())
       setInputState(null)
     } catch (e) {
       message.error((e as Error).message)
+    } finally {
+      creatingRef.current = false
+      setCreating(false)
     }
   }
 
@@ -342,6 +353,37 @@ export function CourseTree({ keyword }: { keyword: string }) {
     setUploadTarget({ courseId, courseTitle })
   }
 
+  const confirmClearCoursePages = async (courseId: string, courseTitle: string) => {
+    const pageIds = useKnowledgeStore.getState().details[courseId]?.pages.map(({ id }) => id)
+    if (!pageIds?.length) return
+
+    const confirmed = await modal.confirm({
+      title: text('tree.clearFilesTitle', { courseTitle }),
+      content: text('tree.clearFilesContent', { count: pageIds.length }),
+      okText: text('tree.clearFilesContinue'),
+      cancelText: text('common.cancel'),
+      autoFocusButton: 'cancel',
+    })
+    if (!confirmed) return
+
+    modal.confirm({
+      title: text('tree.clearFilesFinalTitle', { courseTitle }),
+      content: text('tree.clearFilesFinalContent'),
+      okText: text('tree.clearFiles'),
+      okButtonProps: { danger: true },
+      cancelText: text('common.cancel'),
+      autoFocusButton: 'cancel',
+      onOk: async () => {
+        try {
+          await clearCoursePages(courseId, pageIds)
+          message.success(text('tree.filesCleared', { count: pageIds.length }))
+        } catch (e) {
+          message.error((e as Error).message)
+        }
+      },
+    })
+  }
+
   const menuFor = (node: TreeDataNode) => {
     const ops = (
       node as unknown as {
@@ -360,12 +402,18 @@ export function CourseTree({ keyword }: { keyword: string }) {
         },
       }
     }
-    const courseItems: { key: string; label: string; danger?: boolean }[] = []
+    const courseItems: { key: string; label: string; danger?: boolean; disabled?: boolean }[] = []
     if (access.canCreate) {
       courseItems.push({ key: 'new-page', label: text('tree.newPage') })
       courseItems.push({ key: 'upload', label: text('tree.uploadDoc') })
     }
     if (access.canDelete) {
+      courseItems.push({
+        key: 'clear-files',
+        label: text('tree.clearFiles'),
+        danger: true,
+        disabled: !details[ops.courseId]?.pages.length,
+      })
       courseItems.push({ key: 'del-course', label: text('tree.deleteCourse'), danger: true })
     }
     if (courseItems.length === 0) return null
@@ -374,6 +422,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
       onClick: ({ key }: { key: string }) => {
         if (key === 'new-page') openCreate(ops.courseId)
         if (key === 'upload') openUpload(ops.courseId, node.title as string)
+        if (key === 'clear-files') void confirmClearCoursePages(ops.courseId, node.title as string)
         if (key === 'del-course')
           confirmDelete(text('tree.labelCourse'), () => deleteCourse(ops.courseId))
       },
@@ -663,13 +712,20 @@ export function CourseTree({ keyword }: { keyword: string }) {
         okText={text('common.create')}
         cancelText={text('common.cancel')}
         onOk={submitCreate}
-        onCancel={() => setInputState(null)}
+        confirmLoading={creating}
+        okButtonProps={{ disabled: creating || !inputValue.trim() }}
+        cancelButtonProps={{ disabled: creating }}
+        closable={!creating}
+        maskClosable={!creating}
+        keyboard={!creating}
+        onCancel={() => { if (!creatingRef.current) setInputState(null) }}
         destroyOnHidden
       >
         <Input
           autoFocus
           placeholder={text('tree.pageNamePlaceholder')}
           value={inputValue}
+          disabled={creating}
           onChange={(e) => setInputValue(e.target.value)}
           onPressEnter={submitCreate}
         />

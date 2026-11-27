@@ -29,7 +29,7 @@ export interface TutorPlannerSlice {
   teachingMove: string;
   currentTurnContract: {
     speechAct: string;
-    responseLanguage: 'en-GB' | 'zh-CN';
+    responseLanguage: 'en-GB' | 'zh-CN' | 'es' | 'auto';
     requiredTerms: string[];
     closeAfterResponse: boolean;
   };
@@ -114,6 +114,7 @@ export function validatePlannerSlice(input: {
   candidate: unknown;
   action: 'study_question' | 'submitted_answer';
   teachingPackage: ReviewedTeachingPackage;
+  defaultTeachingMove?: 'explain';
 }): PlannerSliceValidation {
   if (input.action !== 'study_question' && input.action !== 'submitted_answer')
     return { valid: false, reason: 'INVALID_PLANNER_SLICE' };
@@ -142,7 +143,9 @@ export function validatePlannerSlice(input: {
     typeof contract.speechAct !== 'string' ||
     !/^[a-z][a-z0-9_]{0,63}$/.test(contract.speechAct) ||
     (contract.responseLanguage !== 'en-GB' &&
-      contract.responseLanguage !== 'zh-CN') ||
+      contract.responseLanguage !== 'zh-CN' &&
+      contract.responseLanguage !== 'es' &&
+      contract.responseLanguage !== 'auto') ||
     !isStringList(contract.requiredTerms) ||
     new Set(contract.requiredTerms.map(normalizedTerm)).size !==
       contract.requiredTerms.length ||
@@ -169,7 +172,8 @@ export function validatePlannerSlice(input: {
     !registered('frame', value.detectedFrame) ||
     !registered('misreading', value.likelyIssue) ||
     !registered('lens', value.interpretiveLensId) ||
-    !registered('teaching_move', value.teachingMove)
+    (!registered('teaching_move', value.teachingMove) &&
+      value.teachingMove !== input.defaultTeachingMove)
   )
     return { valid: false, reason: 'UNREGISTERED_KNOWLEDGE_ID' };
 

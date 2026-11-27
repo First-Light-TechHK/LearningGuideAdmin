@@ -75,6 +75,14 @@ function actionFor(method: string, segments: string[]): ActionKind {
   if (method === 'GET' || method === 'HEAD') return 'VIEW';
   const [first, second, third] = segments;
   if (first === 'ai') {
+    if (
+      method === 'PATCH' &&
+      second === 'evaluation' &&
+      third === 'tasks' &&
+      segments.length === 5 &&
+      segments[4] === 'name'
+    )
+      return 'EDIT_EXISTING';
     // 后台测试对话不改任何数据，只读角色也可试用
     if (second === 'chat-stream') return 'VIEW';
     if (second === 'config') {
@@ -88,10 +96,27 @@ function actionFor(method: string, segments: string[]): ActionKind {
   if (first === 'files' && ['convert', 'images'].includes(second ?? ''))
     return 'EDIT_EXISTING';
   if (first === 'sync') return 'CREATE';
+  if (method === 'POST' && first === 'courses' && third === 'release-package')
+    return 'PUBLISH';
+  if (
+    first === 'releases' &&
+    method === 'POST' &&
+    segments.length === 3 &&
+    third === 'rebuild-index'
+  )
+    return 'PUBLISH';
   if (first === 'courses' && segments.length === 3) {
     if (['release', 'activate-release', 'set-live'].includes(third ?? ''))
       return 'PUBLISH';
   }
+  if (
+    method === 'POST' &&
+    first === 'courses' &&
+    third === 'teaching-cards' &&
+    segments.length === 4 &&
+    segments[3] === 'deletion-preview'
+  )
+    return 'DELETE';
   if (method === 'DELETE') return 'DELETE';
   if (method === 'PUT' || method === 'PATCH') return 'EDIT_EXISTING';
   return 'CREATE';

@@ -8,6 +8,7 @@ import { SyncModule } from '../sync/sync.module';
 import { TagsModule } from '../tags/tags.module';
 import { KsInternalController } from './ks-internal.controller';
 import { PrismaKnowledgeClient } from './prisma-knowledge.client';
+import type { TeachingPackageCompiler } from './contract/teaching-package-compiler';
 
 /**
  * KS Engine：知识编写（员工经 Admin 使用）+ 给 Agent 的内部接口。
@@ -20,6 +21,7 @@ export class KsModule {
   static register(options: {
     authoring: boolean;
     internalApi: boolean;
+    teachingPackageCompiler: TeachingPackageCompiler;
   }): DynamicModule {
     return {
       module: KsModule,
@@ -28,7 +30,7 @@ export class KsModule {
           ? [
               CoursesModule,
               PagesModule,
-              ReleasesModule,
+              ReleasesModule.register(options.teachingPackageCompiler),
               SyncModule,
               FilesModule.register({ authoring: true }),
               TagsModule,

@@ -667,10 +667,7 @@ export class AiConfigService implements OnModuleInit {
       // 2026-10-29：main 为共享主提示词（讲授/苏格拉底拼接最前）；Welcome / Model 为课程级共享；System Prompt 按模式分开
       welcomeMsg: cfg?.welcomeMsg ?? null,
       model: currentModel(cfg?.model ?? this.defaultModel()),
-      runningSolution:
-        cfg?.runningSolution === 'dialogue-yong'
-          ? 'dialogue-yong'
-          : 'grounded-jack',
+      runningSolution: 'dialogue-yong',
       main: {
         systemPrompt: cfg?.mainSystemPrompt ?? null,
       },

@@ -228,7 +228,7 @@ If the answer is general knowledge not from the context, do not add a citation.
 | 配置 | 值 | 说明 |
 |------|-----|------|
 | `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | embedding 模型 |
-| `EMBEDDING_BATCH_SIZE` | 100 | 每批 embedding 的文本数 |
+| `EMBEDDING_BATCH_SIZE` | 20 | 每批 embedding 的默认文本数 |
 | `CHUNK_TARGET_TOKENS` | 800 | 分块目标 token 数 |
 | `CHUNK_OVERLAP_TOKENS` | 80 | 分块重叠 token 数 |
 | `RETRIEVAL_TOP_K` | 6 | 检索数量 |

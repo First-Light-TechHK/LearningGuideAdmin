@@ -34,7 +34,11 @@ describe('课程关键词召回', () => {
     const lexical = chunk('Keyword match.');
     const semantic = chunk('Semantic match.');
     expect(
-      mergeRetrievedChunks([semantic, shared], [lexical, shared], 2),
+      mergeRetrievedChunks(
+        [semantic, shared],
+        [lexical, { ...shared, score: 0 }],
+        2,
+      ),
     ).toEqual([shared, lexical]);
     expect(mergeRetrievedChunks([], [], 6)).toEqual([]);
   });

@@ -46,6 +46,18 @@ export class KsInternalController {
     return found(await this.knowledge.getCourse(id), '课程');
   }
 
+  @Post('courses/:id/draft-pages')
+  draftPages(@Param('id') id: string, @Body() body: { pageIds?: unknown }) {
+    const ids = Array.isArray(body?.pageIds) ? (body.pageIds as unknown[]) : [];
+    const pageIds = ids
+      .slice(0, 8)
+      .filter(
+        (value): value is string =>
+          typeof value === 'string' && /^[a-f0-9-]{36}$/i.test(value),
+      );
+    return this.knowledge.getCourseDraftPages(id, pageIds);
+  }
+
   @Put('courses/:id/tutor-test-release')
   async setTestRelease(
     @Param('id') id: string,
@@ -75,6 +87,46 @@ export class KsInternalController {
   }
 
   /** RAG 向量检索（2026-10-26 新增）：Agent 调此接口获取相关知识片段 */
+  @Post('releases/:id/qa/retrieve')
+  retrieveProfessorQa(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      courseId?: string;
+      query?: string;
+      allowedIds?: unknown;
+      teachingIds?: unknown;
+    },
+  ) {
+    const teachingIds = body?.teachingIds ?? [];
+    if (
+      !Array.isArray(teachingIds) ||
+      teachingIds.length > 200 ||
+      !teachingIds.every(
+        (id: unknown) => typeof id === 'string' && id.length <= 200,
+      )
+    )
+      return { status: 'missing', cardIds: [] };
+    if (
+      typeof body?.courseId !== 'string' ||
+      typeof body.query !== 'string' ||
+      body.query.length > 8000 ||
+      !Array.isArray(body.allowedIds) ||
+      body.allowedIds.length > 200 ||
+      !body.allowedIds.every(
+        (item: unknown) => typeof item === 'string' && item.length <= 200,
+      )
+    )
+      return { status: 'missing', cardIds: [] };
+    return this.knowledge.retrieveProfessorQa(
+      body.courseId,
+      id,
+      body.query,
+      body.allowedIds as string[],
+      teachingIds as string[],
+    );
+  }
+
   @Post('releases/:id/chunks/retrieve')
   retrieveChunks(
     @Param('id') id: string,

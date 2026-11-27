@@ -30,7 +30,7 @@ test('two tutors receive the same question concurrently and retain isolated foll
   await waitFor(() => assert.equal(pending.length,2))
   assert.deepEqual(calls.map((c) => c.body.message),['question-1','question-1'])
   assert.equal(configs[0].runningSolution,'grounded-jack')
-  assert.equal(configs[1].runningSolution,'dialogue-yong')
+  assert.equal(configs[1].runningSolution,configs[0].runningSolution)
   assert.equal(configs[0].locale,undefined)
   pending.forEach((finish) => finish())
   await waitFor(() => assert.equal((screen.getByRole('button',{name:'新测试'}) as HTMLButtonElement).disabled,false))

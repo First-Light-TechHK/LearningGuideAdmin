@@ -5,6 +5,7 @@ import {
   type EmbeddingQueryClient,
 } from './contract/embedding-client';
 import { PrismaService } from '../prisma/prisma.service';
+import { searchProfessorQa } from './professor-qa-search';
 import { mergeRetrievedChunks, retrievalTerms } from './keyword-retrieval';
 import type {
   KnowledgeClient,
@@ -39,6 +40,24 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
     @Inject(EMBEDDING_QUERY_CLIENT)
     private readonly embedding: EmbeddingQueryClient,
   ) {}
+
+  retrieveProfessorQa(
+    courseId: string,
+    releaseId: string,
+    query: string,
+    allowedIds: string[],
+    teachingIds?: string[],
+  ) {
+    return searchProfessorQa(
+      this.prisma,
+      this.embedding,
+      courseId,
+      releaseId,
+      query,
+      allowedIds,
+      teachingIds,
+    );
+  }
 
   getCourse(courseId: string): Promise<KnowledgeCourse | null> {
     return this.prisma.course.findUnique({
@@ -79,18 +98,34 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
         courseId: true,
         versionTag: true,
         snapshotData: true,
+        _count: { select: { knowledgeChunks: true } },
       },
     });
     if (!release) return null;
     const snapshot = release.snapshotData as {
       pages?: KnowledgeReleasePage[];
+      teachingPackage?: unknown;
     } | null;
     return {
       id: release.id,
       courseId: release.courseId,
       versionTag: release.versionTag,
       pages: snapshot?.pages ?? [],
+      ...(snapshot?.teachingPackage === undefined
+        ? {}
+        : { teachingPackage: snapshot.teachingPackage }),
+      indexedChunkCount: release._count.knowledgeChunks,
     };
+  }
+
+  getCourseDraftPages(
+    courseId: string,
+    pageIds: string[],
+  ): Promise<KnowledgeReleasePage[]> {
+    return this.prisma.page.findMany({
+      where: { courseId, id: { in: pageIds } },
+      select: { id: true, title: true, contentMd: true },
+    });
   }
 
   /** 与删除 Release 共用 Course 行锁，锁内复查版本仍属于该课程（QA 2026-10-27 A7） */
@@ -134,35 +169,34 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
   ): Promise<RetrievedChunk[]> {
     if (!query?.trim()) return [];
 
-    const queryVec = await this.embedding.embedQuery(query);
-    const vecStr = `[${queryVec.join(',')}]`;
-
-    const terms = retrievalTerms(query);
-    const [rows, lexical] = await Promise.all([
-      this.prisma.$queryRawUnsafe<RetrievedChunk[]>(
-        `
-      SELECT "pageTitle", "heading", "content",
-             1 - (embedding <=> $1::vector(1536)) AS score,
-             "tokenCount"
-      FROM "KnowledgeChunk"
-      WHERE "releaseId" = $2
-      ORDER BY embedding <=> $1::vector(1536)
-      LIMIT $3
-    `,
-        vecStr,
+    const semantic = async () => {
+      const vector = await this.embedding
+        .embedQuery(query)
+        .catch(() => undefined);
+      if (!vector) return [];
+      return this.prisma.$queryRawUnsafe<RetrievedChunk[]>(
+        `SELECT "pageTitle", "heading", "content",
+             1 - (embedding <=> $1::vector(1536)) AS score, "tokenCount"
+         FROM "KnowledgeChunk" WHERE "releaseId" = $2
+         ORDER BY embedding <=> $1::vector(1536) LIMIT $3`,
+        JSON.stringify(vector),
         releaseId,
         topK,
-      ),
+      );
+    };
+    const terms = retrievalTerms(query);
+    const [rows, lexical] = await Promise.all([
+      semantic(),
       terms.length
         ? this.prisma.$queryRawUnsafe<RetrievedChunk[]>(
             `
         SELECT "pageTitle", "heading", "content",
-               COALESCE(1 - (embedding <=> $1::vector(1536)), 0) AS score,
+               0::double precision AS score,
                "tokenCount"
         FROM "KnowledgeChunk"
-        WHERE "releaseId" = $2
+        WHERE "releaseId" = $1
           AND EXISTS (
-            SELECT 1 FROM unnest($3::text[]) AS term
+            SELECT 1 FROM unnest($2::text[]) AS term
             WHERE strpos(lower("content"), term) > 0
                OR strpos(lower(COALESCE("heading", '')), term) > 0
           )
@@ -170,11 +204,10 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
           SELECT SUM(
             CASE WHEN strpos(lower(COALESCE("heading", '')), term) > 0 THEN 2 ELSE 0 END
             + CASE WHEN strpos(lower("content"), term) > 0 THEN 1 ELSE 0 END
-          ) FROM unnest($3::text[]) AS term
+          ) FROM unnest($2::text[]) AS term
         ) DESC, "sortOrder" ASC, "id" ASC
-        LIMIT $4
+        LIMIT $3
       `,
-            vecStr,
             releaseId,
             terms,
             topK,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { boRequest } from './lib/api';
@@ -22,6 +22,7 @@ import { SESSION_CHANGED_EVENT, useLocale, usePathname } from './lib/navigation'
 import { menuFromPathSegments, menuHref, visibleMenus } from './rbac/permissions';
 import { SIGNED_OUT_CODES, EmployeeContext, WORKSPACE_MENUS } from './employeeSession';
 import type { SessionPayload, SessionState } from './employeeSession';
+import { clearEmployeeWorkspace } from './lib/signOutCleanup';
 
 /**
  * 登录后外壳：服务端 /api/session 是唯一事实来源。
@@ -42,10 +43,14 @@ export function ShellRoute() {
   // undefined = health has not answered yet (grey wall, keystone without a name); null = read failed ("Unknown environment")
   const [appEnv, setAppEnv] = useState<string | null | undefined>(undefined)
   const [envLabel, setEnvLabel] = useState<string | null>(null)
+  const previousEmployee = useRef<string | null>(null)
 
   const load = useCallback(() => {
     return boRequest<SessionPayload>('/api/session').then((result) => {
       if (result.success) {
+        const id = result.data.employee.employeeId
+        if (previousEmployee.current && previousEmployee.current !== id) clearEmployeeWorkspace()
+        previousEmployee.current = id
         setState({
           kind: 'signedIn',
           employee: result.data.employee,
@@ -57,7 +62,11 @@ export function ShellRoute() {
         return
       }
       // 只有服务端明确说会话无效才登出；断网或 5xx 时保留当前页面，首次加载则提示重试
-      if (SIGNED_OUT_CODES.has(result.error)) setState({ kind: 'signedOut' })
+      if (SIGNED_OUT_CODES.has(result.error)) {
+        if (previousEmployee.current) clearEmployeeWorkspace()
+        previousEmployee.current = null
+        setState({ kind: 'signedOut' })
+      }
       else setState((previous) => (previous.kind === 'signedIn' ? previous : { kind: 'unavailable' }))
     })
   }, [])
@@ -142,7 +151,7 @@ export function ShellRoute() {
   const menu = menuFromPathSegments(segments)
   return (
     <EmployeeContext.Provider value={state.employee}>
-      <AppShell
+      <AppShell key={state.employee.employeeId}
         employee={state.employee}
         menus={menus}
         workspace={menu !== null && WORKSPACE_MENUS.has(menu)}

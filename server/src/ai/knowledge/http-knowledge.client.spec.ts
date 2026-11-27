@@ -28,6 +28,29 @@ function client(fetchImpl: jest.Mock, timeoutMs?: number) {
 }
 
 describe('HttpKnowledgeClient（Agent 经 HTTP 读 KS）', () => {
+  it('passes the version and eligible cards to QA retrieval and tolerates older KS releases', async () => {
+    const data = { status: 'ready', cardIds: ['a'], generation: 'v1' };
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(json(200, { data }))
+      .mockResolvedValueOnce(json(404, {}));
+    const ks = client(fetchImpl);
+    await expect(
+      ks.retrieveProfessorQa('course', 'test release', 'new question', ['a']),
+    ).resolves.toEqual(data);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'http://ks.internal/api/ks/v1/releases/test%20release/qa/retrieve',
+    );
+    expect(JSON.parse(init.body as string)).toEqual({
+      courseId: 'course',
+      query: 'new question',
+      allowedIds: ['a'],
+    });
+    await expect(
+      ks.retrieveProfessorQa('course', 'live', 'new question', ['a']),
+    ).resolves.toEqual({ status: 'missing', cardIds: [] });
+  });
   it('带 Bearer 令牌调 /api/ks/v1，解开统一信封', async () => {
     const fetchImpl = jest
       .fn()

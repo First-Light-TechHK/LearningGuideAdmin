@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { AiRateLimitChannel } from './rate-limit.service';
+import type { passageSource } from './tutor/course-context';
 
 /** 日志目录（相对后端启动目录；已在 .gitignore 中排除） */
 const LOG_DIR = resolve(process.cwd(), 'app-logs');
@@ -31,6 +32,46 @@ export interface AiChatLogEntry {
   latencyMs: number;
   status: AiChatStatus;
   promptHash?: string;
+  evidence?: {
+    route:
+      'course_context' | 'reviewed' | 'direct_clarification' | 'direct_answer';
+    context:
+      | 'not_requested'
+      | 'disabled'
+      | 'snapshot'
+      | 'published_question'
+      | 'retrieval'
+      | 'retrieval_empty';
+    sources: ReturnType<typeof passageSource>[];
+    questionMatch?: 'unique' | 'scoped';
+    linkedSource?: ReturnType<typeof passageSource>;
+  };
+  teaching?: {
+    packageHash: string;
+    topic: string | null;
+    turnCategory: string;
+    qaId?: string;
+    qaCoverage?: 'full' | 'partial';
+    qaEvidenceRanges?: Array<{ start: number; length: number }>;
+    qaSearch?: {
+      rollout: 'on' | 'shadow' | 'off';
+      source?: 'exact' | 'retrieval';
+      status: string;
+      candidates: string[];
+      teachingCandidates?: string[];
+      accepted?: string;
+      generation?: string;
+      retrievalMs?: number;
+      decisionMs?: number;
+      reason?: string;
+    };
+    selectedCardIds: string[];
+    sourceIds: string[];
+    excluded: Array<{ cardId: string; reason: string }>;
+    objectIds: string[];
+    outcome: string;
+    field4Hash?: string;
+  };
   error?: string;
   finishReason?: string | null;
   usage?: {
@@ -95,6 +136,8 @@ export class AiChatLogger {
         latencyMs: entry.latencyMs,
         status: entry.status,
         ...(entry.promptHash ? { promptHash: entry.promptHash } : {}),
+        ...(entry.evidence ? { evidence: entry.evidence } : {}),
+        ...(entry.teaching ? { teaching: entry.teaching } : {}),
         ...(entry.error ? { error: preview(entry.error, ERROR_LIMIT) } : {}),
         ...(entry.finishReason === undefined
           ? {}

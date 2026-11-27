@@ -1,4 +1,5 @@
 import { buildAnchoredChunks } from './anchored-chunks';
+import { prepareReviewedLecture } from './lecture-teaching';
 import { snapshotHash } from './snapshot-hash';
 import {
   validateReviewedTeachingPackage,
@@ -69,6 +70,84 @@ const validate = (candidate: unknown) =>
   validateReviewedTeachingPackage({ ...input, candidate });
 
 describe('validateReviewedTeachingPackage', () => {
+  it.each(['concept', 'misreading', 'professor_qa'])(
+    'validates English-only published %s cards with matching glossary labels',
+    (type) => {
+      const candidate = makePackage();
+      const label = { en: 'Concept', zh: '' };
+      candidate.cards = [
+        makeCard({
+          type,
+          bilingual: {
+            conceptLabel: label,
+            summary: { en: 'Summary', zh: '' },
+            triggers: { en: ['concept'], zh: [] },
+          },
+        }),
+      ];
+      candidate.glossary[0].label = label;
+      expect(validate(candidate).valid).toBe(true);
+      candidate.glossary[0].label = { en: 'Concept', zh: '概念' };
+      expect(validate(candidate).valid).toBe(true);
+    },
+  );
+  it.each([
+    {
+      nameZh: '',
+      summaryZh: '',
+      summaryEn: 'Add components.',
+      expected: 'Add components.',
+    },
+    {
+      nameZh: '加法',
+      summaryZh: '逐分量相加。',
+      summaryEn: '',
+      expected: '逐分量相加。',
+    },
+  ])(
+    'displays new and historical numbered references in Chinese turns',
+    ({ nameZh, summaryZh, summaryEn, expected }) => {
+      const candidate = makePackage();
+      const label = { en: 'Addition', zh: nameZh };
+      const ref = {
+        id: 'card-1',
+        code: 'L1-F01',
+        label: 'Addition',
+        kind: 'latex',
+        value: 'a+b',
+        requires: [],
+      };
+      candidate.cards = [
+        makeCard({
+          type: 'ref_obj',
+          topic: '*',
+          bilingual: {
+            conceptLabel: label,
+            summary: { en: summaryEn, zh: summaryZh },
+            triggers: { en: [], zh: [] },
+          },
+          approvedPayload: { code: ref.code, refObjects: [ref] },
+          useWhen: ['*'],
+        }),
+      ];
+      candidate.glossary[0].label = label;
+      const turn = prepareReviewedLecture(
+        {
+          id: input.releaseId,
+          courseId: input.courseId,
+          versionTag: 'v1',
+          pages: input.snapshot.pages,
+          teachingPackage: candidate,
+        },
+        '请展示 L1-F01',
+      );
+      expect(turn).toMatchObject({
+        kind: 'reference',
+        directAnswer: expected + '\n\n[Addition](refobj:card-1)',
+      });
+    },
+  );
+
   it('验证快照绑定、来源和卡片后返回可信重建内容及包哈希', () => {
     const candidate = makePackage();
     const result = validate(candidate);

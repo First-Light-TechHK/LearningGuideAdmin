@@ -102,6 +102,12 @@ function buildLineDecorations(
             out.push(headingDeco[heading[1].length - 1].range(line.from))
             const end = line.from + heading[0].length
             if (!selectionOverlaps(state, line.from, end)) out.push(hideMark.range(line.from, end))
+            // DOCX 导入会转义编号后的句点。光标移到该标记时再显示源码。
+            const number = /^\s*\d+(?=\\\.\s)/.exec(text.slice(heading[0].length))
+            if (number) {
+              const slash = end + number[0].length
+              if (!selectionTouches(state, slash, slash + 2)) out.push(hideMark.range(slash, slash + 1))
+            }
           } else if (bullet) {
             out.push(bulletLine.range(line.from))
             const from = line.from + bullet[1].length

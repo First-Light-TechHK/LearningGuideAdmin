@@ -1,11 +1,14 @@
 import {
+  BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import JSZip from 'jszip';
+import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import type { Prisma } from '@prisma/client';
+import { Prisma, type Page, type TutorTeachingCard } from '@prisma/client';
 import { lockCourseRow } from '../prisma/course-lock';
 import { PrismaService } from '../prisma/prisma.service';
 import { IndexingService } from '../knowledge/indexing.service';
@@ -13,6 +16,22 @@ import { FilesService } from '../files/files.service';
 import { renderMarkdownDocx } from './markdown-docx';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
+import {
+  cleanProfessorQa,
+  cleanProfessorQaPackage,
+} from '../ks/contract/professor-qa-content';
+import {
+  mergeApprovedCards,
+  teachingPackageBase,
+} from './teaching-card-publication';
+import {
+  teachingReferenceCatalogue,
+  wikiTeachingReferenceIds,
+} from '../ks/contract/teaching-references';
+import {
+  TEACHING_PACKAGE_COMPILER,
+  type TeachingPackageCompiler,
+} from '../ks/contract/teaching-package-compiler';
 
 /** 重复发布判定窗口：窗口内同说明、同快照的第二次提交视为重试（QA 2026-10-27 幂等） */
 const PUBLISH_DEDUPE_WINDOW_MS = 60_000;
@@ -41,7 +60,7 @@ function stableJson(value: unknown): string {
  * mainSystemPrompt 本来就不在此字段集（此前从未复制），保持不变。
  * 用户如需在新 Release 上自定义提示词，手动 Save 即可；Reset 恢复默认也直接从模板兜底链取最新值。
  */
-const AI_CONFIG_COPY_FIELDS = {
+export const AI_CONFIG_COPY_FIELDS = {
   lectureModeId: true,
   socraticModeId: true,
   assessmentModeId: true,
@@ -60,7 +79,22 @@ interface SnapshotPage {
   contentMd: string;
   sectionTags?: unknown;
 }
+type EditorPage = Omit<Page, 'courseId'>;
+type EditorCard = Omit<
+  TutorTeachingCard,
+  'courseId' | 'createdAt' | 'updatedAt' | 'deletedAt'
+> & {
+  createdAt: string | null;
+  deletedAt: string | null;
+};
+type EditorSnapshot = {
+  version: 1;
+  pages: EditorPage[];
+  cards: EditorCard[];
+};
 interface SnapshotData {
+  editor?: EditorSnapshot;
+  teachingPackage?: unknown;
   pages?: SnapshotPage[];
 }
 
@@ -71,6 +105,8 @@ export class ReleasesService {
     private readonly prisma: PrismaService,
     private readonly indexing: IndexingService,
     private readonly files: FilesService,
+    @Inject(TEACHING_PACKAGE_COMPILER)
+    private readonly compileTeachingPackage: TeachingPackageCompiler,
   ) {}
 
   /**
@@ -79,7 +115,7 @@ export class ReleasesService {
    * **不改动 Course.currentReleaseId（Live 指针）**，故不影响 AI Tutor 的上线版本；
    * 亦不改动 Course.aiTestReleaseId（后台测试所选 Release，由用户在 AI Tutor 头部手动选择）。
    * **置 Course.editingReleaseId = 新 Release**（当前编辑版本指针；2026-10-20 三次改拍，§3.4.2）。
-   * 快照仅收录 syncState=SYNCED 节点。
+   * Tutor 仅使用 SYNCED 页面，编辑快照包含本地保留的 STALE 页面。
    * versionTag 格式: "CourseName_YYYYMMDDHHmm"。
    */
   async publish(courseId: string, dto: CreateReleaseDto) {
@@ -90,21 +126,31 @@ export class ReleasesService {
         where: { id: courseId },
         include: {
           pages: {
-            where: { syncState: 'SYNCED' },
-            orderBy: { sortOrder: 'asc' },
+            orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+            select: {
+              id: true,
+              externalId: true,
+              title: true,
+              contentMd: true,
+              sectionTags: true,
+              sortOrder: true,
+              syncState: true,
+            },
           },
         },
       });
       if (!course) {
         throw new NotFoundException('课程不存在');
       }
-      const snapshotData = {
-        pages: course.pages.map((page) => ({
-          id: page.id,
-          title: page.title,
-          contentMd: page.contentMd,
-          sectionTags: page.sectionTags,
-        })),
+      const snapshot = {
+        pages: course.pages
+          .filter((page) => page.syncState === 'SYNCED')
+          .map((page) => ({
+            id: page.id,
+            title: page.title,
+            contentMd: page.contentMd,
+            sectionTags: page.sectionTags,
+          })),
       };
       // 幂等：重复提交（连点、超时重试）在短时间内带来同样的说明和同样的快照时，
       // 返回刚发布的那个版本，不再生成第二个 Release
@@ -112,17 +158,140 @@ export class ReleasesService {
         where: { courseId },
         orderBy: { createdAt: 'desc' },
       });
+      const previous = course.editingReleaseId
+        ? latest?.id === course.editingReleaseId
+          ? latest
+          : await tx.release.findUnique({
+              where: { id: course.editingReleaseId },
+            })
+        : null;
+      const base = cleanProfessorQaPackage(
+        dto.teachingPackage ?? teachingPackageBase(previous?.snapshotData),
+      );
+      const managed = await tx.tutorTeachingCard.findMany({
+        where: { courseId },
+        select: {
+          id: true,
+          createdAt: true,
+          additionPosition: true,
+          revision: true,
+          draft: true,
+          approved: true,
+          approvedRevision: true,
+          deletedAt: true,
+          reviewerId: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      const editor: EditorSnapshot = {
+        version: 1,
+        pages: course.pages,
+        cards: managed.map((row) => ({
+          ...row,
+          createdAt: row.createdAt?.toISOString() ?? null,
+          deletedAt: row.deletedAt?.toISOString() ?? null,
+        })),
+      };
+      const authored = mergeApprovedCards(base, managed);
+      const pageReferences = snapshot.pages.flatMap((page) =>
+        wikiTeachingReferenceIds(page.contentMd).map((id) => ({
+          id,
+          pageTitle: page.title,
+        })),
+      );
+      if (pageReferences.length) {
+        let available: ReturnType<typeof teachingReferenceCatalogue>;
+        try {
+          available = teachingReferenceCatalogue(authored);
+        } catch (error) {
+          throw new BadRequestException(
+            `教学包校验失败：${error instanceof Error ? error.message : 'INVALID_PACKAGE'}`,
+          );
+        }
+        const missing = pageReferences.find(({ id }) => !available.has(id));
+        if (missing)
+          throw new BadRequestException(
+            `页面「${missing.pageTitle}」的课程引用不可用：${missing.id}`,
+          );
+      }
+      const teachingCardRevisions = managed
+        .filter(
+          (entry) =>
+            !entry.deletedAt &&
+            entry.approved !== null &&
+            entry.approvedRevision !== null,
+        )
+        .map((entry) => ({
+          id: entry.id,
+          revision: entry.approvedRevision,
+          reviewerId: entry.reviewerId,
+        }));
       if (
         latest &&
+        latest.id === course.editingReleaseId &&
         latest.revisionNotes === dto.revisionNotes &&
         Date.now() - latest.createdAt.getTime() < PUBLISH_DEDUPE_WINDOW_MS &&
-        stableJson(latest.snapshotData) === stableJson(snapshotData)
+        stableJson({
+          pages: (latest.snapshotData as SnapshotData).pages,
+          editor: (latest.snapshotData as SnapshotData).editor,
+          base: teachingPackageBase(latest.snapshotData),
+          teachingPackageInput: (
+            latest.snapshotData as {
+              teachingPackageInput?: unknown;
+            }
+          ).teachingPackageInput,
+          teachingCardRevisions:
+            (latest.snapshotData as { teachingCardRevisions?: unknown[] })
+              .teachingCardRevisions ?? [],
+        }) ===
+          stableJson({
+            ...snapshot,
+            editor,
+            base,
+            teachingPackageInput: authored,
+            teachingCardRevisions,
+          })
       ) {
         return { created: latest, duplicate: true };
+      }
+      const id = authored ? randomUUID() : undefined;
+      let snapshotData: Prisma.InputJsonObject = {
+        ...snapshot,
+        editor,
+        ...(base
+          ? { teachingPackageBase: base as Prisma.InputJsonObject }
+          : {}),
+      };
+      if (authored && id) {
+        try {
+          const { teachingPackage, imageAssets } = this.compileTeachingPackage({
+            courseId,
+            releaseId: id,
+            snapshot,
+            authored,
+          });
+          for (const asset of imageAssets)
+            if (!(await this.files.getImage(courseId, asset)))
+              throw new Error(`image is unavailable for this course: ${asset}`);
+          snapshotData = {
+            ...snapshotData,
+            teachingCardRevisions,
+            teachingPackageBase: base ? (base as Prisma.InputJsonObject) : null,
+            teachingPackageInput: authored as Prisma.InputJsonObject,
+            teachingPackage: JSON.parse(
+              JSON.stringify(teachingPackage),
+            ) as Prisma.InputJsonObject,
+          };
+        } catch (error) {
+          throw new BadRequestException(
+            `教学包校验失败：${error instanceof Error ? error.message : 'INVALID_PACKAGE'}`,
+          );
+        }
       }
       // 仅写入快照，不更新 currentReleaseId（纯快照，2026-10-20 改拍）
       const created = await tx.release.create({
         data: {
+          ...(id ? { id } : {}),
           courseId,
           versionTag: `${course.title}_${this.timestamp()}`,
           revisionNotes: dto.revisionNotes,
@@ -167,44 +336,87 @@ export class ReleasesService {
     return created;
   }
 
-  /**
-   * 切换到此版本（§3.4.2；2026-10-20 二次/三次改拍）：单事务内校验归属 → 以快照重建 Page 草稿
-   * （覆盖当前草稿，含未发布修改；前端已二次确认）→ **置 `Course.editingReleaseId` = 该 Release**。
-   * **不改动 `Course.currentReleaseId`（Live 指针）**——Live 只能由 §3.4.4 Set Live（AI Tutor 板块）变更。
-   * 重建节点一律 syncState=SYNCED，后续 Sync 按标题匹配不受影响。
-   */
+  /** 课程锁覆盖读取、替换工作区和更新编辑版本指针。 */
   async activate(courseId: string, dto: ActivateReleaseDto) {
-    const course = await this.prisma.course.findUnique({
-      where: { id: courseId },
-      select: { id: true },
-    });
-    if (!course) {
-      throw new NotFoundException('课程不存在');
-    }
-    const release = await this.prisma.release.findUnique({
-      where: { id: dto.releaseId },
-    });
-    if (!release || release.courseId !== courseId) {
-      throw new NotFoundException('发布版本不存在或不属于该课程');
-    }
-    const snapshot = release.snapshotData as unknown as SnapshotData;
     return this.prisma.$transaction(async (tx) => {
-      // 删除当前所有 Page（Course 级联无需管 Lesson）
+      await lockCourseRow(tx, courseId);
+      const course = await tx.course.findUnique({
+        where: { id: courseId },
+        select: { editingReleaseId: true },
+      });
+      if (!course) throw new NotFoundException('课程不存在');
+      const release = await tx.release.findUnique({
+        where: { id: dto.releaseId },
+      });
+      if (!release || release.courseId !== courseId)
+        throw new NotFoundException('发布版本不存在或不属于该课程');
+      const snapshot = release.snapshotData as unknown as SnapshotData;
+      if (!Array.isArray(snapshot?.pages))
+        throw new ConflictException('无法恢复此格式的编辑快照');
+      const editor = snapshot.editor;
+      if (
+        editor !== undefined &&
+        (editor?.version !== 1 ||
+          !Array.isArray(editor.pages) ||
+          !Array.isArray(editor.cards))
+      )
+        throw new ConflictException('无法恢复此格式的编辑快照');
+      if (!editor) {
+        const current =
+          course.editingReleaseId &&
+          (await tx.release.findUnique({
+            where: { id: course.editingReleaseId },
+            select: { snapshotData: true },
+          }));
+        if (
+          snapshot.teachingPackage ||
+          teachingPackageBase(snapshot) ||
+          (current && teachingPackageBase(current.snapshotData)) ||
+          (await tx.tutorTeachingCard.count({ where: { courseId } }))
+        )
+          throw new ConflictException(
+            '旧版本缺少教学条目编辑快照，无法恢复含教学条目的工作区。可继续预览或设为 Live。',
+          );
+      }
+      const pages =
+        editor?.pages ??
+        (snapshot.pages ?? []).map((page, sortOrder) => ({
+          ...page,
+          sortOrder,
+          syncState: 'SYNCED' as const,
+          externalId: null,
+        }));
       await tx.page.deleteMany({ where: { courseId } });
-      for (const [pi, page] of (snapshot.pages ?? []).entries()) {
-        await tx.page.create({
-          data: {
+      if (pages.length)
+        await tx.page.createMany({
+          data: pages.map((page) => ({
+            id: page.id,
             courseId,
             title: page.title,
-            contentMd: page.contentMd ?? '',
+            contentMd: page.contentMd,
+            externalId: page.externalId,
+            sortOrder: page.sortOrder,
+            syncState: page.syncState,
             sectionTags:
               page.sectionTags == null
-                ? undefined
+                ? Prisma.DbNull
                 : (page.sectionTags as Prisma.InputJsonValue),
-            sortOrder: pi,
-            syncState: 'SYNCED',
-          },
+          })),
         });
+      if (editor) {
+        await tx.tutorTeachingCard.deleteMany({ where: { courseId } });
+        if (editor.cards.length)
+          await tx.tutorTeachingCard.createMany({
+            data: editor.cards.map((card) => ({
+              ...card,
+              courseId,
+              draft: cleanProfessorQa(card.draft) as Prisma.InputJsonValue,
+              approved:
+                card.approved == null
+                  ? Prisma.DbNull
+                  : (cleanProfessorQa(card.approved) as Prisma.InputJsonValue),
+            })),
+          });
       }
       // 置当前编辑版本指针 = 该 Release（2026-10-20 三次改拍）；不改动 currentReleaseId
       await tx.course.update({
@@ -283,16 +495,42 @@ export class ReleasesService {
         versionTag: true,
         revisionNotes: true,
         createdAt: true,
+        _count: { select: { knowledgeChunks: true } },
       },
     });
-    return releases.map((r) => ({
+    const complete = await this.prisma.release.findMany({
+      where: {
+        courseId,
+        snapshotData: { path: ['editor', 'version'], equals: 1 },
+      },
+      select: { id: true },
+    });
+    const editable = new Set(complete.map((row) => row.id));
+    return releases.map(({ _count, ...r }) => ({
       ...r,
       // isActive: 是否为 Live 版本；isTestSelected: 是否为 AI Tutor 后台测试所选版本；
       // isEditing: 是否为当前编辑版本（2026-10-20 新增，§3.4.2）
       isActive: r.id === course.currentReleaseId,
       isTestSelected: r.id === course.aiTestReleaseId,
+      hasEditorSnapshot: editable.has(r.id),
       isEditing: r.id === course.editingReleaseId,
+      indexChunkCount: _count.knowledgeChunks,
+      indexStatus: this.indexing.status(r.id, _count.knowledgeChunks),
     }));
+  }
+
+  async rebuildIndex(releaseId: string) {
+    const release = await this.prisma.release.findUnique({
+      where: { id: releaseId },
+      select: { snapshotData: true },
+    });
+    if (!release) throw new NotFoundException('发布版本不存在');
+    const snapshot = release.snapshotData as unknown as SnapshotData;
+    if (!snapshot?.pages?.some((page) => page.contentMd?.trim())) {
+      throw new BadRequestException('所选知识库版本没有可用正文');
+    }
+    void this.indexing.indexRelease(releaseId);
+    return { id: releaseId };
   }
 
   /**

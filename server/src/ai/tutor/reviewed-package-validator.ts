@@ -13,6 +13,8 @@ const CARD_TYPES = new Set([
   'boundary',
   'rubric',
   'teaching_move',
+  'professor_qa',
+  'ref_obj',
 ]);
 
 export interface ReviewedTeachingCard {
@@ -138,7 +140,7 @@ function stringList(value: unknown, allowEmpty = true): value is string[] {
   );
 }
 
-function isBilingual(value: unknown): boolean {
+function isBilingual(value: unknown, reference: boolean): boolean {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['conceptLabel', 'summary', 'triggers'])
@@ -148,10 +150,15 @@ function isBilingual(value: unknown): boolean {
     isRecord(item) &&
     hasExactKeys(item, ['en', 'zh']) &&
     nonEmptyString(item.en) &&
-    nonEmptyString(item.zh);
+    (nonEmptyString(item.zh) || item.zh === '');
   return (
     pair(value.conceptLabel) &&
-    pair(value.summary) &&
+    (reference
+      ? isRecord(value.summary) &&
+        typeof value.summary.zh === 'string' &&
+        typeof value.summary.en === 'string' &&
+        !!(value.summary.zh || value.summary.en)
+      : pair(value.summary)) &&
     isRecord(value.triggers) &&
     hasExactKeys(value.triggers, ['en', 'zh']) &&
     stringList(value.triggers.en) &&
@@ -187,10 +194,13 @@ function isCard(value: unknown): value is ReviewedTeachingCard {
     nonEmptyString(value.topic) &&
     nonEmptyString(value.canonicalPoint) &&
     isPlainJson(value.approvedPayload) &&
-    isBilingual(value.bilingual) &&
+    isBilingual(value.bilingual, value.type === 'ref_obj') &&
     stringList(value.useWhen, false) &&
     stringList(value.doNotUseWhen) &&
-    stringList(value.sourceSupport, false) &&
+    stringList(
+      value.sourceSupport,
+      value.type === 'ref_obj' || value.type === 'professor_qa',
+    ) &&
     stringList(value.links) &&
     Number.isFinite(value.priority) &&
     nonEmptyString(value.reviewerId) &&
@@ -209,7 +219,7 @@ function isGlossaryEntry(
     !isRecord(value.label) ||
     !hasExactKeys(value.label, ['en', 'zh']) ||
     !nonEmptyString(value.label.en) ||
-    !nonEmptyString(value.label.zh) ||
+    !(nonEmptyString(value.label.zh) || value.label.zh === '') ||
     !isRecord(value.aliases) ||
     !hasExactKeys(value.aliases, ['en', 'zh']) ||
     !stringList(value.aliases.en) ||
@@ -272,7 +282,6 @@ export function validateReviewedTeachingPackage(input: {
       !Array.isArray(candidate.sources) ||
       !Array.isArray(candidate.cards) ||
       !Array.isArray(candidate.glossary) ||
-      candidate.sources.length === 0 ||
       candidate.cards.length === 0 ||
       candidate.glossary.length === 0
     )
@@ -320,7 +329,9 @@ export function validateReviewedTeachingPackage(input: {
       if (
         !entry ||
         entry.label.en !== card.bilingual.conceptLabel.en ||
-        entry.label.zh !== card.bilingual.conceptLabel.zh
+        (entry.label.zh &&
+          card.bilingual.conceptLabel.zh &&
+          entry.label.zh !== card.bilingual.conceptLabel.zh)
       )
         return { valid: false, reason: 'GLOSSARY_MISMATCH' };
     }

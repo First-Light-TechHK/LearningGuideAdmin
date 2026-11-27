@@ -10,6 +10,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -30,6 +31,17 @@ import {
   parseEvaluationExample,
   workbook,
 } from './evaluation-excel';
+
+function exportFileStem(name: string | undefined, id: string) {
+  const stem = name
+    ?.replace(/\.(xlsx|json)$/i, '')
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/^[. ]+|[. ]+$/g, '');
+  if (!stem) return id;
+  return /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(stem)
+    ? `_${stem}`
+    : stem;
+}
 
 @Controller('ai/evaluation')
 export class EvaluationController {
@@ -72,7 +84,7 @@ export class EvaluationController {
     const id = randomUUID();
     this.sessions.set(id, {
       owner,
-      config,
+      config: { ...config, runningSolution: 'dialogue-yong' },
       snapshot: snapshots[config.modes[0]]!,
       expires: Date.now() + 30 * 60 * 1000,
       busy: false,
@@ -206,6 +218,13 @@ export class EvaluationController {
   ) {
     return this.tasks.get(this.owner(req), id);
   }
+  @Patch('tasks/:id/name') rename(
+    @Req() req: BackofficeRequest,
+    @Param('id') id: string,
+    @Body('name') name: unknown,
+  ) {
+    return this.tasks.rename(this.owner(req), id, name);
+  }
   @Post('tasks/:id/stop') stop(
     @Req() req: BackofficeRequest,
     @Param('id') id: string,
@@ -239,8 +258,9 @@ export class EvaluationController {
     @Res() res: Response,
   ) {
     const task = await this.tasks.get(this.owner(req), id);
+    const filename = exportFileStem(task.name, id);
     if (format === 'json') {
-      res.attachment(`${id}.json`).json(task);
+      res.attachment(`${filename}.json`).json(task);
       return;
     }
     const en = locale === 'en-GB';
@@ -287,13 +307,16 @@ export class EvaluationController {
     ]);
     res
       .type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      .attachment(`${id}.xlsx`)
+      .attachment(`${filename}.xlsx`)
       .send(
         workbook([
           [
             en ? 'Overview' : '测试概览',
             [
               ['ID', id],
+              ...(task.name
+                ? [[en ? 'Task name' : '任务名称', task.name]]
+                : []),
               ['Status', task.status],
               ...Object.entries(task.config).map(([key, value]) => [
                 key,

@@ -27,6 +27,55 @@ export interface AnchoredChunk {
   anchor: SnapshotSourceAnchor;
 }
 
+export function buildReviewedExcerpt(input: {
+  courseId: string;
+  releaseId: string;
+  snapshot: { pages: SnapshotPage[] };
+  excerpt: string;
+}): AnchoredChunk {
+  const { courseId, releaseId, snapshot, excerpt } = input;
+  if (!excerpt.trim() || excerpt.length > WINDOW)
+    throw new Error('invalid reviewed excerpt length');
+  const pages = snapshot.pages.filter((page) =>
+    page.contentMd.includes(excerpt),
+  );
+  const page = pages[0];
+  if (pages.length !== 1 || !page)
+    throw new Error('reviewed excerpt must identify one snapshot page');
+  const start = page.contentMd.indexOf(excerpt);
+  if (page.contentMd.indexOf(excerpt, start + 1) !== -1)
+    throw new Error('reviewed excerpt must identify one source range');
+  const headingPath =
+    headingPoints(page.contentMd).findLast((point) => point.offset <= start)
+      ?.path ?? [];
+  const anchor = createSnapshotSourceAnchor({
+    courseId,
+    releaseId,
+    pageId: page.id,
+    headingPath,
+    content: page.contentMd,
+    start,
+    end: start + excerpt.length,
+  });
+  const digest = snapshotHash(snapshot);
+  const chunkerVersion = 'reviewed-excerpt-v1';
+  return {
+    id: snapshotHash({
+      snapshotHash: digest,
+      chunkerVersion,
+      anchorId: anchor.id,
+    }),
+    snapshotHash: digest,
+    chunkerVersion,
+    pageTitle: page.title,
+    content: excerpt,
+    tokenCount: Math.ceil(excerpt.length / 4),
+    tokenCountMethod: 'utf16-length-divided-by-4',
+    sourceCategory: 'unknown',
+    anchor,
+  };
+}
+
 function splitsPair(text: string, position: number): boolean {
   if (position <= 0 || position >= text.length) return false;
   const before = text.charCodeAt(position - 1);

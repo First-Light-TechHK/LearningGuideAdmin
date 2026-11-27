@@ -11,7 +11,6 @@ import {
   Segmented,
   Space,
   Spin,
-  Tag,
   Tooltip,
   type MenuProps,
 } from '../ui'
@@ -29,6 +28,7 @@ import { normalizeTutorMarkdown } from './normalizeTutorMarkdown'
 import { copyToClipboard, stripMarkdown } from './chatUtils'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState'
 import { tokens } from '../../theme/tokens'
+import { AiReleaseOption } from './AiReleaseOption'
 
 const katexPlugins = {
   remarkPlugins: [remarkGfm, remarkMath],
@@ -120,48 +120,7 @@ function ReleaseSelector() {
   const canScroll = releases.length > MAX_VISIBLE_RELEASES
 
   const items: MenuProps['items'] = releases.length
-    ? releases.map((r) => {
-        /** 第二行版本说明：revisionNotes 为空 → 占位；单行截断 + tooltip（设计文档拍板） */
-        const hasNotes = Boolean(r.revisionNotes?.trim())
-        const noteDisplay = hasNotes ? r.revisionNotes : text('noRevisionNotes')
-        const noteColor = hasNotes ? tokens.color.text.secondary : tokens.color.text.tertiary
-        return {
-          key: r.id,
-          label: (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: tokens.spacing.xs,
-                minWidth: 220,
-                padding: `${tokens.spacing.xs}px 0`,
-              }}
-            >
-              {/* 第一行：versionTag + Live 徽章 */}
-              <Space size="small">
-                <span>{r.versionTag}</span>
-                {r.isActive && <Tag color="green">{text('live')}</Tag>}
-              </Space>
-              {/* 第二行：版本说明（单行截断 + tooltip） */}
-              <Tooltip title={hasNotes ? r.revisionNotes : undefined}>
-                <span
-                  style={{
-                    display: 'block',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    fontSize: tokens.fontSize.md,
-                    color: noteColor,
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {noteDisplay}
-                </span>
-              </Tooltip>
-            </div>
-          ),
-        }
-      })
+    ? releases.map((release) => ({ key: release.id, label: <AiReleaseOption release={release} /> }))
     : [{ key: '__none', label: text('noReleases'), disabled: true }]
 
   return (

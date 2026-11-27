@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AiModule } from './ai/ai.module';
+import { compileTeachingPublication } from './ai/tutor/teaching-package-publication';
 import { HttpKnowledgeClient } from './ai/knowledge/http-knowledge.client';
 import { HealthController } from './health/health.controller';
 import { validateEnv } from './config/env.validation';
@@ -91,7 +92,11 @@ function appModuleMetadata(roles: readonly AppRole[]): ModuleMetadata {
       PrismaModule,
       // Knowledge System：员工编写（admin 角色）+ 给 Agent 的内部接口（ks 角色）
       // KsModule 内部导入 KnowledgeModule，提供 RAG 索引与向量检索能力
-      KsModule.register({ authoring: admin, internalApi: ks }),
+      KsModule.register({
+        authoring: admin,
+        internalApi: ks,
+        teachingPackageCompiler: compileTeachingPublication,
+      }),
       // AI Tutor：员工配置与测试（admin 角色）+ 学员对话运行时（agent 角色）
       ...(admin || agent
         ? [

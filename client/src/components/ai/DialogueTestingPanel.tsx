@@ -18,7 +18,7 @@ function load(ownerId: string, courseId: string): Saved | null {
     if (!raw) return null
     const saved = JSON.parse(raw) as Saved
     if (!Array.isArray(saved.routes) || !saved.results || typeof saved.results !== 'object') return null
-    return { routes: saved.routes.map((route) => ({ ...route, runningSolution: route.runningSolution === 'dialogue-yong' ? 'dialogue-yong' as const : 'grounded-jack' as const })), results: Object.fromEntries(Object.entries(saved.results).map(([id, items]) => [id, Array.isArray(items) ? items.map((item) => item.status === 'streaming' ? { ...item, status: 'aborted' } : item) : []])) }
+    return { routes: saved.routes.map((route) => ({ ...route, runningSolution: 'dialogue-yong' as const })), results: Object.fromEntries(Object.entries(saved.results).map(([id, items]) => [id, Array.isArray(items) ? items.map((item) => item.status === 'streaming' ? { ...item, status: 'aborted' } : item) : []])) }
   } catch { return null }
 }
 
@@ -54,7 +54,7 @@ export function DialogueTestingPanel() {
     const model = config?.model && models.includes(config.model) ? config.model : models[0]
     const releaseId = config?.releaseId ?? releases[0]?.id
     if (!model || !releaseId) return
-    setRoutes((current) => [...current, { id: crypto.randomUUID(), model, releaseId, useKnowledge: true, runningSolution: config?.runningSolution ?? 'grounded-jack' }])
+    setRoutes((current) => [...current, { id: crypto.randomUUID(), model, releaseId, useKnowledge: true, runningSolution: 'dialogue-yong' }])
   }
 
   const updateRoute = (id: string, change: Partial<Route>) => {
@@ -115,7 +115,6 @@ export function DialogueTestingPanel() {
         <Space wrap>
           <Select value={route.model} onChange={(model) => updateRoute(route.id, { model })} options={models.map((model) => ({ value: model, label: model }))} style={{ minWidth: 180 }} disabled={running} />
           <Select value={route.releaseId} onChange={(releaseId) => updateRoute(route.id, { releaseId })} options={releases.map((release) => ({ value: release.id, label: release.versionTag }))} style={{ minWidth: 160 }} disabled={running} />
-          <Select value={route.runningSolution ?? 'grounded-jack'} onChange={(runningSolution) => updateRoute(route.id, { runningSolution })} options={[{ value: 'grounded-jack', label: 'Grounded Tutor - Jack' }, { value: 'dialogue-yong', label: 'Dialogue Tutor - Yong' }]} style={{ minWidth: 180 }} disabled={running} />
           <Switch checked={route.useKnowledge} onChange={(useKnowledge) => updateRoute(route.id, { useKnowledge })} disabled={running} /> {text('dialogueTesting.useKnowledge')}
         </Space>
         {(results[route.id] ?? []).map((result, i) => <div key={`${result.createdAt}-${i}`} style={{ marginTop: 16 }}>

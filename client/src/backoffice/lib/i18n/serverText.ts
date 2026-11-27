@@ -10,6 +10,36 @@ import { t } from "./messages";
  * 新增后端中文报错时要在这里加译文，tests/i18n-guard.test.ts 会扫描后端源码检查。
  */
 export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> = [
+  ["版本不存在","The release does not exist."],
+  ["目标课程不存在","The target course does not exist."],
+  ["目标课程的外部课程标识与源课程不一致","The source and target courses have different external identifiers."],
+  ["目标课程绑定的商品课程编号与源课程不一致","The source and target courses are linked to different commerce course codes."],
+  ["版本内容 ID 与其他课程冲突","A package identifier belongs to another course."],
+  ["目标课程绑定已改变","The target course binding has changed."],
+  ["请选择知识版本 ZIP","Choose a knowledge release ZIP."],
+  ["版本包缺少有效的对象","A package object is missing or invalid."],
+  ["版本包缺少有效的列表","A package list is missing or invalid."],
+  ["版本包文本字段无效","A package text field is invalid."],
+  ["版本包标识无效","A package identifier is invalid."],
+  ["版本包整数无效","A package integer is invalid."],
+  ["版本包日期无效","A package date is invalid."],
+  ["此版本缺少可迁移的编辑快照","This release has no transferable editor snapshot."],
+  ["页面同步状态无效","A page has an invalid sync state."],
+  ["编辑快照与该版本的教学包输入不一致","The editor snapshot does not match the release's teaching package input."],
+  ["请选择有效的知识版本 ZIP","Choose a valid knowledge release ZIP."],
+  ["版本包文件路径无效","The version package contains an invalid path."],
+  ["缺少版本包清单。请选择可迁移版本 ZIP。","The package manifest is missing. Choose a migration ZIP."],
+  ["版本包清单摘要不一致","The package manifest checksum does not match."],
+  ["不支持的版本包格式","Unsupported release package format."],
+  ["版本包包含未登记文件","The package contains an unlisted file."],
+  ["知识版本 ZIP 无效或已损坏","The knowledge release ZIP is invalid or corrupt."],
+  ["发布页面与编辑快照不一致","Published pages differ from the editor snapshot."],
+  ["此版本缺少教学包原始输入","This release is missing its original teaching package input."],
+  ["存在未引用的图片","The package contains an unused image."],
+  ["版本包包含重复的页面","The release package has duplicate page identifiers."],
+  ["版本包包含重复的条目","The release package has duplicate entry identifiers."],
+  ["版本包包含重复的课节绑定","The release package has duplicate lesson bindings."],
+  ["缺少 embedding 配置", "Embedding is not configured."],
   ["向量检索上游暂不可用", "The embedding retrieval service is temporarily unavailable."],
   ["模型不在可用列表中", "The selected model is not available."],
   ["测试版本已变化，请刷新后重试", "The test release has changed. Refresh and try again."],
@@ -19,6 +49,8 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["LLM 上游生成失败", "The model could not complete this response."],
   ["LLM 上游连接中断", "The model connection was interrupted."],
   ["所选知识库版本没有可用正文", "The selected release has no usable course content."],
+  ["所选知识库版本缺少索引，请在版本列表中重建索引后再测试", "The selected knowledge release has no search index. Rebuild it from the release list before testing."],
+  ["任务名称须为 1–80 个字符，且不能包含控制字符", "Use a task name of 1–80 characters without control characters."],
   ["向量检索无法连接", "The knowledge search service could not be reached."],
   ["所选知识库版本不存在", "The selected release does not exist."],
   ["知识库版本不属于当前课程", "The release does not belong to this course."],
@@ -64,6 +96,7 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["DOCX 解压内容超过安全限制", "The unpacked DOCX is larger than the safety limit."],
   ["页面不存在", "The page does not exist."],
   ["排序列表必须为该课程全部页面的完整排列", "The order must list every page of this course."],
+  ["课程页面已变化，请重新确认后再清除", "The course pages have changed. Review and confirm again before clearing them."],
   ["本期仅同步课程与课时标题，正文内容同步已禁用", "Only course and lesson titles are synced for now. Content sync is off."],
   ["该课程不在同步映射表中", "This course is not in the sync mapping."],
   ["标签名称不能为空", "The tag name cannot be empty."],
@@ -86,16 +119,41 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["DOCX 含图片，请从 Knowledge Pages 课程中导入", "This DOCX contains images. Import it from a course in Knowledge Pages."],
   ["该版本为 AI Tutor 后台测试所选版本，不可删除", "This version is selected for AI Tutor testing and cannot be deleted."],
   ["热门课程只能选择 1–6 门。", "Popular Courses allows 1–6 courses."],
+  ["工作区版本已变化，请重新加载后编辑", "The workspace has changed. Reload before editing."],
+  ["无法恢复此格式的编辑快照", "This editor snapshot format cannot be restored."],
+  ["旧版本缺少教学条目编辑快照，无法恢复含教学条目的工作区。可继续预览或设为 Live。", "This older version has no editable teaching entry snapshot. You can still preview it or set it live."],
 ];
+
+const TEACHING_ERRORS: Readonly<Record<string, readonly [string, string]>> = {
+  DEFINITION_PASSAGE_CHANGED: ['关联原文已变化或不唯一，请重新选择。', 'The linked passage changed or is ambiguous. Select it again.'],
+  REFERENCE_CODE_IN_USE: ['本课程已使用这个编号（含历史编号），请换一个。', 'This course already uses that number or alias. Choose another.'],
+  REFERENCE_SUMMARY_REQUIRED: ['请填写英文摘要。', 'Enter an English summary.'],
+  SCHEMA_NOT_READY: ['数据库版本未就绪，请管理员检查部署迁移。', 'The database schema is not ready. Ask an administrator to check the deployment migrations.'],
+  LECTURE_REFERENCE_CATALOG_INVALID: ['本课程的引用对象有冲突或格式有误，请检查已保存的条目。', 'References for this course contain a conflict or an invalid entry. Check the saved teaching entries.'],
+  INVALID_TEACHING_CARD: ['教学条目信息不完整或格式有误。', 'Complete the required teaching entry fields and check their format.'],
+  TEACHING_CARD_NOT_FOUND: ['找不到这条教学条目。', 'This teaching entry could not be found.'],
+  TEACHING_CARD_REVISION_CHANGED: ['条目已被更新。请刷新并核对最新版本后重试。', 'This entry has changed. Refresh and review the latest version before trying again.'],
+}
 
 /** 带变量的后端句子：同样两种语言都写，正则从中文原文取变量。 */
 export const SERVER_MESSAGE_PATTERNS: ReadonlyArray<readonly [zh: RegExp, en: (m: RegExpMatchArray) => string]> = [
+  [/^DOCX 包含暂不支持的 Word 公式结构（(.+)）$/, (m) => 'The DOCX contains an unsupported Word equation structure (' + m[1] + ').'],
+  [/^DOCX 公式导入不完整（([^/]+)\/([^）]+)），请检查原文$/, (m) => 'Only ' + m[1] + ' of ' + m[2] + ' DOCX equations were imported. Check the original document.'],
   [/^页面「(.+)」的图片无法导出：(.+)$/, (m) => `The image in "${m[1]}" cannot be exported: ${m[2]}`],
   [/^页面「(.+)」的图片不存在：(.+)$/, (m) => `The image in "${m[1]}" is missing: ${m[2]}`],
+  [/^页面「(.+)」的课程引用不可用：(.+)$/, (m) => `Course reference ${m[2]} is unavailable in "${m[1]}".`],
   [/^不支持的 LLM 模型：(.+)$/, (m) => `Unsupported LLM model: ${m[1]}`],
   [/^不支持的 LLM Provider: (.+)$/, (m) => `Unsupported LLM provider: ${m[1]}`],
   [/^Tag "(.+)" 不存在$/, (m) => `The tag "${m[1]}" does not exist.`],
   [/^知识库服务暂不可用（(.+)）$/, () => "The knowledge service is unavailable right now."],
+  [/^向量检索请求超时，阶段 (.+)$/, () => "The knowledge search request timed out."],
+  [/^(?:版本图片不存在|版本引用的图片缺失|缺少或无效的图片)：(.+)$/, m => "Missing or invalid course image: " + m[1]],
+  [/^(?:图片格式与文件名不符|课程图片文件名无效|图片摘要不一致)：(.+)$/, m => "Course image validation failed: " + m[1]],
+  [/^版本中存在跨课程图片：(.+)$/, m => "Image belongs to a different course: " + m[1]],
+  [/^定义的来源页不存在：(.+)$/, m => "The definition refers to a missing page: " + m[1]],
+  [/^页面「(.+)」引用不存在：(.+)$/, m => "Unresolved course reference: " + m[2]],
+  [/^版本校验失败：(.+)$/, m => translate(m[1], "en-GB") ?? "The teaching package could not be validated."],
+  [/^教学包校验失败：(.+)$/, (m) => `The teaching package could not be validated: ${m[1]}`],
   [/^Excel 模板结构无法识别：(.+)$/, () => "The Excel template could not be read: expected the Course info and Lessons sheets."],
   [/^Excel 缺少 Sheet：(.+)$/, (m) => `The Excel file is missing sheets: ${m[1]}`],
   [/^LLM 上游返回 (.+)$/, (m) => `The LLM service answered ${m[1]}`],
@@ -121,6 +179,8 @@ export function serverText(raw: string | null | undefined, locale: Locale = curr
 }
 
 function translate(text: string, locale: Locale): string | null {
+  if (Object.hasOwn(TEACHING_ERRORS, text))
+    return TEACHING_ERRORS[text][locale === 'zh-CN' ? 0 : 1];
   const isZh = HAN.test(text);
   if (locale === "zh-CN") {
     if (isZh) return text;

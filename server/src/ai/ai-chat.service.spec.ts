@@ -331,6 +331,35 @@ describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
     expect(rest).not.toContain(`![状态变量图](${image})`);
   });
 
+  it.each([
+    ['请只用文字解释状态点', 0],
+    ['Show Exhibit 1.6', 1],
+  ] as const)(
+    'Jack Lecture 在流输出和日志中统一执行选图：%s',
+    async (message, count) => {
+      const url = `/api/files/images/${COURSE_ID}/22222222-2222-4222-8222-222222222222.png`;
+      const { service, knowledge, entryOf } = setup(async function* () {
+        yield 'The state changes.\n\n!';
+        yield `[same](${url})\n\nAgain ![same](${url})`;
+      });
+      (knowledge.getRelease as jest.Mock).mockResolvedValue({
+        id: TEST_RELEASE,
+        courseId: COURSE_ID,
+        versionTag: 'v1',
+        pages: [
+          {
+            title: 'Lesson 1',
+            contentMd: `Exhibit 1.6 状态点\n\n![状态点](${url})`,
+          },
+        ],
+      });
+      const result = await collect(service.streamChat({ ...dto(), message }));
+      expect(result.match(/!\[/g) ?? []).toHaveLength(count);
+      expect(result).toContain('The state changes.');
+      expect(entryOf().answer).toBe(result);
+    },
+  );
+
   it('完整 Release 直接进入编译器，并在模型结束前输出首段', async () => {
     const { service, knowledge } = setup(async function* () {
       yield 'first';

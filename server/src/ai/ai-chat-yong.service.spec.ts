@@ -1,3 +1,6 @@
+import { prepareReviewedLecture } from './tutor/lecture-teaching';
+import { lectureQuestionLookup } from './tutor/lecture-question-reference';
+import { createHash } from 'node:crypto';
 /* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/require-await, require-yield -- 测试替身需要匹配 Provider 的异步生成器接口，且 mock 方法不依赖 this。 */
 import {
   ConflictException,
@@ -14,6 +17,9 @@ import { LlmTimeoutError } from './providers/llm-provider.interface';
 import { ProviderRegistry } from './providers/provider.registry';
 import { RateLimitService } from './rate-limit.service';
 import type { KnowledgeClient } from '../ks/contract/knowledge-client';
+import { compileTeachingPackage } from './tutor/teaching-package-publication';
+import { AiModule } from './ai.module';
+import { AiChatService } from './ai-chat.service';
 
 const COURSE_ID = '11111111-1111-4111-8111-111111111111';
 const TEST_RELEASE = 'release-test';
@@ -131,6 +137,966 @@ async function collect(gen: AsyncGenerator<string>): Promise<string> {
 }
 
 describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
+  it('uses only an unambiguous published number and preserves ordinary searches', () => {
+    const pages = [
+      {
+        title: 'Unit A',
+        contentMd: '**Q12: How do we calibrate?**\nQ1.2: Extra material',
+      },
+    ];
+    expect(lectureQuestionLookup('Question 12', pages)).toMatchObject({
+      kind: 'unique',
+      source: { title: 'How do we calibrate?', page: 'Unit A' },
+    });
+    for (const message of [
+      '请解释校准。',
+      'Q1',
+      'Q1.2',
+      'Q12x',
+      'modelQ12',
+      'compare Q12 and Q8',
+    ]) {
+      expect(lectureQuestionLookup(message, pages)).toBeUndefined();
+    }
+    expect(
+      lectureQuestionLookup('Q12', [
+        ...pages,
+        { title: 'Unit B', contentMd: '第12题：其他问题' },
+      ]),
+    ).toMatchObject({ kind: 'clarify' });
+  });
+  it.each([
+    'I reviewed the notes about pressure, speed, distance, weather, density, energy, power, mass and force. Please explain Q7.',
+    '教材里的压力、速度、距离、密度、功率、质量等概念我都复习过了，请解释第７题。',
+  ])(
+    'locates the published question before searching for %s',
+    async (message) => {
+      const env = setup(async function* (opts) {
+        expect(opts.messages.at(-1)?.content).toBe(message);
+        yield opts.messages[0].content.includes('Calibration evidence')
+          ? 'grounded'
+          : 'missing';
+      });
+      jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+        id: TEST_RELEASE,
+        courseId: COURSE_ID,
+        versionTag: 'v1',
+        pages: [
+          {
+            title: 'Measurement',
+            contentMd:
+              'x'.repeat(25000) +
+              '\nQ70: Wrong question\nQ7: How is bias measured?\nA7: Calibration evidence',
+          },
+        ],
+      });
+      jest
+        .mocked(env.knowledge.retrieveChunks)
+        .mockImplementation(async (_id, query) =>
+          query.startsWith('Q7: How is bias measured?')
+            ? [
+                {
+                  pageTitle: 'Measurement',
+                  heading: null,
+                  content: 'Calibration evidence',
+                  score: 1,
+                  tokenCount: 8,
+                },
+              ]
+            : [],
+        );
+      expect(await collect(env.service.streamChat({ ...dto(), message }))).toBe(
+        'grounded',
+      );
+      expect(env.entryOf().evidence).toMatchObject({
+        context: 'published_question',
+        questionMatch: 'unique',
+        sources: [{ pageTitle: 'Measurement' }],
+      });
+    },
+  );
+  it.each([
+    ['请解释第3题。', '第二章', '请解释第2章的第3题。'],
+    ['Please explain Q3.', 'Chapter 2', 'Please explain Q3 from Chapter 2.'],
+  ])(
+    'clarifies repeated numbers and grounds the chapter reply for %s',
+    async (question, chapter, explicit) => {
+      const env = setup(async function* (opts) {
+        const prompt = opts.messages[0].content;
+        yield prompt.includes('Polar adjustment') &&
+        !prompt.includes('Solar adjustment')
+          ? 'polar'
+          : 'wrong evidence';
+      });
+      jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+        id: TEST_RELEASE,
+        courseId: COURSE_ID,
+        versionTag: 'v1',
+        pages: [
+          {
+            title: 'Laboratory',
+            contentMd:
+              '# Chapter 1\n## Exercises\nQ3: How do we calibrate?\nA3: Solar adjustment.\n# Chapter 2\n## Exercises\nQ3: How do we calibrate?\nA3: Polar adjustment.\nQ30: Other subject',
+          },
+        ],
+      });
+      const ask = (message: string, history: ChatStreamDto['history'] = []) =>
+        collect(env.service.streamChat({ ...dto(history), message }));
+      const clarification = await ask(question);
+      expect(clarification).toContain('Chapter 1');
+      expect(clarification).toContain('Chapter 2');
+      expect(env.entryOf().evidence?.route).toBe('direct_clarification');
+      expect(env.knowledge.retrieveChunks).not.toHaveBeenCalled();
+      expect(
+        await ask(chapter, [
+          { role: 'user', content: question },
+          { role: 'assistant', content: clarification },
+        ]),
+      ).toBe('polar');
+      expect(await ask(explicit)).toBe('polar');
+      expect(env.write.mock.calls[2][0].evidence).toMatchObject({
+        route: 'course_context',
+        context: 'published_question',
+        sources: [
+          {
+            pageTitle: 'Laboratory',
+            heading: 'Chapter 2 › Exercises › How do we calibrate?',
+            contentHash: createHash('sha256')
+              .update('Q3: How do we calibrate?\nA3: Polar adjustment.')
+              .digest('hex'),
+          },
+        ],
+      });
+    },
+  );
+  it('combines page and chapter, respects number boundaries and drops stale clarification history', () => {
+    const pages = [
+      {
+        title: 'Dynamics',
+        contentMd:
+          '# Chapter 1\n## Q8: Adjust\n### Solution\nA8: first\n# Chapter 10\n## Q8: Adjust\nA8: tenth',
+      },
+      { title: 'Optics', contentMd: '# 第十章\nQ8: Adjust\nA8: other' },
+    ];
+    const ambiguous = lectureQuestionLookup('Which Q8 in Chapter 10?', pages);
+    expect(ambiguous?.kind).toBe('clarify');
+    if (ambiguous?.kind !== 'clarify') throw Error('Expected a clarification');
+    expect(lectureQuestionLookup('第1章第8题', pages)).toMatchObject({
+      kind: 'scoped',
+      source: { body: '## Q8: Adjust\n### Solution\nA8: first' },
+    });
+    expect(lectureQuestionLookup('Dynamics 第十章 第8题', pages)).toMatchObject(
+      { kind: 'scoped', source: { body: '## Q8: Adjust\nA8: tenth' } },
+    );
+    expect(ambiguous.answer).not.toContain('Chapter 1 ›');
+    expect(
+      lectureQuestionLookup('2', pages, 'en-GB', ambiguous.answer),
+    ).toMatchObject({ kind: 'scoped', source: { page: 'Optics' } });
+    expect(
+      lectureQuestionLookup('Dynamics', pages, 'en-GB', ambiguous.answer),
+    ).toMatchObject({
+      kind: 'scoped',
+      source: { body: '## Q8: Adjust\nA8: tenth' },
+    });
+    expect(
+      lectureQuestionLookup(
+        'Explain a different concept in Chapter 10',
+        pages,
+        'en-GB',
+        ambiguous.answer,
+      ),
+    ).toBeUndefined();
+    expect(
+      lectureQuestionLookup('Dynamics', pages, 'en-GB', 'Let us discuss Q8.'),
+    ).toBeUndefined();
+    expect(
+      lectureQuestionLookup('3', pages.slice(0, 1), 'en-GB', ambiguous.answer),
+    ).toBeUndefined();
+  });
+  it('keeps a title-only exercise while supplementing from the same release text', async () => {
+    const env = setup(async function* (opts) {
+      const prompt = opts.messages[0].content;
+      expect(prompt).toContain('Q42: What causes expansion?');
+      expect(prompt).toContain('Heating expands this sample.');
+      expect(prompt).not.toContain('Answer from another exercise');
+      yield 'grounded';
+    });
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'v1',
+      pages: [
+        {
+          title: 'Lab',
+          contentMd:
+            'Q42: What causes expansion?\nQ43: Other\nA43: Answer from another exercise',
+        },
+        { title: 'Notes', contentMd: 'Heating expands this sample.' },
+      ],
+    });
+    await collect(
+      env.service.streamChat({ ...dto(), message: '请回答第42题。' }),
+    );
+    expect(env.knowledge.retrieveChunks).not.toHaveBeenCalled();
+    expect(env.entryOf().evidence?.sources.map((s) => s.pageTitle)).toEqual([
+      'Lab',
+      'Notes',
+    ]);
+  });
+  it('grounds natural questions and successive image follow-ups in the active release', async () => {
+    const prompts: string[] = [];
+    let reply = '这里是讲解。';
+    const env = setup(async function* (opts) {
+      prompts.push(opts.messages[0].content);
+      for (const chunk of reply.split('|')) yield chunk;
+    });
+    const cards = [
+      [
+        'coffee',
+        'Exhibit 1.2',
+        '咖啡杯的状态变量',
+        'Coffee state variables',
+        '图中 T 表示温度，W 表示重量。',
+      ],
+      [
+        'range',
+        'Exhibit 1.4',
+        '一维取值范围',
+        'One-dimensional state spaces',
+        '电压允许负值，种群数量非负。',
+      ],
+      [
+        'add',
+        'L1-F01',
+        '向量加法',
+        'Vector addition',
+        '撇号表示第二组数量，同一物种的分量相加。',
+      ],
+    ].map(([id, code, zh, en, summary], index) => ({
+      cardId: id,
+      type: 'ref_obj',
+      conceptId: id,
+      topic: '*',
+      canonicalPoint: summary,
+      bilingual: {
+        conceptLabel: { zh, en },
+        summary: { zh: summary, en: '' },
+        triggers: { en: [], zh: [] },
+      },
+      approvedPayload: {
+        code,
+        refObjects: [
+          {
+            id,
+            code,
+            label: zh,
+            kind: id === 'add' ? 'latex' : 'image',
+            value:
+              id === 'add'
+                ? '(a,b)+(c,d)=(a+c,b+d)'
+                : `11111111-1111-4111-8111-11111111111${index}.png`,
+            requires: [],
+          },
+        ],
+      },
+      evidence: [],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      links: [],
+      priority: 10,
+      reviewerId: 'prof',
+    }));
+    const snapshot = {
+      pages: [
+        {
+          id: 'lesson',
+          title: 'Lesson 1',
+          contentMd: 'Links: [Coffee](refobj:coffee) [Range](refobj:range).',
+        },
+      ],
+    };
+    const professorCard = {
+      ...cards[0],
+      cardId: 'coffee-qa',
+      type: 'professor_qa',
+      approvedPayload: {
+        question: 'Which quantities describe coffee?',
+        answerMd: 'We can record temperature and mass.',
+      },
+      bilingual: {
+        ...cards[0].bilingual,
+        summary: { en: 'Temperature and mass', zh: '' },
+        triggers: { en: ['Which quantities describe coffee?'], zh: [] },
+      },
+    };
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot,
+      authored: {
+        cards: [...cards, professorCard],
+        glossary: cards.map((c) => ({
+          conceptId: c.conceptId,
+          label: c.bilingual.conceptLabel,
+          aliases: { en: [], zh: [] },
+        })),
+      },
+    });
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'test',
+      ...snapshot,
+      teachingPackage,
+    });
+    const collectCandidates = jest.fn();
+    const candidateTurn = prepareReviewedLecture(
+      {
+        courseId: COURSE_ID,
+        id: TEST_RELEASE,
+        versionTag: 'test',
+        ...snapshot,
+        teachingPackage,
+      },
+      'What are the state variables of a cup of coffee?',
+      undefined,
+      undefined,
+      [],
+      undefined,
+      { collect: collectCandidates },
+    );
+    expect(candidateTurn.trace.exhibitCandidateIds).toContain('coffee');
+    expect(collectCandidates).toHaveBeenCalledWith(
+      [expect.objectContaining({ cardId: 'coffee-qa' })],
+      expect.any(String),
+      [],
+    );
+    const history: NonNullable<ChatStreamDto['history']> = [];
+    for (const message of [
+      '衰减公式中的 k(1-k) 是什么？',
+      '衰减公式中的速率是什么意思？',
+      'What does k mean in this formula: D=k(1-k)?',
+    ]) {
+      const size = prompts.length;
+      await collect(env.service.streamChat({ ...dto(), message }));
+      expect(prompts).toHaveLength(size + 1);
+      expect(env.write.mock.lastCall?.[0].evidence?.context).toBe('snapshot');
+    }
+    for (const message of [
+      '这个公式是什么意思？',
+      '请问公式中的 k 是什么？',
+      'What does this formula mean?',
+    ]) {
+      await collect(env.service.streamChat({ ...dto(), message }));
+      expect(env.write.mock.lastCall?.[0].evidence?.route).toBe(
+        'direct_clarification',
+      );
+    }
+    const ask = async (message: string) => {
+      const result = await collect(
+        env.service.streamChat({ ...dto(history), message }),
+      );
+      history.push(
+        { role: 'user', content: message },
+        { role: 'assistant', content: result },
+      );
+      return result;
+    };
+    expect(await ask('什么是 state variables？')).not.toContain('![');
+    expect(prompts.at(-1)).toContain('Write the explanation in Chinese.');
+    expect(await ask('能用咖啡杯举例吗？')).toContain(
+      '![咖啡杯的状态变量][exhibit:release-test:coffee]',
+    );
+    expect(prompts.at(-1)).toContain('图中 T 表示温度');
+    expect(prompts.at(-1)).toContain(
+      'exact standalone marker from this list: [[ref:coffee]]',
+    );
+    expect(await ask('这张图里的 T 是什么？')).not.toContain('![');
+    expect(prompts.at(-1)).toContain('Do not emit exhibit markers this turn.');
+    expect(prompts.at(-1)).toContain('Answer the specific follow-up');
+    expect(prompts.at(-1)).toContain('图中 T 表示温度');
+    expect(await ask('图里的 W 呢？')).not.toContain('![');
+    expect(prompts.at(-1)).toContain('图中 T 表示温度');
+    expect(await ask('一维取值范围怎么理解？')).toContain('![一维取值范围]');
+    expect(await ask('这张图说明什么？')).not.toContain('![');
+    expect(prompts.at(-1)).toContain('种群数量非负');
+    expect(prompts.at(-1)).not.toContain('图中 T 表示温度');
+    expect(
+      await ask('What are the state variables of a cup of coffee?'),
+    ).toContain('![咖啡杯的状态变量]');
+    expect(prompts.at(-1)).toContain('Write the explanation in English.');
+    expect(await ask('咖啡杯的状态变量是什么？')).toContain(
+      '![咖啡杯的状态变量]',
+    );
+    reply = '例如，咖啡杯的状态变量包括温度和重量。';
+    expect(await ask('什么是 state variables？')).not.toContain('![');
+    reply = '它描述两种鱼的数量 [1]。!|[课件](/api/test.png) [[ref:|coffee]]';
+    for (const question of [
+      '鲨鱼和金枪鱼模型中的一个点是它们在海里的位置吗？请只用文字解释。',
+      'Does a point in shark–tuna space locate the fish in the sea? Use words only.',
+      'In one sentence, define a one-dimensional state space without examples or a diagram.',
+    ]) {
+      const result = await ask(question);
+      expect(result.trim()).toBe('它描述两种鱼的数量 [1]。');
+      expect(prompts.at(-1)).toContain(
+        'Omit coordinate tuples, variable symbols and math delimiters',
+      );
+      expect(prompts.at(-1)).toContain(
+        'Do not emit exhibit markers this turn.',
+      );
+    }
+    reply = '参见课程中的图。';
+    expect(await ask('请展示咖啡杯的状态变量图')).toContain(
+      '![咖啡杯的状态变量]',
+    );
+    const previous = history.at(-1)!;
+    const foreign = {
+      ...previous,
+      content: previous.content.replaceAll('release-test', 'release-old'),
+    };
+    expect(
+      await collect(
+        env.service.streamChat({
+          ...dto([foreign]),
+          message: '这张图说明什么？',
+        }),
+      ),
+    ).toContain('你指的是哪张图');
+    expect(env.write.mock.lastCall?.[0].evidence).toEqual({
+      route: 'direct_clarification',
+      context: 'not_requested',
+      sources: [],
+    });
+    const both = {
+      ...previous,
+      content:
+        previous.content +
+        '\n[exhibit:release-test:range]: /api/files/images/other',
+    };
+    expect(
+      await collect(
+        env.service.streamChat({ ...dto([both]), message: '这张图说明什么？' }),
+      ),
+    ).toContain('咖啡杯的状态变量 / 一维取值范围');
+    reply = '对应分量相加。';
+    const math = '$$(a,b)+(c,d)=(a+c,b+d)$$';
+    expect(await ask('向量加法怎么计算？')).toContain(math);
+    expect(prompts.at(-1)).toContain('同一物种的分量相加');
+    expect(await ask('这个撇号是什么意思？')).not.toContain(math);
+    expect(prompts.at(-1)).toContain('同一物种的分量相加');
+    expect(prompts.at(-1)).not.toContain('图中 T 表示温度');
+    reply = math + ' [[ref:add]]';
+    const repeated = await ask('Please explain vector addition');
+    expect(repeated.split(math)).toHaveLength(2);
+    expect(repeated).toContain('[exhibit:release-test:add]: #formula');
+    expect(await ask('请展示 L1-F01')).toContain(math);
+    reply = '对应分量相加，结果是 (5,12)。[[ref:add]] !|[图](/api/test.png)';
+    const calculation = await ask(
+      '不用配图，请用向量加法计算 (3,7) 和 (2,5) 的和。',
+    );
+    expect(calculation).toContain('(5,12)');
+    expect(calculation).toContain(math);
+    expect(calculation).not.toContain('/api/test.png');
+  });
+  it('uses approved evidence for exact, paraphrased and partially covered questions', async () => {
+    const answer =
+      'Under the small-angle approximation, the period is approximately independent of amplitude.';
+    const question = 'Does amplitude change the pendulum period?';
+    const pages = [
+      { id: 'p', title: 'Pendulum', contentMd: 'Pendulum course material.' },
+    ];
+    const label = { en: 'pendulum', zh: '' };
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot: { pages },
+      authored: {
+        glossary: [{ conceptId: 'swing', label, aliases: { en: [], zh: [] } }],
+        cards: [
+          {
+            cardId: 'swing',
+            conceptId: 'swing',
+            topic: '*',
+            type: 'professor_qa',
+            canonicalPoint: answer,
+            evidence: [],
+            useWhen: ['*'],
+            doNotUseWhen: [],
+            priority: 10,
+            links: [],
+            reviewerId: 'fixture',
+            bilingual: {
+              conceptLabel: label,
+              summary: label,
+              triggers: { en: [question], zh: [] },
+            },
+            approvedPayload: {
+              question,
+              answerMd: answer + ' Optional example about a clock.',
+            },
+          },
+        ],
+      },
+    });
+    let generationPrompt = '';
+    const env = setup(async function* (opts) {
+      if (
+        opts.messages[0].content.includes('Select a single published answer')
+      ) {
+        const query = opts.messages[1].content;
+        yield JSON.stringify({
+          cardId: 'swing',
+          coverage: query.includes('calibration')
+            ? 'partial'
+            : query.includes('price')
+              ? 'none'
+              : 'full',
+          conditionsMatch: true,
+          missingRequirements: query.includes('calibration')
+            ? ['calibration']
+            : [],
+          scope: 'Does the period change',
+          support: [
+            {
+              part: query.includes('calibration')
+                ? 'Does the period change'
+                : (JSON.parse(query) as { currentQuestion: string })
+                    .currentQuestion,
+              need: 'conclusion',
+              provides: 'conclusion',
+              excerpts: [answer],
+            },
+          ],
+        });
+        return;
+      }
+      const system = opts.messages[0].content;
+      generationPrompt = system;
+      yield system.includes(answer)
+        ? 'For small swings the period stays about the same.'
+        : 'Course material';
+    });
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'test',
+      pages,
+      teachingPackage,
+    });
+    const search = jest
+      .fn()
+      .mockResolvedValue({ status: 'ready', cardIds: ['foreign', 'swing'] });
+    env.knowledge.retrieveProfessorQa = search;
+    const ask = (message: string) =>
+      collect(env.service.streamChat({ ...dto(), message }));
+    expect(await ask(question)).toBe(
+      'For small swings the period stays about the same.',
+    );
+    expect(search).not.toHaveBeenCalled();
+    expect(generationPrompt).not.toContain('Optional example about a clock.');
+    expect(env.write.mock.lastCall?.[0].teaching?.qaSearch).toMatchObject({
+      source: 'exact',
+      accepted: 'swing',
+      reason: 'full_coverage',
+    });
+    expect(env.write.mock.lastCall?.[0].evidence).toMatchObject({
+      route: 'reviewed',
+      context: 'not_requested',
+      sources: [],
+    });
+    expect(
+      await ask(
+        'If the swing is small, is the duration of an oscillation about the same?',
+      ),
+    ).toBe('For small swings the period stays about the same.');
+    expect(search.mock.calls[0]).toEqual(expect.arrayContaining([['swing']]));
+    expect(env.write.mock.lastCall?.[0].teaching).toMatchObject({
+      qaCoverage: 'full',
+      qaSearch: { accepted: 'swing' },
+    });
+    await ask('Does the period change, and how does calibration work?');
+    expect(env.write.mock.lastCall?.[0].teaching).toMatchObject({
+      qaId: 'swing',
+      qaCoverage: 'partial',
+      qaEvidenceRanges: [{ start: 0, length: answer.length }],
+    });
+    expect(generationPrompt).toContain(answer);
+    expect(generationPrompt).toContain('Pendulum course material.');
+    expect(env.write.mock.lastCall?.[0].evidence).toMatchObject({
+      route: 'reviewed',
+      context: 'snapshot',
+      sources: [{ pageTitle: 'Pendulum', heading: null }],
+    });
+    expect(generationPrompt).not.toContain('Optional example about a clock.');
+    await ask('What is the price of a pendulum?');
+    expect(env.write.mock.lastCall?.[0].teaching?.qaId).toBeUndefined();
+    expect(generationPrompt).not.toContain(answer);
+    await ask('Can I compute the exact period at 60 degrees?');
+    expect(env.write.mock.lastCall?.[0].teaching?.qaSearch?.reason).toBe(
+      'numeric_condition_changed',
+    );
+    search.mockRejectedValue(new Error('KS unavailable'));
+    expect(await ask('A different pendulum question?')).not.toContain(answer);
+  });
+
+  it('judges the learning goal for exact and retrieved cards and falls back to the release passages', async () => {
+    const application = 'A control sample can detect contamination.';
+    const prerequisite = 'A clean control is necessary for certification.';
+    const definition =
+      'A control sample is a reference processed alongside the test sample.';
+    const limit = 'A clean control alone cannot certify the process.';
+    const testUse =
+      'The test sample is used to measure the unknown concentration.';
+    const pages = [
+      {
+        id: 'p',
+        title: 'Controls',
+        contentMd: [
+          definition,
+          limit,
+          testUse,
+          'Lesson notes. '.repeat(2100),
+        ].join('\n\n'),
+      },
+    ];
+    const label = { en: 'control sample', zh: '对照样本' };
+    const use = 'What is a control sample used for?';
+    const define = '如何定义对照样本？';
+    const judge = 'Does a clean control certify the process?';
+    const compare =
+      'Compare the uses of the control sample and the test sample.';
+    const common = {
+      conceptId: 'control',
+      topic: 'controls',
+      canonicalPoint: application,
+      evidence: [],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      priority: 10,
+      links: [],
+      reviewerId: 'fixture',
+    };
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot: { pages },
+      authored: {
+        glossary: [
+          { conceptId: 'control', label, aliases: { en: [], zh: [] } },
+        ],
+        cards: [
+          {
+            ...common,
+            cardId: 'use',
+            type: 'professor_qa',
+            bilingual: {
+              conceptLabel: label,
+              summary: label,
+              triggers: { en: [use, judge, compare], zh: [define] },
+            },
+            approvedPayload: {
+              question: use,
+              answerMd: application + ' ' + prerequisite,
+            },
+          },
+          {
+            ...common,
+            cardId: 'other',
+            type: 'concept',
+            evidence: [definition],
+            bilingual: {
+              conceptLabel: label,
+              summary: label,
+              triggers: { en: ['control sample'], zh: [] },
+            },
+            approvedPayload: { explanation: 'A related teaching card.' },
+          },
+        ],
+      },
+    });
+    let decisions = 0;
+    let generation = '';
+    const env = setup(async function* (opts) {
+      if (
+        opts.messages[0].content.includes('Select a single published answer')
+      ) {
+        decisions++;
+        const { currentQuestion } = JSON.parse(opts.messages[1].content) as {
+          currentQuestion: string;
+        };
+        if (currentQuestion === compare) {
+          yield JSON.stringify({
+            cardId: 'use',
+            coverage: 'partial',
+            conditionsMatch: true,
+            scope: 'control sample',
+            support: [
+              {
+                part: 'control sample',
+                need: 'use',
+                provides: 'use',
+                excerpts: [application],
+              },
+            ],
+            missingRequirements: ['the test sample'],
+          });
+          return;
+        }
+        if (currentQuestion === 'Malformed control sample request?') {
+          yield '{}';
+          return;
+        }
+        const unsupported = currentQuestion === judge;
+        const uses =
+          currentQuestion === use || currentQuestion === '对照样本有什么用？';
+        yield JSON.stringify({
+          cardId: 'use',
+          coverage: uses || unsupported ? 'full' : 'none',
+          conditionsMatch: true,
+          scope: currentQuestion,
+          support: [
+            {
+              part: currentQuestion,
+              need: uses ? 'use' : 'definition',
+              provides: 'use',
+              excerpts: [unsupported ? prerequisite : application],
+            },
+          ],
+          missingRequirements: uses
+            ? []
+            : [unsupported ? 'sufficient conditions' : 'definition'],
+        });
+        return;
+      }
+      generation = opts.messages[0].content;
+      yield 'generated';
+    });
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'test',
+      pages,
+      teachingPackage,
+    });
+    const search = jest.fn().mockResolvedValue({
+      status: 'ready',
+      cardIds: ['use'],
+      teachingCardIds: ['other'],
+    });
+    env.knowledge.retrieveProfessorQa = search;
+    jest
+      .mocked(env.knowledge.retrieveChunks)
+      .mockImplementation(async (_id, query) => [
+        {
+          pageTitle: 'Controls',
+          heading: null,
+          score: 1,
+          tokenCount: 32,
+          content: query.startsWith('the test sample ')
+            ? testUse
+            : definition + ' ' + limit,
+        },
+      ]);
+    const ask = (message: string) =>
+      collect(env.service.streamChat({ ...dto(), message }));
+    for (const [question, source, reason] of [
+      [use, 'exact', 'full_coverage'],
+      [define, 'exact', 'coverage_unconfirmed'],
+      [judge, 'exact', 'invalid_verdict'],
+      [compare, 'exact', 'partial_coverage'],
+      ['对照样本有什么用？', 'retrieval', 'full_coverage'],
+      ['Define a control sample.', 'retrieval', 'coverage_unconfirmed'],
+      ['Malformed control sample request?', 'retrieval', 'invalid_verdict'],
+    ]) {
+      const before = decisions;
+      await ask(question);
+      expect(decisions).toBe(before + 1);
+      const log = env.write.mock.lastCall?.[0];
+      expect(log?.teaching?.qaSearch).toMatchObject({ source, reason });
+      if (reason === 'full_coverage') {
+        expect(log?.teaching?.qaCoverage).toBe('full');
+        expect(generation).toContain(application);
+        expect(generation).not.toContain(definition);
+        expect(generation).not.toContain(prerequisite);
+      } else if (reason === 'partial_coverage') {
+        expect(log?.evidence).toMatchObject({
+          route: 'reviewed',
+          context: 'retrieval',
+        });
+        expect(log?.teaching?.qaCoverage).toBe('partial');
+        expect(generation).toContain(application);
+        expect(generation).toContain(testUse);
+        expect(generation).not.toContain(prerequisite);
+      } else {
+        expect(log?.evidence).toMatchObject({
+          route: 'course_context',
+          context: 'retrieval',
+        });
+        expect(log?.teaching?.qaId).toBeUndefined();
+        expect(generation).toContain(definition);
+        expect(generation).toContain(limit);
+        expect(generation).toContain('leave sufficiency open');
+        expect(generation).not.toContain(application);
+      }
+    }
+    expect(search).toHaveBeenCalledTimes(3);
+  });
+
+  it('routes production chat and evaluation injection to Yong', () => {
+    const registration = AiModule.register({
+      adminApi: true,
+      learnerApi: true,
+      knowledge: { provide: 'test-knowledge', useValue: {} },
+    });
+    expect(registration.providers).toContainEqual({
+      provide: AiChatService,
+      useExisting: AiChatYongService,
+    });
+    expect(registration.providers).not.toContain(AiChatService);
+  });
+
+  it('grounds the exact question in professor QA and uses D7 evidence for the nearby question', async () => {
+    const evidence = 'A vector is an element of a vector space.';
+    const snapshot = {
+      pages: [{ id: 'vectors', title: 'Vectors', contentMd: evidence }],
+    };
+    const conceptLabel = { en: 'vector', zh: '向量' };
+    const common = {
+      conceptId: 'vector',
+      topic: 'vectors',
+      canonicalPoint: evidence,
+      evidence: [evidence],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      links: [],
+      priority: 1,
+      reviewerId: 'professor',
+    };
+    const card = (
+      cardId: string,
+      type: string,
+      en: string[],
+      approvedPayload: unknown,
+    ) => ({
+      ...common,
+      cardId,
+      type,
+      bilingual: {
+        conceptLabel,
+        summary: { en: evidence, zh: '向量是向量空间的元素。' },
+        triggers: { en, zh: [] },
+      },
+      approvedPayload,
+    });
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot,
+      authored: {
+        cards: [
+          card('concept', 'concept', ['vector'], { explanation: evidence }),
+          card('explain', 'teaching_move', [], {
+            instruction: 'Explain the definition.',
+          }),
+          card('qa', 'professor_qa', ['what is a vector'], {
+            answerMd:
+              'An element of a vector space. [Notation](refobj:notation)',
+            refObjects: [
+              {
+                id: 'notation',
+                kind: 'latex',
+                label: 'Notation',
+                value: 'v\\in V',
+                requires: [],
+              },
+            ],
+          }),
+        ],
+        glossary: [
+          {
+            conceptId: 'vector',
+            label: conceptLabel,
+            aliases: { en: [], zh: [] },
+          },
+        ],
+      },
+    });
+    const model = jest.fn<ReturnType<StreamFn>, Parameters<StreamFn>>(
+      async function* (opts) {
+        if (
+          opts.messages[0].content.includes('Select a single published answer')
+        ) {
+          yield JSON.stringify({
+            cardId: 'qa',
+            coverage: 'full',
+            conditionsMatch: true,
+            missingRequirements: [],
+            support: [
+              {
+                part: 'vector',
+                need: 'definition',
+                provides: 'definition',
+                excerpts: ['An element of a vector space.'],
+              },
+            ],
+          });
+          return;
+        }
+        yield 'A vector belongs to a vector space.';
+      },
+    );
+    const env = setup(model);
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      versionTag: 'test',
+      courseId: COURSE_ID,
+      pages: snapshot.pages,
+      teachingPackage,
+    });
+    await expect(
+      collect(
+        env.service.streamChat({ ...dto(), message: 'What is a vector?' }),
+      ),
+    ).resolves.toBe('A vector belongs to a vector space.');
+    expect(model.mock.calls[1][0].messages[0].content).toContain(
+      'An element of a vector space.',
+    );
+    expect(env.entryOf().teaching).toMatchObject({
+      qaId: 'qa',
+      qaCoverage: 'full',
+    });
+    expect(env.entryOf().teaching?.selectedCardIds).toContain('qa');
+    await expect(
+      collect(
+        env.service.streamChat({ ...dto(), message: 'Explain a vector space' }),
+      ),
+    ).resolves.toBe('A vector belongs to a vector space.');
+    const system = model.mock.calls[2][0].messages[0].content;
+    expect(system.indexOf('FIELD 2a')).toBeLessThan(system.indexOf('FIELD 4'));
+    expect(system).toContain(evidence);
+    expect(system).not.toContain('refobj:notation');
+    expect(env.knowledge.retrieveChunks).not.toHaveBeenCalled();
+  });
+
+  it('rejects a declared teaching package that does not belong to the release', async () => {
+    const model = jest.fn<ReturnType<StreamFn>, Parameters<StreamFn>>(
+      async function* () {
+        yield 'should not generate';
+      },
+    );
+    const env = setup(model);
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      versionTag: 'test',
+      courseId: COURSE_ID,
+      pages: [{ id: 'p', title: 'Test', contentMd: 'Evidence' }],
+      teachingPackage: { manifest: { courseId: 'another-course' } },
+    });
+    await expect(collect(env.service.streamChat(dto()))).rejects.toThrow(
+      'LECTURE_TEACHING_PACKAGE_',
+    );
+    expect(model).not.toHaveBeenCalled();
+  });
   it('独立测试路线可覆盖模型和 Release，并保留母版消息装配', async () => {
     let options: LlmStreamOptions | undefined;
     const { service, configs } = setup(async function* (received) {
@@ -164,7 +1130,7 @@ describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
 
   it('测试路线关闭知识时不调用检索，也不装入 Wiki', async () => {
     let options: LlmStreamOptions | undefined;
-    const { service, knowledge } = setup(async function* (received) {
+    const { service, knowledge, entryOf } = setup(async function* (received) {
       options = received;
       yield '测试答复';
     });
@@ -181,6 +1147,10 @@ describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
       }),
     );
     expect(knowledge.retrieveChunks).not.toHaveBeenCalled();
+    expect(entryOf().evidence).toMatchObject({
+      context: 'disabled',
+      sources: [],
+    });
     expect(options?.messages[0].content).not.toContain(
       'Current Knowledge Wiki release markdown:',
     );
@@ -467,6 +1437,179 @@ describe('AiChatYongService 学员端对话（2026-10-22）', () => {
     ...over,
   });
 
+  it.each(['ready', 'missing', 'empty'] as const)(
+    'uses published lesson passages for a cross-lesson comparison (QA: %s)',
+    async (scenario) => {
+      const message =
+        'Lesson 1 说 shark–tuna 里向量相乘没什么意义，但 Lesson 3 又给了 dot product 和 cross product。是不是前后矛盾？';
+      const lead = '两个种群状态之间没有默认的乘法。';
+      const products = '点积是标量，三维叉积垂直于两个输入向量。';
+      const pages = [
+        {
+          id: 'l1',
+          title: 'Lesson 1',
+          contentMd: 'Modeling uses state variables.\n\n' + 'x'.repeat(40000),
+        },
+        { id: 'l3', title: 'Lesson 3', contentMd: products },
+      ];
+      const label = { en: 'dot product', zh: '点积' };
+      const common = {
+        conceptId: 'product',
+        topic: '*',
+        canonicalPoint: 'The dot product returns a scalar.',
+        evidence: [],
+        useWhen: ['*'],
+        doNotUseWhen: [],
+        links: [],
+        priority: 1,
+        reviewerId: 'fixture',
+        bilingual: {
+          conceptLabel: label,
+          summary: label,
+          triggers: { en: [], zh: [] },
+        },
+      };
+      const teachingPackage = compileTeachingPackage({
+        courseId: COURSE_ID,
+        releaseId: LIVE_RELEASE,
+        snapshot: { pages },
+        authored: {
+          glossary: [
+            { conceptId: 'product', label, aliases: { en: [], zh: [] } },
+            {
+              conceptId: 'state',
+              label: { en: 'state variables', zh: '状态变量' },
+              aliases: { en: [], zh: [] },
+            },
+          ],
+          cards: [
+            ...[
+              ['product', 'L3-F14', '点积 · Dot product', 'u\\cdot v'],
+              ['cross', 'L3-F15', '叉积 · Cross product', 'u\\times v'],
+            ].map(([id, code, name, value]) => ({
+              ...common,
+              cardId: id,
+              type: 'ref_obj',
+              approvedPayload: {
+                code,
+                refObjects: [
+                  {
+                    id,
+                    code,
+                    kind: 'latex',
+                    label: name,
+                    value,
+                    requires: [],
+                  },
+                ],
+              },
+            })),
+            {
+              ...common,
+              cardId: 'product-qa',
+              type: 'professor_qa',
+              approvedPayload: {
+                question: '什么是点积？',
+                answerMd: '点积是标量。',
+              },
+            },
+            {
+              ...common,
+              conceptId: 'state',
+              cardId: 'state',
+              type: 'concept',
+              evidence: ['Modeling uses state variables.'],
+              bilingual: {
+                ...common.bilingual,
+                conceptLabel: { en: 'state variables', zh: '状态变量' },
+              },
+              approvedPayload: {
+                explanation: 'Modeling uses state variables.',
+              },
+            },
+          ],
+        },
+      });
+      const response = '两个课节讨论的运算不同。';
+      const model = jest.fn<ReturnType<StreamFn>, Parameters<StreamFn>>(
+        async function* ({ messages }) {
+          const system = messages[0].content;
+          if (system.includes('Select a single published answer')) {
+            yield JSON.stringify({
+              cardId: null,
+              coverage: 'none',
+              missingRequirements: [],
+            });
+            return;
+          }
+          expect(system).toContain(lead);
+          expect(system).toContain(products);
+          yield response;
+        },
+      );
+      const { service, knowledge, entryOf } = setup(model);
+      const search = jest
+        .fn()
+        .mockResolvedValue(
+          scenario === 'ready'
+            ? { status: 'ready', cardIds: ['product-qa'] }
+            : { status: 'missing', cardIds: [] },
+        );
+      knowledge.retrieveProfessorQa = search;
+      jest.mocked(knowledge.getRelease).mockResolvedValue({
+        id: LIVE_RELEASE,
+        courseId: COURSE_ID,
+        versionTag: 'v1',
+        pages,
+        teachingPackage,
+      });
+      jest.mocked(knowledge.retrieveChunks).mockResolvedValue(
+        scenario === 'empty'
+          ? []
+          : [lead, products].map((content, index) => ({
+              pageTitle: pages[index].title,
+              heading: null,
+              content,
+              score: 0.9,
+              tokenCount: 20,
+            })),
+      );
+      const env = jest.replaceProperty(process, 'env', { ...process.env });
+      delete process.env.TUTOR_QA_LIVE_COURSES;
+      delete process.env.TUTOR_QA_SHADOW_COURSES;
+      try {
+        const answer = await collect(
+          service.streamLearnerChat(learnerDto({ message, locale: 'zh-CN' })),
+        );
+        expect(search).toHaveBeenCalledWith(
+          COURSE_ID,
+          LIVE_RELEASE,
+          message,
+          ['product-qa'],
+          expect.any(Array),
+        );
+        expect(knowledge.retrieveChunks).toHaveBeenCalledWith(
+          LIVE_RELEASE,
+          expect.stringContaining(message),
+        );
+        expect(entryOf().teaching?.exhibitCandidateIds).toContain('product');
+        if (scenario === 'empty') {
+          expect(answer).toContain('我还无法确定');
+          expect(model).not.toHaveBeenCalled();
+          expect(entryOf().evidence?.route).toBe('direct_clarification');
+        } else {
+          expect(answer).toBe(response);
+          expect(entryOf().teaching?.outcome).toBe(
+            'course_comparison_fallback',
+          );
+          expect(entryOf().evidence?.route).toBe('course_context');
+        }
+      } finally {
+        env.restore();
+      }
+    },
+  );
+
   it('Group Study 在知识输入中使用学员图片代理地址，不加工回答', async () => {
     const asset = '22222222-2222-4222-8222-222222222222.png';
     const source = `/api/files/images/${COURSE_ID}/${asset}`;
@@ -614,7 +1757,7 @@ describe('AiChatYongService 学员端对话（2026-10-22）', () => {
   it('知识命中为空时使用母版无知识提示并调用模型', async () => {
     let providerCalls = 0;
     let system = '';
-    const { service, knowledge } = setup(async function* (opts) {
+    const { service, knowledge, entryOf } = setup(async function* (opts) {
       await Promise.resolve();
       providerCalls += 1;
       system = opts.messages[0].content;
@@ -625,6 +1768,11 @@ describe('AiChatYongService 学员端对话（2026-10-22）', () => {
     const answer = await collect(service.streamChat(dto()));
     expect(answer).toBe('unsupported answer');
     expect(system).toContain('No KS Wiki context is enabled');
+    expect(entryOf().evidence).toMatchObject({
+      route: 'course_context',
+      context: 'retrieval_empty',
+      sources: [],
+    });
     expect(providerCalls).toBe(1);
   });
 
@@ -1288,7 +2436,7 @@ describe('AiChatYongService 学员端对话（2026-10-22）', () => {
     ).resolves.toContain('我是 Learning Guide 的 AI Tutor');
     expect(stream).toHaveBeenCalledTimes(1);
     expect(prompt).toContain('No KS Wiki context is enabled');
-    expect(prompt).toContain('The latest student input language is Chinese.');
+    expect(prompt).toContain('Write the explanation in Chinese.');
   });
 
   it('寒暄、课程问题和平台问题均走同一母版消息链', async () => {

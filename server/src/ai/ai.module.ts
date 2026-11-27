@@ -90,7 +90,7 @@ export class AiModule {
         ...(options.adminApi && options.evaluationDb
           ? [options.evaluationDb, EvaluationService]
           : []),
-        AiChatService,
+        { provide: AiChatService, useExisting: AiChatYongService },
         AiChatYongService,
         options.knowledge,
         ...(helpdesk && options.helpdeskQa

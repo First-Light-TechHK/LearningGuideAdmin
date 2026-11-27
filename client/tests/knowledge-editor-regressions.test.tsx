@@ -41,6 +41,14 @@ test('the formatting toolbar has no image insert button', () => {
   assert.ok(!screen.queryByRole('button', { name: 'Image' }))
 })
 
+test('the Markdown toolbar exposes course references next to its existing commands', () => {
+  let opened = false
+  const editor = { dom: document.createElement('div'), state: EditorState.create() } as EditorView
+  render(<MemoryRouter><MarkdownToolbar view={editor} onCourseReference={() => { opened = true }} /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: 'Course reference' }))
+  assert.ok(opened)
+})
+
 const image = '/api/files/images/course/diagram.png'
 const html = `<div class="joplin-table-wrapper"><table><tr><td><p>阅读时间</p><ol><li>虎先锋<img src="${image}"></li></ol></td><td rowspan="2">第21回</td></tr></table></div>`
 
@@ -61,6 +69,38 @@ test('legacy DOCX raster data images remain visible in preview', () => {
   assert.equal(container.querySelectorAll(`img[src="${src}"]`).length, 2)
 })
 
+test('course reference preview resolves an image and formula and labels missing objects', () => {
+  const imageId = '12345678-aaaa-bbbb-cccc-123456789012.png'
+  const { container } = render(<KnowledgeMarkdown courseId="course-1" references={[
+    { id: 'diagram', kind: 'image', label: 'Diagram', value: imageId, requires: [] },
+    { id: 'square', kind: 'latex', label: 'Square', value: 'x^2', requires: [] },
+  ]} source={'[Diagram](refobj:diagram) [Square](refobj:square) [Missing](refobj:removed) ` [Code](refobj:other) `'} />)
+  assert.equal(container.querySelector('img')?.getAttribute('src'), `/api/files/images/course-1/${imageId}`)
+  assert.ok(container.querySelector('.katex'))
+  assert.match(container.textContent ?? '', /Reference unavailable \(removed\)/)
+  assert.match(container.querySelector('code:not(.katex code)')?.textContent ?? '', /refobj:other/)
+  assert.equal(container.querySelector('a'), null)
+})
+
+test('imported heading numbers match preview and expose their escape when edited', async () => {
+  const source = '#### 1\\. What Does “Rate of Change” Mean?\n\n`1\\.`'
+  const preview = render(<KnowledgeMarkdown source={source} />)
+  const heading = preview.getByRole('heading', { level: 4 }).textContent
+  assert.equal(heading, '1. What Does “Rate of Change” Mean?')
+  let editor: EditorView | null = null
+  const { container } = render(<MemoryRouter><MarkdownSourceEditor value={source}
+    onChange={() => assert.fail('display changed document')} onViewReady={view => { editor = view }} /></MemoryRouter>)
+  const headingLine = () => container.querySelector('.cm-md-h4')?.textContent
+  await waitFor(() => assert.equal(headingLine(), heading))
+  const slash = source.indexOf('\\')
+  act(() => editor!.dispatch({ selection: { anchor: slash + 1 } }))
+  await waitFor(() => assert.match(headingLine() ?? '', /1\\\./))
+  act(() => editor!.dispatch({ selection: { anchor: source.indexOf('Mean') } }))
+  await waitFor(() => assert.equal(headingLine(), heading))
+  assert.match(container.querySelector('.cm-md-code')?.textContent ?? '', /1\\\./)
+  assert.equal(editor!.state.doc.toString(), source)
+})
+
 test('editor displays DOCX HTML table and images without modifying the source', async () => {
   let editor: EditorView | null = null
   const source = `${html}\n\n末尾`
@@ -70,6 +110,14 @@ test('editor displays DOCX HTML table and images without modifying the source', 
   fireEvent.click(container.querySelector('.cm-md-table-widget td')!)
   assert.ok(container.querySelector('.cm-md-table-widget img'))
   assert.equal(editor!.state.doc.toString(), source)
+})
+
+test('Word equations inside a rich HTML table render in the editor and document preview', async () => {
+  const source = '<table><tr><td><code class="language-math math-inline">\\frac{df}{dt}</code></td></tr></table>'
+  const preview = render(<KnowledgeMarkdown source={source} />)
+  assert.ok(preview.container.querySelector('td .katex .mfrac'))
+  const editor = render(<MemoryRouter><MarkdownSourceEditor value={source} onChange={() => assert.fail('display changed document')} /></MemoryRouter>)
+  await waitFor(() => assert.ok(editor.container.querySelector('.cm-md-table-widget td .katex .mfrac')))
 })
 
 test('spreadsheet table survives ten edit, repeated click and done cycles', async () => {

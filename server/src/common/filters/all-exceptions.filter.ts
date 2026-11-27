@@ -237,6 +237,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           code: 'VALIDATION_ERROR',
           message: '字段值超出允许长度',
         };
+      case 'P2021':
+      case 'P2022':
+        return {
+          status: HttpStatus.SERVICE_UNAVAILABLE,
+          code: 'SCHEMA_NOT_READY',
+          message: 'SCHEMA_NOT_READY',
+        };
       default:
         // 未知 Prisma 错误：仅记录日志，对外统一内部错误，绝不泄露 meta/SQL
         return {

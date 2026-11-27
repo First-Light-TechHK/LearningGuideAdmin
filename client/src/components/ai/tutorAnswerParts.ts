@@ -45,6 +45,16 @@ export function normalizeTutorIndent(text: string): string {
 const SOURCE = /\s*[[［【]\s*(?:Source|来源)\s*[:：]\s*([^\]］】]+?)\s*[\]］】]/gi;
 const SOURCES_LIST = /^(?:\*\*)?Sources(?:\*\*)?[ \t]*\n((?:(?:\*\*)?\[\d+\][^\n]*(?:\n|$))+)[ \t]*$/m;
 
+// Earlier answers can contain exhibit IDs inside otherwise valid source citations.
+const exhibitToken = String.raw`(?:\[\[ref:[a-z0-9-]+\]\]|\[ref:[a-z0-9-]+\]|ref:[a-z0-9-]+)`;
+const citationToken = `(?:S?\\d+|${exhibitToken})`;
+const exhibitCitation = new RegExp(`\\[[ \\t]*(${citationToken}(?:[ \\t]*[,，][ \\t]*${citationToken})*)[ \\t]*\\]`, 'gi');
+function readableCitation(original: string, items: string) {
+  if (!/ref:/i.test(items)) return original;
+  const sources = items.split(/[,，]/).map(item => item.trim()).filter(item => /^S?\d+$/i.test(item));
+  return sources.length ? `[${sources.join(', ')}]` : '';
+}
+
 function mathDelimiters(text: string) {
   return text
     .replace(/\\\[([\s\S]+?)\\\]/g, (_match, body: string) => `\n$$\n${body.trim()}\n$$\n`)
@@ -68,13 +78,14 @@ function groupedLine(line: string) {
   return /^\s*(?:[-*+]\s|\d+[.)]\s|\||>)/.test(line);
 }
 
-export function tutorAnswerParts(text: string): TutorAnswerParts {
+export function tutorAnswerParts(text: string, _jackLecture = false): TutorAnswerParts {
   const sources: string[] = [];
   const keep = (name: string) => {
     const clean = name.trim().replace(/^\*\*|\*\*$/g, "").replace(/&#x20;$/i, "").trim();
     if (clean && !sources.includes(clean)) sources.push(clean);
   };
-  const prose = outsideCode(normalizeTutorIndent(text), (part) => arithmeticStars(mathDelimiters(currencyDollars(part
+  const prose = outsideCode(normalizeTutorIndent(text.replace(/\r\n?/g, "\n")), (part) => arithmeticStars(mathDelimiters(currencyDollars(part
+    .replace(exhibitCitation, readableCitation)
     .replace(SOURCE, (_match, name: string) => { keep(name); return ""; })
     .replace(SOURCES_LIST, (_match, entries: string) => {
       // "[1] A [2] B" on one line is two entries.
@@ -87,8 +98,20 @@ export function tutorAnswerParts(text: string): TutorAnswerParts {
   let inMath = false;
   let previous = "";
   let blank = false;
-  for (const raw of prose.split("\n")) {
-    const line = raw.replace(/[ \t]+$/, (spaces) => spaces.length >= 2 ? "  " : "");
+  // 历史回答可能把多行公式的定界符与矩阵或引用写在同一行。
+  const sourceNumbers = new Set(sources.map((s) => /^\[(\d+)\]/.exec(s)?.[1]));
+  const formatted = outsideCode(prose, (part) => part.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+\$)/).map((span, index) =>
+    index % 2 ? span : span
+      .replace(/(?<![\\[!])\[\[(\d+)\]\](?![[(:\]])/g, (full, id: string) => sourceNumbers.has(id) ? '[' + id + ']' : full)
+      .replace(/(\bis[ \t]+|是[ \t]*)[.。]([ \t]*\n\s*)([^\n[\]]+)\n\s*!\[\3\]\[(exhibit:[\w-]+:[\w-]+)\]/gi,
+        (_full, verb: string, gap: string, caption: string, key: string) =>
+          verb + caption.trim() + (/^是/.test(verb) ? '。' : '.') + gap + '![' + caption + '][' + key + ']'),
+  ).join('').replace(
+    /(?<!\\)\$\$([\s\S]*?)\$\$/g,
+    (block, body: string) => body.includes("\n") ? `\n$$\n${body.trim()}\n$$\n` : block,
+  ));
+  for (const raw of formatted.split("\n")) {
+    let line = raw.replace(/[ \t]+$/, (spaces) => spaces.length >= 2 ? "  " : "");
     const fenceMark = FENCE.exec(line)?.[1];
     if (fence !== null || (fenceMark && !inMath)) {
       // A fenced block keeps every line, blank ones included, and stands apart from the prose.
@@ -115,6 +138,10 @@ export function tutorAnswerParts(text: string): TutorAnswerParts {
       continue;
     }
     const indented = (value: string) => /^\s{2,}\S/.test(value);
+    // 模型偶尔给中文讲解加段首缩进；保留列表续行、公式块和代码示例的缩进。
+    if (!groupedLine(previous) && !indented(previous)) {
+      line = line.replace(/^(?: {4}| {0,3}\t)[ \t]*(?=[“「『（(]*(?:\$[^$\n]+\$[ \t]*)?\p{Script=Han})/u, "");
+    }
     const sameBlock = previous.endsWith("  ") ||
       (indented(line) && (groupedLine(previous) || indented(previous))) ||
       (groupedLine(previous) && groupedLine(line)) ||

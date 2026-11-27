@@ -13,6 +13,7 @@ import mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import WordExtractor from 'word-extractor';
 import { latexToMarkdown } from './latex-to-markdown';
+import { prepareDocxMath } from './docx-math';
 import { CourseStorageService } from '../commerce-courses/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -97,6 +98,23 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     return { url: `/api/files/images/${courseId}/${assetId}.${extension}` };
   }
 
+  async stageReleaseImage(courseId: string, name: string, bytes: Buffer) {
+    const [assetId, extension] = name.split('.');
+    await this.saveImageAsset(courseId, assetId, extension, bytes);
+  }
+
+  async discardReleaseImage(courseId: string, name: string) {
+    const storageKey = `knowledge-pages/${courseId}/${name}`;
+    try {
+      await this.storage.removeMedia(storageKey);
+      await this.prisma.knowledgeImageAsset.deleteMany({
+        where: { courseId, storageKey },
+      });
+    } catch {
+      this.logger.warn('暂存图片未完成回收，将由图片清理任务重试');
+    }
+  }
+
   private async saveImageAsset(
     courseId: string,
     assetId: string,
@@ -133,7 +151,7 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
         byCourse.set(asset.courseId, group);
       }
       for (const [courseId, courseAssets] of byCourse) {
-        const [pages, releases] = await Promise.all([
+        const [pages, releases, teachingCards] = await Promise.all([
           this.prisma.page.findMany({
             where: { courseId },
             select: { contentMd: true },
@@ -142,10 +160,15 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
             where: { courseId },
             select: { snapshotData: true },
           }),
+          this.prisma.tutorTeachingCard.findMany({
+            where: { courseId },
+            select: { draft: true, approved: true },
+          }),
         ]);
         const markdown: string[] = pages.map((page) => page.contentMd);
         for (const release of releases)
           this.collectSnapshotMarkdown(release.snapshotData, markdown);
+        this.collectSnapshotMarkdown(teachingCards, markdown);
         for (const asset of courseAssets) {
           if (markdown.some((content) => content.includes(asset.id))) continue;
           await this.storage.removeMedia(asset.storageKey);
@@ -169,6 +192,14 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (!value || typeof value !== 'object') return;
+    if (
+      'kind' in value &&
+      value.kind === 'image' &&
+      'value' in value &&
+      typeof value.value === 'string' &&
+      /^[a-f0-9-]{36}\.(png|jpg|gif|webp)$/i.test(value.value)
+    )
+      output.push(value.value);
     for (const [key, child] of Object.entries(value)) {
       if (key === 'contentMd' && typeof child === 'string') output.push(child);
       else this.collectSnapshotMarkdown(child, output);
@@ -288,7 +319,7 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     return { title, markdown };
   }
 
-  private async preflightDocx(buffer: Buffer): Promise<void> {
+  private async preflightDocx(buffer: Buffer): Promise<JSZip> {
     const zip = await JSZip.loadAsync(buffer);
     const entries = Object.values(zip.files).filter((entry) => !entry.dir);
     if (entries.length > MAX_DOCX_ENTRIES)
@@ -314,16 +345,18 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
         stream.once('error', reject);
       });
     }
+    return zip;
   }
 
   private async docxToMarkdown(
     buffer: Buffer,
     courseId?: string,
   ): Promise<string> {
-    await this.preflightDocx(buffer);
+    const zip = await this.preflightDocx(buffer);
+    const math = await prepareDocxMath(zip, buffer);
     const images: Buffer[] = [];
     let imageError: Error | undefined;
-    const result = await this.markitdown.convertBuffer(buffer, {
+    const result = await this.markitdown.convertBuffer(math.buffer, {
       file_extension: '.docx',
       // 转换器会截断 data URI；按实际出现的位置放占位地址，避免依赖 XML 顺序猜测对应关系。
       convertImage: mammoth.images.imgElement(async (image) => {
@@ -342,7 +375,7 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     });
     // mammoth 会将图片回调异常转为 messages，必须显式中断，不能成功导入缺图文档。
     if (imageError) throw imageError;
-    let markdown = result?.markdown?.trim() ?? '';
+    let markdown = math.restore(result?.markdown?.trim() ?? '');
     if (!images.length || !markdown) return markdown;
     if (
       !courseId ||
