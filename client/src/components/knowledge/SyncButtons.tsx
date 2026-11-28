@@ -26,6 +26,7 @@ function SyncButtonsInner() {
   const runSync = useKnowledgeStore((s) => s.runSync)
 
   const doSync = async () => {
+    if (useKnowledgeStore.getState().syncing) return
     try {
       const summary: SyncSummary = await runSync('structure')
       if (summary.unchanged) {

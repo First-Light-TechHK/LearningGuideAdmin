@@ -142,8 +142,43 @@ describe('teaching entry types', () => {
     },
   );
 
+  it('publishes a definition without a source and drops a stale page id', async () => {
+    const { service, cards } = setup();
+    await service.save(
+      'c',
+      undefined,
+      undefined,
+      { ...definition, evidence: [] },
+      'editor',
+    );
+    const authored = mergeApprovedCards(undefined, [
+      cards.create.mock.calls[0][0].data,
+    ])!;
+    const pkg = compileTeachingPackage({
+      courseId: 'c',
+      releaseId: 'r',
+      snapshot: { pages: [page] },
+      authored,
+    });
+    expect(pkg.sources).toEqual([]);
+    expect(pkg.cards[0].sourceSupport).toEqual([]);
+    expect(pkg.cards[0].approvedPayload).not.toHaveProperty('sourcePageId');
+    const lecture = prepareReviewedLecture(
+      {
+        id: 'r',
+        courseId: 'c',
+        versionTag: 'test',
+        pages: [page],
+        teachingPackage: pkg,
+      },
+      '状态变量是什么？',
+    );
+    expect(lecture.kind).toBe('reviewed');
+    expect(lecture.trace.selectedCardIds).toEqual([pkg.cards[0].cardId]);
+    expect(lecture.trace.sourceIds).toEqual([]);
+  });
+
   it.each([
-    { ...definition, evidence: [] },
     { ...definition, evidence: ['missing passage'] },
     {
       ...definition,

@@ -168,7 +168,7 @@ test('serverText：页面语言决定显示什么', () => {
   assert.equal(serverText('课程不存在', 'zh-CN'), '课程不存在')
   assert.equal(serverText('不支持的 LLM 模型：gpt-x', 'en-GB'), 'Unsupported LLM model: gpt-x')
   assert.equal(serverText('The course does not exist.', 'zh-CN'), '课程不存在')
-  assert.equal(serverText('DOCX 公式导入不完整（2/3），请检查原文', 'en-GB'), 'Only 2 of 3 DOCX equations were imported. Check the original document.')
+  assert.equal(serverText('DOCX 公式导入不完整（2/3），请检查原文', 'en-GB'), 'The DOCX import read 2/3 equations. Check the source document.')
   assert.equal(serverText('Plain English problem', 'en-GB'), 'Plain English problem')
   assert.equal(serverText('Plain English problem', 'zh-CN'), '操作失败，请重试。')
   assert.equal(serverText('从没见过的中文报错啊', 'en-GB'), 'Something went wrong. Please try again.')

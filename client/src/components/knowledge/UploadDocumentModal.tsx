@@ -35,11 +35,17 @@ export function UploadDocumentModal({
   const [converting, setConverting] = useState(false)
   const [converted, setConverted] = useState<ConvertedDocument | null>(null)
   const [importing, setImporting] = useState(false)
+  const convertingRef = useRef(false)
+  const importingRef = useRef(false)
+  const requestId = useRef<string | null>(null)
   /** 代际号：关闭弹窗后丢弃 in-flight 转换结果（防陈旧预览/竞态） */
   const genRef = useRef(0)
 
   const close = () => {
     genRef.current += 1
+    convertingRef.current = false
+    requestId.current = null
+    setConverting(false)
     setFile(null)
     setStep(1)
     setConverted(null)
@@ -67,34 +73,42 @@ export function UploadDocumentModal({
   }
 
   const goParse = async () => {
-    if (!file) return
+    if (!file || !target || convertingRef.current) return
     const gen = genRef.current
+    convertingRef.current = true
     setConverting(true)
     try {
-      const doc = await knowledgeApi.convertFile(file, target!.courseId)
+      const doc = await knowledgeApi.convertFile(file, target.courseId)
       if (gen !== genRef.current) return // 弹窗已关闭/重开，丢弃陈旧结果
       setConverted(doc)
       setStep(2)
     } catch (e) {
       if (gen === genRef.current) message.error((e as Error).message)
     } finally {
-      if (gen === genRef.current) setConverting(false)
+      if (gen === genRef.current) {
+        convertingRef.current = false
+        setConverting(false)
+      }
     }
   }
 
   const doImport = async () => {
-    if (!file || !converted || !target) return
+    if (!file || !converted || !target || importingRef.current) return
+    importingRef.current = true
+    requestId.current ??= crypto.randomUUID()
     setImporting(true)
     try {
       await importDocument(target.courseId, {
         title: converted.title,
         contentMd: converted.markdown,
+        requestId: requestId.current,
       })
       message.success(text('upload.imported', { title: converted.title }))
       close()
     } catch (e) {
       message.error((e as Error).message)
     } finally {
+      importingRef.current = false
       setImporting(false)
     }
   }
@@ -103,12 +117,15 @@ export function UploadDocumentModal({
     <Modal
       open={!!target}
       title={text('upload.title')}
-      onCancel={close}
+      onCancel={() => { if (!importingRef.current) close() }}
+      closable={!importing}
+      keyboard={!importing}
+      maskClosable={!importing}
       destroyOnHidden
       width={720}
       footer={
         <div style={{ display: 'flex', gap: tokens.spacing.sm, justifyContent: 'flex-end' }}>
-          <Button onClick={close}>{text('common.cancel')}</Button>
+          <Button disabled={importing} onClick={() => { if (!importingRef.current) close() }}>{text('common.cancel')}</Button>
           {step === 1 ? (
             <Button type="primary" disabled={!file} loading={converting} onClick={goParse}>
               {text('upload.next')}
@@ -135,11 +152,12 @@ export function UploadDocumentModal({
       {step === 1 ? (
         <>
           <Upload.Dragger
+            disabled={converting}
             maxCount={1}
             showUploadList={false}
             accept={UPLOAD_ALLOWED_EXTENSIONS.join(',')}
             beforeUpload={(f) => {
-              if (preCheck(f)) setFile(f)
+              if (!convertingRef.current && preCheck(f)) setFile(f)
               return false // 手动控制：不自动上传
             }}
           >

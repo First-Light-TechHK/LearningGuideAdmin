@@ -1,18 +1,21 @@
 import { useStore } from 'zustand'
 import { useContext, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { DownloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Empty, Input, Modal, Panel, Select, Space, Spin, Tag, Tooltip, Typography } from '../ui'
 import { useWorkspace, useWorkspaceScroll, useWorkspaceValue } from '../../stores/workspaceSession'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
+import { useActionLock } from '../../lib/useActionLock'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState'
 import { EmployeeContext } from '../../backoffice/employeeSession'
 import { knowledgeApi, type PageNode } from '../../api/knowledge'
-import { definitionBody, definitionFields, teachingCardsApi, type DeleteBlocker, type TeachingDraft, type TeachingEntry, type TeachingRef } from '../../api/teachingCards'
+import { definitionBody, definitionFields, referenceNamePreview, teachingCardsApi, type DeleteBlocker, type TeachingDraft, type TeachingEntry, type TeachingRef } from '../../api/teachingCards'
 import { TutorMarkdown } from '../ai/TutorMarkdown'
 import { useKText } from './i18n'
 import { DefinitionEditor } from './DefinitionEditor'
 import { CourseReferencePicker } from './CourseReferencePicker'
-import { ReferenceImportModal } from './ReferenceImportModal'
+import { TeachingTransferModal } from './TeachingTransferModal'
+import type { TeachingImportKind } from '../../api/teachingCards'
 
 import { color } from '../../theme/tokens'
 import './TeachingCardsPanel.css'
@@ -42,14 +45,10 @@ function listGroup({ draft }: TeachingEntry) {
   return types.includes(draft.type) ? draft.type : 'concept'
 }
 
-function defaultReferenceName(draft: TeachingDraft) {
-  return [draft.approvedPayload.code, draft.bilingual.conceptLabel.zh, draft.bilingual.conceptLabel.en]
-    .map(part => part?.trim()).filter(Boolean).join(' · ')
-}
-
 function entryTitle(draft: TeachingDraft, locale: string) {
   if (draft.type === 'concept' && draft.approvedPayload.definitionName) return draft.approvedPayload.definitionName
-  if (draft.type === 'ref_obj') return draft.approvedPayload.displayName?.trim() || defaultReferenceName(draft)
+  if (draft.type === 'ref_obj') return draft.approvedPayload.refObjects?.[0]?.label ||
+    referenceNamePreview(draft.approvedPayload.code ?? '', draft.bilingual.conceptLabel.en || draft.bilingual.conceptLabel.zh)
   if (draft.type === 'professor_qa') {
     const qa = editableDraft(draft)
     if (qa.approvedPayload.question) return qa.approvedPayload.question
@@ -68,8 +67,8 @@ function requiredFields(draft: TeachingDraft): Record<string, string> {
   if (draft.type === 'concept') return definitionFields(draft)
   const data = draft.approvedPayload
   if (draft.type === 'ref_obj') return {
-    code: data.code ?? '', 'concept.en': draft.bilingual.conceptLabel.en,
-    'summary.en': draft.bilingual.summary.en,
+    code: data.code ?? '', referenceName: draft.bilingual.conceptLabel.en,
+    referenceSummary: draft.bilingual.summary.en,
     [data.refObjects?.[0]?.kind === 'image' ? 'image' : 'formula']: data.refObjects?.[0]?.value ?? '',
   }
   if (draft.type === 'professor_qa') return { studentQuestion: data.question ?? '', professorAnswer: data.answerMd }
@@ -94,7 +93,7 @@ function EntryButton({ title, selected, disabled, onSelect, detail, unsaved, sta
   const [open, setOpen] = useState(false)
   return <Tooltip title={title} placement="right" trigger={['hover', 'focus']} open={open}
     mouseEnterDelay={0.45} mouseLeaveDelay={0} getPopupContainer={trigger => trigger.ownerDocument.body}
-    styles={{ root: { pointerEvents: 'none', maxWidth: 'min(320px, calc(100vw - 24px))' } }}
+    styles={{ root: { position: 'fixed', pointerEvents: 'none', maxWidth: 'min(320px, calc(100vw - 24px))' } }}
     onOpenChange={requested => {
       const el = titleElement.current
       setOpen(!!(requested && el && (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth)))
@@ -173,7 +172,7 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
   const copy = (entryId ? access.canEdit : access.canCreate) ? localCopy : undefined
   const [stamp, setStamp] = useState<string>()
   const [entries, setEntries] = useState<TeachingEntry[]>([])
-  const [importOpen, setImportOpen] = useState(false)
+  const [transferMode, setTransferMode] = useState<'import' | 'download' | null>(null)
   const [batchMode, setBatchMode] = useState(false)
   const [checked, setChecked] = useState<string[]>([])
   const [deletion, setDeletion] = useState<{ rows: TeachingEntry[]; blockers: DeleteBlocker[] } | null>(null)
@@ -197,6 +196,7 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
   const required = draft ? requiredFields(draft) : {}
   const missing = Object.keys(required).filter((key) => !required[key]?.trim())
   const [operating, setBusy] = useState(false)
+  const actions = useActionLock()
   const pendingSave = useStore(session.saving, state => state[key] === true)
   const busy = operating || pendingSave
   const [listResult, setListResult] = useState<{ courseId: string; error?: string } | null>(null)
@@ -225,10 +225,12 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
   }, [courseId, listRetry])
 
   const loadSourcePages = async () => {
+    const unlock = actions.acquire()
+    if (!unlock) return
     setBusy(true)
     try { setPages((await knowledgeApi.getCourse(courseId)).pages) }
     catch (error) { message.error((error as Error).message) }
-    finally { setBusy(false) }
+    finally { setBusy(false); unlock() }
   }
 
   const selectEntry = (entry: TeachingEntry | null) => {
@@ -275,7 +277,7 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
   }
 
   const save = async () => {
-    if (!courseId || !draft || busy || session.saving.getState()[key] || conflict || loading || loadError) return
+    if (!courseId || !draft || busy || actions.isLocked() || session.saving.getState()[key] || conflict || loading || loadError) return
     if (missing.length) {
       setShowMissing(true)
       return
@@ -294,6 +296,10 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
         ...draft.bilingual,
         triggers: { en: items(draft.bilingual.triggers.en), zh: items(draft.bilingual.triggers.zh) },
       },
+    }
+    if (draft.type === 'ref_obj') {
+      prepared.approvedPayload = { ...draft.approvedPayload }
+      delete prepared.approvedPayload.displayName
     }
     session.saving.setState({ [key]: true })
     try {
@@ -334,7 +340,7 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
       {caption(key, mandatory)}
       {key === 'formula' && <Typography.Text type="secondary" id="teaching-formula-hint">{label('formulaHint')}</Typography.Text>}
       {rows ? <Input.TextArea {...attrs} aria-describedby={key === 'formula' ? 'teaching-formula-hint' : undefined} rows={rows} value={value} onChange={(event) => change(event.target.value)} disabled={!editable || busy} />
-        : <Input {...attrs} placeholder={key === 'displayName' && draft ? defaultReferenceName(draft) : undefined} value={value} onChange={(event) => change(event.target.value)} disabled={!editable || busy} />}
+        : <Input {...attrs} value={value} onChange={(event) => change(event.target.value)} disabled={!editable || busy} />}
     </label>
     )
   }
@@ -356,6 +362,8 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
   }
   const deleteRows = async (rows: TeachingEntry[], commit = false) => {
     if (!access.canDelete || busy || !rows.length) return
+    const unlock = actions.acquire()
+    if (!unlock) return
     setBusy(true)
     try {
       const items = rows.map(({ id, revision }) => ({ id, revision }))
@@ -381,7 +389,7 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
       message.success(label('deleted'))
     } catch (error) {
       message.error((error as Error).message)
-    } finally { if (mounted.current) setBusy(false) }
+    } finally { if (mounted.current) setBusy(false); unlock() }
   }
   const eligible = deletion?.rows.filter(row => !deletion.blockers.some(block => block.id === row.id)) ?? []
   const collapsed = useWorkspaceValue<string[]>(session, scope + 'collapsed') ?? []
@@ -413,6 +421,18 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
       onSelect={() => selectEntry(entry)} detail={types.includes(row.type) ? undefined : label('type.' + row.type)}
       unsaved={unsaved} status={label(unsaved ? 'statusUnsaved' : 'statusSaved')} />
   }
+  const courseTitle = courses.find(course => course.id === courseId)?.title ?? ''
+  const entriesForTransfer = (kind: TeachingImportKind) => entries.filter(({ draft: row }) =>
+    kind === 'concept' || kind === 'professor_qa'
+      ? row.type === kind
+      : row.type === 'ref_obj' && row.approvedPayload.refObjects?.[0]?.kind === kind,
+  ).map(entry => ({ id: entry.id, title: entryTitle(entry.draft, locale) }))
+  const closeTransfer = () => setTransferMode(null)
+  const refreshAfterImport = () => {
+    closeTransfer()
+    setListRetry(value => value + 1)
+  }
+
   function renderGroup(key: string, title: string, rows: TeachingEntry[], children?: React.ReactNode) {
     if (searching && !rows.length) return null
     const open = isOpen(key)
@@ -432,10 +452,22 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
   }
   return <div className="teaching-workspace"><div className="teaching-columns">
     <Panel className="teaching-sidebar">
-      <label style={{ display: 'grid', gap: 4 }}>{caption('course')}
-          <Select aria-required aria-label={label('course')} value={courseId || undefined}
+      <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:4}}>
+        {caption('course')}
+        <Space size={4} wrap>
+          {access.canEdit && <Tooltip title={text('batchTeaching.importAction')}>
+            <Button type="text" size="small" aria-label={text('batchTeaching.importAction')} icon={<UploadOutlined />}
+              disabled={!courseId || busy || loading || !!loadError} onClick={() => setTransferMode('import')} />
+          </Tooltip>}
+          <Tooltip title={text('batchTeaching.downloadAction')}>
+            <Button type="text" size="small" aria-label={text('batchTeaching.downloadAction')} icon={<DownloadOutlined />}
+              disabled={!courseId || busy || loading || !!loadError} onClick={() => setTransferMode('download')} />
+          </Tooltip>
+        </Space>
+      </div>
+      <Select aria-required aria-label={label('course')} value={courseId || undefined}
         disabled={busy} options={courses.map((course) => ({ value: course.id, label: course.title }))}
-        onChange={changeCourse} /></label>
+        onChange={changeCourse} />
       <Input aria-label={label('searchEntries')} placeholder={label('searchEntries')} value={search} disabled={busy} onChange={(e) => { setChecked([]); session.write(scope + 'search', e.target.value) }} />
       {batchMode && access.canDelete && <Space wrap>
         <label><input type="checkbox" disabled={busy || !visibleEntries.length}
@@ -495,8 +527,6 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
           <Select aria-required aria-label={label('kind')} value={draft.type} disabled={!editable || busy || selected?.draft.type === 'ref_obj'}
             labelRender={() => label(`type.${draft.type}`)}
             onChange={(type) => { if (selected) update({ type }); else setDraft(blankDraft({ type, kind: type === 'ref_obj' ? lastCreationType().kind : undefined })) }} options={types.filter(type => type !== 'ref_obj' || !selected || selected.draft.type === type).map((type) => ({ value: type, label: label(`type.${type}`) }))} /></label>
-          {draft.type === 'ref_obj' && editable && <Button style={{ alignSelf: 'end' }} disabled={busy}
-            onClick={() => setImportOpen(true)}>{text('refImport.title')}</Button>}
           {draft.type !== 'concept' && draft.type !== 'professor_qa' && draft.type !== 'ref_obj' && <label style={{ display: 'grid', gap: 4 }}>{caption('useWhen')}
           <Select aria-required status={showMissing && missing.includes('useWhen') ? 'error' : undefined} aria-label={label('useWhen')} mode="multiple" value={draft.useWhen} disabled={!editable || busy}
             onChange={(useWhen) => update({ useWhen })} options={categories.map((value) => ({ value, label: label(`category.${value}`) }))} /></label>}
@@ -508,13 +538,16 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
           {field('professorAnswer', payload?.answerMd ?? '', answerMd => setPayload({ answerMd }), 5)}
           {editable && <Button className="teaching-answer-insert" disabled={busy} onClick={() => setPickerSlot(slot)}>{label('insert')}</Button>}
         </> : draft.type === 'ref_obj' ? <>
+          <div>
+            <Typography.Text type="secondary" id="teaching-reference-preview">{label('referenceNamePreview')}</Typography.Text>
+            <br />
+            <output aria-labelledby="teaching-reference-preview">{referenceNamePreview(payload?.code ?? '', draft.bilingual.conceptLabel.en) || '—'}</output>
+          </div>
           {field('code', payload?.code ?? '', code => setPayload({ code }))}
-          {(['zh','en'] as const).map(lang => field(`concept.${lang}`, draft.bilingual.conceptLabel[lang], value =>
-            update({ bilingual: { ...draft.bilingual, conceptLabel: { ...draft.bilingual.conceptLabel, [lang]: value } } })))}
-          <span>{label('referenceSummaryHint')}</span>
-          {(['zh','en'] as const).map(lang => field(`summary.${lang}`, draft.bilingual.summary[lang], value =>
-            update({ bilingual: { ...draft.bilingual, summary: { ...draft.bilingual.summary, [lang]: value } } }), 2))}
-          {field('displayName', payload?.displayName ?? '', displayName => setPayload({ displayName }))}
+          {field('referenceName', draft.bilingual.conceptLabel.en, en =>
+            update({ bilingual: { ...draft.bilingual, conceptLabel: { ...draft.bilingual.conceptLabel, en } } }))}
+          {field('referenceSummary', draft.bilingual.summary.en, en =>
+            update({ bilingual: { ...draft.bilingual, summary: { ...draft.bilingual.summary, en } } }), 2)}
           <label className="teaching-select-field">{caption('referenceType')} <Select aria-label={label('referenceType')} disabled={!editable || busy}
             value={asset?.kind ?? 'latex'} options={['latex','image'].map(kind => ({ value: kind, label: label(kind === 'latex' ? 'formula' : 'image') }))}
             onChange={kind => setAsset({ kind: kind as TeachingRef['kind'], value: '' })} /></label>
@@ -522,10 +555,12 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
             accept="image/png,image/jpeg,image/gif,image/webp" onChange={async event => {
               const file = event.target.files?.[0]
               if (!file) return
+              const unlock = actions.acquire()
+              if (!unlock) return
               setBusy(true)
               try { const uploaded = await knowledgeApi.uploadImage(file, courseId); setAsset({ value: uploaded.url.split('/').at(-1) ?? '' }) }
               catch (error) { message.error((error as Error).message) }
-              finally { setBusy(false) }
+              finally { setBusy(false); unlock() }
             }} /></label> : field('formula', asset?.value ?? '', value => setAsset({ value }), 3)}
           {asset?.value && <TutorMarkdown courseId={courseId} content={asset.kind === 'latex'
             ? `$$\n${asset.value}\n$$` : `![${asset.label}](/api/files/images/${courseId}/${asset.value})`} />}
@@ -592,11 +627,12 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
         setPayload({ answerMd: [payload.answerMd, `[${item.label}](refobj:${item.id})`].filter(Boolean).join('\n\n') })
         setPickerSlot(null)
       }} />}
-    {importOpen && draft?.type === 'ref_obj' && editable && <ReferenceImportModal courseId={courseId} canCreate={access.canCreate} close={() => setImportOpen(false)}
-      saved={() => { setImportOpen(false); setListRetry(value => value + 1) }} />}
+    {courseId && transferMode && (access.canEdit || transferMode === 'download') &&
+      <TeachingTransferModal key={courseId + transferMode} mode={transferMode} courseId={courseId} courseTitle={courseTitle}
+        canCreate={access.canCreate} entriesFor={entriesForTransfer} close={closeTransfer} saved={refreshAfterImport} />}
     <Modal open={!!deletion} title={label('confirmDelete')} cancelText={text('common.cancel')} okText={label('deleteEntry')}
       confirmLoading={busy} okButtonProps={{ danger: true, disabled: !deletion || !!deletion.blockers.length }}
-      onCancel={() => { if (!busy) setDeletion(null) }} onOk={() => deletion && void deleteRows(deletion.rows, true)}>
+      onCancel={() => { if (!busy && !actions.isLocked()) setDeletion(null) }} onOk={() => deletion && void deleteRows(deletion.rows, true)}>
       <ul>{deletion?.rows.map(row => {
         const title = entryTitle(row.draft, locale)
         const code = row.draft.approvedPayload.code
@@ -609,8 +645,8 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
       {deletion?.rows.some(row => row.approved) && <p>{label('deletePublishHint')}</p>}
       {!!deletion?.blockers.length && !!eligible.length && <Button disabled={busy} onClick={() => void deleteRows(eligible)}>{label('selectEligible')}</Button>}
     </Modal>
-    <Modal open={!!reference} title={label('addRef')} okText={label('insert')} okButtonProps={{ disabled: !reference?.label.trim() || !reference.value.trim() }} onOk={insertReference}
-      onCancel={() => setReference(null)}>
+    <Modal open={!!reference} title={label('addRef')} okText={label('insert')} okButtonProps={{ disabled: busy || !reference?.label.trim() || !reference.value.trim() }} onOk={insertReference}
+      onCancel={() => { if (!actions.isLocked()) setReference(null) }}>
       {reference && <div style={{ display: 'grid', gap: 12 }}>
         <label style={{ display: 'grid', gap: 4 }}>{caption('referenceType')}
           <Select aria-required aria-label={label('referenceType')} value={reference.kind} options={[
@@ -622,10 +658,14 @@ function CourseTeachingPanel({ courseId, changeCourse, session }: {
               onChange={async (event) => {
                 const file = event.target.files?.[0]
                 if (!file) return
+                const unlock = actions.acquire()
+                if (!unlock) return
+                setBusy(true)
                 try {
                   const asset = await knowledgeApi.uploadImage(file, courseId)
                   setReference((value) => value?.id === reference.id ? { ...value, value: asset.url.split('/').at(-1) ?? '' } : value)
                 } catch (error) { message.error((error as Error).message) }
+                finally { setBusy(false); unlock() }
               }} /></label>}
         {reference.value && <TutorMarkdown courseId={courseId} content={reference.kind === 'latex'
           ? `$$\n${reference.value}\n$$` : `![${reference.label}](/api/files/images/${courseId}/${reference.value})`} />}

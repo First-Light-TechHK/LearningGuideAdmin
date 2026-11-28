@@ -160,8 +160,9 @@
 @container (max-width: 680px) {
   .teaching-columns {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(320px, 1fr);
     gap: 12px;
+    overflow-y: auto;
   }
 
   .teaching-sidebar {

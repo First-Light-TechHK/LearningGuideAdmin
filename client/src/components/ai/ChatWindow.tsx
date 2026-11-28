@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   App,
-  Avatar,
   Button,
   Card,
   Dropdown,
@@ -14,31 +13,30 @@ import {
   Tooltip,
   type MenuProps,
 } from '../ui'
-import { CopyOutlined, PlusOutlined, ReloadOutlined, RobotOutlined, SendOutlined, UndoOutlined, UserOutlined } from '@ant-design/icons'
+import { CopyOutlined, PlusOutlined, ReloadOutlined, SendOutlined, UndoOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { TutorMarkdown } from './TutorMarkdown'
+import { ChatAnswer } from './ChatAnswer'
+import { normalizeTutorMarkdown } from './normalizeTutorMarkdown'
 import { safeMarkdownPlugins } from './safeMarkdownPlugins'
+import { tutorAnswerPlainText } from './chatAnswerParts'
 import { useAiStore, type ChatMessage } from '../../stores/aiStore'
 import { useUnsavedGuard } from './useUnsavedGuard'
 import { useAiText } from './i18n'
-import { normalizeTutorMarkdown } from './normalizeTutorMarkdown'
 import { copyToClipboard, stripMarkdown } from './chatUtils'
+import { useLocale } from '../../backoffice/lib/navigation'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState'
 import { tokens } from '../../theme/tokens'
 import { AiReleaseOption } from './AiReleaseOption'
+import './chatWindow.css'
 
-const katexPlugins = {
+const userMarkdownPlugins = {
   remarkPlugins: [remarkGfm, remarkMath],
   rehypePlugins: [rehypeKatex],
   pluginsFilter: safeMarkdownPlugins,
 }
-
-/** 默认头像占位（后续可替换为课程/用户自定义头像） */
-const AI_AVATAR = <RobotOutlined />
-const USER_AVATAR = <UserOutlined />
 
 /** Release 下拉最多展示几项后启用滚动窗口（§4.3.1，2026-10-28 新增） */
 const MAX_VISIBLE_RELEASES = 5
@@ -90,27 +88,31 @@ function ReleaseSelector() {
   const streaming = useAiStore((s) => s.streaming)
   const selectRelease = useAiStore((s) => s.selectRelease)
   const setLive = useAiStore((s) => s.setLive)
+  const pending = useAiStore((s) => s.selectedCourseId ? Boolean(s.pendingCourseActions[s.selectedCourseId]) : false)
+  const picking = useRef(false)
   const guard = useUnsavedGuard()
 
   const currentId = config?.releaseId ?? null
   const live = config?.isLive ?? false
   // 流式回答进行中不切换版本（QA 2026-10-27 A13）
-  const canSwitch = access.canPublish && releases.length > 0 && !streaming
+  const canSwitch = access.canPublish && releases.length > 0 && !streaming && !pending
 
   const pick = async (releaseId: string) => {
-    if (releaseId === currentId) return
-    if (!(await guard())) return
+    if (releaseId === currentId || pending || picking.current) return
+    picking.current = true
     try {
+      if (!(await guard())) return
       await selectRelease(releaseId)
     } catch (e) {
       message.error((e as Error).message || text('releaseSwitchFailed'))
+    } finally {
+      picking.current = false
     }
   }
 
   const onSetLive = async () => {
     try {
-      await setLive()
-      message.success(text('setLiveDone', { version: config?.releaseTag ?? '' }))
+      if (await setLive()) message.success(text('setLiveDone', { version: config?.releaseTag ?? '' }))
     } catch (e) {
       message.error((e as Error).message)
     }
@@ -153,7 +155,7 @@ function ReleaseSelector() {
       {access.canPublish && (
         <Button
           type="primary"
-          disabled={!currentId || live || streaming}
+          disabled={!currentId || live || streaming || pending}
           onClick={() => void onSetLive()}
         >
           {text('setLive')}
@@ -174,6 +176,7 @@ function Bubble({
   onUndo,
   text,
   courseId,
+  timeFormat,
 }: {
   msg: ChatMessage
   /** 是否为最后一条 user 消息（决定刷新/撤回按钮是否启用） */
@@ -185,76 +188,37 @@ function Bubble({
   onUndo: () => void
   text: (key: string) => string
   courseId: string | null
+  timeFormat: Intl.DateTimeFormat
 }) {
   const isUser = msg.role === 'user'
   const hasContent = Boolean(msg.content?.trim())
+  const timestamp = Date.parse(msg.createdAt)
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-      }}
-    >
-      {/* 气泡行 */}
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: isUser ? 'row-reverse' : 'row',
-          alignItems: 'flex-start',
-          gap: tokens.spacing.sm,
-        }}
-      >
-        <Avatar
-          icon={isUser ? USER_AVATAR : AI_AVATAR}
-          style={{
-            backgroundColor: isUser ? tokens.color.primary : tokens.color.success,
-            flexShrink: 0,
-          }}
-        />
-        <div
-          style={{
-            maxWidth: '75%',
-            minWidth: 0,
-            background: isUser ? tokens.color.primary : tokens.color.bg.layout,
-            color: isUser ? tokens.color.bg.container : 'inherit',
-            padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
-            borderRadius: tokens.radius.md,
-            whiteSpace: isUser ? 'pre-wrap' : 'normal',
-          }}
-        >
-          {hasContent ? (
-            <div data-color-mode="light" className={isUser ? 'chat-bubble-user' : undefined}>
-              {isUser ? (
-                <MDEditor.Markdown
-                  source={normalizeTutorMarkdown(msg.content)}
-                  {...katexPlugins}
-                  style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
-                />
-              ) : <TutorMarkdown content={msg.content} courseId={courseId} sourcesLabel={text('sources')} />}
-              {(msg.status === 'error' || msg.status === 'aborted') &&
-                <div role="status">{text(msg.status === 'aborted' ? 'aborted' : 'incomplete')}</div>}
-            </div>
-          ) : (
-            msg.status === 'error' || msg.status === 'aborted'
-              ? <span role="status">{text(msg.status === 'aborted' ? 'aborted' : 'incomplete')}</span>
-              : <Spin size="small" />
-          )}
+    <div className={isUser ? 'tutor-message-row user' : 'tutor-message-row assistant'}>
+      <div className="tutor-message-line">
+        <div className="tutor-message-bubble-wrap">
+          <span className="tutor-avatar" aria-hidden="true">{isUser ? text('userAvatar') : 'AI'}</span>
+          <div className="tutor-message">
+            {hasContent ? (
+              isUser ? (
+                <div data-color-mode="light" className="chat-bubble-user">
+                  <MDEditor.Markdown
+                    source={normalizeTutorMarkdown(msg.content)}
+                    {...userMarkdownPlugins}
+                    style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
+                  />
+                </div>
+              ) : <ChatAnswer content={msg.content} courseId={courseId} sourcesLabel={text('sources')} />
+            ) : msg.status !== 'error' && msg.status !== 'aborted' ? <Spin size="small" /> : null}
+            {(msg.status === 'error' || msg.status === 'aborted') &&
+              <div role="status">{text(msg.status === 'aborted' ? 'aborted' : 'incomplete')}</div>}
+          </div>
+          {Number.isFinite(timestamp) && <time className="tutor-message-time" dateTime={msg.createdAt}>{timeFormat.format(timestamp)}</time>}
         </div>
       </div>
 
-      {/* 工具栏行：AI 左侧、User 右侧 */}
-      <div
-        className={`chat-bubble-actions ${isUser ? 'user' : 'ai'}`}
-        style={{
-          display: 'flex',
-          gap: 4,
-          justifyContent: isUser ? 'flex-end' : 'flex-start',
-          paddingLeft: isUser ? 0 : 36, // 对齐气泡（左侧 Avatar 约 36px）
-          paddingRight: isUser ? 36 : 0, // 对齐气泡
-        }}
-      >
+      <div className="tutor-message-actions">
         {!isUser ? (
           // AI 工具栏：复制（Dropdown：纯文本 / Markdown）
           <Dropdown
@@ -268,7 +232,7 @@ function Bubble({
             trigger={['click']}
           >
             <Tooltip title={text('copy')}>
-              <Button type="text" size="small" icon={<CopyOutlined />} disabled={!hasContent} />
+              <Button type="text" size="small" aria-label={text('copy')} icon={<CopyOutlined />} disabled={!hasContent} />
             </Tooltip>
           </Dropdown>
         ) : (
@@ -278,6 +242,7 @@ function Bubble({
               <Button
                 type="text"
                 size="small"
+                aria-label={text('copy')}
                 icon={<CopyOutlined />}
                 disabled={!hasContent}
                 onClick={() => void onCopyMarkdown()}
@@ -287,6 +252,7 @@ function Bubble({
               <Button
                 type="text"
                 size="small"
+                aria-label={text('retry')}
                 icon={<ReloadOutlined />}
                 disabled={!isLastUser || streaming}
                 onClick={() => void onRetry()}
@@ -296,6 +262,7 @@ function Bubble({
               <Button
                 type="text"
                 size="small"
+                aria-label={text('undo')}
                 icon={<UndoOutlined />}
                 disabled={!isLastUser || streaming}
                 onClick={onUndo}
@@ -327,9 +294,12 @@ export function ChatWindow() {
   const retryLastUserMessage = useAiStore((s) => s.retryLastUserMessage)
   const undoLastUserMessage = useAiStore((s) => s.undoLastUserMessage)
   const { text, modeLabel } = useAiText()
+  const locale = useLocale()
+  const timeFormat = useMemo(() => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }), [locale])
 
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
+  const sendDisabled = saving || !selectedCourseId || (!streaming && !input.trim())
 
   // 流式增量时保持滚动到底部
   useEffect(() => {
@@ -406,12 +376,13 @@ export function ChatWindow() {
       )}
       <div
         ref={listRef}
+        className="ai-test-messages"
         style={{
           flex: 1,
           overflow: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: tokens.spacing.md,
+          gap: 17,
           padding: `${tokens.spacing.xs}px 0`,
         }}
       >
@@ -429,8 +400,12 @@ export function ChatWindow() {
                 streaming={streaming}
                 text={text}
                 courseId={selectedCourseId}
+                timeFormat={timeFormat}
                 onCopyPlain={async () => {
-                  const ok = await copyToClipboard(stripMarkdown(m.content))
+                  const plain = m.role === 'user'
+                    ? stripMarkdown(m.content)
+                    : tutorAnswerPlainText(m.content, text('sources'))
+                  const ok = await copyToClipboard(plain)
                   message[ok ? 'success' : 'error'](ok ? text('copied') : text('copyFailed'))
                 }}
                 onCopyMarkdown={async () => {
@@ -460,7 +435,7 @@ export function ChatWindow() {
           })
         )}
       </div>
-      <Space.Compact style={{ marginTop: tokens.spacing.md, width: '100%' }}>
+      <div className="ai-test-composer" style={{ marginTop: tokens.spacing.md }}>
         <Input.TextArea
           value={input}
           autoSize={{ minRows: 1, maxRows: 4 }}
@@ -468,21 +443,20 @@ export function ChatWindow() {
           disabled={!selectedCourseId || streaming}
           onChange={(e) => setInput(e.target.value)}
           onPressEnter={(e) => {
-            if (!e.shiftKey) {
-              e.preventDefault()
-              void onSend()
-            }
+            if (e.shiftKey || e.nativeEvent.isComposing || e.keyCode === 229) return
+            e.preventDefault()
+            if (!sendDisabled) void onSend()
           }}
         />
         <Button
           type="primary"
           icon={<SendOutlined />}
-          disabled={saving || !selectedCourseId || (!streaming && !input.trim())}
+          disabled={sendDisabled}
           onClick={() => streaming ? cancel() : void onSend()}
         >
           {text(streaming ? 'stop' : 'send')}
         </Button>
-      </Space.Compact>
+      </div>
     </Card>
   )
 }

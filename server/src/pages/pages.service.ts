@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockCourseRow } from '../prisma/course-lock';
 import { CreatePageDto } from './dto/create-page.dto';
@@ -25,15 +26,36 @@ export class PagesService {
     }
     const sortOrder =
       dto.sortOrder ?? (await this.prisma.page.count({ where: { courseId } }));
-    return this.prisma.page.create({
-      data: {
-        courseId,
-        title: dto.title,
-        contentMd: dto.contentMd,
-        sectionTags: dto.sectionTags,
-        sortOrder,
-      },
-    });
+    try {
+      return await this.prisma.page.create({
+        data: {
+          ...(dto.requestId && { id: dto.requestId }),
+          courseId,
+          title: dto.title,
+          contentMd: dto.contentMd,
+          sectionTags: dto.sectionTags,
+          sortOrder,
+        },
+      });
+    } catch (error) {
+      if (
+        !dto.requestId ||
+        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== 'P2002'
+      )
+        throw error;
+      const page = await this.prisma.page.findUnique({
+        where: { id: dto.requestId },
+      });
+      if (
+        !page ||
+        page.courseId !== courseId ||
+        page.title !== dto.title ||
+        page.contentMd !== dto.contentMd
+      )
+        throw new ConflictException('页面创建请求已被使用');
+      return page;
+    }
   }
 
   /** 单个 Page，含 contentMd、sectionTags（§5.1.2） */

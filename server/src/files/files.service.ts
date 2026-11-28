@@ -16,6 +16,15 @@ import { latexToMarkdown } from './latex-to-markdown';
 import { prepareDocxMath } from './docx-math';
 import { CourseStorageService } from '../commerce-courses/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { lockCourseRow } from '../prisma/course-lock';
+import {
+  readReferenceDocument,
+  type ReferenceKind,
+} from '../releases/teaching-reference-document';
+import {
+  referenceImageBytes,
+  referenceTransferLimits,
+} from '../releases/teaching-reference-limits';
 import {
   MAX_IMAGE_UPLOAD_BYTES,
   prepareKnowledgeImage,
@@ -44,7 +53,7 @@ export const ALLOWED_EXTENSIONS = [
 export const MAX_FILE_SIZE = 15 * 1024 * 1024;
 const MAX_DOCX_ENTRIES = 2000;
 const MAX_DOCX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
-const MAX_DOCX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_DOCX_IMAGE_BYTES = referenceImageBytes;
 const IMAGE_CLEANUP_BATCH_SIZE = 200;
 
 export interface ConvertedDocument {
@@ -60,6 +69,10 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
   private readonly markitdown = new MarkItDown();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private cleanupRunning = false;
+  private readonly referencePreviews = new Map<
+    string,
+    { courseId: string; employeeId: string; assets: string[]; at: number }
+  >();
 
   constructor(
     private readonly storage: CourseStorageService,
@@ -138,6 +151,9 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     if (this.cleanupRunning) return;
     this.cleanupRunning = true;
     try {
+      for (const [token, preview] of this.referencePreviews)
+        if (preview.at < now.getTime() - 24 * 60 * 60 * 1000)
+          this.referencePreviews.delete(token);
       const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const assets = await this.prisma.knowledgeImageAsset.findMany({
         where: { createdAt: { lt: cutoff } },
@@ -201,7 +217,17 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     )
       output.push(value.value);
     for (const [key, child] of Object.entries(value)) {
-      if (key === 'contentMd' && typeof child === 'string') output.push(child);
+      if (
+        (key === 'contentMd' || key === 'answerMd') &&
+        typeof child === 'string'
+      )
+        output.push(child);
+      else if (key === 'evidence' && Array.isArray(child))
+        output.push(
+          ...child.filter(
+            (value): value is string => typeof value === 'string',
+          ),
+        );
       else this.collectSnapshotMarkdown(child, output);
     }
   }
@@ -348,11 +374,160 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     return zip;
   }
 
+  async fitsReferenceDocument(buffer: Buffer, kind: ReferenceKind) {
+    if (buffer.length > referenceTransferLimits[kind].bytes) return false;
+    try {
+      await this.preflightDocx(buffer);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async previewReferenceDocument(
+    file: Express.Multer.File,
+    courseId: string,
+    kind: ReferenceKind,
+    employeeId: string,
+  ) {
+    if (
+      !/\.docx$/i.test(file.originalname) ||
+      file.buffer.length > referenceTransferLimits[kind].bytes
+    )
+      throw new BadRequestException('TEACHING_REFERENCE_DOCUMENT_INVALID');
+    await this.prisma.course.findUniqueOrThrow({
+      where: { id: courseId },
+      select: { id: true },
+    });
+    const assets: string[] = [];
+    try {
+      const zip = await this.preflightDocx(file.buffer);
+      const portable = await readReferenceDocument(zip);
+      if (portable?.some((row) => row.kind !== kind))
+        throw new BadRequestException('TEACHING_REFERENCE_WRONG_KIND');
+      let markdown: string | undefined;
+      let rows;
+      if (portable) {
+        rows = [];
+        for (const row of portable) {
+          const { bytes, ...details } = row;
+          if (bytes) {
+            const format = this.detectImage(bytes);
+            if (!format || bytes.length > MAX_DOCX_IMAGE_BYTES)
+              throw new BadRequestException(
+                'TEACHING_REFERENCE_DOCUMENT_INVALID',
+              );
+            const checked = await prepareKnowledgeImage(bytes);
+            if (
+              checked.extension !== format.extension ||
+              !bytes.equals(checked.bytes)
+            )
+              throw new BadRequestException(
+                'TEACHING_REFERENCE_DOCUMENT_INVALID',
+              );
+            details.value = await this.savePreviewImage(
+              courseId,
+              bytes,
+              format.extension,
+              assets,
+            );
+          }
+          rows.push(details);
+        }
+      } else {
+        markdown = await this.docxToMarkdown(
+          file.buffer,
+          courseId,
+          assets,
+          zip,
+        );
+      }
+      const token = assets.length ? randomUUID() : undefined;
+      if (token)
+        this.referencePreviews.set(token, {
+          courseId,
+          employeeId,
+          assets,
+          at: Date.now(),
+        });
+      return { markdown, rows, token };
+    } catch (error) {
+      for (const asset of assets)
+        await this.discardReleaseImage(courseId, asset);
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('TEACHING_REFERENCE_DOCUMENT_INVALID');
+    }
+  }
+
+  async finishReferencePreview(
+    courseId: string,
+    token: string,
+    employeeId: string,
+  ) {
+    const preview = this.referencePreviews.get(token);
+    if (
+      !preview ||
+      preview.courseId !== courseId ||
+      preview.employeeId !== employeeId
+    )
+      return;
+    this.referencePreviews.delete(token);
+    await this.prisma.$transaction(
+      async (tx) => {
+        await lockCourseRow(tx, courseId);
+        const [pages, releases, cards] = await Promise.all([
+          tx.page.findMany({
+            where: { courseId },
+            select: { contentMd: true },
+          }),
+          tx.release.findMany({
+            where: { courseId },
+            select: { snapshotData: true },
+          }),
+          tx.tutorTeachingCard.findMany({
+            where: { courseId },
+            select: { draft: true, approved: true },
+          }),
+        ]);
+        const references = pages.map((page) => page.contentMd);
+        this.collectSnapshotMarkdown(
+          releases.map((release) => release.snapshotData),
+          references,
+        );
+        this.collectSnapshotMarkdown(cards, references);
+        for (const asset of preview.assets) {
+          if (references.some((value) => value.includes(asset))) continue;
+          const storageKey = 'knowledge-pages/' + courseId + '/' + asset;
+          await this.storage.removeMedia(storageKey);
+          await tx.knowledgeImageAsset.deleteMany({
+            where: { courseId, storageKey },
+          });
+        }
+      },
+      { timeout: 30000 },
+    );
+  }
+
+  private async savePreviewImage(
+    courseId: string,
+    bytes: Buffer,
+    extension: string,
+    assets?: string[],
+  ) {
+    const id = randomUUID();
+    await this.saveImageAsset(courseId, id, extension, bytes);
+    const name = id + '.' + extension;
+    assets?.push(name);
+    return name;
+  }
+
   private async docxToMarkdown(
     buffer: Buffer,
     courseId?: string,
+    staged?: string[],
+    checkedZip?: JSZip,
   ): Promise<string> {
-    const zip = await this.preflightDocx(buffer);
+    const zip = checkedZip ?? (await this.preflightDocx(buffer));
     const math = await prepareDocxMath(zip, buffer);
     const images: Buffer[] = [];
     let imageError: Error | undefined;
@@ -390,11 +565,15 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
 
     for (const [index, bytes] of images.entries()) {
       const detected = this.detectImage(bytes)!;
-      const assetId = randomUUID();
-      await this.saveImageAsset(courseId, assetId, detected.extension, bytes);
+      const asset = await this.savePreviewImage(
+        courseId,
+        bytes,
+        detected.extension,
+        staged,
+      );
       markdown = markdown.replaceAll(
         `/knowledge-import-images/${index}/image`,
-        `/api/files/images/${courseId}/${assetId}.${detected.extension}`,
+        `/api/files/images/${courseId}/${asset}`,
       );
     }
     return markdown;

@@ -66,6 +66,7 @@ export function ConfigPanel() {
   const save = useAiStore((s) => s.save)
   const reset = useAiStore((s) => s.reset)
   const setOnline = useAiStore((s) => s.setOnline)
+  const pending = useAiStore((s) => s.pendingCourseActions)
   const openTutorManager = useAiStore((s) => s.openTutorManager)
   const streaming = useAiStore((s) => s.streaming)
   const { text, modeLabel } = useAiText()
@@ -122,8 +123,7 @@ export function ConfigPanel() {
       }
     }
     try {
-      await setOnline(checked)
-      message.success(checked ? text('onlineOn') : text('onlineOff'))
+      if (await setOnline(checked)) message.success(checked ? text('onlineOn') : text('onlineOff'))
     } catch (e) {
       message.error((e as Error).message)
     }
@@ -180,7 +180,7 @@ export function ConfigPanel() {
               <Switch
                 size="small"
                 checked={config?.online ?? false}
-                disabled={!access.canPublish || !selectedCourseId}
+                disabled={!access.canPublish || !selectedCourseId || Boolean(pending[selectedCourseId])}
                 onChange={(v) => void onOnlineChange(v)}
               />
             </span>
@@ -194,7 +194,7 @@ export function ConfigPanel() {
               onOpenChange={setCourseOpen}
               style={{ minWidth: 150, flexShrink: 0, marginLeft: 'auto' }}
               onChange={(v) => void onChangeCourse(v)}
-              options={courses.map((c) => ({ value: c.id, label: c.title }))}
+              options={courses.map((c) => ({ value: c.id, label: c.title, disabled: Boolean(pending[c.id]) }))}
               // 下拉面板底部追加「管理所有 online」链接（§4.2.6）；View/Edit 角色不显示
               popupRender={(menu) => (
                 <>

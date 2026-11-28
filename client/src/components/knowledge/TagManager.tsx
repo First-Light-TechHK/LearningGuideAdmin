@@ -1,6 +1,7 @@
 import { Tag, AutoComplete, Button, Space, Popover } from '../ui'
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useActionLock } from '../../lib/useActionLock'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { useKText } from './i18n'
@@ -80,6 +81,7 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
   /** 新增 tag 时用户选择的颜色（空字符串表示用后端默认分配） */
   const [newTagColor, setNewTagColor] = useState('')
   const deletingRef = useRef(false)
+  const actions = useActionLock()
 
   useEffect(() => {
     if (tagLibrary.length === 0 && !tagsLoading) void loadTags()
@@ -100,6 +102,7 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
   )
 
   const commit = async () => {
+    if (actions.isLocked('add')) return
     const t = value.trim()
     if (!t) {
       setValue('')
@@ -113,28 +116,37 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
       setAdding(false)
       return
     }
-    if (!colorMap.has(t)) {
-      try {
-        await createTag(t, newTagColor || undefined)
-      } catch {
-        // 创建失败仍允许本地加（颜色 fallback）
+    const unlock = actions.acquire('add')
+    if (!unlock) return
+    try {
+      if (!colorMap.has(t)) {
+        try {
+          await createTag(t, newTagColor || undefined)
+        } catch {
+          // 创建失败仍允许本地加（颜色 fallback）
+        }
       }
+      onChange([...tags, t])
+      setValue('')
+      setNewTagColor('')
+      setAdding(false)
+    } finally {
+      unlock()
     }
-    onChange([...tags, t])
-    setValue('')
-    setNewTagColor('')
-    setAdding(false)
   }
 
   const handleDelete = async (name: string, e: React.MouseEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    const unlock = actions.acquire('tag:' + name)
+    if (!unlock) return
     deletingRef.current = true
     try {
       await deleteTag(name)
     } catch {
       // 删除失败不打扰
     } finally {
+      unlock()
       setTimeout(() => {
         deletingRef.current = false
       }, 0)
@@ -143,10 +155,14 @@ export function TagManager({ tags, onChange, compact }: TagManagerProps) {
 
   /** 修改词库中已有 tag 的颜色 */
   const handleChangeColor = async (name: string, color: string) => {
+    const unlock = actions.acquire('tag:' + name)
+    if (!unlock) return
     try {
       await updateTagColor(name, color)
     } catch {
       // 失败不打扰
+    } finally {
+      unlock()
     }
   }
 

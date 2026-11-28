@@ -43,12 +43,12 @@ function delimiter(value: string): string {
   return delimiters[value] ?? unsupported(value);
 }
 
-function latex(node: Element): string {
+export function wordMathToLatex(node: Element): string {
   const children = Array.from(node.children).filter(
     (c) => c.namespaceURI === mathNs,
   );
   const fields = (tag: string) => children.filter((c) => c.localName === tag);
-  const field = (tag: string) => fields(tag).map(latex).join('');
+  const field = (tag: string) => fields(tag).map(wordMathToLatex).join('');
   const property = (tag: string, fallback: string) =>
     Array.from(fields(node.localName + 'Pr')[0]?.children ?? [])
       .find((c) => c.localName === tag)
@@ -69,7 +69,7 @@ function latex(node: Element): string {
     case 'sup':
     case 'sub':
     case 'deg':
-      return children.map(latex).join('');
+      return children.map(wordMathToLatex).join('');
     case 'f':
       if (property('type', 'bar') !== 'bar')
         unsupported('f/' + property('type', 'bar'));
@@ -111,7 +111,7 @@ function latex(node: Element): string {
         '\\left' +
         delimiter(property('begChr', '(')) +
         fields('e')
-          .map(latex)
+          .map(wordMathToLatex)
           .join(mathText(property('sepChr', '|'))) +
         '\\right' +
         delimiter(property('endChr', ')'))
@@ -119,18 +119,18 @@ function latex(node: Element): string {
     case 'm':
       return (
         '\\begin{matrix}' +
-        fields('mr').map(latex).join(' \\\\ ') +
+        fields('mr').map(wordMathToLatex).join(' \\\\ ') +
         '\\end{matrix}'
       );
     case 'mr':
       return fields('e')
-        .map((cell) => '{' + latex(cell) + '}')
+        .map((cell) => '{' + wordMathToLatex(cell) + '}')
         .join(' & ');
     case 'eqArr':
       return (
         '\\begin{gathered}' +
         fields('e')
-          .map((row) => '{' + latex(row) + '}')
+          .map((row) => '{' + wordMathToLatex(row) + '}')
           .join(' \\\\ ') +
         '\\end{gathered}'
       );
@@ -153,9 +153,17 @@ export async function prepareDocxMath(zip: JSZip, original: Buffer) {
         doc.getElementsByTagNameNS(mathNs, 'oMathPara'),
       );
       for (const equation of equations) {
-        const body = latex(equation).trim();
+        const body = wordMathToLatex(equation).trim();
         if (!body) unsupported('空公式');
-        const display = equation.parentElement?.localName === 'oMathPara';
+        const parent = equation.parentElement;
+        const display =
+          parent?.localName === 'oMathPara' ||
+          (parent?.localName === 'p' &&
+            Array.from(parent.children).every(
+              (child) =>
+                child === equation ||
+                (child.namespaceURI === wordNs && child.localName === 'pPr'),
+            ));
         const index = formulas.push({ body, display }) - 1;
         const run = doc.createElementNS(wordNs, 'w:r');
         const text = doc.createElementNS(wordNs, 'w:t');

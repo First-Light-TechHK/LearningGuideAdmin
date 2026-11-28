@@ -142,6 +142,11 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
       if (!release || release.courseId !== courseId) {
         throw new NotFoundException('发布版本不存在或不属于该课程');
       }
+      const course = await tx.course.findUniqueOrThrow({
+        where: { id: courseId },
+        select: COURSE_FIELDS,
+      });
+      if (course.aiTestReleaseId === releaseId) return course;
       return tx.course.update({
         where: { id: courseId },
         data: { aiTestReleaseId: releaseId },
@@ -151,10 +156,18 @@ export class PrismaKnowledgeClient implements KnowledgeClient {
   }
 
   setTutorOnline(courseId: string, online: boolean): Promise<KnowledgeCourse> {
-    return this.prisma.course.update({
-      where: { id: courseId },
-      data: { aiTutorOnline: online },
-      select: COURSE_FIELDS,
+    return this.prisma.$transaction(async (tx) => {
+      await lockCourseRow(tx, courseId);
+      const course = await tx.course.findUniqueOrThrow({
+        where: { id: courseId },
+        select: COURSE_FIELDS,
+      });
+      if (course.aiTutorOnline === online) return course;
+      return tx.course.update({
+        where: { id: courseId },
+        data: { aiTutorOnline: online },
+        select: COURSE_FIELDS,
+      });
     });
   }
 

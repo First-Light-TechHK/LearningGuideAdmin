@@ -31,6 +31,37 @@ function setup() {
 }
 
 describe('reference document import', () => {
+  it('creates up to 500 formulas using one active-reference lookup and rejects oversized batches', async () => {
+    const { service, tx } = setup();
+    const items = Array.from({ length: 500 }, (_, i) => ({
+      draft: {
+        ...draft,
+        approvedPayload: { ...draft.approvedPayload, code: `L1-F${i}` },
+      },
+    }));
+    await expect(
+      service.importReferences('c', items, false, 'editor'),
+    ).resolves.toEqual({ saved: 500 });
+    expect(tx.tutorTeachingCard.create).toHaveBeenCalledTimes(500);
+    expect(tx.tutorTeachingCard.findMany).toHaveBeenCalledTimes(2);
+    await expect(
+      service.importReferences('c', [...items, items[0]], false, 'editor'),
+    ).rejects.toMatchObject({ status: 413 });
+    const images = items.slice(0, 301).map(({ draft }) => ({
+      draft: {
+        ...draft,
+        approvedPayload: {
+          ...draft.approvedPayload,
+          refObjects: [{ kind: 'image', value: 'image.png' }],
+        },
+      },
+    }));
+    await expect(
+      service.importReferences('c', images, false, 'editor'),
+    ).rejects.toMatchObject({ status: 413 });
+    expect(tx.knowledgeImageAsset.findFirst).not.toHaveBeenCalled();
+  });
+
   it('checks the expected revision and makes imported updates available for release', async () => {
     const { service, tx } = setup();
     tx.tutorTeachingCard.findFirst.mockResolvedValue({
@@ -151,25 +182,57 @@ describe('reference document import', () => {
       },
       approvedPayload: { refObjects: [{ label: 'L1-F01 · Vector' }] },
     });
-    await expect(
-      service.save(
+  });
+
+  it.each([
+    {
+      conceptLabel: { zh: '向量', en: 'Vector' },
+      summary: { zh: '逐分量相加。', en: 'Add components.' },
+      label: 'Vector',
+      point: 'Add components.',
+    },
+    {
+      conceptLabel: { zh: '向量' },
+      summary: { zh: '逐分量相加。' },
+      label: '向量',
+      point: '逐分量相加。',
+    },
+  ])(
+    'uses $label as the default name when saving a reference',
+    async ({ conceptLabel, summary, label, point }) => {
+      const { service, tx } = setup();
+      await service.save(
         'c',
         undefined,
         undefined,
         {
           ...draft,
-          bilingual: { ...draft.bilingual, conceptLabel: { zh: '向量' } },
+          bilingual: { conceptLabel, summary },
+          approvedPayload: { ...draft.approvedPayload, code: ' Ｌ1-F01 ' },
         },
         'editor',
-      ),
-    ).rejects.toThrow('INVALID_TEACHING_CARD');
-  });
+      );
+      const [call] = tx.tutorTeachingCard.create.mock.calls[0] as [
+        { data: { id: string; approved: unknown } },
+      ];
+      expect(call.data.approved).toMatchObject({
+        canonicalPoint: point,
+        bilingual: {
+          conceptLabel: { ...conceptLabel, en: label },
+          summary: { ...summary, en: point },
+        },
+        approvedPayload: {
+          refObjects: [{ id: call.data.id, label: 'L1-F01 · ' + label }],
+        },
+      });
+    },
+  );
 
-  it('requires an English reference summary for individual and imported saves', async () => {
+  it('requires a reference summary for individual and imported saves', async () => {
     const { service, tx } = setup();
     const withoutSummary = {
       ...draft,
-      bilingual: { ...draft.bilingual, summary: { zh: '向量', en: ' ' } },
+      bilingual: { ...draft.bilingual, summary: { zh: '', en: ' ' } },
     };
     await expect(
       service.save('c', undefined, undefined, withoutSummary, 'editor'),

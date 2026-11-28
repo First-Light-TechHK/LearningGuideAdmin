@@ -213,6 +213,7 @@ export async function buildTutorContext(
   format: ContextFormat = 'structured',
   selectedSources?: ReturnType<typeof passageSource>[],
   gapTerms?: string[],
+  referenceOffset = 0,
 ): Promise<{
   text: string | null;
   strategy: 'snapshot' | 'retrieval';
@@ -240,6 +241,7 @@ export async function buildTutorContext(
       passages,
       selectedSources,
       gapTerms,
+      referenceOffset,
     ),
     strategy: 'retrieval',
     passages,
@@ -267,6 +269,7 @@ async function buildRetrievedContext(
   passages: string[] = [],
   selectedSources?: ReturnType<typeof passageSource>[],
   gapTerms: string[] = [],
+  referenceOffset = 0,
 ): Promise<string | null> {
   if (!releaseId) {
     throw new BadRequestException(
@@ -433,7 +436,7 @@ async function buildRetrievedContext(
     passages.push(r.content);
     blocks.push(
       JSON.stringify({
-        reference: `S${blocks.length + 1}`,
+        reference: `S${referenceOffset + blocks.length + 1}`,
         source,
         sourceLevel: sourceLevel(r.pageTitle),
         evidence: r.content,

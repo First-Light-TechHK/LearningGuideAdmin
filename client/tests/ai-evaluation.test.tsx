@@ -10,8 +10,8 @@ import { http } from '../src/api/client'
 import type { AiConfigView } from '../src/api/ai'
 import { buildAccess, WorkspaceAccessContext } from '../src/backoffice/lib/workspaceAccessState'
 
-const initial = useAiStore.getState(), originalGet = http.get, originalPatch = http.patch
-afterEach(() => { cleanup(); useAiStore.setState(initial, true); http.get = originalGet; http.patch = originalPatch })
+const initial = useAiStore.getState(), originalGet = http.get, originalPatch = http.patch, originalPost = http.post
+afterEach(() => { cleanup(); useAiStore.setState(initial, true); http.get = originalGet; http.patch = originalPatch; http.post = originalPost })
 
 function renderPanel(locale = 'en-GB') {
   render(<App><ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[`/${locale}`]}><Routes><Route path="/:locale" element={
@@ -56,6 +56,31 @@ async function clickTab(name: string) {
 async function poll(t: TestContext) {
   await act(async () => t.mock.timers.tick(3000))
 }
+
+test('double-clicking restart opens one confirmation and submits one keyed request', async () => {
+  const completed = task('job-1', 'completed')
+  http.get = (async (url: string) => ({ data: url === tasksUrl ? [completed] : completed })) as typeof http.get
+  const keys: string[] = []
+  let finish!: (result: { data: ReturnType<typeof task> }) => void
+  http.post = ((url: string, body: { submissionKey: string }) => {
+    assert.equal(url, tasksUrl + '/job-1/restart')
+    keys.push(body.submissionKey)
+    return new Promise((resolve) => { finish = resolve })
+  }) as typeof http.post
+  renderPanel()
+  await clickTab('Task history')
+  fireEvent.click(await screen.findByRole('button', { name: /job-1 · completed/ }))
+  const restart = await screen.findByRole('button', { name: 'Restart' })
+  act(() => { fireEvent.click(restart); fireEvent.click(restart) })
+  const heading = 'Regenerate all answers from the beginning?'
+  const dialog = await screen.findByRole('dialog', { name: heading })
+  assert.equal(screen.getAllByRole('dialog', { name: heading }).length, 1)
+  const confirm = within(dialog).getByRole('button', { name: 'OK' })
+  act(() => { fireEvent.click(confirm); fireEvent.click(confirm) })
+  assert.equal(keys.length, 1)
+  assert.match(keys[0], /^[\da-f-]{36}$/i)
+  await act(async () => finish({ data: task('job-2', 'queued') }))
+})
 
 test('only loads task history when that tab is opened and stops scheduling after the last active job ends', async (t) => {
   const statuses = ['queued', 'running', 'stopping', 'completed']

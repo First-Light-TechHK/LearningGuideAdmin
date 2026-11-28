@@ -9,6 +9,7 @@ import { useLocale } from '../../backoffice/lib/navigation'
 import { TutorMarkdown } from './TutorMarkdown'
 import { AiReleaseOption } from './AiReleaseOption'
 import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState'
+import { useActionLock } from '../../lib/useActionLock'
 
 type Mode = 'LECTURE' | 'SOCRATIC'
 type Question = { conversationId: string; turn: number; question: string; notes: string }
@@ -44,17 +45,22 @@ export function EvaluationPanel({ open, close }: { open: boolean; close: () => v
   const hasActiveTasks = useRef(false)
   const selectedId = useRef<string | null>(null)
   const selectionRequest = useRef(0)
+  const taskRead = useRef<{ id: string; request: number } | null>(null)
   const selectTask = useCallback((task: Task | null) => {
     selectedId.current = task?.id ?? null
     setSelected(task)
   }, [])
   const submissionKey = useRef(crypto.randomUUID())
+  const restartKeys = useRef(new Map<string, string>())
+  const actions = useActionLock()
   const generation = useRef(0)
   const refreshTaskHistory = () => setTaskRefreshVersion(++refreshVersion.current)
   const patch = (value: Partial<Config>) => { generation.current++; setConfig((c) => ({ ...c, ...value })); submissionKey.current = crypto.randomUUID(); setQuestions([]); setSource(''); setErrors([]) }
   useEffect(() => {
+    restartKeys.current.clear()
     generation.current++
     selectionRequest.current++
+    taskRead.current = null
     hasActiveTasks.current = false
     selectTask(null); setQuestions([]); setSource(''); setTasks([]); setTaskRefreshFailed(false); setRename(null)
     setConfig((c) => ({ ...c, courseId: courseId ?? '', releaseId: current?.releaseId ?? '', model: current?.model ?? models[0] ?? '' }))
@@ -111,24 +117,76 @@ export function EvaluationPanel({ open, close }: { open: boolean; close: () => v
   }, [open, tab, owner, courseId, taskRefreshVersion, selectTask])
 
   const loadTask = async (id: string) => {
+    if (taskRead.current?.id === id) return
     const request = ++selectionRequest.current
+    taskRead.current = { id, request }
     try {
       const { data } = await http.get<Task>(`${root}/tasks/${id}`)
       if (request === selectionRequest.current) selectTask(data)
     } catch (e) {
       if (request === selectionRequest.current) message.error(evaluationText((e as Error).message, en))
+    } finally {
+      if (request === taskRead.current?.request) taskRead.current = null
     }
   }
-  const action = async (url: string, method: 'post' | 'delete' = 'post') => {
+  const runTaskAction = async (taskId: string, work: () => Promise<unknown>) => {
+    const unlock = actions.acquire(taskId)
+    if (!unlock) return
     try {
-      await http[method](url)
+      await work()
       refreshTaskHistory()
     } catch (e) { message.error(evaluationText((e as Error).message, en)) }
+    finally { unlock() }
+  }
+
+  const confirmAction = (key: string, title: string, work: () => Promise<void>, content?: string) => {
+    const unlock = actions.acquire(key)
+    if (!unlock) return
+    const dialog = modal.confirm({
+      title,
+      content,
+      afterClose: unlock,
+      onOk: async () => {
+        if (useAiStore.getState().ownerId !== owner || useAiStore.getState().selectedCourseId !== courseId) return
+        dialog.update({ cancelButtonProps: { disabled: true }, keyboard: false })
+        try {
+          await work()
+        } catch (error) {
+          message.error(evaluationText((error as Error).message, en))
+          dialog.update({ cancelButtonProps: { disabled: false }, keyboard: true })
+          throw error
+        }
+      },
+    })
+  }
+
+  const startBatch = () => {
+    const body = { config, questions, source, submissionKey: submissionKey.current }
+    confirmAction('start', L('开始批量测试？', 'Start batch test?'), async () => {
+      const { data } = await http.post<Task>(`${root}/tasks`, body)
+      if (useAiStore.getState().ownerId !== owner || useAiStore.getState().selectedCourseId !== courseId) return
+      selectTask(data)
+      setTab('tasks')
+    }, `${questions.length * config.modes.length} ${L('份回答将生成。', 'answers will be generated.')}`)
+  }
+
+  const restartTask = (id: string) => {
+    confirmAction(id, L('从头重新生成全部答案？', 'Regenerate all answers from the beginning?'), async () => {
+      const key = restartKeys.current.get(id) ?? crypto.randomUUID()
+      restartKeys.current.set(id, key)
+      const { data } = await http.post<Task>(`${root}/tasks/${id}/restart`, { submissionKey: key })
+      if (restartKeys.current.get(id) === key) restartKeys.current.delete(id)
+      if (useAiStore.getState().ownerId !== owner || useAiStore.getState().selectedCourseId !== courseId) return
+      if (selectedId.current === id) selectTask(data)
+      refreshTaskHistory()
+    }, L('将创建新任务并重新生成答案。', 'A new job will regenerate the answers.'))
   }
 
   const renameTask = async () => {
     const name = rename?.name.trim()
-    if (!canEdit || !rename || !name || renaming) return
+    if (!canEdit || !rename || !name) return
+    const unlock = actions.acquire(rename.id)
+    if (!unlock) return
     setRenaming(true)
     try {
       const { data } = await http.patch<{ id: string; name: string }>(`${root}/tasks/${rename.id}/name`, { name })
@@ -143,11 +201,15 @@ export function EvaluationPanel({ open, close }: { open: boolean; close: () => v
       message.error(evaluationText((e as Error).message, en))
     } finally {
       setRenaming(false)
+      unlock()
     }
   }
   const upload = async (file: File) => {
+    if (actions.isLocked('start') || actions.isLocked('upload')) return
     submissionKey.current = crypto.randomUUID(); setQuestions([]); setSource(''); setErrors([])
     if (file.size > 5 * 1024 * 1024) { setErrors([L('文件不能超过5MB', 'Maximum file size is 5 MB')]); return }
+    const unlock = actions.acquire('upload')
+    if (!unlock) return
     const token = ++generation.current
     const form = new FormData(); form.append('file', file); form.append('config', JSON.stringify(config))
     setBusy(true)
@@ -158,14 +220,15 @@ export function EvaluationPanel({ open, close }: { open: boolean; close: () => v
       if (generation.current !== token) return
 setQuestions(response.data.questions); setErrors(response.data.errors); setSource(btoa(binary))
     } catch (e) { if (generation.current === token) setErrors([evaluationText((e as Error).message,en)]) }
-    finally { setBusy(false) }
+    finally { setBusy(false); unlock() }
   }
   const selectedDone = selected?.results.filter((r) => r.status === 'success' || r.status === 'failed').length ?? 0
   const successful = selected?.results.filter((r) => r.status === 'success').length ?? 0
   const measured = selected?.results.filter((r) => r.latencyMs > 0) ?? []
   const remaining = selected ? selected.results.length - selectedDone : 0
   const estimate = measured.length ? Math.ceil(Math.max(3100, measured.reduce((sum, r) => sum + r.latencyMs, 0) / measured.length) * remaining / 60000) : null
-  const locked = busy
+  const locked = busy || actions.pending.has('start')
+  const taskPending = selected ? actions.pending.has(selected.id) : false
   return <Modal open={open} onCancel={close} footer={null} width={1050} style={{ top: '7.5vh', paddingBottom: 0 }} styles={{ content: { maxHeight: '85dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }, body: { height: 'min(720px, calc(85dvh - 110px))', minHeight: 0, display: 'flex', overflow: 'hidden' } }} title={L('AI 测试', 'AI Testing')}>
     <div className="ai-testing-shell">
       <Alert type="info" message={L('知识库始终开启。批测全局并发1，最多200份回答，结果保留30天。', 'Knowledge is always enabled. Global batch concurrency: 1. Maximum 200 answers per job. Results retained for 30 days.')} />
@@ -189,11 +252,11 @@ setQuestions(response.data.questions); setErrors(response.data.errors); setSourc
       </div>
 
           <Space>{(['LECTURE', 'SOCRATIC'] as const).map((mode) => <a key={mode} href={`/api${root}/template?mode=${mode}`}>{mode === 'LECTURE' ? L('下载讲授示例', 'Download Lecture example') : L('下载苏格拉底示例', 'Download Socratic example')}</a>)}</Space>
-          <input aria-label={L('上传Excel', 'Upload Excel')} type="file" accept=".xlsx" disabled={busy} onChange={(e) => { if (e.target.files?.[0]) void upload(e.target.files[0]); e.target.value = '' }} />
+          <input aria-label={L('上传Excel', 'Upload Excel')} type="file" accept=".xlsx" disabled={locked} onChange={(e) => { if (e.target.files?.[0]) void upload(e.target.files[0]); e.target.value = '' }} />
           {errors.length > 0 && <Alert type="error" message={evaluationText(errors.join('; '),en)} />}
           <div>{L('有效问题 / 预计回答数：', 'Questions / planned answers: ')}{questions.length} / {questions.length * config.modes.length}</div>
           <div className="ai-test-scroll ai-question-preview">{questions.map((q) => <div key={`${q.conversationId}:${q.turn}`}>{q.conversationId} · {q.turn} · {q.question}</div>)}</div>
-          <Button disabled={busy || !questions.length || errors.length > 0 || questions.length * config.modes.length > 200 || !config.releaseId || !config.model} onClick={() => modal.confirm({ title: L('开始批量测试？', 'Start batch test?'), content: `${questions.length * config.modes.length} ${L('份回答，将产生模型调用费用。', 'answers. Model usage will be charged.')}`, onOk: async () => { try { const response = await http.post<Task>(`${root}/tasks`, { config, questions, source, submissionKey: submissionKey.current }); selectTask(response.data); setTab('tasks') } catch (e) { message.error(evaluationText((e as Error).message, en)); throw e } } })}>{L('开始测试', 'Start test')}</Button>
+          <Button disabled={locked || !questions.length || errors.length > 0 || questions.length * config.modes.length > 200 || !config.releaseId || !config.model} onClick={startBatch}>{L('开始测试', 'Start test')}</Button>
         </div> },
         { key: 'tasks', label: L('任务记录', 'Task history'), children: <div className="ai-task-pane">
           {taskRefreshFailed && <Alert
@@ -208,15 +271,23 @@ setQuestions(response.data.questions); setErrors(response.data.errors); setSourc
             <Space wrap>
               <span className="ai-task-name">{selected.name || selected.id}</span>
               <span>{L('成功', 'Success')} {successful}/{selected.results.length} · {L('失败', 'Failed')} {selected.results.filter((r) => r.status === 'failed').length}</span>
-              {canEdit && <Button size="small" onClick={() => setRename({ id: selected.id, name: selected.name ?? '' })}>{L('重命名', 'Rename')}</Button>}
+              {canEdit && <Button size="small" disabled={taskPending} onClick={() => setRename({ id: selected.id, name: selected.name ?? '' })}>{L('重命名', 'Rename')}</Button>}
             </Space>
             <div>{selected.config.runningSolution} · {selected.config.modes.join(' / ')} · {L('已提交', 'Submitted')} {Math.max(0, Math.floor((Date.now() - Date.parse(selected.createdAt)) / 60000))} {L('分钟', 'minutes ago')}</div>
             <progress value={selected.status === 'stopped' ? successful : selectedDone} max={selected.results.length} style={{ width: '100%' }} />
             <div>{selected.status === 'running' ? estimate === null ? L('预计时间：估算中', 'ETA: estimating') : L(`预计剩余约${estimate}分钟（不含排队等待）`, `About ${estimate} minutes remaining (excluding queue delays)`) : ''}</div>
             <Space wrap>
-              {['queued', 'running'].includes(selected.status) && <Button danger onClick={() => void action(`${root}/tasks/${selected.id}/stop`)}>{L('停止测试', 'Stop test')}</Button>}
-              {['stopped', 'completed'].includes(selected.status) && <><Button onClick={() => modal.confirm({ title: L('从头重新生成全部答案？', 'Regenerate all answers from the beginning?'), content: L('创建新任务，会重新产生模型调用费用。', 'Creates a new job and incurs model usage costs again.'), onOk: () => action(`${root}/tasks/${selected.id}/restart`) })}>{L('重新开始', 'Restart')}</Button><Button danger onClick={() => modal.confirm({ title: L('删除题目、结果和文件？', 'Delete questions, results and files?'), onOk: () => action(`${root}/tasks/${selected.id}`, 'delete') })}>{L('删除任务', 'Delete job')}</Button></>}
-              <Button onClick={() => void action(`${root}/tasks/${selected.id}/source`, 'delete')}>{L('删除上传Excel', 'Delete uploaded Excel')}</Button>
+              {['queued', 'running'].includes(selected.status) && <Button danger disabled={taskPending}
+                onClick={() => void runTaskAction(selected.id, () => http.post(`${root}/tasks/${selected.id}/stop`))}>{L('停止测试', 'Stop test')}</Button>}
+              {['stopped', 'completed'].includes(selected.status) && <>
+                <Button disabled={taskPending} onClick={() => restartTask(selected.id)}>{L('重新开始', 'Restart')}</Button>
+                <Button danger disabled={taskPending} onClick={() => confirmAction(selected.id, L('删除题目、结果和文件？', 'Delete questions, results and files?'), async () => {
+                  await http.delete(`${root}/tasks/${selected.id}`)
+                  refreshTaskHistory()
+                })}>{L('删除任务', 'Delete job')}</Button>
+              </>}
+              <Button disabled={taskPending}
+                onClick={() => void runTaskAction(selected.id, () => http.delete(`${root}/tasks/${selected.id}/source`))}>{L('删除上传Excel', 'Delete uploaded Excel')}</Button>
               <Button href={`/api${root}/tasks/${selected.id}/export?locale=${locale}`}>{L('下载结果 Excel', 'Download results Excel')}</Button>
               <Button href={`/api${root}/tasks/${selected.id}/export?format=json`}>{L('下载数据', 'Download JSON')}</Button>
             </Space>
@@ -233,7 +304,7 @@ setQuestions(response.data.questions); setErrors(response.data.errors); setSourc
       confirmLoading={renaming}
       okButtonProps={{ disabled: !rename?.name.trim() }}
       onOk={() => void renameTask()}
-      onCancel={() => { if (!renaming) setRename(null) }}
+      onCancel={() => { if (!rename || !actions.isLocked(rename.id)) setRename(null) }}
     >
       <Input
         aria-label={L('任务名称', 'Task name')}

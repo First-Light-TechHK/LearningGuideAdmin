@@ -45,4 +45,27 @@ describe('published teaching card search documents', () => {
       'What is a state?\nA condition.',
     ]);
   });
+  it('indexes the full content of a modern definition under a single identity', () => {
+    const result = qaParts([
+      {
+        cardId: 'state',
+        type: 'concept',
+        bilingual,
+        approvedPayload: {
+          definitionName: '状态变量',
+          answerMd: '说明状态的量。'.repeat(430) + '\n最后用温度表征咖啡。',
+        },
+      },
+    ]);
+    expect(result.length).toBeGreaterThan(1);
+    expect(
+      result.every(
+        (row) =>
+          row.cardId === 'state' &&
+          row.part > 0 &&
+          row.text.startsWith('状态变量\n'),
+      ),
+    ).toBe(true);
+    expect(result.at(-1)?.answerTerms).toContain('咖啡');
+  });
 });

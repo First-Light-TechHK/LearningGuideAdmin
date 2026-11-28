@@ -52,6 +52,7 @@ interface AiState {
   /** 全部 AI Tutor 列表（弹窗数据源） */
   tutors: AiTutorListView[]
   tutorsLoading: boolean
+  pendingCourseActions: Record<string, symbol | undefined>
   /** 当前课程的 Release 列表（按发布时间倒序；头部 Release 选择器数据源，§4.3.1） */
   releases: ReleaseSummary[]
 
@@ -66,14 +67,14 @@ interface AiState {
   save: () => Promise<boolean>
   /** 把当前编辑模式的 System Prompt 恢复为模板默认值（只改编辑区，需 Save 才生效） */
   reset: () => void
-  setOnline: (online: boolean) => Promise<void>
-  setTutorOnline: (courseId: string, online: boolean) => Promise<void>
+  setOnline: (online: boolean) => Promise<boolean>
+  setTutorOnline: (courseId: string, online: boolean) => Promise<boolean>
   openTutorManager: () => Promise<void>
   closeTutorManager: () => void
   /** 切换「测试所选 Release」（§4.3.1，持久化 aiTestReleaseId，并加载该 Release 的配置） */
   selectRelease: (releaseId: string) => Promise<void>
   /** Set Live：把测试所选 Release 设为上线版本（§3.4.4，轻量） */
-  setLive: () => Promise<void>
+  setLive: () => Promise<boolean>
   newChat: () => void
   send: (text: string) => Promise<void>
   /** 撤回最后一条用户消息及其 AI 回复，不重新发送（仅前端，localStorage 持久化） */
@@ -165,6 +166,28 @@ function buildForm(
   }
 }
 
+async function runCourseAction(courseId: string, action: (isCurrent: () => boolean) => Promise<void>): Promise<boolean> {
+  const { getState, setState } = useAiStore
+  const { ownerId, pendingCourseActions } = getState()
+  if (pendingCourseActions[courseId]) return false
+  const token = Symbol()
+  const isCurrent = () => getState().ownerId === ownerId && getState().pendingCourseActions[courseId] === token
+  setState({ pendingCourseActions: { ...pendingCourseActions, [courseId]: token } })
+  try {
+    await action(isCurrent)
+    return isCurrent()
+  } catch (error) {
+    if (isCurrent()) throw error
+    return false
+  } finally {
+    if (isCurrent()) {
+      const next = { ...getState().pendingCourseActions }
+      delete next[courseId]
+      setState({ pendingCourseActions: next })
+    }
+  }
+}
+
 export const useAiStore = create<AiState>((set, get) => ({
   ownerId: null,
   controller: null,
@@ -185,6 +208,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   tutorManagerOpen: false,
   tutors: [],
   tutorsLoading: false,
+  pendingCourseActions: {},
   releases: [],
 
   cancel() { get().controller?.abort() },
@@ -194,7 +218,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       get().cancel()
       set({ ownerId, selectedCourseId: null, config: null, messages: [], error: null,
         form: { systemPrompt: '', welcomeMsg: '', llmModel: '', runningSolution: 'grounded-jack' }, initialForm: null,
-        courses: [], models: [], templates: {}, releases: [], tutors: [], tutorManagerOpen: false,
+        courses: [], models: [], templates: {}, releases: [], tutors: [], tutorManagerOpen: false, tutorsLoading: false, pendingCourseActions: {},
         controller: null, streaming: false, selectionId: get().selectionId + 1 })
     }
     const [courses, models, prompts] = await Promise.all([
@@ -221,13 +245,15 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   async refreshActiveCourse() {
     const { selectedCourseId, ownerId, config: previousConfig, streaming } = get()
-    if (!selectedCourseId || streaming) return
+    if (!selectedCourseId || streaming || get().pendingCourseActions[selectedCourseId]) return
     try {
       const [config, releases] = await Promise.all([
         aiApi.getConfig(selectedCourseId),
         knowledgeApi.listReleases(selectedCourseId),
       ])
-      if (get().ownerId !== ownerId || get().selectedCourseId !== selectedCourseId) return
+      const current = get()
+      if (current.ownerId !== ownerId || current.selectedCourseId !== selectedCourseId ||
+        current.config !== previousConfig || current.pendingCourseActions[selectedCourseId]) return
       if (get().isDirty()) {
         set({ releases, error: null })
       } else {
@@ -251,7 +277,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   async selectCourse(courseId) {
     // 流式回答进行中不切换课程，否则增量会写进另一门课的会话（QA 2026-10-27 A13）
-    if (get().streaming) return
+    if (get().streaming || get().pendingCourseActions[courseId]) return
     const { editMode, templates, ownerId } = get()
     const selectionId = get().selectionId + 1
     set({ selectionId })
@@ -373,41 +399,35 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   /** §4.2.6 顶部卡片 Online 开关：切换即时生效（当前选中课程） */
   async setOnline(online) {
-    const { selectedCourseId, tutors } = get()
-    if (!selectedCourseId) return
-    try {
-      const next = await aiApi.setOnline(selectedCourseId, online)
-      set({
-        config: next,
-        // 同步弹窗列表中同一课程行的状态（若已加载）
-        tutors: tutors.map((t) =>
-          t.courseId === selectedCourseId ? { ...t, online: next.online } : t,
-        ),
-        error: null,
-      })
-    } catch (e) {
-      set({ error: (e as Error).message })
-      throw e
-    }
+    const { selectedCourseId } = get()
+    return selectedCourseId ? get().setTutorOnline(selectedCourseId, online) : false
   },
 
   /** §4.2.6 弹窗表格行内切换：点即改即存；若为当前课程，同步顶部卡片开关 */
   async setTutorOnline(courseId, online) {
-    const next = await aiApi.setOnline(courseId, online)
-    set((s) => ({
-      tutors: s.tutors.map((t) => (t.courseId === courseId ? { ...t, online: next.online } : t)),
-      config: s.selectedCourseId === courseId ? next : s.config,
-    }))
+    return runCourseAction(courseId, async (isCurrent) => {
+      const next = await aiApi.setOnline(courseId, online)
+      if (!isCurrent()) return
+      set((s) => ({
+        tutors: s.tutors.map((t) => (t.courseId === courseId ? { ...t, online: next.online } : t)),
+        config: s.selectedCourseId === courseId && s.config ? { ...s.config, online: next.online } : s.config,
+      }))
+    })
   },
 
   /** 打开「管理所有 online」弹窗并拉取列表（§4.2.6） */
   async openTutorManager() {
+    if (get().tutorsLoading) {
+      set({ tutorManagerOpen: true })
+      return
+    }
+    const { ownerId } = get()
     set({ tutorManagerOpen: true, tutorsLoading: true })
     try {
       const tutors = await aiApi.listTutors()
-      set({ tutors, tutorsLoading: false })
+      if (get().ownerId === ownerId) set({ tutors, tutorsLoading: false })
     } catch (e) {
-      set({ tutorsLoading: false, error: (e as Error).message })
+      if (get().ownerId === ownerId) set({ tutorsLoading: false, error: (e as Error).message })
     }
   },
 
@@ -417,38 +437,34 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   /** §4.3.1 头部 Release 选择器：切换测试所选 Release 并加载其已保存配置（按当前 editMode） */
   async selectRelease(releaseId) {
-    const { selectedCourseId, streaming, ownerId } = get()
-    if (!selectedCourseId || streaming) return
-    const selectionId = get().selectionId + 1
-    set({ selectionId })
-    try {
+    const { selectedCourseId, streaming } = get()
+    if (!selectedCourseId || streaming || get().config?.releaseId === releaseId) return
+    await runCourseAction(selectedCourseId, async (isCurrent) => {
       const next = await aiApi.setActiveRelease(selectedCourseId, releaseId)
-      if (get().ownerId !== ownerId || get().selectedCourseId !== selectedCourseId || get().selectionId !== selectionId) return
+      if (!isCurrent() || get().selectedCourseId !== selectedCourseId) return
       const { editMode, templates } = get()
       const form = buildForm(next, templates, editMode)
       set({ config: next, form, initialForm: { ...form }, error: null,
         messages: loadChat(get().ownerId, selectedCourseId, next.releaseId, next.runningSolution) ?? freshChat(form.welcomeMsg) })
-    } catch (e) {
-      set({ error: (e as Error).message })
-      throw e
-    }
+    })
   },
 
   /** §3.4.4 Set Live：把测试所选 Release 设为上线版本（轻量），并刷新配置/列表 */
   async setLive() {
     const { selectedCourseId, config } = get()
-    if (!selectedCourseId || !config?.releaseId) return
-    try {
-      await knowledgeApi.setLive(selectedCourseId, config.releaseId)
-      const [next, releases] = await Promise.all([
-        aiApi.getConfig(selectedCourseId),
-        knowledgeApi.listReleases(selectedCourseId),
-      ])
-      set({ config: next, releases, error: null })
-    } catch (e) {
-      set({ error: (e as Error).message })
-      throw e
-    }
+    const releaseId = config?.releaseId
+    if (!selectedCourseId || !releaseId || config.isLive || get().streaming) return false
+    return runCourseAction(selectedCourseId, async (isCurrent) => {
+      await knowledgeApi.setLive(selectedCourseId, releaseId)
+      if (!isCurrent()) return
+      set((s) => ({
+        config: s.selectedCourseId === selectedCourseId && s.config
+          ? { ...s.config, isLive: s.config.releaseId === releaseId, hasLiveRelease: true } : s.config,
+        tutors: s.tutors.map((tutor) => tutor.courseId === selectedCourseId ? { ...tutor, hasLiveRelease: true } : tutor),
+      }))
+      const releases = await knowledgeApi.listReleases(selectedCourseId).catch(() => null)
+      if (releases && isCurrent() && get().selectedCourseId === selectedCourseId) set({ releases })
+    })
   },
 
   newChat() {

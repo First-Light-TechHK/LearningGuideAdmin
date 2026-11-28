@@ -98,8 +98,7 @@ export function PageEditor() {
   useWorkspaceScroll(workspace, pageKey + '.editorScroll', !preview, view?.scrollDOM ?? null)
   const activePicker = !preview && picker?.pageId === draft?.pageId && picker?.target === view && picker?.courseId === courseId
     ? picker : null
-  const previewReferences = preview && draft?.contentMd.includes('refobj:')
-  const referenceCourseId = previewReferences ? courseId : null
+  const referenceCourseId = draft?.contentMd.includes('refobj:') ? courseId : null
   const currentLoad = referenceLoad?.courseId === referenceCourseId ? referenceLoad : null
   /** 标题编辑态（§3.3.1）：默认展示态（大标题 + 常显铅笔），点击铅笔进入编辑态 */
   const [editingTitle, setEditingTitle] = useState(false)
@@ -515,10 +514,7 @@ export function PageEditor() {
             icon={preview ? <EditOutlined /> : <EyeOutlined />}
             onClick={() => {
               // 切到预览前先把最新文本写回 draft，保证预览内容与编辑器一致
-              if (!preview) {
-                commitRef.current()
-                setReferenceLoad(null)
-              }
+              if (!preview) commitRef.current()
               workspace.write(pageKey + '.preview', !preview)
             }}
           >
@@ -548,6 +544,7 @@ export function PageEditor() {
           </Button>
         </div>
       )}
+      {referenceLoadError}
       {preview ? (
         <div ref={previewScroll}
           data-color-mode="light"
@@ -559,7 +556,7 @@ export function PageEditor() {
             padding: `${tokens.spacing.md}px ${tokens.spacing.lg}px`,
           }}
         >
-          {previewReferences && (referenceLoadError || (!currentLoad && <Spin />))}
+          {referenceCourseId && !currentLoad && <Spin />}
           <KnowledgeMarkdown source={draft.contentMd} courseId={courseId ?? undefined} references={currentLoad?.items} />
         </div>
       ) : (
@@ -631,6 +628,8 @@ export function PageEditor() {
                 <MarkdownSourceEditor
                   key={draft.pageId}
                   value={draft.contentMd}
+                  courseId={courseId ?? undefined}
+                  references={currentLoad?.items}
                   readOnly={!access.canEdit}
                   onChange={onEditorChange}
                   onViewReady={onViewReady}

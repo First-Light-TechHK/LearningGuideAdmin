@@ -82,6 +82,25 @@ test('course reference preview resolves an image and formula and labels missing 
   assert.equal(container.querySelector('a'), null)
 })
 
+test('editor reference data follows the course without changing the document or editor instance', async () => {
+  const source = '[Diagram](refobj:diagram)'
+  const reference = { id: 'diagram', kind: 'image' as const, label: 'Diagram', value: 'diagram.png', requires: [] }
+  let view: EditorView | null = null
+  const editor = (courseId: string, references?: typeof reference[]) =>
+    <MemoryRouter><MarkdownSourceEditor value={source} courseId={courseId} references={references}
+      onChange={() => assert.fail('reference rendering changed Markdown')} onViewReady={next => { view = next }} /></MemoryRouter>
+  const { container, rerender } = render(editor('course-1', [reference]))
+  const image = () => container.querySelector('.cm-md-course-reference-image')
+  await waitFor(() => assert.equal(image()?.getAttribute('src'), '/api/files/images/course-1/diagram.png'))
+  const initial = view
+  rerender(editor('course-2'))
+  await waitFor(() => assert.equal(image(), null))
+  rerender(editor('course-2', [{ ...reference, value: 'second.png' }]))
+  await waitFor(() => assert.equal(image()?.getAttribute('src'), '/api/files/images/course-2/second.png'))
+  assert.equal(view, initial)
+  assert.equal(view!.state.doc.toString(), source)
+})
+
 test('imported heading numbers match preview and expose their escape when edited', async () => {
   const source = '#### 1\\. What Does “Rate of Change” Mean?\n\n`1\\.`'
   const preview = render(<KnowledgeMarkdown source={source} />)

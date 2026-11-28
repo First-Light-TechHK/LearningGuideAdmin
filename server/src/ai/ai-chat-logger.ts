@@ -52,6 +52,19 @@ export interface AiChatLogEntry {
     turnCategory: string;
     qaId?: string;
     qaCoverage?: 'full' | 'partial';
+    definitionRouting?: {
+      intent:
+        | 'definition'
+        | 'mixed'
+        | 'explain'
+        | 'example'
+        | 'quotation'
+        | 'clarify';
+      conceptOrigin: 'current_question' | 'previous_question';
+      mainCardIds: string[];
+      courseLookup:
+        'not_needed' | 'uncovered_request' | 'follow_up' | 'course_script';
+    };
     qaEvidenceRanges?: Array<{ start: number; length: number }>;
     qaSearch?: {
       rollout: 'on' | 'shadow' | 'off';
@@ -69,6 +82,7 @@ export interface AiChatLogEntry {
     sourceIds: string[];
     excluded: Array<{ cardId: string; reason: string }>;
     objectIds: string[];
+    exhibitCandidateIds?: string[];
     outcome: string;
     field4Hash?: string;
   };

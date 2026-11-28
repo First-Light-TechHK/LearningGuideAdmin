@@ -38,6 +38,11 @@ const url = process.env.PROFESSOR_QA_TEST_DATABASE_URL;
                 {
                   cardId: 'period-definition',
                   type: 'concept',
+                  approvedPayload: {
+                    definitionName: 'pendulum period',
+                    answerMd:
+                      'It measures the time for a complete oscillation.',
+                  },
                   bilingual: {
                     conceptLabel: { en: 'pendulum period' },
                     summary: { en: 'Time for a full swing.' },
@@ -138,6 +143,23 @@ const url = process.env.PROFESSOR_QA_TEST_DATABASE_URL;
       expect(mixed.teachingCardIds).toEqual(['period-definition']);
       expect(mixed.cardIds).not.toContain('period-definition');
       expect(embedding.embedQuery).toHaveBeenCalledTimes(2);
+      embedding.embedQuery.mockRejectedValueOnce(new Error('offline'));
+      expect(
+        await searchProfessorQa(
+          db,
+          embedding,
+          courseId,
+          b.id,
+          'complete oscillation',
+          [],
+          ['period-definition'],
+        ),
+      ).toMatchObject({
+        status: 'degraded',
+        teachingCardIds: ['period-definition'],
+        teachingParts: [{ cardId: 'period-definition', part: 1 }],
+        cardIds: [],
+      });
       embedding.embedQuery.mockRejectedValueOnce(new Error('offline'));
       expect(
         await searchProfessorQa(

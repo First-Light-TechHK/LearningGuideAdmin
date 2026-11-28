@@ -598,6 +598,347 @@ describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
     expect(calculation).toContain(math);
     expect(calculation).not.toContain('/api/test.png');
   });
+  it('routes Trajectory definitions, speed questions and short follow-ups to the appropriate evidence', async () => {
+    const definitionQuestion = '什么是 trajectory（轨迹）？';
+    const speedQuestion = '能从轨迹的形状判断速度吗？';
+    const definition =
+      'A trajectory is the path traced by a changing state through state space. Imagine the state as a point that leaves a curve as it moves.';
+    const speed =
+      'The shape of the trajectory alone does not give the speed at each point.';
+    const pages = [
+      {
+        id: 'p',
+        title: 'Lesson 1',
+        contentMd: 'course material '.repeat(5000),
+      },
+    ];
+    const card = (id: string, name: string, body: string) => ({
+      cardId: id,
+      conceptId: id,
+      type: 'concept',
+      topic: '*',
+      canonicalPoint: body,
+      evidence: [],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      links: [],
+      priority: 10,
+      reviewerId: 'fixture',
+      bilingual: {
+        conceptLabel: { en: name, zh: '' },
+        summary: { en: body, zh: '' },
+        triggers: { en: [], zh: [] },
+      },
+      approvedPayload: { definitionName: name, answerMd: body },
+    });
+    const trajectory = card('trajectory', 'Trajectory', definition);
+    const space = card(
+      'space',
+      'State space',
+      'State space contains the possible states.',
+    );
+    const cards = [
+      trajectory,
+      space,
+      {
+        ...trajectory,
+        cardId: 'speed',
+        type: 'professor_qa',
+        approvedPayload: {
+          question:
+            'Can I tell exactly how fast the system moves at every point from the shape of its trajectory?',
+          answerMd: speed,
+        },
+      },
+    ];
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot: { pages },
+      authored: {
+        cards,
+        glossary: [trajectory, space].map(({ conceptId, bilingual }) => ({
+          conceptId,
+          label: bilingual.conceptLabel,
+          aliases: { en: [], zh: [] },
+        })),
+      },
+    });
+    const assessed: string[] = [];
+    let generation = '';
+    const env = setup(async function* (opts) {
+      if (
+        opts.messages[0].content.includes('Select a single published answer')
+      ) {
+        const { currentQuestion } = JSON.parse(opts.messages[1].content) as {
+          currentQuestion: string;
+        };
+        assessed.push(currentQuestion);
+        yield JSON.stringify({
+          cardId: 'speed',
+          coverage: 'full',
+          conditionsMatch: true,
+          missingRequirements: [],
+          support: [
+            {
+              part: currentQuestion,
+              need: 'conclusion',
+              provides: 'conclusion',
+              excerpts: [speed],
+            },
+          ],
+        });
+        return;
+      }
+      generation = opts.messages[0].content;
+      yield '课程解释。';
+    });
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'test',
+      pages,
+      teachingPackage,
+    });
+    const search = jest
+      .fn()
+      .mockResolvedValue({ status: 'ready', cardIds: ['speed'] });
+    env.knowledge.retrieveProfessorQa = search;
+    const wiki = jest.mocked(env.knowledge.retrieveChunks);
+    const ask = (message: string, history: ChatStreamDto['history'] = []) =>
+      collect(env.service.streamChat({ ...dto(history), message }));
+    const route = () => env.write.mock.lastCall?.[0].teaching;
+    await ask(definitionQuestion);
+    expect(route()?.definitionRouting).toEqual({
+      intent: 'definition',
+      conceptOrigin: 'current_question',
+      mainCardIds: ['trajectory'],
+      courseLookup: 'not_needed',
+    });
+    expect(route()?.selectedCardIds).toEqual(['trajectory']);
+    expect(search).not.toHaveBeenCalled();
+    expect(wiki).not.toHaveBeenCalled();
+    expect(generation).toContain(definition);
+    expect(generation).not.toContain(speed);
+
+    await ask(speedQuestion);
+    expect(assessed).toEqual([speedQuestion]);
+    expect(route()).toMatchObject({
+      selectedCardIds: ['speed'],
+      qaCoverage: 'full',
+    });
+    expect(generation).toContain(speed);
+
+    await ask(definitionQuestion + speedQuestion);
+    expect(assessed.at(-1)).toBe(speedQuestion.slice(0, -1));
+    expect(route()).toMatchObject({
+      selectedCardIds: ['speed', 'trajectory'],
+      definitionRouting: {
+        intent: 'mixed',
+        mainCardIds: ['trajectory'],
+        courseLookup: 'not_needed',
+      },
+    });
+    expect(generation).toContain(definition);
+    expect(generation).toContain(speed);
+    expect(wiki).not.toHaveBeenCalled();
+
+    const history: ChatStreamDto['history'] = [
+      { role: 'user', content: definitionQuestion },
+      { role: 'assistant', content: '轨迹是系统的演化路径。' },
+    ];
+    await ask('可以解释一下吗？', history);
+    expect(wiki.mock.calls[0][1]).toContain('Trajectory');
+    expect(route()?.definitionRouting).toMatchObject({
+      intent: 'explain',
+      conceptOrigin: 'previous_question',
+      mainCardIds: ['trajectory'],
+      courseLookup: 'follow_up',
+    });
+    expect(generation).toContain(definition);
+    await ask('举个例子呢？', [
+      ...history,
+      { role: 'user', content: '可以解释一下吗？' },
+      { role: 'assistant', content: '进一步解释。' },
+    ]);
+    expect(route()?.definitionRouting).toMatchObject({
+      intent: 'example',
+      mainCardIds: ['trajectory'],
+    });
+    await ask('What is state space?', history);
+    expect(route()?.definitionRouting).toMatchObject({
+      intent: 'definition',
+      conceptOrigin: 'current_question',
+      mainCardIds: ['space'],
+    });
+    await ask('讲稿里是怎么说的？', history);
+    expect(route()?.definitionRouting).toMatchObject({
+      intent: 'quotation',
+      courseLookup: 'course_script',
+    });
+    expect(generation).toContain(
+      'Attribute lecture quotations only to actual supplied script passages',
+    );
+    wiki.mockClear();
+    await expect(
+      ask('可以解释一下吗？', [
+        { role: 'user', content: 'How do trajectory and state space differ?' },
+      ]),
+    ).resolves.toContain('哪个概念');
+    expect(route()?.definitionRouting).toMatchObject({
+      intent: 'clarify',
+      conceptOrigin: 'previous_question',
+      mainCardIds: [],
+    });
+    expect(wiki).not.toHaveBeenCalled();
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a source-free definition when QA is rejected and searches only the remaining request', async () => {
+    const name = '状态变量';
+    const body = '状态变量是描述系统状态的量。';
+    const reason = '咖啡冷却实验中，温度是研究问题关注的量。';
+    const pages = [
+      { id: 'lesson', title: 'Lesson 1', contentMd: '讲稿正文'.repeat(10000) },
+    ];
+    const label = { en: name, zh: '' };
+    const card = {
+      cardId: 'state',
+      conceptId: 'state',
+      topic: '*',
+      type: 'concept',
+      canonicalPoint: body,
+      evidence: [],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      priority: 10,
+      links: [],
+      reviewerId: 'fixture',
+      bilingual: {
+        conceptLabel: label,
+        summary: { en: body, zh: '' },
+        triggers: { en: [], zh: [] },
+      },
+      approvedPayload: { definitionName: name, answerMd: body },
+    };
+    const qa = {
+      ...card,
+      cardId: 'qa',
+      type: 'professor_qa',
+      approvedPayload: {
+        question: '为什么可以只用温度描述咖啡？',
+        answerMd: reason,
+      },
+    };
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot: { pages },
+      authored: {
+        glossary: [{ conceptId: 'state', label, aliases: { en: [], zh: [] } }],
+        cards: [card, qa],
+      },
+    });
+    let generation = '';
+    const definitionPart = '状态变量是什么';
+    const reasonPart = '为什么咖啡模型可以选温度';
+    const quotation = '状态变量在讲稿的原话是什么';
+    let approveReason = false;
+    const env = setup(async function* (opts) {
+      if (
+        opts.messages[0].content.includes('Select a single published answer')
+      ) {
+        yield JSON.stringify(
+          approveReason
+            ? {
+                cardId: 'qa',
+                coverage: 'full',
+                conditionsMatch: true,
+                missingRequirements: [],
+                scope: reasonPart,
+                support: [
+                  {
+                    part: reasonPart,
+                    need: 'reason',
+                    provides: 'reason',
+                    excerpts: [reason],
+                  },
+                ],
+              }
+            : {
+                cardId: null,
+                coverage: 'none',
+                missingRequirements: [],
+                support: [],
+              },
+        );
+        return;
+      }
+      generation = opts.messages[0].content;
+      yield '课程解释。';
+    });
+    jest.mocked(env.knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'test',
+      pages,
+      teachingPackage,
+    });
+    env.knowledge.retrieveProfessorQa = jest
+      .fn()
+      .mockResolvedValue({ status: 'ready', cardIds: ['qa'] });
+    const wiki = jest.mocked(env.knowledge.retrieveChunks);
+    const ask = (message: string) =>
+      collect(env.service.streamChat({ ...dto(), message }));
+    await ask(definitionPart + '？');
+    expect(wiki).not.toHaveBeenCalled();
+    expect(generation).toContain(body);
+    expect(env.write.mock.lastCall?.[0].teaching?.selectedCardIds).toEqual([
+      'state',
+    ]);
+
+    await ask(definitionPart + '，' + reasonPart + '？');
+    expect(wiki.mock.calls[0]?.[1]).toBe(reasonPart + ' ' + name);
+    expect(generation).toContain(body);
+    expect(generation).toContain('A model consists of state variables');
+    expect(generation).not.toContain(reason);
+
+    wiki.mockClear();
+    approveReason = true;
+    await ask(definitionPart + '，' + reasonPart + '？');
+    expect(wiki).not.toHaveBeenCalled();
+    expect(generation).toContain(body);
+    expect(generation).toContain(reason);
+    expect(env.write.mock.lastCall?.[0].teaching?.selectedCardIds).toEqual([
+      'qa',
+      'state',
+    ]);
+
+    approveReason = false;
+    await ask(quotation + '？');
+    expect(wiki.mock.calls[0]?.[1]).toBe(quotation + ' ' + name);
+    expect(generation).toContain(
+      'Attribute lecture quotations only to actual supplied script passages',
+    );
+    expect(env.write.mock.lastCall?.[0].teaching?.sourceIds).toEqual([]);
+    wiki.mockClear();
+    wiki.mockRejectedValueOnce(new Error('index unavailable'));
+    await ask(definitionPart + '，' + reasonPart + '？');
+    expect(generation).toContain(body);
+    expect(env.write.mock.lastCall?.[0].evidence?.context).toBe(
+      'retrieval_empty',
+    );
+
+    jest
+      .mocked(env.knowledge.retrieveProfessorQa)
+      .mockResolvedValueOnce({ status: 'ready', cardIds: [] });
+    await ask(reasonPart + '？');
+    expect(env.write.mock.lastCall?.[0].teaching?.outcome).toBe(
+      'definition_course_fallback',
+    );
+    expect(generation).toContain('A model consists of state variables');
+  });
+
   it('uses approved evidence for exact, paraphrased and partially covered questions', async () => {
     const answer =
       'Under the small-angle approximation, the period is approximately independent of amplitude.';

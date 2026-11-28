@@ -13,6 +13,7 @@ import {
   SetTutorTestReleaseDto,
 } from './dto/tutor-settings.dto';
 import { PrismaKnowledgeClient } from './prisma-knowledge.client';
+import { MAX_PUBLISHED_TEACHING_CARDS } from './contract/teaching-package-compiler';
 
 function found<T>(value: T | null, what: string): T {
   if (value === null) throw new NotFoundException(`${what}不存在`);
@@ -101,7 +102,7 @@ export class KsInternalController {
     const teachingIds = body?.teachingIds ?? [];
     if (
       !Array.isArray(teachingIds) ||
-      teachingIds.length > 200 ||
+      teachingIds.length > MAX_PUBLISHED_TEACHING_CARDS ||
       !teachingIds.every(
         (id: unknown) => typeof id === 'string' && id.length <= 200,
       )
@@ -112,7 +113,7 @@ export class KsInternalController {
       typeof body.query !== 'string' ||
       body.query.length > 8000 ||
       !Array.isArray(body.allowedIds) ||
-      body.allowedIds.length > 200 ||
+      body.allowedIds.length > MAX_PUBLISHED_TEACHING_CARDS ||
       !body.allowedIds.every(
         (item: unknown) => typeof item === 'string' && item.length <= 200,
       )

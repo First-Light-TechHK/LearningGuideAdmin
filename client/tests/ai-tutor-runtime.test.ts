@@ -137,16 +137,45 @@ test('旧账号的延迟请求不能覆盖新账号的消息或 streaming 状态
   assert.equal(localStorage.length, 0)
 })
 
-test('快速选择 Release 时，旧响应不能覆盖后一次选择', async () => {
+test('同课程 Release 写入未结束时拦截后续点击，完成后可切到下一版', async () => {
   useAiStore.setState({ ownerId: 'e1', selectedCourseId: 'c1', config: config('r1') })
   let resolveOld!: (config: AiConfigView) => void
   aiApi.setActiveRelease = (_courseId, releaseId) => releaseId === 'r2'
     ? new Promise((resolve) => { resolveOld = resolve }) : Promise.resolve(config(releaseId))
   const old = useAiStore.getState().selectRelease('r2')
   await useAiStore.getState().selectRelease('r3')
+  assert.equal(useAiStore.getState().config?.releaseId, 'r1')
   resolveOld(config('r2'))
   await old
+  assert.equal(useAiStore.getState().config?.releaseId, 'r2')
+  await useAiStore.getState().selectRelease('r3')
   assert.equal(useAiStore.getState().config?.releaseId, 'r3')
+})
+
+test('Set Live 与两个 Online 入口共用课程锁，其他课程仍可操作', async () => {
+  useAiStore.setState({ ownerId: 'e1', selectedCourseId: 'c1', config: config('r1') })
+  const calls: string[] = []
+  let finish!: () => void
+  knowledgeApi.setLive = async (id) => {
+    calls.push('live:' + id)
+    await new Promise<void>((resolve) => { finish = resolve })
+    return { id: 'r1', versionTag: 'v1' }
+  }
+  knowledgeApi.listReleases = async () => []
+  aiApi.setOnline = async (id, online) => {
+    calls.push('online:' + id)
+    return { ...config('r1'), online }
+  }
+  const store = useAiStore.getState()
+  const first = store.setLive()
+  assert.equal(await store.setLive(), false)
+  assert.equal(await store.setOnline(true), false)
+  assert.equal(await store.setTutorOnline('c1', true), false)
+  assert.equal(await store.setTutorOnline('c2', true), true)
+  finish()
+  assert.equal(await first, true)
+  assert.equal(useAiStore.getState().config?.isLive, true)
+  assert.deepEqual(calls, ['live:c1', 'online:c2'])
 })
 
  test('saving either running solution preserves messages and reload history', async () => {

@@ -1,10 +1,12 @@
 import { Prisma } from '@prisma/client';
+import { retrievalTerms } from '../common/retrieval-terms';
 import { qaGeneration, qaTerms } from '../knowledge/professor-qa-parts';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { EmbeddingQueryClient } from './contract/embedding-client';
 import type { ProfessorQaSearch } from './contract/knowledge-client';
 
 type Hit = { cardId: string };
+type PartHit = Hit & { part: number };
 
 async function timedRead<T>(db: PrismaService, query: Prisma.PrismaPromise<T>) {
   const [, result] = await db.$transaction([
@@ -66,8 +68,33 @@ export async function searchProfessorQa(
     WHERE ${scope} AND "cardId" IN (${Prisma.join(allowed)}) AND part=0 AND terms @@ q ORDER BY ts_rank_cd(terms,q) DESC, "cardId" LIMIT 20`,
       )
     : [];
+  const definitionTerms = retrievalTerms(query);
+  const definitionText =
+    teachingIds.length && definitionTerms.length > 1
+      ? timedRead(
+          db,
+          db.$queryRaw<PartHit[]>`
+        WITH query_terms AS (
+          SELECT plainto_tsquery('simple', token) AS term
+          FROM unnest(ARRAY[${Prisma.join(definitionTerms)}]::text[]) AS tokens(token)
+        ), combined AS (SELECT string_agg(term::text, ' | ')::tsquery AS q FROM query_terms),
+        best AS (
+          SELECT DISTINCT ON ("cardId") "cardId", part, ts_rank_cd(terms, q) AS rank
+          FROM "ProfessorQaPart", combined
+          WHERE ${scope} AND ${teaching} AND part > 0 AND terms @@ q
+            AND (SELECT count(*) FROM query_terms WHERE terms @@ term) >= 2
+          ORDER BY "cardId", rank DESC, part
+        ) SELECT "cardId", part FROM best ORDER BY rank DESC, "cardId" LIMIT 5`,
+        )
+      : [];
   const vector = async () => {
-    if (!embedding.model || index.generation !== qaGeneration(embedding.model))
+    if (
+      !embedding.model ||
+      ![
+        qaGeneration(embedding.model),
+        'teaching-v3:' + embedding.model,
+      ].includes(index.generation)
+    )
       throw new Error('model mismatch');
     const values = await embedding.embedQuery(query, 1800);
     if (values.length !== 1536 || !values.every(Number.isFinite))
@@ -75,28 +102,47 @@ export async function searchProfessorQa(
     const vec = JSON.stringify(values);
     return timedRead(
       db,
-      db.$queryRaw<(Hit & { kind: string })[]>`WITH per_card AS (
-      SELECT "cardId", CASE WHEN ${teaching} THEN 'teaching' WHEN part=0 THEN 'question' ELSE 'answer' END AS kind,
-             min(embedding <=> ${vec}::vector) AS distance FROM "ProfessorQaPart"
-      WHERE ${scope} AND "cardId" IN (${Prisma.join(ids)}) GROUP BY "cardId", kind
+      db.$queryRaw<(PartHit & { kind: string })[]>`WITH scored AS (
+      SELECT "cardId", part, CASE WHEN ${teaching} THEN 'teaching' WHEN part=0 THEN 'question' ELSE 'answer' END AS kind,
+             embedding <=> ${vec}::vector AS distance FROM "ProfessorQaPart"
+      WHERE ${scope} AND "cardId" IN (${Prisma.join(ids)})
+    ), per_card AS (
+      SELECT DISTINCT ON ("cardId", kind) "cardId", kind, part, distance FROM scored
+      ORDER BY "cardId", kind, distance, part
     ), ranked AS (SELECT *, row_number() OVER (PARTITION BY kind ORDER BY distance, "cardId") AS pos FROM per_card)
-    SELECT "cardId",kind FROM ranked WHERE pos<=20 AND (kind <> 'teaching' OR distance <= 0.55) ORDER BY kind,pos`,
+    SELECT "cardId", kind, part FROM ranked WHERE pos<=20 AND (kind <> 'teaching' OR distance <= 0.55) ORDER BY kind,pos`,
     );
   };
-  const [text, semantic] = await Promise.allSettled([lexical, vector()]);
+  const [text, definitions, semantic] = await Promise.allSettled([
+    lexical,
+    definitionText,
+    vector(),
+  ]);
   const rows = semantic.status === 'fulfilled' ? semantic.value : [];
+  const vectorTeaching = rows.filter((r) => r.kind === 'teaching').slice(0, 5);
+  const textTeaching =
+    definitions.status === 'fulfilled' ? definitions.value : [];
+  const teachingCardIds = fuseQa([vectorTeaching, textTeaching]);
+  const teachingParts = new Map(
+    [...textTeaching, ...vectorTeaching]
+      .filter(({ part }) => part > 0)
+      .map(({ cardId, part }) => [cardId, part]),
+  );
   return {
     generation: index.generation,
     status:
-      text.status === 'fulfilled' && semantic.status === 'fulfilled'
+      text.status === 'fulfilled' &&
+      definitions.status === 'fulfilled' &&
+      semantic.status === 'fulfilled'
         ? 'ready'
         : 'degraded',
     ...(teachingIds.length
       ? {
-          teachingCardIds: rows
-            .filter((r) => r.kind === 'teaching')
-            .slice(0, 5)
-            .map((r) => r.cardId),
+          teachingCardIds,
+          teachingParts: teachingCardIds.flatMap((cardId) => {
+            const part = teachingParts.get(cardId);
+            return part ? [{ cardId, part }] : [];
+          }),
         }
       : {}),
     cardIds: fuseQa([

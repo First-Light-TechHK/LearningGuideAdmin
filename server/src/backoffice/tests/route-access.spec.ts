@@ -272,6 +272,45 @@ describe('route access classification', () => {
       ['PATCH', '/api/courses/c1/teaching-cards/t1', 'EDIT_EXISTING'],
       ['GET', '/api/courses/c1/teaching-cards/import/deleted-codes', 'VIEW'],
       ['POST', '/api/courses/c1/teaching-cards/import/references', 'CREATE'],
+      ['POST', '/api/courses/c1/teaching-cards/export/concept', 'VIEW'],
+      ['POST', '/api/courses/c1/teaching-cards/export/workbook', 'VIEW'],
+      [
+        'POST',
+        '/api/courses/c1/teaching-cards/sheets/workbook/preview',
+        'EDIT_EXISTING',
+      ],
+      [
+        'POST',
+        '/api/courses/c1/teaching-cards/sheets/workbook/apply',
+        'CREATE',
+      ],
+      [
+        'PATCH',
+        '/api/courses/c1/teaching-cards/sheets/workbook/apply',
+        'EDIT_EXISTING',
+      ],
+      [
+        'POST',
+        '/api/courses/c1/teaching-cards/reference-documents/image/preview',
+        'EDIT_EXISTING',
+      ],
+      [
+        'POST',
+        '/api/courses/c1/teaching-cards/reference-documents/finish',
+        'EDIT_EXISTING',
+      ],
+      ['GET', '/api/courses/c1/teaching-cards/templates/concept', 'VIEW'],
+      [
+        'POST',
+        '/api/courses/c1/teaching-cards/sheets/concept/preview',
+        'EDIT_EXISTING',
+      ],
+      ['POST', '/api/courses/c1/teaching-cards/sheets/concept/apply', 'CREATE'],
+      [
+        'PATCH',
+        '/api/courses/c1/teaching-cards/sheets/concept/apply',
+        'EDIT_EXISTING',
+      ],
       [
         'PATCH',
         '/api/courses/c1/teaching-cards/import/references',

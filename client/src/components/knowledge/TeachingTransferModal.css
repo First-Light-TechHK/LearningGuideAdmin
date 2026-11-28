@@ -1,0 +1,245 @@
+.teaching-transfer-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 12px;
+  margin: 12px 0;
+  list-style: none;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.teaching-transfer-steps li {
+  color: #596579;
+}
+
+.teaching-transfer-steps li[aria-current="step"] {
+  color: #1a56c5;
+  font-weight: 600;
+}
+
+.teaching-transfer-steps li[data-complete] {
+  color: inherit;
+}
+
+.teaching-transfer-steps span {
+  margin-inline-end: 8px;
+  color: #596579;
+}
+
+.teaching-transfer-course {
+  margin: 12px 0;
+  color: #596579;
+  overflow-wrap: anywhere;
+}
+
+.teaching-transfer-course strong {
+  color: #1e293b;
+}
+
+.teaching-transfer-scroll {
+  max-height: min(48vh, 440px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.teaching-transfer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.teaching-transfer-footer > button:first-child {
+  margin-inline-end: auto;
+}
+
+.teaching-transfer-kinds {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.teaching-transfer-kinds label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.teaching-transfer-kinds label:has(:checked) {
+  border-color: #1d6bff;
+  background: #eef5ff;
+}
+
+.teaching-transfer-kinds small {
+  margin-inline-start: auto;
+  color: #596579;
+  text-align: end;
+}
+
+.teaching-transfer-input {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.teaching-transfer-section {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.teaching-transfer-section + .teaching-transfer-section {
+  margin-top: 12px;
+}
+
+.teaching-transfer-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 7px 7px 0 0;
+  background: #f5f7fa;
+}
+
+.teaching-transfer-section-heading h3 {
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+}
+
+.teaching-transfer-inset,
+.teaching-transfer-row {
+  padding: 10px 12px;
+}
+
+.teaching-transfer-inset > :first-child {
+  margin-top: 0;
+}
+
+.teaching-transfer-inset > :last-child {
+  margin-bottom: 0;
+}
+
+.teaching-transfer-file {
+  margin: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+}
+
+.teaching-transfer-file-control {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.teaching-transfer-row + .teaching-transfer-row {
+  border-top: 1px solid #e2e8f0;
+}
+
+.teaching-transfer-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+label.teaching-transfer-choice,
+.teaching-transfer-choice label {
+  cursor: pointer;
+}
+
+label.teaching-transfer-choice:has(:disabled) {
+  color: #596579;
+  cursor: default;
+}
+
+.teaching-transfer-choice input {
+  margin: 4px 0 0;
+}
+
+.teaching-transfer-muted {
+  color: #596579;
+  font-size: 13px;
+}
+
+.teaching-transfer-choice small {
+  display: block;
+}
+
+.teaching-transfer-format {
+  text-align: end;
+}
+
+.teaching-transfer-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: start;
+}
+
+.teaching-transfer-result [role='alert'] {
+  grid-column: 1 / -1;
+  color: #a62438;
+}
+
+.teaching-transfer-summary {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.teaching-transfer-summary > div {
+  display: grid;
+  grid-template-columns: minmax(5em, 35%) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.teaching-transfer-summary dd {
+  margin: 0;
+}
+
+.teaching-download-tabs > .ant-tabs-nav {
+  margin: 0;
+  padding-inline: 12px;
+}
+
+.teaching-download-controls {
+  display: grid;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.teaching-download-list {
+  max-height: min(32vh, 300px, max(96px, 100dvh - 490px));
+  overflow: auto;
+  overflow-wrap: anywhere;
+  border-block: 1px solid #e2e8f0;
+}
+
+.teaching-download-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.teaching-import-target {
+  width: min(300px, 55vw);
+}

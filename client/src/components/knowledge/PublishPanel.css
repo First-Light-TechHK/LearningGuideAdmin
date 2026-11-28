@@ -1,0 +1,85 @@
+.release-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 12px;
+}
+
+.release-history-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.release-history-meta,
+.release-history-index,
+.release-history-actions,
+.release-history-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+}
+
+.release-history-meta,
+.release-history-index {
+  margin: 2px 0 4px;
+}
+
+.release-history-meta .ant-tag,
+.release-history-index .ant-tag {
+  margin-inline-end: 0;
+  white-space: normal;
+}
+
+.release-history-actions {
+  justify-content: end;
+  gap: 6px;
+}
+
+.release-history-package {
+  margin-bottom: 12px;
+}
+
+.release-history-upload > span {
+  overflow-wrap: anywhere;
+}
+
+.release-history-package .ant-typography {
+  margin: 8px 0 0;
+}
+
+.release-history-package .ant-btn-primary {
+  margin-top: 8px;
+}
+
+.release-history-pages {
+  max-width: 100%;
+  min-width: min(240px, 100%);
+}
+
+.release-preview-body,
+.release-preview-body > .teaching-transfer-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.release-preview-body > .teaching-transfer-course,
+.release-preview-body .teaching-transfer-section-heading {
+  flex-shrink: 0;
+}
+
+.release-preview-page {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 680px) {
+  .release-history-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .release-history-actions {
+    justify-content: start;
+  }
+}
