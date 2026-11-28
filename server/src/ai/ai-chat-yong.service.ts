@@ -28,9 +28,13 @@ import { prepareReviewedLecture } from './tutor/lecture-teaching';
 import {
   asksForCourseScript,
   asksForDefinition,
-  definitionFollowUp,
 } from './tutor/definition-request';
 import { lectureQuestionLookup } from './tutor/lecture-question-reference';
+import {
+  followUpEvidenceMatches,
+  lectureFollowUpKind,
+  resolveLectureFollowUp,
+} from './tutor/lecture-follow-up';
 import {
   lectureLanguage,
   translateLectureText,
@@ -249,6 +253,7 @@ export class AiChatYongService {
     let answer = '';
     let promptHash: string | undefined;
     let teaching: AiChatLogEntry['teaching'];
+    let followUpRouting: AiChatLogEntry['followUpRouting'];
     let evidenceLog: AiChatLogEntry['evidence'];
     let finished = false;
     let status: AiChatStatus = 'ok';
@@ -301,12 +306,15 @@ export class AiChatYongService {
       const question = input.message.trim();
       const comparison =
         input.mode === 'LECTURE' ? comparisonSubjects(question) : [];
-      const conceptFollowUp =
-        input.mode === 'LECTURE' && definitionFollowUp(question);
+      const continuation =
+        input.mode === 'LECTURE'
+          ? resolveLectureFollowUp(question, history)
+          : undefined;
+      const conceptFollowUp = continuation?.kind;
       const previousQuestion = history.findLast(
         (item) =>
           item.role === 'user' &&
-          (!conceptFollowUp || !definitionFollowUp(item.content)),
+          (!conceptFollowUp || !lectureFollowUpKind(item.content)),
       )?.content;
       const lastTurn = history.at(-1);
       const reference =
@@ -470,9 +478,255 @@ export class AiChatYongService {
       const qaQuestion = scopedQa
         ? scopedQa.filter((part) => !asksForCourseScript(part)).join('\n')
         : question;
+      const followsDefinition =
+        continuation &&
+        definitionRequest?.inherited &&
+        definitionRequest.names.some((name) =>
+          asksForDefinition(continuation.anchor, name),
+        ) &&
+        continuation.kind !== 'condition' &&
+        (continuation.kind !== 'quotation' ||
+          (continuation.quotationSource === 'course_context' &&
+            !!preferredDefinition?.trace.sourceIds.length)) &&
+        !continuation.anotherExample;
+      const scopedFollowUp =
+        !resolvedQuestion &&
+        !priorObjects.length &&
+        input.testRoute?.useKnowledge !== false &&
+        display !== 'image' &&
+        reviewed?.kind !== 'reference' &&
+        !(reviewed?.kind === 'wiki' && reviewed.focus) &&
+        !hasExplicitFormula(question) &&
+        !followsDefinition
+          ? continuation
+          : undefined;
+      let followUpContext: string | undefined;
+      if (scopedFollowUp) {
+        const { anchor, target, kind, previousAnswer, anotherExample } =
+          scopedFollowUp;
+        const language = lectureLanguage(question, anchor, input.locale);
+        followUpRouting = {
+          kind,
+          ...(anchor
+            ? { anchorHash: createHash('sha256').update(anchor).digest('hex') }
+            : {}),
+          result: 'clarify',
+        };
+        if (
+          !scopedFollowUp.ambiguous &&
+          reviewed?.trace.outcome !== 'ambiguous_definition_follow_up'
+        ) {
+          const runtime = await this.configs.resolveRuntime(
+            courseId,
+            release.id,
+            input.mode,
+          );
+          const provider = this.registry.get(runtime.provider);
+          const settings = {
+            ...runtime,
+            model: input.testRoute?.model ?? runtime.model,
+          };
+          const requiredRole =
+            kind === 'example' || kind === 'reason' || kind === 'quotation'
+              ? kind
+              : undefined;
+          const assessment = {
+            request: question,
+            requiredRole,
+            previousAnswer,
+            anotherExample,
+          };
+          const validateExcerpts = (excerpts: string[]) => {
+            const valid = followUpEvidenceMatches(
+              scopedFollowUp,
+              question,
+              excerpts,
+            );
+            if (!valid && followUpRouting)
+              followUpRouting.reason = 'follow_up_constraints_missing';
+            return valid;
+          };
+          const assess = (
+            text: string,
+            candidates: ProfessorAnswer[],
+            requirement?: typeof assessment,
+          ) =>
+            runtime.apiKey
+              ? assessProfessorAnswer(
+                  provider,
+                  settings,
+                  text,
+                  candidates,
+                  language,
+                  input.signal,
+                  anchor,
+                  (reason) => {
+                    if (followUpRouting) followUpRouting.reason = reason;
+                  },
+                  requirement,
+                )
+              : undefined;
+          const courseQuote =
+            scopedFollowUp.quotationSource === 'course_context';
+          if (!courseQuote && release.teachingPackage !== undefined) {
+            try {
+              let anchorCandidates: ProfessorAnswer[] = [];
+              const priorSelection = prepareReviewedLecture(
+                release,
+                anchor,
+                undefined,
+                undefined,
+                [],
+                input.locale,
+                {
+                  collect: (cards) => {
+                    anchorCandidates = cards;
+                  },
+                },
+              );
+              const exact =
+                priorSelection.kind === 'wiki'
+                  ? priorSelection.directCandidate
+                  : undefined;
+              let anchorQa = exact;
+              if (
+                !anchorQa &&
+                rollout === 'on' &&
+                anchorCandidates.length &&
+                this.knowledge.retrieveProfessorQa
+              ) {
+                const recalled = await this.knowledge.retrieveProfessorQa(
+                  courseId,
+                  release.id,
+                  anchor,
+                  anchorCandidates.map(({ cardId }) => cardId),
+                );
+                const top = anchorCandidates.find(
+                  ({ cardId }) => cardId === recalled.cardIds[0],
+                );
+                if (top) {
+                  const verified = await assess(anchor, [top]);
+                  if (verified?.coverage === 'full') anchorQa = top;
+                }
+              }
+              if (anchorQa) {
+                followUpRouting.anchorQaId = anchorQa.cardId;
+                const evidence = await assess(target, [anchorQa], assessment);
+                if (
+                  evidence?.coverage === 'full' &&
+                  validateExcerpts(evidence.excerpts)
+                ) {
+                  const selection = prepareReviewedLecture(
+                    release,
+                    question,
+                    anchor,
+                    undefined,
+                    [],
+                    input.locale,
+                    { professorEvidence: evidence },
+                  );
+                  if (
+                    selection.kind === 'reviewed' &&
+                    selection.trace.qaId === anchorQa.cardId
+                  ) {
+                    reviewed = selection;
+                    followUpRouting.result = 'professor_qa';
+                  }
+                }
+              }
+            } catch {
+              input.signal?.throwIfAborted();
+              followUpRouting.reason = 'anchor_qa_unavailable';
+            }
+          }
+          const professorQuote =
+            scopedFollowUp.quotationSource === 'professor_qa';
+          if (followUpRouting.result !== 'professor_qa' && !professorQuote) {
+            try {
+              await buildContext(target);
+              const candidates = (
+                sources.length && !passages.length
+                  ? release.pages
+                      .filter((p) => p.contentMd?.trim())
+                      .map((p) => p.contentMd ?? '')
+                  : passages
+              ).flatMap((body, index) =>
+                body.trim()
+                  ? [
+                      {
+                        cardId: String(index),
+                        question: sources[index]?.pageTitle ?? '',
+                        answerMd: body,
+                      },
+                    ]
+                  : [],
+              );
+              const evidence = await assess(target, candidates, assessment);
+              const source = evidence && sources[Number(evidence.cardId)];
+              if (
+                evidence?.coverage === 'full' &&
+                source &&
+                validateExcerpts(evidence.excerpts)
+              ) {
+                sources.splice(0, sources.length, source);
+                passages = evidence.excerpts;
+                followUpContext = JSON.stringify({
+                  reference: 'S1',
+                  source: [source.pageTitle, source.heading]
+                    .filter(Boolean)
+                    .join(' — '),
+                  evidence: passages.join('\n\n'),
+                });
+                followUpRouting.result = 'course_context';
+                reviewed = undefined;
+              }
+            } catch {
+              input.signal?.throwIfAborted();
+              followUpRouting.reason = 'course_lookup_unavailable';
+            }
+          }
+        }
+        if (followUpRouting.result === 'clarify') {
+          const ambiguous =
+            scopedFollowUp.ambiguous ||
+            reviewed?.trace.outcome === 'ambiguous_definition_follow_up';
+          followUpRouting.result = ambiguous ? 'clarify' : 'unavailable';
+          teaching = reviewed?.trace;
+          if (teaching && ambiguous)
+            teaching.definitionRouting = {
+              intent: 'clarify',
+              conceptOrigin: 'previous_question',
+              mainCardIds: [],
+              courseLookup: 'not_needed',
+            };
+          answer =
+            language === 'zh-CN'
+              ? ambiguous
+                ? '你想进一步了解哪个概念，或哪一句话？'
+                : '我在当前课程材料中没有找到能回答这个追问的依据。'
+              : ambiguous
+                ? 'Which question or statement would you like to follow up on?'
+                : 'I could not find evidence for that follow-up in the current course materials.';
+          evidenceLog = {
+            route: 'direct_clarification',
+            context: sources.length ? 'retrieval_empty' : contextStrategy,
+            sources: [],
+          };
+          providerName = 'local';
+          model = 'lecture-follow-up';
+          promptHash = createHash('sha256')
+            .update(JSON.stringify([release.id, question, answer]))
+            .digest('hex');
+          yield answer;
+          input.signal?.throwIfAborted();
+          finished = true;
+          return;
+        }
+      }
       let definitionFilledQaGap = false;
       if (
         !resolvedQuestion &&
+        !scopedFollowUp &&
         !definitionFirst &&
         qaQuestion.length > 0 &&
         qaQuestion.length <= 8000 &&
@@ -490,10 +744,7 @@ export class AiChatYongService {
           candidates: candidates.map((c) => c.cardId),
         };
         try {
-          const followUp =
-            /^(那它|那么它|这个呢|它为什么|(?:请)?(?:给我|引用|展示)(?:教授的?|老师的?)?(?:原文|原话)|what about it\b|why is that\b|(?:please )?quote (?:the |that |your )?(?:professor|original)\b)/iu.test(
-              question,
-            );
+          const followUp = !!continuation;
           if (!directCandidate && this.knowledge.retrieveProfessorQa) {
             const query =
               followUp && previousQuestion && question.length <= 7300
@@ -959,10 +1210,17 @@ export class AiChatYongService {
           ),
         !needsCourseContext
           ? ''
-          : (fallbackContext ??
+          : (followUpContext ??
+            fallbackContext ??
             buildContext(
               (definition
-                ? [...courseGaps, ...definition.names]
+                ? [
+                    ...courseGaps,
+                    ...definition.names,
+                    ...(followsDefinition && continuation
+                      ? [continuation.anchor]
+                      : []),
+                  ]
                 : [...courseGaps, question, ...(wiki?.focus?.names ?? [])]
               )
                 .filter(Boolean)
@@ -1049,11 +1307,41 @@ export class AiChatYongService {
         !refsForAnswer.some((ref) => ref.id === wiki.focus?.ref.id)
       )
         refsForAnswer.push(wiki.focus.ref);
+      const citationNumbers =
+        input.mode === 'LECTURE' ? new Set<number>() : undefined;
+      const citationTitles: string[] = [];
+      if (citationNumbers) {
+        const reviewedText =
+          reviewed?.kind === 'reviewed' ? reviewed.knowledge : '';
+        for (const match of reviewedText.matchAll(/"reference":"S(\d+)"/g))
+          citationNumbers.add(Number(match[1]));
+        const offset = reviewed?.trace.sourceIds.length ?? 0;
+        sources.forEach((source, index) => {
+          const number = offset + index + 1;
+          citationNumbers.add(number);
+          citationTitles.push(
+            '[' +
+              number +
+              '] ' +
+              [source.pageTitle, source.heading].filter(Boolean).join(' — '),
+          );
+        });
+      }
       const compiled = compileMotherbaseDialogue({
         model,
         basePrompt: dialoguePrompts.basePrompt,
         modePrompt: [
           dialoguePrompts.modePrompt,
+          scopedFollowUp
+            ? 'Answer the follow-up using its resolved question and only the verified evidence. Do not substitute a broadly related example. For a quotation, reproduce the actual approved wording verbatim and identify whether it is from the course script or a professor answer.\n' +
+              scopedFollowUp.target
+            : '',
+          citationNumbers
+            ? citationNumbers.size
+              ? 'Use only the citation numbers supplied in this turn. ' +
+                citationTitles.join('\n')
+              : 'This turn has no numbered sources. Do not add citation numbers or a Sources section. When applicable refer to the approved professor answer by name.'
+            : '',
           fallbackContext && comparison.length > 1
             ? 'Use evidence for each side of the comparison. Distinguish mathematical definitions from interpretations in a particular model. Do not infer a physical interpretation beyond what the course material supports. If evidence for one side is missing, say which side and what is missing.'
             : '',
@@ -1124,13 +1412,15 @@ export class AiChatYongService {
         suppressImages ||
         (reviewed && 'references' in reviewed) ||
         refsForAnswer.length ||
-        wiki?.exhibits.length
+        wiki?.exhibits.length ||
+        (citationNumbers && followUpContext)
           ? createLectureReferenceStream(
               refsForAnswer,
               courseId,
               externalCourseId,
               !wiki && !teaching?.qaId,
               releaseId,
+              citationNumbers,
             )
           : undefined;
       const preserveWikiImages =
@@ -1271,6 +1561,7 @@ export class AiChatYongService {
           status,
           promptHash,
           teaching,
+          followUpRouting,
           evidence: evidenceLog,
           error: errorText,
           finishReason,

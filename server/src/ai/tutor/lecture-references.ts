@@ -90,6 +90,7 @@ export function createLectureReferenceStream(
   externalCourseId?: string,
   appendUnused = true,
   releaseId?: string,
+  sourceNumbers?: ReadonlySet<number>,
 ) {
   const objects = new Map(
     references.map((reference) => [reference.id, reference]),
@@ -112,8 +113,15 @@ export function createLectureReferenceStream(
   let pendingBang = false;
   let proseTail = '';
   let previousOutput = '';
+  let mathOpen = false;
+  let lastDollar = false;
   // An inline marker can come before the sentence punctuation. Place its image after the line.
   function writeProse(text: string, chunkOutput: string) {
+    if (sourceNumbers)
+      for (const char of text) {
+        if (char === '$' && !lastDollar) mathOpen = !mathOpen;
+        lastDollar = char === '$';
+      }
     if (text) proseTail = (proseTail + text.slice(-16)).slice(-16);
     const newline = text.indexOf('\n');
     if (newline < 0 || !requestedObjects.size) return text;
@@ -172,12 +180,20 @@ export function createLectureReferenceStream(
           input = input.slice(1);
           continue;
         }
-        if (!/ref:/i.test(match[1])) output += match[0];
-        else {
-          const numbers = match[1]
-            .split(/[,，]/)
-            .map((value) => value.trim())
-            .filter((value) => /^S?\d+$/i.test(value));
+        const numbers = match[1]
+          .split(/[,，]/)
+          .map((value) => value.trim())
+          .filter(
+            (value) =>
+              /^S?\d+$/i.test(value) &&
+              (!sourceNumbers ||
+                sourceNumbers.has(Number(value.replace(/^s/i, '')))),
+          );
+        if (!/ref:/i.test(match[1])) {
+          if (!sourceNumbers || mathOpen || input[match[0].length] === '(')
+            output += match[0];
+          else if (numbers.length) output += '[' + numbers.join(', ') + ']';
+        } else {
           if (numbers.length) output += '[' + numbers.join(', ') + ']';
           for (const ref of match[1].matchAll(/ref:([a-z0-9-]+)/gi)) {
             const object = objects.get(ref[1]);
@@ -207,6 +223,7 @@ export function createLectureReferenceStream(
           }
         }
         proseTail = '';
+        lastDollar = false;
         input = input.slice(match[0].length);
       }
       previousOutput += output;

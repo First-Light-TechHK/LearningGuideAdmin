@@ -598,6 +598,167 @@ describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
     expect(calculation).toContain(math);
     expect(calculation).not.toContain('/api/test.png');
   });
+  it('anchors an example to the preceding QA and rejects a full verdict on an unrelated candidate', async () => {
+    const anchor = '为什么状态变量要有数值和单位？';
+    const request = '可以举个例子吗？';
+    const exactQuestion =
+      'Why do state variables need numerical values and units?';
+    const explanation =
+      'Numbers describe quantity and units identify the scale.';
+    const example =
+      '30°C records air temperature; 30 is the value and Celsius is the unit.';
+    const wrong =
+      'A shark–tuna model illustrates state spaces, vectors, and trajectories.';
+    const wikiExample =
+      'A population of 20 individuals gives both the number and the counting unit.';
+    const label = { en: 'State Variable', zh: '' };
+    const pages = [
+      {
+        id: 'lesson',
+        title: 'Lesson 1',
+        contentMd: 'course material '.repeat(5000),
+      },
+    ];
+    const qa = (cardId: string, question: string, answerMd: string) => ({
+      cardId,
+      conceptId: 'state-variable',
+      type: 'professor_qa',
+      topic: '*',
+      canonicalPoint: answerMd,
+      evidence: [],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      links: [],
+      priority: 10,
+      reviewerId: 'test',
+      bilingual: {
+        conceptLabel: label,
+        summary: label,
+        triggers: { en: [question], zh: [] },
+      },
+      approvedPayload: { question, answerMd },
+    });
+    const teachingPackage = compileTeachingPackage({
+      courseId: COURSE_ID,
+      releaseId: TEST_RELEASE,
+      snapshot: { pages },
+      authored: {
+        glossary: [
+          { conceptId: 'state-variable', label, aliases: { en: [], zh: [] } },
+        ],
+        cards: [
+          qa('units', exactQuestion, explanation + '\n\n' + example),
+          qa('unrelated', 'Can you give a biology example?', wrong),
+        ],
+      },
+    });
+    const lookups: string[] = [];
+    let generation = '';
+    let rejectExample = false;
+    const { service, knowledge, write } = setup(async function* (opts) {
+      if (
+        opts.messages[0].content.includes('Select a single published answer')
+      ) {
+        const { currentQuestion, requiredRole } = JSON.parse(
+          opts.messages[1].content,
+        ) as { currentQuestion: string; requiredRole?: string };
+        const checkingWiki = opts.messages[1].content.includes(wikiExample);
+        const cardId = checkingWiki
+          ? '0'
+          : rejectExample && requiredRole
+            ? 'unrelated'
+            : 'units';
+        const excerpt = checkingWiki
+          ? wikiExample
+          : cardId === 'unrelated'
+            ? wrong
+            : requiredRole
+              ? example
+              : explanation;
+        const role = requiredRole ?? 'reason';
+        yield JSON.stringify({
+          cardId,
+          coverage: 'full',
+          conditionsMatch: true,
+          missingRequirements: [],
+          support: [
+            {
+              part: currentQuestion,
+              need: role,
+              provides: role,
+              excerpts: [excerpt],
+            },
+          ],
+        });
+        return;
+      }
+      generation = opts.messages[0].content;
+      yield '课程例子 [';
+      yield '1] [99]。';
+    });
+    jest.mocked(knowledge.getRelease).mockResolvedValue({
+      id: TEST_RELEASE,
+      courseId: COURSE_ID,
+      versionTag: 'test',
+      pages,
+      teachingPackage,
+    });
+    knowledge.retrieveProfessorQa = jest.fn(async (_, __, query) => {
+      lookups.push(query);
+      return {
+        status: 'ready' as const,
+        cardIds:
+          query === anchor ? ['units', 'unrelated'] : ['unrelated', 'units'],
+      };
+    });
+    const wiki = jest.mocked(knowledge.retrieveChunks);
+    wiki.mockResolvedValue([
+      {
+        pageTitle: 'Lesson 1',
+        heading: 'Units',
+        content: wikiExample,
+        score: 0.9,
+        tokenCount: 40,
+      },
+    ]);
+    const run = () =>
+      collect(
+        service.streamChat({
+          ...dto([
+            { role: 'user', content: anchor },
+            {
+              role: 'assistant',
+              content: '数值表示有多少，单位说明测量的尺度。',
+            },
+          ]),
+          message: request,
+        }),
+      );
+    expect(await run()).not.toContain('[1]');
+    expect(lookups).toEqual([anchor]);
+    expect(wiki).not.toHaveBeenCalled();
+    expect(generation).toContain(example);
+    expect(generation).not.toContain(wrong);
+    expect(write.mock.lastCall?.[0].followUpRouting).toMatchObject({
+      kind: 'example',
+      anchorQaId: 'units',
+      result: 'professor_qa',
+    });
+
+    rejectExample = true;
+    const answer = await run();
+    expect(wiki.mock.calls[0][1]).toContain(anchor);
+    expect(wiki.mock.calls[0][1]).toContain(request);
+    expect(generation).toContain(wikiExample);
+    expect(generation).not.toContain(wrong);
+    expect(answer).toContain('[1]');
+    expect(answer).not.toContain('[99]');
+    expect(write.mock.lastCall?.[0].followUpRouting).toMatchObject({
+      kind: 'example',
+      result: 'course_context',
+    });
+  });
+
   it('routes Trajectory definitions, speed questions and short follow-ups to the appropriate evidence', async () => {
     const definitionQuestion = '什么是 trajectory（轨迹）？';
     const speedQuestion = '能从轨迹的形状判断速度吗？';
@@ -665,26 +826,32 @@ describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
       },
     });
     const assessed: string[] = [];
+    const scriptQuote =
+      'A trajectory is the curve traced by the moving state point.';
     let generation = '';
     const env = setup(async function* (opts) {
       if (
         opts.messages[0].content.includes('Select a single published answer')
       ) {
-        const { currentQuestion } = JSON.parse(opts.messages[1].content) as {
+        const { currentQuestion, requiredRole } = JSON.parse(
+          opts.messages[1].content,
+        ) as {
           currentQuestion: string;
+          requiredRole?: string;
         };
+        const quotation = requiredRole === 'quotation';
         assessed.push(currentQuestion);
         yield JSON.stringify({
-          cardId: 'speed',
+          cardId: quotation ? '0' : 'speed',
           coverage: 'full',
           conditionsMatch: true,
           missingRequirements: [],
           support: [
             {
               part: currentQuestion,
-              need: 'conclusion',
-              provides: 'conclusion',
-              excerpts: [speed],
+              need: quotation ? 'quotation' : 'conclusion',
+              provides: quotation ? 'quotation' : 'conclusion',
+              excerpts: [quotation ? scriptQuote : speed],
             },
           ],
         });
@@ -771,14 +938,21 @@ describe('AiChatYongService 对话日志（§4.4.2 第 7 步）', () => {
       conceptOrigin: 'current_question',
       mainCardIds: ['space'],
     });
+    wiki.mockResolvedValueOnce([
+      {
+        pageTitle: 'Lesson 1',
+        heading: 'Trajectories',
+        content: scriptQuote,
+        score: 0.9,
+        tokenCount: 30,
+      },
+    ]);
     await ask('讲稿里是怎么说的？', history);
-    expect(route()?.definitionRouting).toMatchObject({
-      intent: 'quotation',
-      courseLookup: 'course_script',
+    expect(env.write.mock.lastCall?.[0].followUpRouting).toMatchObject({
+      kind: 'quotation',
+      result: 'course_context',
     });
-    expect(generation).toContain(
-      'Attribute lecture quotations only to actual supplied script passages',
-    );
+    expect(generation).toContain(scriptQuote);
     wiki.mockClear();
     await expect(
       ask('可以解释一下吗？', [
