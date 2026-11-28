@@ -81,6 +81,95 @@ function epicurusRelease(): KnowledgeRelease {
 }
 
 describe('reviewed Lecture selection', () => {
+  it('prioritizes the full definition name while keeping independently mentioned concepts', () => {
+    const version = {
+      id: 'r',
+      courseId: 'c',
+      versionTag: 'test',
+      pages: [{ id: 'p', title: 'Lesson', contentMd: 'Script.' }],
+    };
+    const cards = [
+      ['a', '状态'],
+      ['z', '状态变量'],
+    ].map(([cardId, name]) => ({
+      cardId,
+      conceptId: cardId,
+      topic: '*',
+      type: 'concept',
+      canonicalPoint: name + '的教学解释。',
+      evidence: [],
+      useWhen: ['*'],
+      doNotUseWhen: [],
+      priority: 10,
+      links: [],
+      reviewerId: 'fixture',
+      bilingual: {
+        conceptLabel: { en: name, zh: '' },
+        summary: { en: name, zh: '' },
+        triggers: { en: [], zh: [] },
+      },
+      approvedPayload: {
+        definitionName: name,
+        answerMd:
+          name +
+          '的教学解释。' +
+          (cardId === 'z' ? '进一步阐述。'.repeat(440) + '尾段证据。' : ''),
+      },
+    }));
+    const release = {
+      ...version,
+      teachingPackage: compileTeachingPackage({
+        courseId: version.courseId,
+        releaseId: version.id,
+        snapshot: { pages: version.pages },
+        authored: {
+          cards,
+          glossary: cards.map((card) => ({
+            conceptId: card.conceptId,
+            label: card.bilingual.conceptLabel,
+            aliases: { en: [], zh: [] },
+          })),
+        },
+      }),
+    };
+    const select = (
+      message: string,
+      rankedCards: string[] = [],
+      rankedParts?: ReadonlyMap<string, number>,
+    ) =>
+      prepareReviewedLecture(
+        release,
+        message,
+        undefined,
+        undefined,
+        [],
+        'zh-CN',
+        { rankedCards, rankedParts },
+      );
+    expect(select('状态变量是什么？').trace.selectedCardIds).toEqual(['z']);
+    expect(select('状态变量是什么？', ['a']).trace.selectedCardIds).toEqual([
+      'z',
+    ]);
+    expect(select('状态和状态变量有什么区别？').trace.selectedCardIds).toEqual([
+      'a',
+      'z',
+    ]);
+    expect(
+      select('用于描述系统变化的量叫什么？', ['z']).trace.selectedCardIds,
+    ).toEqual(['z']);
+    const semantic = select(
+      '用于描述系统变化的量叫什么？',
+      ['z'],
+      new Map([['z', 2]]),
+    );
+    expect(semantic.kind === 'reviewed' && semantic.knowledge).toContain(
+      '尾段证据。',
+    );
+    expect(semantic.kind === 'reviewed' && semantic.knowledge).toContain(
+      '状态变量的教学解释。',
+    );
+  });
+
   it('uses a ranked same-release concept for a Spanish paraphrase and ignores an unknown card', () => {
     const release = epicurusRelease();
     const question = '¿Cómo se entiende el bienestar en su contexto histórico?';

@@ -250,11 +250,28 @@ export class EvaluationService implements OnModuleInit, OnModuleDestroy {
     }
     return task;
   }
-  async restart(owner: string, id: string) {
+  async restart(owner: string, id: string, submissionKey?: unknown) {
+    if (
+      submissionKey !== undefined &&
+      (typeof submissionKey !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          submissionKey,
+        ))
+    )
+      throw new BadRequestException('INVALID_SUBMISSION_KEY');
     const task = await this.get(owner, id);
     if (task.status !== 'stopped' && task.status !== 'completed')
       throw new ConflictException('TASK_STILL_RUNNING');
-    return this.create(owner, task.config, task.questions, undefined, task);
+    return this.create(
+      owner,
+      task.config,
+      task.questions,
+      undefined,
+      task,
+      submissionKey === undefined
+        ? undefined
+        : `restart:${id}:${submissionKey}`,
+    );
   }
   async remove(owner: string, id: string, sourceOnly = false) {
     const task = await this.get(owner, id);

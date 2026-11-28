@@ -183,7 +183,7 @@ describe('ReleasesService', () => {
       requires: [],
     };
     const contentMd = `${evidence}\n\n[Square](refobj:vector-square)`;
-    mockTx.course.findUnique.mockResolvedValue({
+    const course = {
       id: 'c1',
       title: 'Vectors',
       currentReleaseId: 'live',
@@ -196,7 +196,8 @@ describe('ReleasesService', () => {
           sectionTags: null,
         },
       ],
-    });
+    };
+    mockTx.course.findUnique.mockResolvedValue(course);
     mockTx.courseAiConfig.findUnique.mockResolvedValue(null);
     mockTx.release.findFirst.mockResolvedValue(null);
     mockTx.release.create.mockImplementation(
@@ -227,10 +228,15 @@ describe('ReleasesService', () => {
         },
       ],
     };
-    const released = await service.publish('c1', {
-      revisionNotes: 'reviewed',
-      teachingPackage: input,
-    });
+    const card = input.cards[0];
+    const saved = {
+      id: card.cardId,
+      approved: card,
+      approvedRevision: 1,
+      reviewerId: card.reviewerId,
+    };
+    mockTx.tutorTeachingCard.findMany.mockResolvedValue([saved]);
+    const released = await service.publish('c1', { revisionNotes: 'reviewed' });
     expect(released.snapshotData).toMatchObject({
       pages: [{ contentMd }],
       teachingPackage: {
@@ -243,15 +249,42 @@ describe('ReleasesService', () => {
       where: { id: 'c1' },
       data: { editingReleaseId: released.id },
     });
+    const legacyCard = { ...card, cardId: 'legacy-definition' };
+    mockTx.course.findUnique.mockResolvedValue({
+      ...course,
+      editingReleaseId: 'historical',
+    });
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'historical',
+      snapshotData: { teachingPackageInput: { ...input, cards: [legacyCard] } },
+    });
+    const next = await service.publish('c1', { revisionNotes: 'merged' });
+    expect(next.snapshotData).toMatchObject({
+      teachingPackage: {
+        cards: [{ cardId: legacyCard.cardId }, { cardId: saved.id }],
+      },
+    });
+    expect(mockTx.course.update).toHaveBeenLastCalledWith({
+      where: { id: 'c1' },
+      data: { editingReleaseId: next.id },
+    });
+    const explicitCard = { ...card, cardId: 'explicit-definition' };
+    const explicit = await service.publish('c1', {
+      revisionNotes: 'explicit package',
+      teachingPackage: { ...input, cards: [explicitCard] },
+    });
+    expect(explicit.snapshotData).toMatchObject({
+      teachingPackage: {
+        cards: [{ cardId: explicitCard.cardId }, { cardId: saved.id }],
+      },
+    });
+
     mockTx.release.create.mockClear();
+    mockTx.tutorTeachingCard.findMany.mockResolvedValue([
+      { ...saved, approved: { ...card, evidence: ['missing'] } },
+    ]);
     await expect(
-      service.publish('c1', {
-        revisionNotes: 'invalid',
-        teachingPackage: {
-          ...input,
-          cards: [{ ...input.cards[0], evidence: ['missing'] }],
-        },
-      }),
+      service.publish('c1', { revisionNotes: 'invalid' }),
     ).rejects.toThrow('教学包校验失败');
     expect(mockTx.release.create).not.toHaveBeenCalled();
   });

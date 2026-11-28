@@ -1,0 +1,61 @@
+/* Match the Portal lesson Tutor within the Backoffice AI Test conversation. */
+.ai-test-messages .tutor-message-row { display:flex; flex-direction:column; }
+.ai-test-messages .tutor-message-line { display:flex; min-width:0; }
+.ai-test-messages .tutor-message-row.user .tutor-message-line { justify-content:flex-end; }
+.ai-test-messages .tutor-message-actions { display:flex; gap:4px; margin-left:42px; }
+.ai-test-messages .tutor-message-row.user .tutor-message-actions { justify-content:flex-end; margin-left:0; margin-right:38px; }
+.ai-test-messages .tutor-message-actions button { border:0; border-radius:4px; background:transparent; color:#667085; cursor:pointer; font-size:11px; padding:3px 5px; }
+.ai-test-messages .tutor-message-actions button:hover:not(:disabled) { color:#005cff; background:#eef3ff; }
+.ai-test-messages .tutor-message-actions button:disabled { opacity:.45; cursor:not-allowed; }
+.ai-test-messages .tutor-message-bubble-wrap { display:flex; flex-direction:row; align-items:flex-end; width:fit-content; max-width:min(640px,92%); gap:6px 8px; }
+.ai-test-messages .tutor-message-row.user .tutor-avatar { order:3; align-self:flex-start; }
+.ai-test-messages .tutor-message-row.user .tutor-message { order:2; }
+.ai-test-messages .tutor-message-row.user .tutor-message-time { order:1; }
+.ai-test-messages .tutor-message-row.assistant .tutor-avatar { align-self:flex-start; }
+.ai-test-messages .tutor-avatar { display:grid; place-items:center; flex-shrink:0; border-radius:50%; font-size:14px; line-height:19px; }
+.ai-test-messages .tutor-message-row.assistant .tutor-avatar { width:34px; height:34px; background:#e8eeff; color:#005cff; font-weight:600; }
+.ai-test-messages .tutor-message-row.user .tutor-avatar { width:30px; height:30px; background:#e8f1ff; color:#155dfc; font-weight:600; }
+.ai-test-messages .tutor-message { min-width:0; max-width:100%; padding:11px 13px; border-radius:12px; }
+.ai-test-messages .tutor-message-row.assistant .tutor-message { border:1px solid #e4eaf4; border-bottom-left-radius:3px; background:#f8f9fb; color:#52617e; }
+.ai-test-messages .tutor-message-row.user .tutor-message { border-bottom-right-radius:3px; background:#005cff; color:#fff; }
+.ai-test-messages .tutor-message p { margin:0; font-size:13px; line-height:18px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ai-test-messages .tutor-message .tutor-answer { font-size:13px; line-height:18px; color:inherit; }
+.ai-test-messages .tutor-answer { line-height:1.5; overflow-wrap:anywhere; }
+.ai-test-messages .tutor-answer > :last-child { margin-bottom:0; }
+.ai-test-messages .tutor-answer p { margin:0 0 .6em; white-space:normal; overflow-wrap:anywhere; }
+.ai-test-messages .tutor-answer p:last-child { margin-bottom:0; }
+.ai-test-messages .tutor-answer ul, .ai-test-messages .tutor-answer ol { margin:0 0 .6em; padding-left:1.5em; }
+.ai-test-messages .tutor-answer li { margin:.25em 0; }
+.ai-test-messages .tutor-answer li > p { margin:0; }
+.ai-test-messages .tutor-answer strong { font-weight:600; }
+.ai-test-messages .tutor-answer code { font-size:.9em; padding:0 .3em; border-radius:4px; background:rgba(16,24,40,.06); }
+.ai-test-messages .tutor-answer pre { margin:0 0 .6em; padding:.6em .8em; overflow-x:auto; border-radius:6px; background:rgba(16,24,40,.06); }
+.ai-test-messages .tutor-answer pre code { padding:0; background:transparent; white-space:inherit; }
+.ai-test-messages .tutor-answer .katex { font-size:1.08em; }
+.ai-test-messages .tutor-answer .katex-display { margin:.5em 0; padding:2px 0; overflow-x:auto; overflow-y:hidden; }
+.ai-test-messages .tutor-answer table { display:block; overflow-x:auto; margin:0 0 .6em; border-collapse:collapse; }
+.ai-test-messages .tutor-answer th, .ai-test-messages .tutor-answer td { border:1px solid #e4e7ec; padding:2px 6px; }
+.ai-test-messages .tutor-answer img { display:block; max-width:100%; height:auto; margin:.5em 0; border-radius:6px; }
+.ai-test-messages .tutor-answer a { color:inherit; text-decoration:underline; }
+.ai-test-messages .tutor-answer blockquote { margin:0 0 .6em; padding-left:.8em; border-left:2px solid #d9e2f1; color:#667085; }
+.ai-test-messages .tutor-answer sup { font-size:.75em; line-height:0; vertical-align:super; padding:0 1px; }
+.ai-test-messages .tutor-answer-sources { margin:.6em 0 0; padding:0; border:0; color:#667085; font-size:.9em; line-height:1.4; }
+.ai-test-messages .tutor-answer-sources p { margin:0 0 2px; }
+.ai-test-messages .tutor-answer-sources p:first-child { font-weight:600; }
+.ai-test-messages .tutor-message-row.assistant .tutor-message .tutor-answer strong { color:#101828; }
+.ai-test-messages .tutor-message-row.user .tutor-message .tutor-answer strong, .ai-test-messages .tutor-message-row.user .tutor-message .tutor-answer-sources { color:rgba(255,255,255,.9); }
+.ai-test-messages .tutor-message-row.user .tutor-message .tutor-answer code, .ai-test-messages .tutor-message-row.user .tutor-message .tutor-answer pre { background:rgba(255,255,255,.18); }
+.ai-test-messages .tutor-message-time { flex-shrink:0; color:#8a9ab6; font-size:10px; line-height:14px; white-space:nowrap; margin-bottom:1px; }
+
+.ai-test-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ai-test-composer > button {
+  inline-size: 112px;
+  block-size: 32px;
+}

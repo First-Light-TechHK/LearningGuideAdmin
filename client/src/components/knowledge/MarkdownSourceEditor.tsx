@@ -14,7 +14,8 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search'
 import { createMarkdownLivePreview } from './markdownLivePreview'
-import { createMarkdownBlockWidgets } from './markdownBlockWidgets'
+import { courseReferenceContext, courseReferenceFocus, createMarkdownBlockWidgets, setCourseReferenceFocus } from './markdownBlockWidgets'
+import type { TeachingRef } from '../../api/teachingCards'
 import { toggleWrap } from './markdownCommands'
 import { useKText } from './i18n'
 
@@ -28,6 +29,8 @@ import { useKText } from './i18n'
 interface MarkdownSourceEditorProps {
   /** 外部文档内容（切页/回滚时会替换编辑器文档；内部输入不回灌，避免光标跳动） */
   value: string
+  courseId?: string
+  references?: TeachingRef[]
   /** 只读（View 角色） */
   readOnly?: boolean
   /** 用户输入回调（未防抖，由调用方决定何时写入 store） */
@@ -38,6 +41,8 @@ interface MarkdownSourceEditorProps {
 
 export function MarkdownSourceEditor({
   value,
+  courseId,
+  references,
   readOnly = false,
   onChange,
   onViewReady,
@@ -57,6 +62,7 @@ export function MarkdownSourceEditor({
   const externalRef = useRef(false)
   const readOnlyCompartment = useRef(new Compartment())
   const placeholderCompartment = useRef(new Compartment())
+  const referenceCompartment = useRef(new Compartment())
 
   useLayoutEffect(() => {
     onChangeRef.current = onChange
@@ -93,6 +99,9 @@ export function MarkdownSourceEditor({
           markdown({ base: markdownLanguage }),
           // Live Preview：块级 Widget（公式/表格/整行图片，StateField）+ 行级/行内装饰（ViewPlugin）
           // 注意：CM6 禁止 ViewPlugin 提供 block 装饰，故块级必须单独用 StateField
+          referenceCompartment.current.of(courseReferenceContext.of(undefined)),
+          courseReferenceFocus,
+          EditorView.focusChangeEffect.of((_state, focused) => setCourseReferenceFocus.of(focused)),
           blockWidgets,
           livePreview,
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -163,6 +172,15 @@ export function MarkdownSourceEditor({
       externalRef.current = false
     }
   }, [value])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const context = courseId && references
+      ? { courseId, byId: new Map(references.map(item => [item.id, item])) }
+      : undefined
+    view.dispatch({ effects: referenceCompartment.current.reconfigure(courseReferenceContext.of(context)) })
+  }, [courseId, references])
 
   // 只读切换
   useEffect(() => {

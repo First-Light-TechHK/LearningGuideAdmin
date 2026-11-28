@@ -53,13 +53,13 @@ interface KnowledgeState {
   flushSave: () => Promise<boolean>
 
   deleteCourse: (id: string) => Promise<void>
-  createPage: (courseId: string, title: string) => Promise<void>
+  createPage: (courseId: string, title: string, requestId?: string, contentMd?: string) => Promise<PageNode>
   deletePage: (courseId: string, pageId: string) => Promise<void>
   clearCoursePages: (courseId: string, expectedPageIds: string[]) => Promise<void>
   /** 批量重排 Course 下 Page 顺序（§5.1.2，2026-10-19：左侧树拖拽排序） */
   reorderPages: (courseId: string, orderedIds: string[]) => Promise<void>
 
-  refreshDetail: (courseId: string) => Promise<void>
+  refreshDetail: (courseId: string, fresh?: boolean) => Promise<void>
 
   loadExternalCourses: () => Promise<void>
   /** 切换同步目标；传 null 回到「全部课件」视图（BUG-0227） */
@@ -69,7 +69,7 @@ interface KnowledgeState {
   /** 弹窗 Import（§3.2.3 两步流程）：以转换预览内容建页 → 刷新树并选中新页 */
   importDocument: (
     courseId: string,
-    doc: { title: string; contentMd: string },
+    doc: { title: string; contentMd: string; requestId?: string },
   ) => Promise<void>
 
   afterActivateRelease: (courseId: string) => Promise<void>
@@ -95,6 +95,10 @@ const AUTOSAVE_INTERVAL_MS = 5_000
 let autosaveTimer: ReturnType<typeof setInterval> | null = null
 /** 当前在飞的保存请求（串行化，防止乱序 PUT 覆盖新内容） */
 let savingPromise: Promise<boolean> | null = null
+const detailRequests = new Map<string, Promise<void>>()
+const syncRequests = new Map<string, Promise<SyncSummary>>()
+const reorders = new Map<string, { next: string[] | null; done: Promise<void> }>()
+let selectionVersion = 0
 
 function stopAutosave() {
   if (autosaveTimer) {
@@ -176,13 +180,11 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       return
     }
     set({ expandedCourseIds: [...expandedCourseIds, courseId] })
-    if (!details[courseId]) {
-      const detail = await knowledgeApi.getCourse(courseId)
-      set((s) => ({ details: { ...s.details, [courseId]: detail } }))
-    }
+    if (!details[courseId]) await get().refreshDetail(courseId)
   },
 
   async selectPage(courseId, pageId) {
+    const selection = ++selectionVersion
     // 2026-10-22 修复：重复点击当前 Page 不重置 draft，避免编辑器反复 replaceBlocks
     // 导致目录/正文出现重复 Heading。
     if (
@@ -205,7 +207,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     // 最后一刻再做一次提交：覆盖「最后一次 flush 与 set 之间」的输入（同步、零成本）
     draftFlusher?.()
     const leaving = get().draft
-    if (leaving && leaving.saveState !== 'saved' && leaving.saveState !== 'idle') return
+    if (selection !== selectionVersion || (leaving && leaving.saveState !== 'saved' && leaving.saveState !== 'idle')) return
     // 保存可能真的写了库并刷新了详情：必须在保存之后再取 page，避免用旧 contentMd 作为新页基线
     const page = get().details[courseId]?.pages.find((p) => p.id === pageId)
     if (!page) return
@@ -279,7 +281,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
           sectionTags: snapshot.sectionTags,
         }, draft.workspaceStamp)
         const courseId = get().selectedCourseId
-        if (courseId) await get().refreshDetail(courseId)
+        if (courseId) await get().refreshDetail(courseId, true)
         return true
       } catch {
         return false
@@ -320,6 +322,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   },
 
   async selectExternal(externalId) {
+    const selection = ++selectionVersion
     if (get().selectedExternalId === externalId) return
     // 与 selectPage 对齐：先提交最新文本、保存失败或仍有未落库内容则阻断，成功后再清本地草稿
     if (!(await get().flushSave())) return
@@ -333,7 +336,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     }
     draftFlusher?.()
     const leaving = get().draft
-    if (leaving && leaving.saveState !== 'saved' && leaving.saveState !== 'idle') return
+    if (selection !== selectionVersion || (leaving && leaving.saveState !== 'saved' && leaving.saveState !== 'idle')) return
     clearLocalDraft(leaving?.pageId)
     set({ selectedExternalId: externalId, selectedPageId: null, draft: null })
   },
@@ -341,33 +344,31 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   async runSync(mode) {
     const { selectedExternalId } = get()
     if (!selectedExternalId) throw new Error(t(currentLocale(), 'knowledge.sync.selectTarget'))
+    const pending = syncRequests.get(selectedExternalId)
+    if (pending) return pending
+    const request = Promise.resolve().then(async () => {
+      const summary = mode === 'structure'
+        ? await knowledgeApi.syncStructure(selectedExternalId)
+        : await knowledgeApi.syncAll(selectedExternalId)
+      await get().loadCourses().catch(() => {})
+      await get().loadExternalCourses()
+      const local = get().externalCourses.find((course) => course.externalId === selectedExternalId)
+      if (local?.localCourseId) await get().refreshDetail(local.localCourseId, true).catch(() => {})
+      return summary
+    })
+    syncRequests.set(selectedExternalId, request)
     set({ syncing: true })
     try {
-      const summary =
-        mode === 'structure'
-          ? await knowledgeApi.syncStructure(selectedExternalId)
-          : await knowledgeApi.syncAll(selectedExternalId)
-      await get().loadCourses()
-      await get().loadExternalCourses()
-      const local = get().externalCourses.find(
-        (e) => e.externalId === selectedExternalId,
-      )
-      if (local?.localCourseId) {
-        await get().refreshDetail(local.localCourseId)
-      }
-      return summary
+      return await request
     } finally {
-      set({ syncing: false })
+      syncRequests.delete(selectedExternalId)
+      set({ syncing: syncRequests.size > 0 })
     }
   },
 
   async importDocument(courseId, doc) {
-    const page = await knowledgeApi.createPage(courseId, {
-      title: doc.title,
-      contentMd: doc.contentMd,
-    })
-    await get().refreshDetail(courseId)
-    await get().selectPage(courseId, page.id)
+    const page = await get().createPage(courseId, doc.title, doc.requestId, doc.contentMd)
+    await get().selectPage(courseId, page.id).catch(() => {})
   },
 
   async afterActivateRelease(courseId) {
@@ -379,7 +380,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       set({ draft: null, selectedPageId: null })
       clearLocalDraft(leavingPageId)
     }
-    await get().refreshDetail(courseId)
+    await get().refreshDetail(courseId, true)
   },
 
   async deleteCourse(id) {
@@ -398,26 +399,35 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     await get().loadCourses()
   },
 
-  async createPage(courseId, title) {
+  async createPage(courseId, title, requestId, contentMd = '') {
     // 标题单独显示在编辑器上方，正文从空白开始，不再把标题复制成正文首行 H1（BUG-0222）
-    const page = await knowledgeApi.createPage(courseId, { title, contentMd: '' })
+    const page = await knowledgeApi.createPage(courseId, { title, contentMd, requestId })
     set((state) => {
       const detail = state.details[courseId]
       const course = detail ?? state.courses.find((course) => course.id === courseId)
       if (!course) return state
-      return { details: { ...state.details, [courseId]: { ...course, pages: [...(detail?.pages ?? []), page] } } }
+      const pages = detail?.pages ?? []
+      const nextPages = pages.some(({ id }) => id === page.id)
+        ? pages.map((item) => item.id === page.id ? page : item)
+        : [...pages, page]
+      return { details: { ...state.details, [courseId]: { ...course, pages: nextPages } } }
     })
     // POST 已成功：目录刷新失败不能再报创建失败，否则重试会写入第二个页面。
-    await get().refreshDetail(courseId).catch(() => {})
+    await get().refreshDetail(courseId, true).catch(() => {})
+    return page
   },
 
   async deletePage(courseId, pageId) {
     await knowledgeApi.deletePage(pageId)
     clearLocalDraft(pageId)
-    await get().refreshDetail(courseId)
+    set((state) => {
+      const detail = state.details[courseId]
+      return detail ? { details: { ...state.details, [courseId]: { ...detail, pages: detail.pages.filter((page) => page.id !== pageId) } } } : state
+    })
     if (get().selectedPageId === pageId) {
       set({ draft: null, selectedPageId: null })
     }
+    await get().refreshDetail(courseId, true).catch(() => {})
   },
 
   async clearCoursePages(courseId, expectedPageIds) {
@@ -445,7 +455,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       }
     })
     // 删除已提交，即使刷新失败也要保留更新后的目录，避免误报并重复确认。
-    await get().refreshDetail(courseId).catch(() => {})
+    await get().refreshDetail(courseId, true).catch(() => {})
   },
 
   async reorderPages(courseId, orderedIds) {
@@ -460,17 +470,44 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       })
       set((s) => ({ details: { ...s.details, [courseId]: { ...detail, pages } } }))
     }
-    try {
-      await knowledgeApi.reorderPages(courseId, orderedIds)
-    } catch (e) {
-      await get().refreshDetail(courseId)
-      throw e
+    const pending = reorders.get(courseId)
+    if (pending) {
+      pending.next = orderedIds
+      return pending.done
     }
+    const queue = { next: orderedIds as string[] | null, done: Promise.resolve() }
+    queue.done = Promise.resolve().then(async () => {
+      try {
+        while (queue.next) {
+          const next = queue.next
+          queue.next = null
+          try {
+            await knowledgeApi.reorderPages(courseId, next)
+          } catch (error) {
+            if (!queue.next) {
+              await get().refreshDetail(courseId, true).catch(() => {})
+              if (!queue.next) throw error
+            }
+          }
+        }
+      } finally {
+        reorders.delete(courseId)
+      }
+    })
+    reorders.set(courseId, queue)
+    return queue.done
   },
 
-  async refreshDetail(courseId) {
-    const detail = await knowledgeApi.getCourse(courseId)
-    set((s) => ({ details: { ...s.details, [courseId]: detail } }))
+  async refreshDetail(courseId, fresh = false) {
+    const pending = detailRequests.get(courseId)
+    if (pending && !fresh) return pending
+    const request = knowledgeApi.getCourse(courseId).then((detail) => {
+      if (detailRequests.get(courseId) === request) set((s) => ({ details: { ...s.details, [courseId]: detail } }))
+    }).finally(() => {
+      if (detailRequests.get(courseId) === request) detailRequests.delete(courseId)
+    })
+    detailRequests.set(courseId, request)
+    return request
   },
 
   tocScrollTarget: null,

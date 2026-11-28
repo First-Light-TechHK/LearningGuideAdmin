@@ -25,6 +25,11 @@ import { OpenRouterHttpError } from './providers/openrouter.provider';
 import { ProviderRegistry } from './providers/provider.registry';
 import { compileMotherbaseDialogue } from './tutor/motherbase-dialogue';
 import { prepareReviewedLecture } from './tutor/lecture-teaching';
+import {
+  asksForCourseScript,
+  asksForDefinition,
+  definitionFollowUp,
+} from './tutor/definition-request';
 import { lectureQuestionLookup } from './tutor/lecture-question-reference';
 import {
   lectureLanguage,
@@ -296,8 +301,12 @@ export class AiChatYongService {
       const question = input.message.trim();
       const comparison =
         input.mode === 'LECTURE' ? comparisonSubjects(question) : [];
+      const conceptFollowUp =
+        input.mode === 'LECTURE' && definitionFollowUp(question);
       const previousQuestion = history.findLast(
-        (item) => item.role === 'user',
+        (item) =>
+          item.role === 'user' &&
+          (!conceptFollowUp || !definitionFollowUp(item.content)),
       )?.content;
       const lastTurn = history.at(-1);
       const reference =
@@ -315,7 +324,11 @@ export class AiChatYongService {
       const sources: ReturnType<typeof passageSource>[] = [];
       let contextStrategy: NonNullable<AiChatLogEntry['evidence']>['context'] =
         input.testRoute?.useKnowledge === false ? 'disabled' : 'not_requested';
-      const buildContext = async (query: string, topics: string[] = []) => {
+      const buildContext = async (
+        query: string,
+        topics: string[] = [],
+        referenceOffset = 0,
+      ) => {
         if (input.testRoute?.useKnowledge === false) return '';
         if (resolvedQuestion) {
           const context = await publishedQuestionContext(
@@ -340,6 +353,7 @@ export class AiChatYongService {
           input.mode === 'LECTURE'
             ? [...topicsToCheck, ...comparison]
             : undefined,
+          referenceOffset,
         );
         contextStrategy =
           context.text === null ? 'retrieval_empty' : context.strategy;
@@ -360,6 +374,7 @@ export class AiChatYongService {
       let eligible: ProfessorAnswer[] = [];
       let eligibleTeaching: string[] = [];
       let rankedCards: string[] = [];
+      let rankedParts = new Map<string, number>();
       let topicsToCheck: string[] = [];
       let qaLanguage = '';
       let qaSearch: NonNullable<AiChatLogEntry['teaching']>['qaSearch'];
@@ -407,9 +422,60 @@ export class AiChatYongService {
       if (resolvedQuestion) reviewed = undefined;
       const directCandidate =
         reviewed?.kind === 'wiki' ? reviewed.directCandidate : undefined;
+      const reviewDefinition = () => {
+        if (
+          reviewed?.kind === 'reviewed' &&
+          'definition' in reviewed &&
+          reviewed.definition
+        )
+          return reviewed;
+        if (!directCandidate) return undefined;
+        const result = prepareReviewedLecture(
+          release,
+          question,
+          previousQuestion,
+          undefined,
+          priorObjects,
+          input.locale,
+          { rankedCards, rankedParts, ignoreProfessorQa: true },
+        );
+        if (
+          result.kind === 'reviewed' &&
+          'definition' in result &&
+          result.definition
+        )
+          return result;
+      };
+      const preferredDefinition = reviewDefinition();
+      const definitionRequest = preferredDefinition?.definition;
+      const definitionParts = definitionRequest?.requests;
+      const courseScriptOnly =
+        !!definitionParts?.remaining.length &&
+        definitionParts.remaining.every(asksForCourseScript);
+      const definitionFirst = !!(
+        definitionRequest?.uniqueDefinition ||
+        definitionRequest?.inherited ||
+        courseScriptOnly
+      );
+      if (definitionFirst) reviewed = preferredDefinition;
+      const scopedQa =
+        definitionParts?.covered.length && !definitionFirst
+          ? definitionParts.remaining
+          : undefined;
+      const scriptRequests =
+        scopedQa?.filter(
+          (part) =>
+            asksForCourseScript(part) && definitionRequest?.gaps.includes(part),
+        ) ?? [];
+      const qaQuestion = scopedQa
+        ? scopedQa.filter((part) => !asksForCourseScript(part)).join('\n')
+        : question;
+      let definitionFilledQaGap = false;
       if (
         !resolvedQuestion &&
-        question.length <= 8000 &&
+        !definitionFirst &&
+        qaQuestion.length > 0 &&
+        qaQuestion.length <= 8000 &&
         (directCandidate ||
           (rollout !== 'off' &&
             (eligible.length || eligibleTeaching.length) &&
@@ -434,8 +500,8 @@ export class AiChatYongService {
                 ? 'Previous: ' +
                   previousQuestion.slice(-600) +
                   '\nCurrent: ' +
-                  question
-                : question;
+                  qaQuestion
+                : qaQuestion;
             const result = await this.knowledge.retrieveProfessorQa(
               courseId,
               release.id,
@@ -448,6 +514,16 @@ export class AiChatYongService {
               rankedCards = (result.teachingCardIds ?? [])
                 .filter((id) => eligibleTeaching.includes(id))
                 .slice(0, 5);
+              rankedParts = new Map(
+                (result.teachingParts ?? [])
+                  .filter(
+                    ({ cardId, part }) =>
+                      rankedCards.includes(cardId) &&
+                      Number.isSafeInteger(part) &&
+                      part > 0,
+                  )
+                  .map(({ cardId, part }) => [cardId, part]),
+              );
               if (rankedCards.length)
                 reviewed = prepareReviewedLecture(
                   release,
@@ -456,7 +532,7 @@ export class AiChatYongService {
                   undefined,
                   priorObjects,
                   input.locale,
-                  { rankedCards },
+                  { rankedCards, rankedParts },
                 );
             }
             candidates = [...new Set(result.cardIds)]
@@ -489,7 +565,7 @@ export class AiChatYongService {
                     baseUrl: runtime.baseUrl,
                     model: input.testRoute?.model ?? runtime.model,
                   },
-                  question,
+                  qaQuestion,
                   candidates,
                   qaLanguage ||
                     lectureLanguage(question, previousQuestion, input.locale),
@@ -519,8 +595,62 @@ export class AiChatYongService {
                 selected.kind === 'reviewed' &&
                 selected.trace.selectedCardIds.includes(evidence.cardId)
               ) {
-                reviewed = selected;
-                topicsToCheck = evidence.missingRequirements;
+                topicsToCheck = [
+                  ...scriptRequests,
+                  ...evidence.missingRequirements,
+                ];
+                const definitionReview = scopedQa
+                  ? preferredDefinition
+                  : evidence.coverage === 'partial'
+                    ? reviewDefinition()
+                    : undefined;
+                const notes = definitionReview?.definition;
+                if (definitionReview && notes) {
+                  const remaining = topicsToCheck.filter(
+                    (part) =>
+                      !notes.names.some((name) =>
+                        asksForDefinition(part, name),
+                      ),
+                  );
+                  if (scopedQa || remaining.length < topicsToCheck.length) {
+                    definitionFilledQaGap = true;
+                    topicsToCheck = remaining;
+                    reviewed = {
+                      ...selected,
+                      definition: { ...notes, gaps: remaining },
+                      knowledge: [
+                        definitionReview.knowledge,
+                        selected.knowledge,
+                      ].join('\n\n'),
+                      outputContract:
+                        'Use the approved professor answer for its covered question and the definition for the corresponding definition request. Search evidence supplied in this context may support remaining requests. Report unsupported parts. Attribute lecture quotations only to supplied lecture passages.',
+                      references: [
+                        ...new Map(
+                          [
+                            ...selected.references,
+                            ...definitionReview.references,
+                          ].map((ref) => [ref.id, ref]),
+                        ).values(),
+                      ],
+                      trace: {
+                        ...selected.trace,
+                        selectedCardIds: [
+                          ...new Set([
+                            ...selected.trace.selectedCardIds,
+                            ...definitionReview.trace.selectedCardIds,
+                          ]),
+                        ],
+                        sourceIds: [
+                          ...new Set([
+                            ...selected.trace.sourceIds,
+                            ...definitionReview.trace.sourceIds,
+                          ]),
+                        ],
+                      },
+                    };
+                  }
+                }
+                if (!definitionFilledQaGap) reviewed = selected;
                 qaSearch.accepted = evidence.cardId;
               } else qaSearch.reason = 'selection_unavailable';
             }
@@ -535,9 +665,18 @@ export class AiChatYongService {
         if (
           candidates.length &&
           !qaSearch.accepted &&
+          (directCandidate || rollout === 'on')
+        ) {
+          const definitionReview = reviewDefinition();
+          if (definitionReview) reviewed = definitionReview;
+        }
+        if (
+          candidates.length &&
+          !qaSearch.accepted &&
           (directCandidate || rollout === 'on') &&
           reviewed &&
           reviewed.kind !== 'wiki' &&
+          !('definition' in reviewed && reviewed.definition) &&
           !(
             reviewed.kind === 'clarify' &&
             reviewed.trace.outcome === 'no_applicable_evidence' &&
@@ -589,12 +728,12 @@ export class AiChatYongService {
               topic,
               priorObjects,
               input.locale,
-              { rankedCards },
+              { rankedCards, rankedParts },
             );
         }
       }
       teaching = reviewed?.trace ?? wiki?.trace ?? teaching;
-      let comparisonContext: string | undefined;
+      let fallbackContext: string | undefined;
       // 已知问题对象可以继续查正文，教学卡缺失本身不需要学生补充信息。
       if (
         reviewed?.kind === 'clarify' &&
@@ -606,7 +745,7 @@ export class AiChatYongService {
         ).catch(() => null);
         input.signal?.throwIfAborted();
         if (context?.trim()) {
-          comparisonContext = context;
+          fallbackContext = context;
           reviewed = undefined;
           if (teaching) teaching.outcome = 'course_comparison_fallback';
         }
@@ -617,8 +756,35 @@ export class AiChatYongService {
         hasExplicitFormula(question)
       ) {
         reviewed = undefined;
+      } else if (
+        reviewed?.kind === 'clarify' &&
+        reviewed.searchCourse &&
+        reviewed.trace.outcome === 'no_applicable_evidence' &&
+        !reviewed.trace.exhibitCandidateIds.length
+      ) {
+        const context = await buildContext(question).catch(() => null);
+        input.signal?.throwIfAborted();
+        if (context?.trim()) {
+          fallbackContext = context;
+          reviewed = undefined;
+          if (teaching) teaching.outcome = 'definition_course_fallback';
+        }
       }
       if (teaching && qaSearch) teaching.qaSearch = qaSearch;
+      if (
+        teaching?.outcome === 'ambiguous_definition_follow_up' ||
+        teaching?.outcome === 'ambiguous_definition_request'
+      ) {
+        teaching.definitionRouting = {
+          intent: 'clarify',
+          conceptOrigin:
+            teaching.outcome === 'ambiguous_definition_request'
+              ? 'current_question'
+              : 'previous_question',
+          mainCardIds: [],
+          courseLookup: 'not_needed',
+        };
+      }
       if (wiki?.focus && teaching) {
         teaching.selectedCardIds.push(wiki.focus.cardId);
         teaching.outcome = wiki.followUp
@@ -727,6 +893,56 @@ export class AiChatYongService {
         finished = true;
         return;
       }
+      const definition =
+        reviewed && 'definition' in reviewed ? reviewed.definition : undefined;
+      const onlyDefinition = definition?.uniqueDefinition;
+      const courseGaps = definition
+        ? [
+            ...new Set([
+              ...definition.gaps,
+              ...topicsToCheck.filter(
+                (part) =>
+                  !onlyDefinition &&
+                  !definition.names.some((name) =>
+                    asksForDefinition(part, name),
+                  ),
+              ),
+            ]),
+          ]
+        : topicsToCheck;
+      const needsCourseContext =
+        !reviewed ||
+        (teaching?.qaCoverage === 'partial' &&
+          (!definitionFilledQaGap || courseGaps.length > 0)) ||
+        !!(definition && courseGaps.length);
+      if (
+        teaching &&
+        definition &&
+        (definition.requests.covered.length ||
+          definition.inherited ||
+          courseScriptOnly)
+      ) {
+        teaching.definitionRouting = {
+          intent:
+            definition.inherited ??
+            (onlyDefinition
+              ? 'definition'
+              : definition.requests.covered.length
+                ? 'mixed'
+                : 'quotation'),
+          conceptOrigin: definition.inherited
+            ? 'previous_question'
+            : 'current_question',
+          mainCardIds: definition.cardIds,
+          courseLookup: !needsCourseContext
+            ? 'not_needed'
+            : courseGaps.some(asksForCourseScript)
+              ? 'course_script'
+              : definition.inherited
+                ? 'follow_up'
+                : 'uncovered_request',
+        };
+      }
       const [runConfig, context] = await Promise.all([
         this.configs
           .resolveTutorRun(courseId, releaseId, input.mode)
@@ -741,14 +957,24 @@ export class AiChatYongService {
                 }
               : current,
           ),
-        reviewed && teaching?.qaCoverage !== 'partial'
+        !needsCourseContext
           ? ''
-          : (comparisonContext ??
+          : (fallbackContext ??
             buildContext(
-              [...topicsToCheck, question, ...(wiki?.focus?.names ?? [])]
+              (definition
+                ? [...courseGaps, ...definition.names]
+                : [...courseGaps, question, ...(wiki?.focus?.names ?? [])]
+              )
                 .filter(Boolean)
                 .join(' '),
-            )),
+              [],
+              reviewed?.trace.sourceIds.length,
+            ).catch((error: unknown) => {
+              input.signal?.throwIfAborted();
+              if (!definition && !definitionFilledQaGap) throw error;
+              contextStrategy = 'retrieval_empty';
+              return null;
+            })),
       ]);
       const { runtime, dialoguePrompts } = runConfig;
       if (context === null) progress('retrieval_context_empty');
@@ -828,7 +1054,7 @@ export class AiChatYongService {
         basePrompt: dialoguePrompts.basePrompt,
         modePrompt: [
           dialoguePrompts.modePrompt,
-          comparisonContext
+          fallbackContext && comparison.length > 1
             ? 'Use evidence for each side of the comparison. Distinguish mathematical definitions from interpretations in a particular model. Do not infer a physical interpretation beyond what the course material supports. If evidence for one side is missing, say which side and what is missing.'
             : '',
           display === 'words'
@@ -869,7 +1095,7 @@ export class AiChatYongService {
                 }),
                 knowledge: [
                   reviewed.knowledge,
-                  teaching?.qaCoverage === 'partial' ? knowledgeText : '',
+                  needsCourseContext ? knowledgeText : '',
                 ]
                   .filter(Boolean)
                   .join('\n\n'),

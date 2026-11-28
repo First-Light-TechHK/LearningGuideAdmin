@@ -1,8 +1,9 @@
 import { syntaxTree } from '@codemirror/language'
-import { EditorState, StateEffect, StateField } from '@codemirror/state'
+import { EditorState, Facet, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
-import { BlockMathWidget, HtmlTableWidget, ImageWidget, TableWidget, parseDestination } from './markdownWidgets'
+import { BlockMathWidget, CourseReferenceWidget, HtmlTableWidget, ImageWidget, TableWidget, parseDestination } from './markdownWidgets'
 import type { TextFn } from './markdownWidgets'
+import { courseReferenceId, type CourseReferencePreview } from './courseReferencePreview'
 
 /**
  * 块级 Widget 层（2026-10-29 M3 / 2026-10-27 M4 表格可编辑）。
@@ -19,14 +20,24 @@ import type { TextFn } from './markdownWidgets'
 
 export const setEditingTable = StateEffect.define<{ from: number; to: number } | null>()
 
-interface BlockRange {
+export const courseReferenceContext = Facet.define<CourseReferencePreview | undefined, CourseReferencePreview | undefined>({
+  combine: values => values[0],
+})
+export const setCourseReferenceFocus = StateEffect.define<boolean>()
+export const courseReferenceFocus = StateField.define<boolean>({
+  create: () => false,
+  update: (focused, tr) => tr.effects.find(effect => effect.is(setCourseReferenceFocus))?.value ?? focused,
+})
+
+type BlockRange = {
   from: number
   to: number
-  kind: 'math' | 'table' | 'htmlTable' | 'image'
-  payload: string
   fromLine: number
   toLine: number
-}
+} & (
+  | { kind: 'math' | 'table' | 'htmlTable' | 'image'; payload: string }
+  | { kind: 'reference'; id: string; label: string; block: boolean }
+)
 
 interface BlockWidgetState {
   blocks: BlockRange[]
@@ -195,13 +206,38 @@ function scanBlockImages(state: EditorState): BlockRange[] {
   return blocks
 }
 
+function scanCourseReferences(state: EditorState): BlockRange[] {
+  if (!state.facet(courseReferenceContext)) return []
+  const references: BlockRange[] = []
+  syntaxTree(state).iterate({
+    enter: (node) => {
+      if (node.name === 'Table' || node.name === 'Image') return false
+      if (node.name !== 'Link') return undefined
+      const target = node.node.getChild('URL')
+      if (!target) return false
+      const id = courseReferenceId(parseDestination(state.sliceDoc(target.from, target.to)))
+      if (id === undefined) return false
+      const labelEnd = node.node.getChildren('LinkMark').find(mark => state.sliceDoc(mark.from, mark.to) === ']')
+      const first = state.doc.lineAt(node.from)
+      const last = state.doc.lineAt(node.to)
+      const block = !state.sliceDoc(first.from, node.from).trim() && !state.sliceDoc(node.to, last.to).trim()
+      references.push({
+        kind: 'reference', id, label: state.sliceDoc(node.from + 1, labelEnd?.from ?? target.from), block,
+        from: block ? first.from : node.from, to: block ? last.to : node.to, fromLine: first.number, toLine: last.number,
+      })
+      return false
+    },
+  })
+  return references
+}
+
 function collectBlocks(state: EditorState): BlockRange[] {
   const codeRanges = codeRangesOf(state)
-  const all = [...scanBlockMath(state, codeRanges), ...scanTables(state), ...scanHtmlTables(state), ...scanBlockImages(state)]
+  const all = [...scanBlockMath(state, codeRanges), ...scanTables(state), ...scanHtmlTables(state), ...scanBlockImages(state), ...scanCourseReferences(state)]
   const sorted = [...all].sort((a, b) => a.from - b.from)
   const kept: BlockRange[] = []
   for (const block of sorted) {
-    if (kept.some((k) => block.from < k.to && block.to > k.from)) continue
+    if (kept.length && block.from < kept[kept.length - 1].to) continue
     kept.push(block)
   }
   return kept
@@ -231,6 +267,9 @@ function decorateActive(
     }
     // 正在编辑的表格：永远渲染（不回退源码）
     if (editing && block.from === editing.from && block.to === editing.to) return true
+    if (block.kind === 'reference' || (block.kind === 'table' && state.facet(courseReferenceContext) && block.payload.includes('refobj:'))) {
+      if (state.readOnly || !state.field(courseReferenceFocus, false)) return true
+    }
     return !touchesSelection(state, block.from, block.to)
   })
 }
@@ -246,6 +285,7 @@ function decorate(
   const readOnly = state.readOnly
   const text = deps.getText()
   const locale = deps.getLocale()
+  const references = state.facet(courseReferenceContext)
   const setEditing = (range: { from: number; to: number } | null) => {
     const view = deps.getView()
     if (!view) return
@@ -264,7 +304,12 @@ function decorate(
     })
   }
   for (const block of active) {
-    if (block.kind === 'math') {
+    if (block.kind === 'reference') {
+      if (!references) continue
+      const widget = new CourseReferenceWidget(references, block.id, block.label, block.from, block.block, text)
+      ranges.push(Decoration.replace({ widget, block: block.block }).range(block.from, block.to))
+      if (block.block) rendered.push(block)
+    } else if (block.kind === 'math') {
       ranges.push(
         Decoration.replace({ widget: new BlockMathWidget(block.payload), block: true }).range(
           block.from,
@@ -290,6 +335,7 @@ function decorate(
             applyChange,
             text,
             locale,
+            block.payload.includes('refobj:') ? references : undefined,
           ),
           block: true,
         }).range(block.from, block.to),
@@ -348,11 +394,11 @@ export function createMarkdownBlockWidgets(
         // 表格自身的 keepEditing 提交会带 setEditingTable effect，此时 editing 已是新范围
         return build(tr.state, editingChanged ? editing : null)
       }
-      if (treeChanged) {
+      if (treeChanged || tr.reconfigured) {
         // 语法树推进（初始懒解析）不影响编辑锁
         return build(tr.state, editing)
       }
-      if (editingChanged || tr.selection) {
+      if (editingChanged || tr.selection || tr.effects.some(effect => effect.is(setCourseReferenceFocus))) {
         const active = decorateActive(tr.state, value.blocks, editing)
         const { decorations, rendered } = decorate(tr.state, active, editing, deps)
         return { ...value, decorations, occupied: buildRanges(rendered), editing }

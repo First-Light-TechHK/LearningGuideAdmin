@@ -437,7 +437,7 @@ export class ReleasesService {
       await lockCourseRow(tx, courseId);
       const course = await tx.course.findUnique({
         where: { id: courseId },
-        select: { id: true },
+        select: { currentReleaseId: true },
       });
       if (!course) {
         throw new NotFoundException('课程不存在');
@@ -449,10 +449,11 @@ export class ReleasesService {
       if (!release || release.courseId !== courseId) {
         throw new NotFoundException('发布版本不存在或不属于该课程');
       }
-      await tx.course.update({
-        where: { id: courseId },
-        data: { currentReleaseId: release.id },
-      });
+      if (course.currentReleaseId !== release.id)
+        await tx.course.update({
+          where: { id: courseId },
+          data: { currentReleaseId: release.id },
+        });
       // 自愈：历史版本可能在索引失败（如 embedding 鉴权过期、事务超时）后
       // 从未生成 chunks，上线后检索会一直为空。上线时补建一次索引。
       const chunkCount = await tx.knowledgeChunk.count({

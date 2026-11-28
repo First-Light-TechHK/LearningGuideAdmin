@@ -234,8 +234,9 @@ export class EvaluationController {
   @Post('tasks/:id/restart') restart(
     @Req() req: BackofficeRequest,
     @Param('id') id: string,
+    @Body('submissionKey') submissionKey?: unknown,
   ) {
-    return this.tasks.restart(this.owner(req), id);
+    return this.tasks.restart(this.owner(req), id, submissionKey);
   }
   @Delete('tasks/:id') remove(
     @Req() req: BackofficeRequest,

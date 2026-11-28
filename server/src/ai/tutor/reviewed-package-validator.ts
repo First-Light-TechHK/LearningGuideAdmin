@@ -199,7 +199,13 @@ function isCard(value: unknown): value is ReviewedTeachingCard {
     stringList(value.doNotUseWhen) &&
     stringList(
       value.sourceSupport,
-      value.type === 'ref_obj' || value.type === 'professor_qa',
+      value.type === 'ref_obj' ||
+        value.type === 'professor_qa' ||
+        (value.type === 'concept' &&
+          isRecord(value.approvedPayload) &&
+          nonEmptyString(value.approvedPayload.definitionName) &&
+          nonEmptyString(value.approvedPayload.answerMd) &&
+          !value.approvedPayload.sourcePageId),
     ) &&
     stringList(value.links) &&
     Number.isFinite(value.priority) &&

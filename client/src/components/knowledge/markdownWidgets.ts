@@ -2,6 +2,7 @@ import katex from 'katex'
 import { WidgetType } from '@codemirror/view'
 import type { EditorView } from '@codemirror/view'
 import { renderHtmlTable } from './markdownHtml'
+import { courseReferenceId, courseReferenceImageUrl, type CourseReferencePreview } from './courseReferencePreview'
 
 /**
  * Markdown Live Preview 的 Widget（2026-10-29 M3 / 2026-10-27 M4 表格可编辑）。
@@ -173,6 +174,77 @@ export class ImageWidget extends WidgetType {
   }
 }
 
+function renderCourseReference(context: CourseReferencePreview, id: string, label: string, text: TextFn): string {
+  const item = context.byId.get(id)
+  if (!item) {
+    return `<span class="cm-md-course-reference-missing">${escapeHtml(label)} (${escapeHtml(text('teaching.refUnavailable', { id }))})</span>`
+  }
+  const caption = escapeHtml(item.label)
+  if (item.kind === 'latex') {
+    return (item.code ? `<span class="cm-md-course-reference-caption">${caption}</span> ` : '') + renderMath(item.value, false)
+  }
+  const url = courseReferenceImageUrl(context.courseId, item.value)
+  return `<img class="cm-md-course-reference-image" src="${escapeHtml(url)}" alt="${caption}" loading="lazy" referrerpolicy="no-referrer" />` +
+    `<span class="cm-md-course-reference-caption">${caption}</span>`
+}
+
+function watchReferenceImages(root: HTMLElement, text: TextFn, measure: () => void) {
+  for (const img of root.querySelectorAll<HTMLImageElement>('img.cm-md-course-reference-image')) {
+    img.addEventListener('load', measure, { once: true })
+    img.addEventListener('error', () => {
+      const failed = document.createElement('span')
+      failed.className = 'cm-md-image-failed'
+      failed.textContent = `${img.alt} · ${text('table.imageFailed', { src: img.getAttribute('src') ?? '' })}`
+      img.replaceWith(failed)
+      measure()
+    }, { once: true })
+  }
+}
+
+export class CourseReferenceWidget extends WidgetType {
+  private readonly context: CourseReferencePreview
+  private readonly id: string
+  private readonly label: string
+  private readonly from: number
+  private readonly block: boolean
+  private readonly text: TextFn
+
+  constructor(
+    context: CourseReferencePreview,
+    id: string,
+    label: string,
+    from: number,
+    block: boolean,
+    text: TextFn,
+  ) {
+    super()
+    this.context = context
+    this.id = id
+    this.label = label
+    this.from = from
+    this.block = block
+    this.text = text
+  }
+
+  eq(other: CourseReferenceWidget) {
+    return other.context === this.context && other.id === this.id && other.label === this.label &&
+      other.from === this.from && other.block === this.block && other.text === this.text
+  }
+
+  toDOM(view: EditorView) {
+    const wrap = document.createElement(this.block ? 'div' : 'span')
+    wrap.className = this.block ? 'cm-md-course-reference-block' : 'cm-md-course-reference-inline'
+    wrap.innerHTML = renderCourseReference(this.context, this.id, this.label, this.text)
+    watchReferenceImages(wrap, this.text, () => view.requestMeasure())
+    wrap.addEventListener('click', () => {
+      if (view.state.readOnly) return
+      view.focus()
+      view.dispatch({ selection: { anchor: this.from + 1 }, scrollIntoView: true })
+    })
+    return wrap
+  }
+}
+
 // ========================== 表格：解析 / 序列化 / 渲染 ==========================
 
 export class HtmlTableWidget extends WidgetType {
@@ -331,7 +403,7 @@ function findBracketClose(text: string, start: number): number {
 }
 
 /** 渲染单元格内行内 Markdown：行内代码 / 公式 / 图片 / 链接 / 粗体 / 斜体 / 删除线 */
-export function renderInline(text: string): string {
+export function renderInline(text: string, renderReference?: (id: string, label: string) => string): string {
   let out = ''
   let i = 0
   const n = text.length
@@ -346,14 +418,32 @@ export function renderInline(text: string): string {
       i += 6
       continue
     }
-    // 行内代码 `...`
+    if (text[i] === '\\' && i + 1 < n && '\\[]`'.includes(text[i + 1])) {
+      out += escapeHtml(text[i + 1])
+      i += 2
+      continue
+    }
+    // 行内代码使用等长的反引号，避免把代码示例中的 refobj 当成引用。
     if (text[i] === '`') {
-      const end = text.indexOf('`', i + 1)
-      if (end > i) {
-        out += `<code>${escapeHtml(text.slice(i + 1, end))}</code>`
-        i = end + 1
-        continue
+      let openingEnd = i + 1
+      while (text[openingEnd] === '`') openingEnd++
+      const runLength = openingEnd - i
+      let end = text.indexOf('`', openingEnd)
+      while (end !== -1) {
+        let closingEnd = end + 1
+        while (text[closingEnd] === '`') closingEnd++
+        if (closingEnd - end === runLength) {
+          out += `<code>${escapeHtml(text.slice(openingEnd, end))}</code>`
+          i = closingEnd
+          break
+        }
+        end = text.indexOf('`', closingEnd)
       }
+      if (end === -1) {
+        out += text.slice(i, openingEnd)
+        i = openingEnd
+      }
+      continue
     }
     // 行内公式 $...$
     if (text[i] === '$' && text[i + 1] !== '$') {
@@ -407,9 +497,15 @@ export function renderInline(text: string): string {
         if (pend > close + 1) {
           const label = text.slice(i + 1, close)
           const url = parseDestination(text.slice(close + 2, pend))
+          const id = courseReferenceId(url)
+          if (id !== undefined && renderReference) {
+            out += renderReference(id, label)
+            i = pend + 1
+            continue
+          }
           const href = safeUrl(url)
           out += href
-            ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${renderInline(label)}</a>`
+            ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${renderInline(label, renderReference)}</a>`
             : escapeHtml(`[${label}](${url})`)
           i = pend + 1
           continue
@@ -420,7 +516,7 @@ export function renderInline(text: string): string {
     if (text[i] === '*' && text[i + 1] === '*') {
       const end = text.indexOf('**', i + 2)
       if (end > i + 1) {
-        out += `<strong>${renderInline(text.slice(i + 2, end))}</strong>`
+        out += `<strong>${renderInline(text.slice(i + 2, end), renderReference)}</strong>`
         i = end + 2
         continue
       }
@@ -441,7 +537,7 @@ export function renderInline(text: string): string {
         j++
       }
       if (found > i) {
-        out += `<em>${renderInline(text.slice(i + 1, found))}</em>`
+        out += `<em>${renderInline(text.slice(i + 1, found), renderReference)}</em>`
         i = found + 1
         continue
       }
@@ -450,7 +546,7 @@ export function renderInline(text: string): string {
     if (text[i] === '~' && text[i + 1] === '~') {
       const end = text.indexOf('~~', i + 2)
       if (end > i + 1) {
-        out += `<del>${renderInline(text.slice(i + 2, end))}</del>`
+        out += `<del>${renderInline(text.slice(i + 2, end), renderReference)}</del>`
         i = end + 2
         continue
       }
@@ -482,6 +578,7 @@ export interface SetEditingTableEffect {
 let editingFocusHint: { row: number; col: number } | null = null
 
 export class TableWidget extends WidgetType {
+  private readonly references?: CourseReferencePreview
   readonly markdown: string
   readonly from: number
   readonly to: number
@@ -504,6 +601,7 @@ export class TableWidget extends WidgetType {
     applyChange: (opts: { from: number; to: number; md: string; keepEditing: boolean }) => void,
     text: (key: string, vars?: Record<string, string | number>) => string,
     locale: string,
+    references?: CourseReferencePreview,
   ) {
     super()
     this.markdown = markdown
@@ -514,6 +612,7 @@ export class TableWidget extends WidgetType {
     this.getView = getView
     this.setEditing = setEditing
     this.applyChange = applyChange
+    this.references = references
     this.text = text
     this.locale = locale
   }
@@ -525,7 +624,8 @@ export class TableWidget extends WidgetType {
       other.to === this.to &&
       other.editing === this.editing &&
       other.readOnly === this.readOnly &&
-      other.locale === this.locale
+      other.locale === this.locale &&
+      other.references === this.references
     )
   }
 
@@ -611,11 +711,16 @@ export class TableWidget extends WidgetType {
       return tbl
     }
 
+    const references = this.references
+    const renderReference = references
+      ? (id: string, label: string) => renderCourseReference(references, id, label, this.text)
+      : undefined
     const makePreviewCell = (text: string, align: Align): HTMLSpanElement => {
       const span = document.createElement('span')
       span.className = 'cm-md-table-cell-preview'
       if (align) span.style.textAlign = align
-      span.innerHTML = renderInline(text)
+      span.innerHTML = renderInline(text, renderReference)
+      if (references) watchReferenceImages(span, this.text, () => this.getView()?.requestMeasure())
       return span
     }
 

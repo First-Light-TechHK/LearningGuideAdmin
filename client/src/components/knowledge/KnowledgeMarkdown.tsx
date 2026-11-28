@@ -9,6 +9,7 @@ import { previewUrl, sanitizeHtml } from './markdownHtml'
 import { tokens } from '../../theme/tokens'
 import type { TeachingRef } from '../../api/teachingCards'
 import { useKText } from './i18n'
+import { courseReferenceId, courseReferenceImageUrl } from './courseReferencePreview'
 
 const remarkPlugins = [remarkGfm, remarkMath]
 const rehypePlugins: NonNullable<React.ComponentProps<typeof MDEditor.Markdown>['rehypePlugins']> = [
@@ -28,13 +29,13 @@ function resolveCourseReferences(courseId: string, references: TeachingRef[], un
   const byId = new Map(references.map((reference) => [reference.id, reference]))
   return () => (tree: MarkdownNode) => {
     const replace = (node: MarkdownNode): MarkdownNode => {
-      if (node.type === 'link' && node.url?.startsWith('refobj:')) {
-        const id = node.url.slice('refobj:'.length)
+      const id = node.type === 'link' && node.url ? courseReferenceId(node.url) : undefined
+      if (id !== undefined) {
         const object = byId.get(id)
         const withCaption = (content: MarkdownNode): MarkdownNode => object?.code
           ? { type: 'emphasis', children: [{ type: 'text', value: object.label + ' ' }, content] } : content
         if (object?.kind === 'image') {
-          const url = `/api/files/images/${encodeURIComponent(courseId)}/${encodeURIComponent(object.value)}`
+          const url = courseReferenceImageUrl(courseId, object.value)
           return withCaption({ type: 'image', url, alt: object.label })
         }
         if (object?.kind === 'latex') {

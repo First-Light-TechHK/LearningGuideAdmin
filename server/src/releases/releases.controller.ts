@@ -11,6 +11,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UnauthorizedException,
@@ -26,8 +27,55 @@ import { ReleasesService } from './releases.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
 import { TeachingCardsService } from './teaching-cards.service';
+import {
+  readTeachingWorkbook,
+  readTeachingWorkbookSheets,
+  referenceWordTemplate,
+  sheetKind,
+  TEACHING_SHEET_BYTES,
+  teachingSheetKinds,
+  teachingWorkbook,
+  teachingWorkbookSheets,
+} from './teaching-import-files';
+import type { SheetRow } from './teaching-sheet-rows';
+import { FilesService } from '../files/files.service';
+import { referenceTransferLimits } from './teaching-reference-limits';
+
+const teachingWorkbookUpload = FileInterceptor('file', {
+  limits: {
+    fileSize: TEACHING_SHEET_BYTES + 1,
+    files: 1,
+    fields: 1,
+    fieldSize: 256 * 1024,
+  },
+});
+
+function sendTeachingFile(
+  response: Response,
+  filename: string,
+  buffer: Buffer,
+) {
+  response.setHeader(
+    'Content-Disposition',
+    "attachment; filename*=UTF-8''" + encodeURIComponent(filename),
+  );
+  response
+    .type(
+      filename.endsWith('.xlsx')
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+    .send(buffer);
+}
 
 type TeachingCardRequest = Request & { employee?: { employeeId: string } };
+type WorkbookPick = {
+  kind?: unknown;
+  row?: unknown;
+  id?: unknown;
+  revision?: unknown;
+  binding?: unknown;
+};
 
 function employeeId(request: TeachingCardRequest): string {
   if (!request.employee?.employeeId) throw new UnauthorizedException();
@@ -44,6 +92,7 @@ export class ReleasesController {
     private readonly releasesService: ReleasesService,
     private readonly teachingCards: TeachingCardsService,
     private readonly packages: ReleasePackagesService,
+    private readonly files: FilesService,
   ) {}
 
   @Get('releases/:releaseId/package')
@@ -85,6 +134,252 @@ export class ReleasesController {
   @Get('courses/:id/teaching-cards/import/deleted-codes')
   deletedReferenceCodes(@Param('id') id: string) {
     return this.teachingCards.deletedReferenceCodes(id);
+  }
+
+  @Get('courses/:id/teaching-cards/templates/:kind')
+  async teachingTemplate(
+    @Param('kind') kind: string,
+    @Query('lang') lang: string,
+    @Res() response: Response,
+  ) {
+    if (kind === 'workbook') {
+      sendTeachingFile(
+        response,
+        'Teaching Entries.xlsx',
+        teachingWorkbookSheets(
+          teachingSheetKinds.map((kind) => ({ kind, rows: [] })),
+        ),
+      );
+      return;
+    }
+    if (kind === 'latex' || kind === 'image') {
+      sendTeachingFile(
+        response,
+        kind === 'latex' ? 'Formula references.docx' : 'Image references.docx',
+        await referenceWordTemplate(kind),
+      );
+      return;
+    }
+    const type = sheetKind(kind);
+    sendTeachingFile(
+      response,
+      type === 'concept' ? 'Definitions.xlsx' : 'Professor Q&A.xlsx',
+      teachingWorkbook(type, [], lang === 'zh-CN'),
+    );
+  }
+
+  @Post('courses/:id/teaching-cards/export/:kind')
+  async downloadCurrentTeaching(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @Query('lang') lang: string,
+    @Body('ids') ids: unknown,
+    @Body('sheets') sheets: unknown,
+    @Res() response: Response,
+  ) {
+    if (kind === 'workbook') {
+      const { filename, buffer } =
+        await this.teachingCards.downloadTeachingWorkbook(id, sheets);
+      sendTeachingFile(response, filename, buffer);
+      return;
+    }
+    const type = kind === 'latex' || kind === 'image' ? kind : sheetKind(kind);
+    const { filename, buffer } = await this.teachingCards.download(
+      id,
+      type,
+      ids,
+      lang === 'zh-CN',
+    );
+    sendTeachingFile(response, filename, buffer);
+  }
+
+  @Post('courses/:id/teaching-cards/reference-documents/:kind/preview')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: referenceTransferLimits.image.bytes + 1, files: 1 },
+    }),
+  )
+  previewReferenceFile(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @Req() request: TeachingCardRequest,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file || (kind !== 'latex' && kind !== 'image'))
+      throw new BadRequestException('TEACHING_REFERENCE_DOCUMENT_INVALID');
+    return this.files.previewReferenceDocument(
+      file,
+      id,
+      kind,
+      employeeId(request),
+    );
+  }
+
+  @Post('courses/:id/teaching-cards/reference-documents/finish')
+  async finishReferenceFiles(
+    @Param('id') id: string,
+    @Body('tokens') tokens: unknown,
+    @Req() request: TeachingCardRequest,
+  ) {
+    if (
+      !Array.isArray(tokens) ||
+      tokens.length > referenceTransferLimits.latex.rows ||
+      !tokens.every((token: unknown) => typeof token === 'string')
+    )
+      throw new BadRequestException('TEACHING_REFERENCE_DOCUMENT_INVALID');
+    for (const token of tokens)
+      await this.files.finishReferencePreview(id, token, employeeId(request));
+    return { finished: true };
+  }
+
+  @Get('courses/:id/teaching-cards/:entryId/reference-usage')
+  referenceUsage(
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+    @Query('revision', ParseIntPipe) revision: number,
+  ) {
+    return this.teachingCards.deleteSelection(
+      id,
+      [{ id: entryId, revision }],
+      true,
+    );
+  }
+
+  @Post('courses/:id/teaching-cards/sheets/:kind/preview')
+  @UseInterceptors(teachingWorkbookUpload)
+  async previewTeachingSheet(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (kind === 'workbook') {
+      const { sheets, skippedSheets } = await readTeachingWorkbookSheets(
+        this.sheetBuffer(file),
+      );
+      return {
+        ...(await this.teachingCards.previewTeachingWorkbook(id, sheets)),
+        skippedSheets,
+      };
+    }
+    const type = sheetKind(kind);
+    return this.teachingCards.previewTeachingSheet(
+      id,
+      type,
+      await readTeachingWorkbook(type, this.sheetBuffer(file)),
+    );
+  }
+
+  @Post('courses/:id/teaching-cards/sheets/:kind/apply')
+  @UseInterceptors(teachingWorkbookUpload)
+  async applyTeachingSheet(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @Body('selection') raw: string,
+    @Req() request: TeachingCardRequest,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.applySheet(id, kind, raw, request, file, false);
+  }
+
+  @Patch('courses/:id/teaching-cards/sheets/:kind/apply')
+  @UseInterceptors(teachingWorkbookUpload)
+  async updateTeachingSheet(
+    @Param('id') id: string,
+    @Param('kind') kind: string,
+    @Body('selection') raw: string,
+    @Req() request: TeachingCardRequest,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.applySheet(id, kind, raw, request, file, true);
+  }
+
+  private async applySheet(
+    id: string,
+    kind: string,
+    raw: string,
+    request: TeachingCardRequest,
+    file: Express.Multer.File | undefined,
+    updatesOnly: boolean,
+  ) {
+    const picks = this.sheetSelection(raw);
+    const employee = employeeId(request);
+    const stamp = request.get('X-Workspace-Stamp');
+    if (kind === 'workbook') {
+      const { sheets } = await readTeachingWorkbookSheets(
+        this.sheetBuffer(file),
+      );
+      const kinds = [...new Set(picks.map((pick) => sheetKind(pick?.kind)))];
+      const selections = kinds.map((kind) => {
+        const sheet = sheets.find(
+          (sheet) => sheet.kind === kind && !sheet.invalid,
+        );
+        if (!sheet) throw new BadRequestException('TEACHING_SHEET_INVALID');
+        return {
+          kind,
+          items: this.sheetItems(
+            sheet.rows,
+            picks.filter((pick) => pick.kind === kind),
+          ),
+        };
+      });
+      return this.teachingCards.importTeachingWorkbook(
+        id,
+        selections,
+        updatesOnly,
+        employee,
+        stamp,
+      );
+    }
+    const type = sheetKind(kind);
+    const rows = await readTeachingWorkbook(type, this.sheetBuffer(file));
+    return this.teachingCards.importTeachingSheet(
+      id,
+      type,
+      this.sheetItems(rows, picks),
+      updatesOnly,
+      employee,
+      stamp,
+    );
+  }
+
+  private sheetSelection(raw: string) {
+    let selection: unknown;
+    try {
+      selection = JSON.parse(raw);
+    } catch {
+      throw new BadRequestException('TEACHING_SHEET_INVALID');
+    }
+    if (!Array.isArray(selection) || !selection.length)
+      throw new BadRequestException('TEACHING_SHEET_INVALID');
+    return selection as WorkbookPick[];
+  }
+
+  private sheetItems(rows: SheetRow[], picks: WorkbookPick[]) {
+    if (
+      picks.length > rows.length ||
+      new Set(picks.map((pick) => pick?.row)).size !== picks.length
+    )
+      throw new BadRequestException('TEACHING_SHEET_INVALID');
+    return picks.map((pick) => {
+      const found = rows.find((row) => row.row === pick?.row);
+      if (!found || found.errors.length)
+        throw new BadRequestException('TEACHING_SHEET_INVALID');
+      return {
+        row: found.row,
+        values: found.values,
+        sourceOmitted: found.sourceOmitted,
+        id: pick.id,
+        revision: pick.revision,
+        binding: pick.binding,
+        dependencies: found.dependencies,
+      };
+    });
+  }
+
+  private sheetBuffer(file?: Express.Multer.File) {
+    if (!file || !/\.xlsx$/i.test(file.originalname))
+      throw new BadRequestException('TEACHING_SHEET_INVALID');
+    return file.buffer;
   }
 
   @Post('courses/:id/teaching-cards/import/references')

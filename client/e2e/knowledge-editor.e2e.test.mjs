@@ -31,7 +31,7 @@ after(async () => {
   await server?.close()
 })
 
-async function open(contentMd = '测试正文\n\n末尾', releases = [], locale = 'zh-CN') {
+async function open(contentMd = '测试正文\n\n末尾', releases = [], locale = 'zh-CN', configurePage) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   const page = await context.newPage()
   page.setDefaultTimeout(7000)
@@ -55,6 +55,7 @@ async function open(contentMd = '测试正文\n\n末尾', releases = [], locale 
     if (path === '/api/files/convert') return route.fulfill(ok({ title: '阅读任务', markdown: richTable }))
     return route.fulfill(ok([]))
   })
+  await configurePage?.(page)
   await page.goto(`${base}/${locale}/knowledge`)
   await page.waitForLoadState('networkidle')
   await page.getByText('回归页面', { exact: true }).click()
@@ -191,18 +192,75 @@ test('course references can be inserted into the selected text and previewed fro
   } finally { await context.close() }
 })
 
+test('editing renders course references and preserves the Markdown across preview and retry', async () => {
+  const asset = '12345678-aaaa-bbbb-cccc-123456789012.png'
+  const image = `/api/files/images/k1/${asset}`
+  const source = [
+    '[图一](refobj:diagram)',
+    '正文 **[平方](refobj:square)** 后面的文字。',
+    '| 表格 | 代码 | 文字 |\n| --- | --- | --- |\n| [表格图片](refobj:diagram) | ``[代码示例](refobj:square)`` | \\[文字](refobj:square) |',
+    '[已移除](refobj:removed)',
+    '`[代码示例](refobj:square)`',
+    '```md\n[代码块示例](refobj:square)\n```',
+    '末尾',
+  ].join('\n\n')
+  let requests = 0
+  const { context, page, errors } = await open(source, [], 'zh-CN', async page => {
+    await page.route('**/api/courses/k1/teaching-references', route => {
+      requests++
+      const data = [
+        { id: 'diagram', kind: 'image', label: '图一', value: asset, requires: [] },
+        { id: 'square', kind: 'latex', label: '平方公式', code: 'L1-F01', value: 'x^2', requires: [] },
+      ]
+      return route.fulfill(requests === 1
+        ? { status: 503, json: { success: false, error: { code: 'SCHEMA_NOT_READY', message: 'SCHEMA_NOT_READY' } } }
+        : { json: { success: true, data } })
+    })
+    await page.route(`**${image}`, route => route.fulfill({ body: png, contentType: 'image/png' }))
+  })
+  try {
+    await page.getByText('数据库版本未就绪，请管理员检查部署迁移。').waitFor()
+    assert.equal(await page.locator('.cm-md-course-reference-image').count(), 0)
+    assert.match(await page.locator('.cm-content').innerText(), /\[图一\]\(refobj:diagram\)/)
+    await page.getByRole('button', { name: /重\s*试/ }).click()
+    const block = page.locator('.cm-md-course-reference-block img')
+    await block.waitFor()
+    await page.locator('.cm-md-course-reference-inline .katex').waitFor()
+    await page.locator('.cm-md-table-cell-preview img').waitFor()
+    await page.locator('.cm-md-course-reference-missing').waitFor()
+    assert.equal(await page.locator('.cm-editor .katex').count(), 1)
+    assert.equal(await block.getAttribute('src'), image)
+    await block.click()
+    assert.match(await page.locator('.cm-content').innerText(), /\[图一\]\(refobj:diagram\)/)
+    await page.keyboard.press('Control+End')
+    await block.waitFor()
+    await page.keyboard.press('Control+Home')
+    assert.match(await page.locator('.cm-content').innerText(), /\[图一\]\(refobj:diagram\)/)
+    await page.keyboard.press('Control+End')
+    await block.waitFor()
+    await page.getByRole('button', { name: /预\s*览/ }).click()
+    await page.locator('#root .wmde-markdown .katex').waitFor()
+    assert.ok(await page.locator(`#root .wmde-markdown img[src="${image}"]`).count() >= 1)
+    await page.getByRole('button', { name: /编\s*辑$/ }).click()
+    await block.waitFor()
+    assert.equal(await currentMarkdown(page), source)
+    assert.equal(requests, 2)
+    assert.deepEqual(errors, [])
+  } finally { await context.close() }
+})
+
 test('professor answer inserts one approved reference on confirmation, independently of the saved draft name', async () => {
   const { context, page } = await open(undefined, [], 'en-GB')
   const draft = {
     type: 'ref_obj', topic: '*', conceptId: 'square', canonicalPoint: 'Square',
-    bilingual: { conceptLabel: { zh: '平方', en: 'Square' }, summary: { zh: '', en: 'Square' }, triggers: { en: [], zh: [] } },
+    bilingual: { conceptLabel: { zh: '平方', en: 'Squared distance' }, summary: { zh: '', en: 'Square' }, triggers: { en: [], zh: [] } },
     approvedPayload: { code: 'L1-F01', displayName: 'Squared distance', refObjects: [{kind:'latex',value:'x^2'}] },
     useWhen:['*'], doNotUseWhen:[], links:[], evidence:[], priority:10,
   }
   let references = []
   try {
     await page.route('**/api/courses/k1/teaching-cards', route => route.fulfill({ json: { success: true, data: [
-      { id:'square', revision:3, approvedRevision:1, draft, approved:{...draft,approvedPayload:{...draft.approvedPayload,displayName:'Square'}} },
+      { id:'square', revision:3, approvedRevision:1, draft, approved:{...draft,bilingual:{...draft.bilingual,conceptLabel:{zh:'平方',en:'Square'}}} },
     ] } }))
     await page.route('**/api/courses/k1/teaching-references', route => route.fulfill({json:{success:true,data:references}}))
     await page.getByRole('tab', {name:'Teaching entries'}).click()
@@ -210,6 +268,10 @@ test('professor answer inserts one approved reference on confirmation, independe
     await page.getByRole('button', {name:/Squared distance.*Saved/}).click()
     await page.getByText('Save this entry again to include this revision in the next release.').waitFor()
     await page.getByRole('button', {name:'Add entry'}).click()
+    await page.waitForURL(url => url.searchParams.has('draftId'))
+    await page.locator('.teaching-select-row .ant-select:not(.ant-select-disabled)').first().click()
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+      .filter({ hasText: 'Professor Q&A' }).click()
     const answer = page.getByRole('textbox', {name:'Professor answer'})
     await answer.fill('Use the formula.')
     const openPicker = page.locator('.teaching-answer-insert')
@@ -236,10 +298,11 @@ test('professor answer inserts one approved reference on confirmation, independe
 
 test('long bilingual entry titles have padding and cannot overlap the saved badge', async () => {
   const { context, page } = await open()
-  const title = 'L3-F04 · 状态的标量缩放 · Scaling multiplication of a state'
+  const longName = '状态的标量缩放 · Scaling multiplication of a state'
+  const title = 'L3-F04 · ' + longName
   const draft = {
     type:'ref_obj', topic:'*', conceptId:'scaling', canonicalPoint:'scaling',
-    bilingual:{conceptLabel:{zh:'状态的标量缩放',en:'Scaling multiplication of a state'},summary:{en:'Scaling',zh:'缩放'},triggers:{en:[],zh:[]}},
+    bilingual:{conceptLabel:{zh:'状态的标量缩放',en:longName},summary:{en:'Scaling',zh:'缩放'},triggers:{en:[],zh:[]}},
     approvedPayload:{code:'L3-F04',refObjects:[{kind:'latex',value:'aX'}]},useWhen:['*'],doNotUseWhen:[],links:[],evidence:[],priority:10,
   }
   try {
@@ -261,9 +324,8 @@ test('long bilingual entry titles have padding and cannot overlap the saved badg
       const dims = await row.evaluate(el=>{
         const box = el.getBoundingClientRect()
         const text = el.querySelector('.teaching-entry-title').getBoundingClientRect()
-        const meta = el.querySelector('small').getBoundingClientRect()
         const badge = el.querySelector('.ant-tag').getBoundingClientRect()
-        return {top:text.top-box.top, bottom:box.bottom-meta.bottom, gap:badge.left-text.right, title:el.querySelector('.teaching-entry-title').textContent}
+        return {top:text.top-box.top, bottom:box.bottom-text.bottom, gap:badge.left-text.right, title:el.querySelector('.teaching-entry-title').textContent}
       })
       assert.equal(dims.title,title)
       assert.ok(dims.top >= 7 && dims.bottom >= 7 && dims.gap >= 7,JSON.stringify(dims))
@@ -276,13 +338,13 @@ test('rapid teaching list scrolling keeps title tooltips from expanding the page
   try {
     const rows = Array.from({ length: 45 }, (_, index) => ({
       id: 'entry-' + index, revision: 1, approved: null, approvedRevision: null,
-      draft: { type: 'ref_obj', bilingual: { conceptLabel: { zh: '状态向量', en: 'Four-dimensional state vector' } },
+      draft: { type: 'ref_obj', bilingual: { conceptLabel: { zh: '状态向量', en: 'Four-dimensional state vector for a model with several independently measured populations '.repeat(3) } },
         approvedPayload: { code: 'L3-F' + index, refObjects: [] } },
     }))
     await page.route('**/api/courses/k1/teaching-cards', route => route.fulfill({ json: { success: true, data: rows } }))
     await page.getByRole('tab', { name: '教学条目' }).click()
     const list = page.locator('.teaching-list')
-    const last = list.locator('.teaching-list-entry').last()
+    const last = list.locator('.teaching-list-entry').filter({ hasText: 'L3-F44' })
     await last.hover()
     await page.getByRole('tooltip').filter({ hasText: 'L3-F44' }).waitFor()
     assert.ok(await list.evaluate(el => el.scrollTop > 0))
@@ -304,13 +366,12 @@ test('rapid teaching list scrolling keeps title tooltips from expanding the page
   } finally { await context.close() }
 })
 
-test('previews two reference documents, filters by lesson and saves only selected drafts', async () => {
+test('previews two formula documents, filters by lesson and saves only selected drafts', async () => {
   const { context, page } = await open()
-  const asset = '00000000-0000-0000-0000-000000000001.png'
   let submitted
   try {
-    await page.route('**/api/files/convert?courseId=k1', route => route.fulfill({ json: {
-      success: true, data: { title: 'Figures', markdown: '## Exhibit 1.1 星座 · Stars\n![](/api/files/images/k1/' + asset + ')\n\n图注\n\nCaption' },
+    await page.route('**/api/courses/k1/teaching-cards/reference-documents/latex/preview', route => route.fulfill({ json: {
+      success: true, data: { markdown: '### L1-F01 状态 · State\n$$\nx\n$$\n\n解释\n\nExplanation' },
     } }))
     await page.route('**/api/courses/k1/teaching-cards/import/references', route => {
       submitted = route.request().postDataJSON().items
@@ -318,27 +379,18 @@ test('previews two reference documents, filters by lesson and saves only selecte
       return route.fulfill({ json: { success: true, data: { saved: submitted.length } } })
     })
     await page.getByRole('tab', { name: '教学条目' }).click()
-    const importButton = page.getByRole('button', { name: '从文档导入引用对象' })
-    await page.getByRole('button', { name: '新建条目' }).click()
-    await page.getByRole('textbox', { name: '学生问题' }).waitFor()
-    assert.equal(await importButton.count(), 0)
-    await page.getByRole('combobox', { name: '条目类型' }).press('ArrowDown')
-    await page.getByText('引用对象', { exact: true }).last().click()
-    const typeBox = await page.locator('.teaching-select-row .ant-select').first().boundingBox()
-    const buttonBox = await importButton.boundingBox()
-    assert.ok(typeBox && buttonBox && buttonBox.x >= typeBox.x + typeBox.width)
-    assert.ok(Math.abs(buttonBox.y + buttonBox.height - typeBox.y - typeBox.height) <= 2)
-    await importButton.click()
-    const dialog = page.getByRole('dialog')
+    const dialog = await beginReferenceImport(page, '公式引用')
     await dialog.locator('input[type=file]').setInputFiles([
-      { name: 'Figures.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from('fixture') },
+      { name: 'State.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: Buffer.from('fixture') },
       { name: 'Formula.md', mimeType: 'text/markdown', buffer: Buffer.from('### L3-F01 变化 · Change\n$$\nx+y\n$$\n\n解释\n\nExplanation') },
     ])
-    await dialog.getByText('共解析 2 个候选对象').waitFor()
+    await dialog.getByRole('button', { name: '预览文件' }).click()
+    const search = dialog.getByRole('searchbox')
+    await search.waitFor()
+    assert.equal(await dialog.locator('.teaching-transfer-row').count(), 2)
     assert.equal(submitted, undefined)
-    await dialog.getByRole('searchbox').fill('Lesson 3')
+    await search.fill('Lesson 3')
     await dialog.getByRole('button', { name: '仅勾选筛选结果' }).click()
-    assert.match(await dialog.innerText(), /保存所选草稿（1）/)
     await dialog.getByRole('button', { name: '保存所选草稿（1）' }).click()
     await dialog.waitFor({ state: 'hidden' })
     assert.equal(submitted.length, 1)
@@ -347,6 +399,14 @@ test('previews two reference documents, filters by lesson and saves only selecte
     assert.deepEqual(submitted[0].draft.approvedPayload.refObjects, [{ kind: 'latex', value: 'x+y' }])
   } finally { await context.close() }
 })
+
+async function beginReferenceImport(page, kind) {
+  await page.getByRole('button', { name: '导入', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('radio', { name: new RegExp(kind) }).check()
+  await dialog.getByRole('button', { name: '下一步' }).click()
+  return dialog
+}
 
 test('reimporting the same Word image bytes skips the existing reference draft', async () => {
   const { context, page } = await open()
@@ -361,14 +421,13 @@ test('reimporting the same Word image bytes skips the existing reference draft',
       { id: 'entry', revision: 3, draft, approved: draft, approvedRevision: 2 },
     ] } }))
     await page.route('**/api/files/images/k1/*.png', route => route.fulfill({ contentType: 'image/png', body: png }))
-    await page.route('**/api/files/convert?courseId=k1', route => route.fulfill({ json: {
+    await page.route('**/api/courses/k1/teaching-cards/reference-documents/image/preview', route => route.fulfill({ json: {
       success: true, data: { title: 'Figures', markdown: ['## Exhibit 1.1 星座 · Stars', '![](/api/files/images/k1/' + newAsset + ')', '图注', 'Caption'].join('\n\n') },
     } }))
     await page.getByRole('tab', { name: '教学条目' }).click()
-    await page.getByRole('button', { name: /Exhibit 1\.1/ }).click()
-    await page.getByRole('button', { name: '从文档导入引用对象' }).click()
-    const dialog = page.getByRole('dialog')
+    const dialog = await beginReferenceImport(page, '图片引用')
     await dialog.locator('input[type=file]').setInputFiles({ name: 'Figures.docx', mimeType: 'application/octet-stream', buffer: Buffer.from('fixture') })
+    await dialog.getByRole('button', { name: '预览文件' }).click()
     await dialog.getByText('内容相同，跳过').waitFor()
     assert.ok(await dialog.getByRole('checkbox').isDisabled())
     assert.ok(await dialog.getByRole('button', { name: '保存所选草稿（0）' }).isDisabled())
@@ -512,8 +571,8 @@ test('a numbered formula can be authored without a teaching evidence card', asyn
     await page.getByRole('combobox', { name: '条目类型' }).press('ArrowDown')
     await page.getByText('引用对象', { exact: true }).last().click()
     await page.getByRole('textbox', { name: '课程内编号' }).fill('L1-F01')
-    await page.getByLabel('英文概念名称').fill('Addition')
-    await page.getByLabel('英文摘要').fill('Add the components.')
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill('Addition')
+    await page.getByRole('textbox', { name: '摘要', exact: true }).fill('Add the components.')
     const formula = page.getByRole('textbox', { name: '公式', exact: true })
     const hint = page.getByText('只填公式正文。系统会自动在首尾添加 $$，粘贴公式时请去掉这两处标记。', { exact: true })
     await hint.waitFor()
@@ -549,7 +608,7 @@ for (const [locale, tab, add] of [['zh-CN', '教学条目', '新建条目'], ['e
       await type.click()
       await menu.first().waitFor()
       const labels = await menu.allTextContents()
-      assert.equal(labels.length, 9)
+      assert.equal(labels.length, 4)
       for (const label of labels) {
         const option = menu.filter({ hasText: label }).first()
         await option.scrollIntoViewIfNeeded()
@@ -590,6 +649,7 @@ test('incomplete teaching drafts survive tab, workspace, history, course and rel
     await page.getByRole('textbox', { name: '搜索条目' }).fill('L1')
     await formula.fill('a+b')
     const localUrl = page.url()
+    await page.setViewportSize({ width: 1440, height: 620 })
     const scroll = page.locator('.teaching-editor-body')
     await scroll.evaluate(el => { el.scrollTop = el.scrollHeight })
     const offset = await scroll.evaluate(el => el.scrollTop)
@@ -609,6 +669,8 @@ test('incomplete teaching drafts survive tab, workspace, history, course and rel
     await page.getByRole('combobox', { name: '课程', exact: true }).press('ArrowDown')
     await page.locator('.ant-select-item-option-content').filter({ hasText: '另一门课' }).click()
     await add.click()
+    await page.getByRole('combobox', { name: '条目类型' }).press('ArrowDown')
+    await page.getByText('教授问答', { exact: true }).last().click()
     await page.getByRole('textbox', { name: '学生问题' }).fill('另一条草稿')
     await page.goBack()
     await page.goBack()
@@ -676,6 +738,8 @@ test('sign-out clears teaching drafts and a different employee cannot resume the
   try {
     await page.getByRole('tab', { name: 'Teaching entries' }).click()
     await page.getByRole('button', { name: 'Add entry' }).click()
+    await page.getByRole('combobox', { name: 'Entry type' }).press('ArrowDown')
+    await page.getByText('Professor Q&A', { exact: true }).last().click()
     const question = page.getByRole('textbox', { name: 'Student question' })
     await question.fill('Private unfinished question')
     const url = page.url()
@@ -689,6 +753,8 @@ test('sign-out clears teaching drafts and a different employee cannot resume the
       employee: { employeeId: 'e2', role: 'ADMIN', loginEmail: 'other@example.com', displayName: 'Other', accountStatus: 'ACTIVE', emailVerification: 'VERIFIED' },
     } } }))
     await page.goto(url)
+    await page.getByRole('combobox', { name: 'Entry type' }).press('ArrowDown')
+    await page.getByText('Professor Q&A', { exact: true }).last().click()
     assert.equal(await question.inputValue(), '')
   } finally { await context.close() }
 })
@@ -726,8 +792,9 @@ test('historical previews resolve the same reference using each release caption'
     await page.getByRole('table').getByText(releases[0].versionTag, { exact: true }).click()
     const history = page.getByRole('dialog', { name: '历史版本' })
     for (const release of releases) {
-      await history.getByText(release.versionTag, { exact: true }).locator('..').getByRole('button', { name: /预\s*览/ }).click()
-      const preview = page.getByRole('dialog', { name: release.versionTag, exact: true })
+      const row = history.getByRole('article').filter({ has: page.getByText(release.versionTag, { exact: true }) })
+      await row.getByRole('button', { name: /预\s*览/ }).click()
+      const preview = page.getByRole('dialog', { name: '版本预览', exact: true })
       await preview.locator('.katex').waitFor()
       assert.ok((await preview.innerText()).includes(release.code + ' · 加法'))
       await preview.getByRole('button', { name: 'Close', exact: true }).click()
@@ -763,7 +830,7 @@ test('release history fits the viewport and scrolls independently of its title',
   try {
     await openHistory()
     const desktop = await content.boundingBox()
-    assert.equal(desktop.width, 960)
+    assert.equal(desktop.width, 924)
     assert.equal(desktop.height, 820)
 
     await page.setViewportSize({ width: 360, height: 560 })

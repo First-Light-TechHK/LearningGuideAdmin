@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { App, Button, Input, Modal, Panel, Select, Spin, Table, Tag, Typography } from '../ui'
 import type { ColumnsType } from '../ui'
 import { knowledgeApi, type ReleaseDetail, type ReleaseSummary } from '../../api/knowledge'
 import { KnowledgeMarkdown } from './KnowledgeMarkdown'
 import { ReleasePackageUpload } from './ReleasePackageUpload'
+import { ReleaseDownloadModal } from './ReleaseDownloadModal'
+import { TeachingTransferSection } from './TeachingTransferStep'
 import { DownloadOutlined } from '@ant-design/icons'
 import { CloseIcon } from '../icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
@@ -11,6 +13,8 @@ import { useWorkspaceAccess } from '../../backoffice/lib/workspaceAccessState';
 import { tokens } from '../../theme/tokens'
 import { useKText } from './i18n'
 import { formatDateTime } from '../../backoffice/lib/i18n/format'
+import './PublishPanel.css'
+import { useActionLock } from '../../lib/useActionLock'
 
 const indexTags = {
   building: { key: 'publish.indexBuilding', color: 'processing' },
@@ -18,6 +22,8 @@ const indexTags = {
   missing: { key: 'publish.indexMissing', color: 'warning' },
   failed: { key: 'publish.indexFailed', color: 'error' },
 } as const
+
+const releaseModalMaxHeight = 'min(82dvh, calc(100dvh - 32px))'
 
 /**
  * Releases 版本发布面板（§3.4；2026-10-15 激活版本模型；2026-10-19 由 Publish 更名为 Releases）：
@@ -42,10 +48,11 @@ export function PublishPanel() {
   const [historyCourse, setHistoryCourse] = useState<string | null>(null)
   const [publishCourse, setPublishCourse] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
-  const [teachingPackage, setTeachingPackage] = useState('')
   const [publishing, setPublishing] = useState(false)
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [downloadReleaseId, setDownloadReleaseId] = useState<string | null>(null)
   const [rebuildingId, setRebuildingId] = useState<string | null>(null)
+  const actions = useActionLock()
+  const releaseRequests = useRef(new Map<string, Promise<void>>())
 
   const [previewId, setPreviewId] = useState('')
   const [snapshot, setSnapshot] = useState<ReleaseDetail | null>(null)
@@ -64,47 +71,48 @@ export function PublishPanel() {
     return () => { active = false }
   }, [previewId, message])
 
-  const loadReleases = useCallback(() => {
-    const map: Record<string, ReleaseSummary[]> = {}
-    return Promise.all(
-      courses.map(async (c) => {
-        map[c.id] = await knowledgeApi.listReleases(c.id)
-      }),
-    ).then(() => setLatest(map))
-  }, [courses])
+  const loadReleaseList = useCallback((courseId: string, fresh = false) => {
+    const pending = releaseRequests.current.get(courseId)
+    if (pending && !fresh) return pending
+    const request = knowledgeApi.listReleases(courseId).then((releases) => {
+      if (releaseRequests.current.get(courseId) === request) {
+        setLatest((current) => ({ ...current, [courseId]: releases }))
+      }
+    }).finally(() => {
+      if (releaseRequests.current.get(courseId) === request) releaseRequests.current.delete(courseId)
+    })
+    releaseRequests.current.set(courseId, request)
+    return request
+  }, [])
+
+  const loadReleases = useCallback(async () => {
+    await Promise.all(courses.map(({ id }) => loadReleaseList(id)))
+  }, [courses, loadReleaseList])
 
   useEffect(() => {
-    void loadReleases()
-  }, [loadReleases])
+    void loadReleases().catch((error: Error) => message.error(error.message))
+  }, [loadReleases, message])
 
   const buildingCourseIds = Object.entries(latest)
-    .filter(([, releases]) => releases.some((release) => release.indexStatus === 'building'))
+    .filter(([id, releases]) => courses.some((course) => course.id === id) && releases.some((release) => release.indexStatus === 'building'))
     .map(([id]) => id)
     .join(',')
 
   useEffect(() => {
     if (!buildingCourseIds) return
-    let disposed = false
     const courseIds = buildingCourseIds.split(',')
     let pending = false
     const timer = setInterval(async () => {
       if (pending) return
       pending = true
       try {
-        const lists = await Promise.allSettled(courseIds.map((id) => knowledgeApi.listReleases(id)))
-        if (!disposed) setLatest((current) => {
-          const next = { ...current }
-          lists.forEach((list, index) => {
-            if (list.status === 'fulfilled') next[courseIds[index]] = list.value
-          })
-          return next
-        })
+        await Promise.allSettled(courseIds.map((id) => loadReleaseList(id)))
       } finally {
         pending = false
       }
     }, 3000)
-    return () => { disposed = true; clearInterval(timer) }
-  }, [buildingCourseIds])
+    return () => clearInterval(timer)
+  }, [buildingCourseIds, loadReleaseList])
 
   const indexTag = (release: ReleaseSummary) => {
     if (!release.indexStatus) return null
@@ -113,6 +121,8 @@ export function PublishPanel() {
   }
 
   const doRebuildIndex = async (courseId: string, releaseId: string) => {
+    const unlock = actions.acquire('rebuild')
+    if (!unlock) return
     setRebuildingId(releaseId)
     try {
       await knowledgeApi.rebuildReleaseIndex(releaseId)
@@ -126,54 +136,47 @@ export function PublishPanel() {
       message.error((error as Error).message)
     } finally {
       setRebuildingId(null)
+      unlock()
     }
   }
 
   const doPublish = async () => {
     // 发布中再次触发（回车、连点）直接忽略，服务端另有重复提交保护
-    if (!publishCourse || !notes.trim() || publishing) return
+    if (!publishCourse || !notes.trim()) return
+    const unlock = actions.acquire(publishCourse)
+    if (!unlock) return
     setPublishing(true)
     try {
-      let reviewed: Record<string, unknown> | undefined
-      if (teachingPackage.trim()) {
-        let value: unknown
-        try {
-          value = JSON.parse(teachingPackage)
-        } catch {
-          throw new Error(text('publish.teachingPackageInvalid'))
-        }
-        if (!value || typeof value !== 'object' || Array.isArray(value))
-          throw new Error(text('publish.teachingPackageInvalid'))
-        reviewed = value as Record<string, unknown>
-      }
-      if (reviewed) await knowledgeApi.publish(publishCourse, notes.trim(), reviewed)
-      else await knowledgeApi.publish(publishCourse, notes.trim())
+      await knowledgeApi.publish(publishCourse, notes.trim())
       message.success(text('publish.success'))
       setPublishCourse(null)
       setNotes('')
-      setTeachingPackage('')
-      await loadReleases()
+      await loadReleaseList(publishCourse, true).catch((error: Error) => message.error(error.message))
     } catch (e) {
       message.error((e as Error).message)
     } finally {
       setPublishing(false)
+      unlock()
     }
   }
 
   const doActivate = (courseId: string, release: ReleaseSummary) => {
-    modal.confirm({
+    const unlock = actions.acquire(courseId)
+    if (!unlock) return
+    const dialog = modal.confirm({
+      afterClose: unlock,
       title: text('publish.activateTitle', { version: release.versionTag }),
       content: text(release.hasEditorSnapshot ? 'publish.activateContent' : 'publish.legacyActivateContent'),
       okText: text('publish.activateConfirm'),
       okButtonProps: { danger: true },
       cancelText: text('common.cancel'),
       onOk: async () => {
+        dialog.update({ cancelButtonProps: { disabled: true }, keyboard: false })
         try {
           await knowledgeApi.activateRelease(courseId, release.id)
           message.success(text('publish.activated', { version: release.versionTag }))
           setHistoryCourse(null)
-          await loadReleases()
-          await afterActivateRelease(courseId)
+          await Promise.all([loadReleaseList(courseId, true), afterActivateRelease(courseId)])
         } catch (e) {
           message.error((e as Error).message)
         }
@@ -182,48 +185,27 @@ export function PublishPanel() {
   }
 
   /** 删除版本（§3.4.5，2026-10-20 新增）：Live / 后台测试所选版本无删除入口 */
-  const doDelete = (release: ReleaseSummary) => {
-    modal.confirm({
+  const doDelete = (courseId: string, release: ReleaseSummary) => {
+    const unlock = actions.acquire(courseId)
+    if (!unlock) return
+    const dialog = modal.confirm({
+      afterClose: unlock,
       title: text('publish.deleteTitle', { version: release.versionTag }),
       content: text('publish.deleteContent'),
       okText: text('tree.delete'),
       okButtonProps: { danger: true },
       cancelText: text('common.cancel'),
       onOk: async () => {
+        dialog.update({ cancelButtonProps: { disabled: true }, keyboard: false })
         try {
           await knowledgeApi.deleteRelease(release.id)
           message.success(text('publish.deleted', { version: release.versionTag }))
-          await loadReleases()
+          await loadReleaseList(courseId, true)
         } catch (e) {
           message.error((e as Error).message)
         }
       },
     })
-  }
-
-  /**
-   * 下载版本快照为 ZIP（方案 B，2026-10-30 新增）。
-   * VIEW 权限即可；纯读，不改变任何状态。
-   */
-  const doDownload = async (release: ReleaseSummary, migration = false) => {
-    if (downloadingId) return
-    setDownloadingId(release.id)
-    try {
-      const { blob, filename } = migration ? await knowledgeApi.exportRelease(release.id, 'package') : await knowledgeApi.exportRelease(release.id)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-      message.success(text('publish.downloaded', { version: release.versionTag }))
-    } catch (e) {
-      message.error((e as Error).message)
-    } finally {
-      setDownloadingId(null)
-    }
   }
 
   const columns: ColumnsType<(typeof courses)[number]> = [
@@ -261,7 +243,7 @@ export function PublishPanel() {
       key: 'action',
       render: (_, record) =>
         access.canPublish ? (
-          <Button type="primary" size="small" onClick={() => setPublishCourse(record.id)}>
+          <Button type="primary" size="small" disabled={actions.pending.has(record.id)} onClick={() => setPublishCourse(record.id)}>
             {text('publish.createRelease')}
           </Button>
         ) : (
@@ -271,6 +253,8 @@ export function PublishPanel() {
   ]
 
   const historyList = historyCourse ? latest[historyCourse] ?? [] : []
+  const historyBusy = Boolean(historyCourse && actions.pending.has(historyCourse))
+  const downloadRelease = historyList.find(release => release.id === downloadReleaseId)
 
   return (
     // 内容面板（2026-10-19 对齐 Figma）：白色/圆角12/无边框/卡片阴影，与 Knowledge Pages、AI Tutor 统一
@@ -292,119 +276,108 @@ export function PublishPanel() {
         open={!!historyCourse}
         title={text('publish.historyTitle')}
         footer={null}
-        onCancel={() => setHistoryCourse(null)}
+        closable={!historyBusy}
+        keyboard={!historyBusy}
+        onCancel={() => {
+          if (historyCourse && actions.isLocked(historyCourse)) return
+          setHistoryCourse(null)
+          setDownloadReleaseId(null)
+        }}
         centered
-        width="min(960px, calc(100vw - 32px))"
+        width="min(924px, calc(100vw - 32px))"
         style={{ margin: 0 }}
         styles={{
           content: {
             boxSizing: 'border-box',
-            height: 'min(82dvh, calc(100dvh - 32px))',
+            height: releaseModalMaxHeight,
             display: 'flex',
             flexDirection: 'column',
           },
           body: { flex: 1, minHeight: 0, overflowY: 'auto' },
         }}
       >
-        {historyCourse && access.canPublish && <ReleasePackageUpload key={historyCourse} courseId={historyCourse} onImported={loadReleases} />}
+        {historyCourse && access.canPublish && <ReleasePackageUpload key={historyCourse} courseId={historyCourse} disabled={historyBusy}
+          acquire={() => actions.acquire(historyCourse)}
+          onImported={() => loadReleaseList(historyCourse, true)} />}
         {historyList.length === 0 ? (
           <Typography.Text type="secondary">{text('publish.noHistory')}</Typography.Text>
         ) : (
-          historyList.map((r) => {
-            const protectedVersion = r.isActive || r.isTestSelected
-            return (
-              <div
-                key={r.id}
-                style={{
-                  marginBottom: tokens.spacing.md,
-                  padding: tokens.spacing.md,
-                  border: `1px solid ${tokens.color.border}`,
-                  borderRadius: tokens.radius.md,
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
-                  <Tag color={r.isActive ? 'green' : 'geekblue'} style={{ whiteSpace: 'normal' }}>
-                    {r.versionTag}
-                  </Tag>
-                  {/* 下载按钮（图标，VIEW 权限即可；2026-10-30 新增） */}
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<DownloadOutlined />}
-                    style={{ marginLeft: tokens.spacing.sm }}
-                    aria-label={text('publish.downloadVersionAria', { version: r.versionTag })}
-                    title={text('publish.downloadVersionAria', { version: r.versionTag })}
-                    loading={downloadingId === r.id}
-                    onClick={() => doDownload(r)}
-                  />
-                  {r.hasEditorSnapshot && <Button type="text" size="small" disabled={!!downloadingId}
-                    onClick={() => void doDownload(r, true)}>{text('publish.downloadPackage')}</Button>}
-                  {r.hasEditorSnapshot === false && <Typography.Text type="secondary">{text('publish.legacyPackage')}</Typography.Text>}
-                  {/* editing 紧贴版本名右侧（2026-10-20 三次改拍）；定序 editing → live → testing */}
-                  <Button type="text" size="small" onClick={() => { setSnapshot(null); setPreviewId(r.id) }}>
-                    {text('editor.preview')}
-                  </Button>
-                  {r.isEditing && <Tag color="green">{text('publish.tagEditing')}</Tag>}
-                  {r.isActive && <Tag color="green">{text('publish.tagLive')}</Tag>}
-                  {r.isTestSelected && <Tag>{text('publish.tagTesting')}</Tag>}
-                  <Typography.Text type="secondary">
-                    {formatDateTime(locale, r.createdAt)}
-                  </Typography.Text>
-                  {/* editing 版本不可再「切换到此版本」（2026-10-20 三次改拍） */}
-                  {access.canPublish && historyCourse && !r.isEditing && (
-                    <Button
-                      size="small"
-                      style={{ marginLeft: tokens.spacing.sm }}
-                      onClick={() => doActivate(historyCourse, r)}
-                    >
-                      {text('publish.switchTo')}
-                    </Button>
-                  )}
-                  <div>
-                    <Typography.Text>{r.revisionNotes}</Typography.Text>
+          <TeachingTransferSection title={text('publish.versionRecords')}>
+            {historyList.map(release => (
+              <article key={release.id} className="release-history-row teaching-transfer-row">
+                <div className="release-history-detail">
+                  <div className="release-history-meta">
+                    <strong>{release.versionTag}</strong>
+                    {release.isEditing && <Tag color="green">{text('publish.tagEditing')}</Tag>}
+                    {release.isActive && <Tag color="green">{text('publish.tagLive')}</Tag>}
+                    {release.isTestSelected && <Tag>{text('publish.tagTesting')}</Tag>}
+                    <time className="teaching-transfer-muted" dateTime={release.createdAt}>{formatDateTime(locale, release.createdAt)}</time>
                   </div>
-                  <div>
-                    {indexTag(r)}
-                    {access.canPublish && historyCourse && r.indexStatus && r.indexStatus !== 'building' && (
-                      <Button
-                        size="small"
-                        disabled={rebuildingId !== null}
-                        loading={rebuildingId === r.id}
-                        onClick={() => void doRebuildIndex(historyCourse, r.id)}
-                      >
+                  {release.revisionNotes && <div>{release.revisionNotes}</div>}
+                  <div className="release-history-index">
+                    {indexTag(release)}
+                    {access.canPublish && historyCourse && release.indexStatus && release.indexStatus !== 'building' && (
+                      <Button size="small" disabled={rebuildingId !== null} loading={rebuildingId === release.id}
+                        onClick={() => void doRebuildIndex(historyCourse, release.id)}>
                         {text('publish.rebuildIndex')}
                       </Button>
                     )}
                   </div>
                 </div>
-                {/* Live / 后台测试所选版本受保护，不显示删除 ×（2026-10-20 双保护） */}
-                {access.canDelete && !protectedVersion && (
-                  <Button
-                    type="text"
-                    size="small"
-                    danger
-                    aria-label={text('publish.deleteVersionAria', { version: r.versionTag })}
-                    onClick={() => doDelete(r)}
-                  >
-                    <CloseIcon size={16} />
+                <div className="release-history-actions">
+                  <Button size="small" icon={<DownloadOutlined />}
+                    aria-label={text('publish.downloadVersionAria', { version: release.versionTag })}
+                    onClick={() => setDownloadReleaseId(release.id)}>
+                    {text('publish.downloadVersion')}
                   </Button>
-                )}
-              </div>
-            )
-          })
+                  <Button size="small" onClick={() => {
+                    if (previewId === release.id) return
+                    setSnapshot(null)
+                    setPreviewId(release.id)
+                  }}>{text('editor.preview')}</Button>
+                  {access.canPublish && historyCourse && !release.isEditing && (
+                    <Button size="small" disabled={actions.pending.has(historyCourse)}
+                      onClick={() => doActivate(historyCourse, release)}>{text('publish.switchTo')}</Button>
+                  )}
+                  {access.canDelete && historyCourse && !release.isActive && !release.isTestSelected && (
+                    <Button type="text" size="small" danger
+                      aria-label={text('publish.deleteVersionAria', { version: release.versionTag })}
+                      disabled={actions.pending.has(historyCourse)}
+                      onClick={() => doDelete(historyCourse, release)}>
+                      <CloseIcon size={16} />
+                    </Button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </TeachingTransferSection>
         )}
       </Modal>
 
-      <Modal open={!!previewId} title={snapshot?.versionTag ?? text('editor.preview')} width={800} footer={null}
+      {downloadRelease && <ReleaseDownloadModal key={downloadRelease.id} release={downloadRelease}
+        close={() => setDownloadReleaseId(null)} />}
+
+      <Modal open={!!previewId} title={text('publish.versionPreviewTitle')} width={800} centered style={{ margin: 0 }}
+        classNames={{ body: 'release-preview-body' }}
+        styles={{
+          content: { boxSizing: 'border-box', maxHeight: releaseModalMaxHeight, display: 'flex', flexDirection: 'column' },
+          header: { flexShrink: 0 },
+          footer: { flexShrink: 0 },
+        }}
+        footer={<Button onClick={() => setPreviewId('')}>{text('publish.backToHistory')}</Button>}
         onCancel={() => setPreviewId('')}>
         {!snapshot ? <Spin /> : <>
-          <Select aria-label={text('teaching.sourcePage')} value={pageId || undefined} onChange={setPageId}
-            options={snapshot.snapshotData.pages.map(page => ({ value: page.id, label: page.title }))} />
-          {previewPage && <div data-color-mode="light"><KnowledgeMarkdown source={previewPage.contentMd}
-            courseId={snapshot.courseId}
-            references={snapshot.snapshotData.teachingPackage?.cards.flatMap(card => card.approvedPayload?.refObjects ?? []) ?? []} /></div>}
+          <p className="teaching-transfer-course"><strong>{snapshot.versionTag}</strong> {formatDateTime(locale, snapshot.createdAt)}</p>
+          <TeachingTransferSection title={text('publish.pageSnapshot')} actions={
+            <Select className="release-history-pages" aria-label={text('teaching.sourcePage')} value={pageId || undefined} onChange={setPageId}
+              options={snapshot.snapshotData.pages.map(page => ({ value: page.id, label: page.title }))} />
+          }>
+            {previewPage && <div key={previewPage.id} className="release-preview-page teaching-transfer-inset"
+              role="region" aria-label={previewPage.title} tabIndex={0} data-color-mode="light">
+              <KnowledgeMarkdown source={previewPage.contentMd} courseId={snapshot.courseId}
+                references={snapshot.snapshotData.teachingPackage?.cards.flatMap(card => card.approvedPayload?.refObjects ?? []) ?? []} />
+            </div>}
+          </TeachingTransferSection>
         </>}
       </Modal>
       {/* 发布 Modal（§3.4.3：Revision Notes 必填） */}
@@ -416,12 +389,16 @@ export function PublishPanel() {
         okText={text('publish.publish')}
         cancelText={text('common.cancel')}
         confirmLoading={publishing}
-        okButtonProps={{ disabled: !notes.trim() }}
+        okButtonProps={{ disabled: !notes.trim() || publishing }}
+        cancelButtonProps={{ disabled: publishing }}
+        closable={!publishing}
+        keyboard={!publishing}
+        maskClosable={!publishing}
         onOk={doPublish}
         onCancel={() => {
+          if (publishCourse && actions.isLocked(publishCourse)) return
           setPublishCourse(null)
           setNotes('')
-          setTeachingPackage('')
         }}
       >
         <Typography.Paragraph type="secondary">
@@ -433,15 +410,6 @@ export function PublishPanel() {
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           maxLength={500}
-        />
-        <Input.TextArea
-          rows={5}
-          style={{ marginTop: tokens.spacing.md }}
-          aria-label={text('publish.teachingPackageLabel')}
-          placeholder={text('publish.teachingPackagePlaceholder')}
-          value={teachingPackage}
-          onChange={(event) => setTeachingPackage(event.target.value)}
-          maxLength={500_000}
         />
       </Modal>
     </Panel>

@@ -96,6 +96,7 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
   ["DOCX 解压内容超过安全限制", "The unpacked DOCX is larger than the safety limit."],
   ["页面不存在", "The page does not exist."],
   ["排序列表必须为该课程全部页面的完整排列", "The order must list every page of this course."],
+  ["页面创建请求已被使用", "This page creation request has already been used."],
   ["课程页面已变化，请重新确认后再清除", "The course pages have changed. Review and confirm again before clearing them."],
   ["本期仅同步课程与课时标题，正文内容同步已禁用", "Only course and lesson titles are synced for now. Content sync is off."],
   ["该课程不在同步映射表中", "This course is not in the sync mapping."],
@@ -125,9 +126,17 @@ export const SERVER_MESSAGES: ReadonlyArray<readonly [zh: string, en: string]> =
 ];
 
 const TEACHING_ERRORS: Readonly<Record<string, readonly [string, string]>> = {
+  TEACHING_REFERENCE_DOCUMENT_INVALID: ["无法读取引用文档，请检查标题和内容。", "The reference document could not be read. Check its headings and content."],
+  TEACHING_REFERENCE_WRONG_KIND: ["文件与所选引用类型不符。", "The file does not match the selected reference type."],
+  TEACHING_TRANSFER_SELECTION: ["选中的条目已变化，请刷新后重新选择。", "The selected entries have changed. Refresh and select them again."],
+  TEACHING_TRANSFER_UNPORTABLE: ["条目缺少可下载的资源或稳定的引用编号，请检查其引用。", "An entry is missing a downloadable resource or a stable reference code. Check its references."],
+  TEACHING_TRANSFER_TOO_LARGE: ["导出文件的大小或条目数超限。请减少所选条目后重试。", "The export exceeds the file size or entry limit. Select fewer entries and try again."],
+  TEACHING_REFERENCE_BATCH_LIMIT: ["本批引用条目数量超限，请分批确认导入。", "This batch exceeds the reference limit. Import it in smaller batches."],
+  TEACHING_SHEET_INVALID: ["表格无法读取或格式不符。请使用对应模板，检查表头、文本单元格和文件大小。", "The workbook could not be read or does not match the template. Check the headers, text cells and file size."],
+  TEACHING_SHEET_CHANGED: ["条目、原文或引用已变化，请刷新预览后再导入。", "An entry, source passage or reference has changed. Refresh the preview and try again."],
   DEFINITION_PASSAGE_CHANGED: ['关联原文已变化或不唯一，请重新选择。', 'The linked passage changed or is ambiguous. Select it again.'],
   REFERENCE_CODE_IN_USE: ['本课程已使用这个编号（含历史编号），请换一个。', 'This course already uses that number or alias. Choose another.'],
-  REFERENCE_SUMMARY_REQUIRED: ['请填写英文摘要。', 'Enter an English summary.'],
+  REFERENCE_SUMMARY_REQUIRED: ['请填写摘要。', 'Enter a summary.'],
   SCHEMA_NOT_READY: ['数据库版本未就绪，请管理员检查部署迁移。', 'The database schema is not ready. Ask an administrator to check the deployment migrations.'],
   LECTURE_REFERENCE_CATALOG_INVALID: ['本课程的引用对象有冲突或格式有误，请检查已保存的条目。', 'References for this course contain a conflict or an invalid entry. Check the saved teaching entries.'],
   INVALID_TEACHING_CARD: ['教学条目信息不完整或格式有误。', 'Complete the required teaching entry fields and check their format.'],
@@ -137,8 +146,9 @@ const TEACHING_ERRORS: Readonly<Record<string, readonly [string, string]>> = {
 
 /** 带变量的后端句子：同样两种语言都写，正则从中文原文取变量。 */
 export const SERVER_MESSAGE_PATTERNS: ReadonlyArray<readonly [zh: RegExp, en: (m: RegExpMatchArray) => string]> = [
-  [/^DOCX 包含暂不支持的 Word 公式结构（(.+)）$/, (m) => 'The DOCX contains an unsupported Word equation structure (' + m[1] + ').'],
-  [/^DOCX 公式导入不完整（([^/]+)\/([^）]+)），请检查原文$/, (m) => 'Only ' + m[1] + ' of ' + m[2] + ' DOCX equations were imported. Check the original document.'],
+  [/^图片引用「(.+)」超过单图 8 MiB 限制$/, (m) => `Image reference "${m[1]}" exceeds the 8 MiB limit for a single image.`],
+  [/^DOCX 包含暂不支持的 Word 公式结构（(.+)）$/, (m) => `The DOCX contains an unsupported equation structure (${m[1]}).`],
+  [/^DOCX 公式导入不完整（(.+)），请检查原文$/, (m) => `The DOCX import read ${m[1]} equations. Check the source document.`],
   [/^页面「(.+)」的图片无法导出：(.+)$/, (m) => `The image in "${m[1]}" cannot be exported: ${m[2]}`],
   [/^页面「(.+)」的图片不存在：(.+)$/, (m) => `The image in "${m[1]}" is missing: ${m[2]}`],
   [/^页面「(.+)」的课程引用不可用：(.+)$/, (m) => `Course reference ${m[2]} is unavailable in "${m[1]}".`],

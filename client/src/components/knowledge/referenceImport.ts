@@ -1,10 +1,11 @@
-import type { ReferenceDraft, TeachingEntry, TeachingText } from '../../api/teachingCards'
+import { referenceNamePreview, type ReferenceDraft, type TeachingEntry, type TeachingText } from '../../api/teachingCards'
 
 export type Candidate = {
   file: string; line: number; lesson: string; code: string; names: TeachingText; summary: TeachingText
   kind: 'image' | 'latex'; value: string; issue?: 'missingAsset' | 'multipleAssets'
+  displayName?: string; aliases?: string[]
 }
-export const normalizeCode = (value: string) => value.trim().normalize('NFKC').toLowerCase()
+export const normalizeCode = (value: string) => value.trim().normalize('NFKC').replace(/\s+/g, ' ').toLowerCase()
 
 export function parseReferences(markdown: string, file: string, courseId: string): Candidate[] {
   const rows: Candidate[] = []
@@ -66,20 +67,25 @@ export function matchReference(row: Candidate, entries: TeachingEntry[], deleted
     [d.approvedPayload.code ?? '', ...(d.approvedPayload.aliases ?? [])].some(c => normalizeCode(c) === code)))
   const target = matches[0]
   const asset = target?.draft.approvedPayload.refObjects?.[0]
-  const label = target?.draft.approvedPayload.displayName || [target?.draft.approvedPayload.code ?? row.code, row.names.zh, row.names.en].filter(Boolean).join(' · ')
-  if (row.issue || !row.value.trim() || !code || code.length > 80 || !row.names.en.trim() || !row.summary.en.trim() ||
+  const name = row.names.en.trim() || row.names.zh.trim()
+  const summaryText = row.summary.en.trim() || row.summary.zh.trim()
+  const label = (row.displayName ?? target?.draft.approvedPayload.displayName) || referenceNamePreview(target?.draft.approvedPayload.code ?? row.code, name)
+  if (row.issue || !row.value.trim() || !code || code.length > 80 || !name || !summaryText ||
     Math.max(row.names.zh.length, row.names.en.length) > 100 || Math.max(row.summary.zh.length, row.summary.en.length) > 2000 ||
     label.length > 350 || /[[\]\r\n\\]/.test(label) || (row.kind === 'latex' && (row.value.length > 2000 || /[$<>]/.test(row.value))) ||
     matches.length > 1 || (target && asset?.kind !== row.kind)) return { status: 'conflict' as const, target }
   if (!target) return { status: deleted.some(c => normalizeCode(c) === code) ? 'recreate' as const : 'new' as const, target }
   const { conceptLabel, summary } = target.draft.bilingual
-  const same = asset?.value === row.value && conceptLabel.en === row.names.en && conceptLabel.zh === row.names.zh &&
-    summary.en === row.summary.en && summary.zh === row.summary.zh
+  const same = asset?.value === row.value && conceptLabel.en === name && conceptLabel.zh === row.names.zh.trim() &&
+    summary.en === summaryText && summary.zh === row.summary.zh.trim() &&
+    (row.displayName === undefined || row.displayName === (target.draft.approvedPayload.displayName ?? '')) &&
+    (row.aliases ?? []).every(alias => [target.draft.approvedPayload.code ?? '', ...(target.draft.approvedPayload.aliases ?? [])]
+      .some(number => normalizeCode(number) === normalizeCode(alias)))
   return { status: same ? 'same' as const : 'update' as const, target }
 }
 
 export function referenceDraft(row: Candidate, target?: TeachingEntry): ReferenceDraft {
   return { type: 'ref_obj', bilingual: { conceptLabel: row.names, summary: row.summary },
-    approvedPayload: { code: target?.draft.approvedPayload.code ?? row.code, displayName: target?.draft.approvedPayload.displayName,
+    approvedPayload: { code: target?.draft.approvedPayload.code ?? row.code, displayName: row.displayName ?? target?.draft.approvedPayload.displayName, aliases:row.aliases,
       refObjects: [{ kind: row.kind, value: row.value }] } }
 }

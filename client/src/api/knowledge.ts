@@ -1,6 +1,5 @@
 import { http } from './client'
-import { notifySessionChanged } from '../backoffice/lib/navigation'
-import { serverText } from '../backoffice/lib/i18n/serverText'
+import { fetchFileDownload } from './fileDownload'
 
 // ============ 类型（与后端 Prisma 模型字段对齐，§2） ============
 
@@ -116,7 +115,7 @@ export const knowledgeApi = {
   // 2026-10-27：contentMd 可能是整份上传文档（数 MB），默认 15s 超时不够，建页/保存单独放宽到 120s
   createPage: (
     courseId: string,
-    data: { title: string; contentMd: string; sectionTags?: Record<string, string[]> },
+    data: { title: string; contentMd: string; sectionTags?: Record<string, string[]>; requestId?: string },
   ) =>
     http
       .post<PageNode>(`/courses/${courseId}/pages`, data, { timeout: 120_000 })
@@ -191,37 +190,11 @@ export const knowledgeApi = {
    * 后端返回 application/zip，客户端触发浏览器下载。
    * 错误处理对齐 axios http 拦截器：401/403 通知会话变更，解析后端统一错误信封。
    */
-  exportRelease: async (
+  exportRelease: (
     releaseId: string,
     kind: 'export' | 'package' = 'export',
-  ): Promise<{ blob: Blob; filename: string }> => {
-    const res = await fetch(`/api/releases/${releaseId}/${kind}`, {
-      credentials: 'include',
-      headers: { Accept: 'application/zip' },
-    })
-    if (!res.ok) {
-      // 会话过期 / 被停用（401）或角色刚被改（403）
-      if (res.status === 401 || res.status === 403) notifySessionChanged()
-      // 尝试解析后端统一错误信封 { success:false, error:{ code, message } }
-      let msg = serverText(null)
-      try {
-        const j = (await res.json()) as { error?: { message?: string } }
-        if (j?.error?.message) msg = serverText(j.error.message)
-      } catch {
-        /* 非 JSON 响应体，用默认消息 */
-      }
-      throw new Error(msg)
-    }
-    const blob = await res.blob()
-    const cd = res.headers.get('Content-Disposition') ?? ''
-    const match =
-      cd.match(/filename\*=UTF-8''([^;]+)/i) ||
-      cd.match(/filename="?([^";]+)"?/)
-    const filename = match
-      ? decodeURIComponent(match[1])
-      : `${releaseId}.zip`
-    return { blob, filename }
-  },
+  ) => fetchFileDownload(`/api/releases/${encodeURIComponent(releaseId)}/${kind}`,
+    releaseId + (kind === 'package' ? '.lgknowledge.zip' : '.zip'), { headers: { Accept: 'application/zip' } }),
 
   importReleasePackage: (courseId: string, file: File, action: 'preview' | 'apply') => {
     const form = new FormData()

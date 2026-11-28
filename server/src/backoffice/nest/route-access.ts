@@ -74,6 +74,19 @@ function sharedWithAiTutor(method: string, segments: string[]): boolean {
 function actionFor(method: string, segments: string[]): ActionKind {
   if (method === 'GET' || method === 'HEAD') return 'VIEW';
   const [first, second, third] = segments;
+  if (first === 'courses' && third === 'teaching-cards' && method === 'POST') {
+    if (segments[3] === 'export' && segments.length === 5) return 'VIEW';
+    if (segments[3] === 'reference-documents') return 'EDIT_EXISTING';
+  }
+  if (
+    first === 'courses' &&
+    third === 'teaching-cards' &&
+    segments.length === 6 &&
+    segments[3] === 'sheets' &&
+    segments[5] === 'preview' &&
+    method === 'POST'
+  )
+    return 'EDIT_EXISTING';
   if (first === 'ai') {
     if (
       method === 'PATCH' &&

@@ -364,7 +364,8 @@ export function createMarkdownLivePreview(
 
       update(update: ViewUpdate) {
         const treeChanged = syntaxTree(update.startState) !== syntaxTree(update.state)
-        if (update.docChanged || update.selectionSet || update.viewportChanged || treeChanged) {
+        const occupiedChanged = getOccupiedLineRanges(update.startState) !== getOccupiedLineRanges(update.state)
+        if (update.docChanged || update.selectionSet || update.viewportChanged || treeChanged || occupiedChanged) {
           this.decorations = buildDecorations(update.view)
         }
       }

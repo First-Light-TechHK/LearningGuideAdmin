@@ -168,6 +168,33 @@ body,
   font-size: 12px;
   color: #94a3b8;
 }
+.cm-md-course-reference-block {
+  padding: 6px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+.cm-md-course-reference-image {
+  max-width: 100%;
+  vertical-align: middle;
+}
+.cm-md-course-reference-inline .cm-md-course-reference-image,
+.cm-md-table-cell-preview .cm-md-course-reference-image {
+  max-width: min(100%, 16rem);
+  max-height: 12rem;
+}
+.cm-md-course-reference-block .cm-md-course-reference-image + .cm-md-course-reference-caption {
+  display: block;
+  margin-top: 4px;
+}
+.cm-md-course-reference-caption,
+.cm-md-course-reference-missing {
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+.cm-content[contenteditable="true"] .cm-md-course-reference-block,
+.cm-content[contenteditable="true"] .cm-md-course-reference-inline {
+  cursor: text;
+}
 .cm-md-table-widget { position: relative; padding: 6px 0; overflow-x: auto; }
 .cm-md-table-widget .cm-md-table {
   border-collapse: collapse;

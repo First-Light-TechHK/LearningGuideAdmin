@@ -1,6 +1,59 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { PagesService } from './pages.service';
+
+describe('PagesService.create', () => {
+  const requestId = '07983c97-0d51-4022-a973-ef2dd1a0492c';
+  const dto = { title: 'Lesson', contentMd: 'Markdown', requestId };
+  const existing = { ...dto, id: requestId, courseId: 'c1', sortOrder: 0 };
+  const duplicate = new Prisma.PrismaClientKnownRequestError('duplicate', {
+    code: 'P2002',
+    clientVersion: 'test',
+  });
+
+  it('returns the same page on a replay after the first response was lost', async () => {
+    const page = {
+      count: jest.fn().mockResolvedValue(0),
+      create: jest
+        .fn()
+        .mockResolvedValueOnce(existing)
+        .mockRejectedValueOnce(duplicate),
+      findUnique: jest.fn().mockResolvedValue(existing),
+    };
+    const service = new PagesService({
+      course: { findUnique: jest.fn().mockResolvedValue({ id: 'c1' }) },
+      page,
+    } as unknown as PrismaService);
+    await expect(service.create('c1', dto)).resolves.toEqual(existing);
+    await expect(service.create('c1', dto)).resolves.toEqual(existing);
+    expect(page.create).toHaveBeenNthCalledWith(2, {
+      data: {
+        id: requestId,
+        courseId: 'c1',
+        title: dto.title,
+        contentMd: dto.contentMd,
+        sectionTags: undefined,
+        sortOrder: 0,
+      },
+    });
+    expect(page.findUnique).toHaveBeenCalledWith({ where: { id: requestId } });
+  });
+
+  it('rejects a key previously used with different page content', async () => {
+    const service = new PagesService({
+      course: { findUnique: jest.fn().mockResolvedValue({ id: 'c1' }) },
+      page: {
+        count: jest.fn().mockResolvedValue(1),
+        create: jest.fn().mockRejectedValue(duplicate),
+        findUnique: jest.fn().mockResolvedValue(existing),
+      },
+    } as unknown as PrismaService);
+    await expect(
+      service.create('c1', { ...dto, contentMd: 'Different' }),
+    ).rejects.toThrow(ConflictException);
+  });
+});
 
 describe('PagesService.clearCoursePages', () => {
   const tx = {

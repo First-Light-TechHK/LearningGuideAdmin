@@ -1,6 +1,16 @@
 import { cleanProfessorQa } from '../../ks/contract/professor-qa-content';
 import { ConflictException } from '@nestjs/common';
 import { passageSource } from './course-context';
+import { retrievalTerms } from '../../common/retrieval-terms';
+import { answerSections } from '../../common/markdown-sections';
+import {
+  asksForCourseScript,
+  asksForDefinition,
+  definitionFollowUp,
+  definitionGaps,
+  definitionNamePattern,
+  partitionDefinitionRequests,
+} from './definition-request';
 import type {
   ProfessorAnswer,
   ProfessorEvidence,
@@ -107,6 +117,8 @@ export function prepareReviewedLecture(
   semantic?: {
     professorEvidence?: ProfessorEvidence;
     rankedCards?: string[];
+    rankedParts?: ReadonlyMap<string, number>;
+    ignoreProfessorQa?: boolean;
     collect?: (
       cards: ProfessorAnswer[],
       language: string,
@@ -134,7 +146,7 @@ export function prepareReviewedLecture(
   const question = normalize(message);
   const previous =
     previousQuestion &&
-    /^(?:and\b|what about\b|why\b|how\b|can you elaborate\b|那|那么|为什么|怎么|还有|举个例子|继续)/u.test(
+    /^(?:and\b|what about\b|why\b|how\b|can you elaborate\b|(?:please )?quote\b|那|那么|为什么|怎么|还有|举个例子|继续|(?:请)?(?:给我|引用|展示)(?:讲稿|老师的?)?(?:原文|原话))/u.test(
       question,
     )
       ? normalize(previousQuestion)
@@ -157,6 +169,83 @@ export function prepareReviewedLecture(
         (condition) =>
           condition === turnCategory || matches(question, condition),
       ),
+  );
+  const definitions = new Map(
+    compatible.flatMap((card) => {
+      const name = payload(card).definitionName;
+      return card.type === 'concept' && typeof name === 'string'
+        ? [[card.cardId, name] as const]
+        : [];
+    }),
+  );
+  const definitionTerms = new Map(
+    compatible.flatMap((card) => {
+      const name = definitions.get(card.cardId);
+      if (!name) return [];
+      const aliases = checked.value.glossary.find(
+        (entry) => entry.conceptId === card.conceptId,
+      )?.aliases;
+      return [
+        [
+          card.cardId,
+          [
+            ...new Set(
+              [
+                name,
+                card.bilingual.conceptLabel.en,
+                card.bilingual.conceptLabel.zh,
+                ...(aliases?.en ?? []),
+                ...(aliases?.zh ?? []),
+              ].filter(Boolean),
+            ),
+          ],
+        ] as const,
+      ];
+    }),
+  );
+  const mentionedDefinitions = (text: string) => {
+    const mentions = [...definitionTerms].flatMap(([id, names]) =>
+      names.flatMap((name) => {
+        const term = definitionNamePattern(name);
+        const pattern = /\p{Script=Han}/u.test(name)
+          ? term
+          : `(?:(?<=\\p{Script=Han})|(?<![\\p{L}\\p{N}]))${term}(?:(?=\\p{Script=Han})|(?![\\p{L}\\p{N}]))`;
+        return [...text.matchAll(new RegExp(pattern, 'gu'))].map((match) => ({
+          id,
+          start: match.index,
+          end: match.index + match[0].length,
+        }));
+      }),
+    );
+    return new Set(
+      mentions
+        .filter(
+          (mention) =>
+            !mentions.some(
+              (other) =>
+                other.start <= mention.start &&
+                other.end >= mention.end &&
+                (other.start < mention.start || other.end > mention.end),
+            ),
+        )
+        .map(({ id }) => id),
+    );
+  };
+  const explicitDefinitions = mentionedDefinitions(question);
+  const definitionContinuation =
+    !explicitDefinitions.size && !previousObjectIds.length && previousQuestion
+      ? definitionFollowUp(message)
+      : undefined;
+  const inheritedDefinitions =
+    definitionContinuation && previousQuestion
+      ? mentionedDefinitions(normalize(previousQuestion))
+      : new Set<string>();
+  const activeDefinitions =
+    inheritedDefinitions.size === 1
+      ? inheritedDefinitions
+      : explicitDefinitions;
+  const semanticDefinition = semantic?.rankedCards?.find((id) =>
+    definitions.has(id),
   );
   const quotedSources = new Set(
     checked.value.sources
@@ -181,6 +270,16 @@ export function prepareReviewedLecture(
         ? 10000
         : 0;
     if (fromPassage(card)) return 9000;
+    if (definitions.has(card.cardId) && activeDefinitions.size)
+      return activeDefinitions.has(card.cardId)
+        ? 1000 + normalize(definitions.get(card.cardId)!).length
+        : 0;
+    if (
+      definitions.has(card.cardId) &&
+      semanticDefinition &&
+      card.cardId !== semanticDefinition
+    )
+      return 0;
     const terms =
       card.type === 'concept' || card.type === 'distinction'
         ? [
@@ -236,7 +335,10 @@ export function prepareReviewedLecture(
     (card) => card.topic === '*' || card.topic === topic,
   );
   const matchesQa = compatible.filter(
-    (card) => card.type === 'professor_qa' && score(card),
+    (card) =>
+      !semantic?.ignoreProfessorQa &&
+      card.type === 'professor_qa' &&
+      score(card),
   );
   const qa = matchesQa.length === 1 && !inferred ? matchesQa[0] : undefined;
   scoped = scoped.filter((card) => card.type !== 'professor_qa' || card === qa);
@@ -311,12 +413,34 @@ export function prepareReviewedLecture(
   const clarify = () => ({
     kind: 'clarify' as const,
     trace,
+    searchCourse:
+      definitions.size > 0 &&
+      isStudentQuestion &&
+      retrievalTerms(question).length > 1,
     topicHints: matchesQa.length > 1 || inferred ? [] : topicHints,
     directAnswer:
       language === 'zh-CN'
         ? '我还无法确定哪一部分课程材料适用。你可以告诉我具体的概念，或贴出你正在看的段落吗？'
         : 'Which course concept or passage are you referring to? That will help me use the right course material.',
   });
+  const ambiguousDefinition =
+    [...explicitDefinitions].filter((id) =>
+      definitionTerms.get(id)?.some((name) => asksForDefinition(message, name)),
+    ).length > 1;
+  if (inheritedDefinitions.size > 1 || ambiguousDefinition) {
+    trace.outcome = ambiguousDefinition
+      ? 'ambiguous_definition_request'
+      : 'ambiguous_definition_follow_up';
+    return {
+      ...clarify(),
+      searchCourse: false,
+      topicHints: [],
+      directAnswer:
+        language === 'zh-CN'
+          ? '你想进一步了解哪个概念？'
+          : 'Which concept would you like me to explain further?',
+    };
+  }
   const primary =
     qa ??
     matched
@@ -324,7 +448,11 @@ export function prepareReviewedLecture(
         ['concept', 'distinction', 'frame', 'source'].includes(card.type),
       )
       .sort((a, b) =>
-        fromPassage(a) || fromPassage(b) || semantic?.rankedCards?.length
+        fromPassage(a) ||
+        fromPassage(b) ||
+        semantic?.rankedCards?.length ||
+        activeDefinitions.has(a.cardId) ||
+        activeDefinitions.has(b.cardId)
           ? score(b) - score(a) || byPriority(a, b)
           : byPriority(a, b),
       )[0] ??
@@ -517,6 +645,7 @@ export function prepareReviewedLecture(
       )
         return {
           ...clarify(),
+          searchCourse: false,
           topicHints: [],
           directAnswer:
             language === 'zh-CN'
@@ -611,7 +740,40 @@ export function prepareReviewedLecture(
       };
     return clarify();
   }
-  const teachingPackage = { ...checked.value, cards: scoped };
+  const queryTerms = retrievalTerms(question);
+  const teachingPackage = {
+    ...checked.value,
+    cards: scoped.map((card) => {
+      const data = payload(card);
+      if (
+        !applicable(card) ||
+        !definitions.has(card.cardId) ||
+        typeof data.answerMd !== 'string' ||
+        data.answerMd.length <= 2400
+      )
+        return card;
+      const [opening, ...rest] = answerSections(data.answerMd);
+      const rank = (text: string) =>
+        queryTerms.filter((term) => text.toLowerCase().includes(term)).length;
+      const indexedPart = semantic?.rankedParts?.get(card.cardId);
+      const best =
+        (indexedPart ? [opening, ...rest][indexedPart - 1] : undefined) ??
+        rest.reduce(
+          (selected, section) =>
+            rank(section) > rank(selected) ? section : selected,
+          opening,
+        );
+      const lead = opening.split(/\n\n|(?<=[。！？])|(?<=[.!?])\s+/u)[0];
+      return {
+        ...card,
+        approvedPayload: {
+          ...data,
+          answerMd:
+            best === opening || lead.length > 450 ? best : lead + '\n\n' + best,
+        },
+      };
+    }),
+  };
   const planner = validatePlannerSlice({
     candidate: decision,
     action: 'study_question',
@@ -627,7 +789,10 @@ export function prepareReviewedLecture(
     planner: planner.value,
     candidateScores: scoped
       .filter((card) => applicable(card) || card.type === 'boundary')
-      .map((card) => ({ cardId: card.cardId, score: score(card) ? 1 : 0 })),
+      .map((card) => ({
+        cardId: card.cardId,
+        score: Math.min(1, score(card) / 10000),
+      })),
     requiredCardIds: [primary.cardId],
     defaultTeachingMove: 'explain',
     minCards: 1,
@@ -689,6 +854,47 @@ export function prepareReviewedLecture(
     linkedExhibitPassage(pages, focus.ref.id, (title, body) => {
       linkedSource = passageSource(title, null, body);
     });
+  const definitionNames = selected.selectedCardIds.flatMap((id) => {
+    const name = definitions.get(id);
+    return name ? [name] : [];
+  });
+  const definitionCards = selected.selectedCards.filter((card) =>
+    definitions.has(card.cardId),
+  );
+  const definitionIds = definitionCards.map((card) => card.cardId);
+  const names = definitionIds.flatMap((id) => definitionTerms.get(id) ?? []);
+  const requests = partitionDefinitionRequests(
+    message,
+    definitionIds.map((id) => definitionTerms.get(id) ?? []),
+  );
+  const hasScript = definitionCards.every(
+    (card) => card.sourceSupport.length > 0,
+  );
+  const inherited =
+    inheritedDefinitions.size === 1 &&
+    definitionIds.some((id) => inheritedDefinitions.has(id))
+      ? definitionContinuation
+      : undefined;
+  const definition = definitionNames.length
+    ? {
+        names: definitionNames,
+        cardIds: definitionIds,
+        requests,
+        uniqueDefinition:
+          explicitDefinitions.size === 1 &&
+          requests.covered.length === 1 &&
+          !requests.remaining.length,
+        inherited,
+        gaps:
+          inherited && (inherited !== 'quotation' || !hasScript)
+            ? [message]
+            : requests.covered.length
+              ? requests.remaining.filter(
+                  (part) => !hasScript || !asksForCourseScript(part),
+                )
+              : definitionGaps(message, names, hasScript),
+      }
+    : undefined;
   return {
     kind: 'reviewed' as const,
     linkedSource,
@@ -698,6 +904,7 @@ export function prepareReviewedLecture(
     trace,
     directAnswer: undefined,
     planner: planner.value,
+    definition,
     knowledge: [
       selected.knowledgeText,
       exhibitEvidence(descriptions),
@@ -706,10 +913,8 @@ export function prepareReviewedLecture(
       .filter(Boolean)
       .join('\n\n'),
     references: [...references.values()],
-    outputContract: selected.selectedCards.some(
-      (card) => card.type === 'concept' && payload(card).definitionName,
-    )
-      ? 'Distinguish the supplementary definition from the linked script passage. Attribute quoted dialogue only to the script; explain the definition as course commentary.'
+    outputContract: definition
+      ? 'Use the supplementary definition for the concept. State what it means first and then explain it intuitively when supported. For a follow-up, expand the inherited concept with the requested process or example. Attribute lecture quotations only to actual supplied script passages. If the requested wording is unavailable, say so. For requested reasons, examples or comparisons use supporting evidence and say when it is missing.'
       : 'Use the approved evidence for course-specific claims.',
   };
 }

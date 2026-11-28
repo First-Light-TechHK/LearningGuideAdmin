@@ -37,28 +37,6 @@ export function DefinitionEditor({ courseId, draft, disabled, missing, update }:
   const caret = useRef<[number, number] | null>(null)
   const attrs = (key: string) => ({ required: true, 'aria-label': label(key), 'aria-invalid': missing.includes(key) || undefined })
   return <>
-    {error && <Alert type="error" message={error} action={<Button onClick={() => retry(value => value + 1)}>{text('common.retry')}</Button>} />}
-    <label className="teaching-select-field">{label('sourcePage')}
-      <Select aria-label={label('sourcePage')} value={page?.id} disabled={disabled} options={pages.map(item => ({ value: item.id, label: item.title }))}
-        onChange={id => { selectPage(id); setInvalid(false) }} />
-    </label>
-    {page && !disabled && <>
-      <Input.TextArea key={page.id} ref={sourceInput} readOnly rows={6} aria-label={label('browseSources')} value={page.contentMd} />
-      <Button onClick={() => {
-        const el = sourceInput.current?.resizableTextArea?.textArea
-        const selection = el?.value.slice(el.selectionStart, el.selectionEnd).trim() ?? ''
-        const matching = pages.filter(item => item.contentMd.includes(selection))
-        if (!selection || selection.length > 3200 || matching.length !== 1 || matching[0].id !== page.id ||
-          page.contentMd.indexOf(selection) !== page.contentMd.lastIndexOf(selection)) { setInvalid(true); return }
-        update({ evidence: [selection, ...draft.evidence.slice(1)], approvedPayload: patch({ sourcePageId: page.id }) })
-        setInvalid(false)
-      }}>{label('useSelection')}</Button>
-      {invalid && <Alert type="warning" message={label('uniquePassage')} />}
-    </>}
-    <label>{label('definitionExcerpt')} *
-      <Input.TextArea {...attrs('definitionExcerpt')} readOnly rows={3} value={draft.evidence.join('\n\n')} />
-    </label>
-    {bound && <small>{label('passageSource')} · {bound.title}</small>}
     <label>{label('definitionName')} *
       <Input {...attrs('definitionName')} maxLength={100} value={name} disabled={disabled}
         onChange={event => update({ approvedPayload: patch({ definitionName: event.target.value }) })} />
@@ -80,5 +58,35 @@ export function DefinitionEditor({ courseId, draft, disabled, missing, update }:
       requestAnimationFrame(() => bodyInput.current?.resizableTextArea?.textArea.setSelectionRange(position, position))
       setPicker(false)
     }} />}
+    <section aria-label={label('optionalSource')}>
+      <h4>{label('optionalSource')}</h4>
+      {error && <Alert type="error" message={error} action={<Button onClick={() => retry(value => value + 1)}>{text('common.retry')}</Button>} />}
+      <label className="teaching-select-field">{label('sourcePage')}
+        <Select aria-label={label('sourcePage')} value={page?.id} disabled={disabled} options={pages.map(item => ({ value: item.id, label: item.title }))}
+          onChange={id => { selectPage(id); setInvalid(false) }} />
+      </label>
+      {page && !disabled && <>
+        <Input.TextArea key={page.id} ref={sourceInput} readOnly rows={6} aria-label={label('browseSources')} value={page.contentMd} />
+        <Button onClick={() => {
+          const el = sourceInput.current?.resizableTextArea?.textArea
+          const selection = el?.value.slice(el.selectionStart, el.selectionEnd).trim() ?? ''
+          const matching = pages.filter(item => item.contentMd.includes(selection))
+          if (!selection || selection.length > 3200 || matching.length !== 1 || matching[0].id !== page.id ||
+            page.contentMd.indexOf(selection) !== page.contentMd.lastIndexOf(selection)) { setInvalid(true); return }
+          update({ evidence: [selection, ...draft.evidence.slice(1)], approvedPayload: patch({ sourcePageId: page.id }) })
+          setInvalid(false)
+        }}>{label('useSelection')}</Button>
+        {invalid && <Alert type="warning" message={label('uniquePassage')} />}
+      </>}
+      <label>{label('definitionExcerpt')}
+        <Input.TextArea aria-label={label('definitionExcerpt')} readOnly rows={3} value={draft.evidence.join('\n\n')} />
+      </label>
+      {bound && <small>{label('passageSource')} · {bound.title}</small>}
+      {excerpt && !disabled && <Button onClick={() => {
+        selectPage('')
+        setInvalid(false)
+        update({ evidence: [], approvedPayload: patch({ sourcePageId: undefined }) })
+      }}>{label('removeSource')}</Button>}
+    </section>
   </>
 }

@@ -51,7 +51,7 @@ async function openChat(userContent = original) {
 test('确认撤回后原文回填且可编辑，最后一轮从历史和持久化中移除', async () => {
   const input = await openChat()
   fireEvent.change(input, { target: { value: 'draft' } })
-  fireEvent.click(screen.getByRole('button', { name: 'undo' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
   const dialog = await screen.findByRole('dialog')
   assert.equal(input.value, 'draft')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Undo' }))
@@ -65,7 +65,7 @@ test('确认撤回后原文回填且可编辑，最后一轮从历史和持久�
 test('取消撤回保留输入草稿和对话', async () => {
   const input = await openChat()
   fireEvent.change(input, { target: { value: 'draft' } })
-  fireEvent.click(screen.getByRole('button', { name: 'undo' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
   const dialog = await screen.findByRole('dialog')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
   assert.equal(input.value, 'draft')

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useActionLock } from '../../lib/useActionLock'
 import { App, Dropdown, Tree, Modal, Input, Tooltip, Empty } from '../ui'
 import type { TreeDataNode } from '../ui'
 import {
@@ -70,6 +71,8 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
   } | null>(null)
   const [inputValue, setInputValue] = useState('')
   const creatingRef = useRef(false)
+  const createRequest = useRef<{ title: string; id: string } | null>(null)
+  const actions = useActionLock()
   const [creating, setCreating] = useState(false)
   const [uploadTarget, setUploadTarget] = useState<{
     courseId: string
@@ -310,6 +313,8 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
   }
 
   const openCreate = (courseId: string) => {
+    if (creatingRef.current) return
+    createRequest.current = null
     setInputState({ kind: 'page', courseId })
     setInputValue('')
   }
@@ -317,11 +322,13 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
   const submitCreate = async () => {
     if (creatingRef.current || !inputState || !inputValue.trim()) return
     const { courseId } = inputState
+    const title = inputValue.trim()
+    if (createRequest.current?.title !== title) createRequest.current = { title, id: crypto.randomUUID() }
     // ref 同步拦截同一轮事件中的回车/连点，不能只依赖下一次渲染的 loading。
     creatingRef.current = true
     setCreating(true)
     try {
-      await createPage(courseId, inputValue.trim())
+      await createPage(courseId, title, createRequest.current.id)
       setInputState(null)
     } catch (e) {
       message.error((e as Error).message)
@@ -331,14 +338,18 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
     }
   }
 
-  const confirmDelete = (label: string, action: () => Promise<void>) => {
-    modal.confirm({
+  const confirmDelete = (courseId: string, label: string, action: () => Promise<void>) => {
+    const unlock = actions.acquire(courseId)
+    if (!unlock) return
+    const dialog = modal.confirm({
+      afterClose: unlock,
       title: text('tree.deleteConfirmTitle', { label }),
       content: text('tree.deleteConfirmContent'),
       okText: text('tree.delete'),
       okButtonProps: { danger: true },
       cancelText: text('common.cancel'),
       onOk: async () => {
+        dialog.update({ cancelButtonProps: { disabled: true }, keyboard: false })
         try {
           await action()
           message.success(text('tree.deleted'))
@@ -356,6 +367,8 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
   const confirmClearCoursePages = async (courseId: string, courseTitle: string) => {
     const pageIds = useKnowledgeStore.getState().details[courseId]?.pages.map(({ id }) => id)
     if (!pageIds?.length) return
+    const unlock = actions.acquire(courseId)
+    if (!unlock) return
 
     const confirmed = await modal.confirm({
       title: text('tree.clearFilesTitle', { courseTitle }),
@@ -364,9 +377,13 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
       cancelText: text('common.cancel'),
       autoFocusButton: 'cancel',
     })
-    if (!confirmed) return
+    if (!confirmed) {
+      unlock()
+      return
+    }
 
-    modal.confirm({
+    const dialog = modal.confirm({
+      afterClose: unlock,
       title: text('tree.clearFilesFinalTitle', { courseTitle }),
       content: text('tree.clearFilesFinalContent'),
       okText: text('tree.clearFiles'),
@@ -374,6 +391,7 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
       cancelText: text('common.cancel'),
       autoFocusButton: 'cancel',
       onOk: async () => {
+        dialog.update({ cancelButtonProps: { disabled: true }, keyboard: false })
         try {
           await clearCoursePages(courseId, pageIds)
           message.success(text('tree.filesCleared', { count: pageIds.length }))
@@ -398,7 +416,7 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
         items: [{ key: 'del-page', label: text('tree.deletePage'), danger: true }],
         onClick: ({ key }: { key: string }) => {
           if (key === 'del-page')
-            confirmDelete(text('tree.labelPage'), () => deletePage(ops.courseId, ops.pageId!))
+            confirmDelete(ops.courseId, text('tree.labelPage'), () => deletePage(ops.courseId, ops.pageId!))
         },
       }
     }
@@ -424,7 +442,7 @@ export function CourseTree({ keyword, linkedPage }: { keyword: string; linkedPag
         if (key === 'upload') openUpload(ops.courseId, node.title as string)
         if (key === 'clear-files') void confirmClearCoursePages(ops.courseId, node.title as string)
         if (key === 'del-course')
-          confirmDelete(text('tree.labelCourse'), () => deleteCourse(ops.courseId))
+          confirmDelete(ops.courseId, text('tree.labelCourse'), () => deleteCourse(ops.courseId))
       },
     }
   }

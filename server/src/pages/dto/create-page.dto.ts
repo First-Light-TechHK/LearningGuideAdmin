@@ -3,12 +3,17 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
 
 /** 创建 Page（开发文档 §5.1.2、§2 Page 模型；2026-10-16 移除页面级 tags） */
 export class CreatePageDto {
+  @IsOptional()
+  @IsUUID('4')
+  requestId?: string;
+
   @IsString()
   @MaxLength(200)
   title!: string;

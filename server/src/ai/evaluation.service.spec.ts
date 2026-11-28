@@ -269,6 +269,49 @@ describe('evaluation execution', () => {
       env.get().results.every((r) => r.error === 'USER_STOPPED_NOT_EXECUTED'),
     ).toBe(true);
   });
+  it('reuses the created task on concurrent replays of a restart key', async () => {
+    const env = setup();
+    env.set({ ...env.get(), status: 'completed' });
+    const originalQuery = env.database.query.getMockImplementation()!;
+    const inserted = new Map<
+      unknown,
+      { id: string; owner: string; status: string; payload: unknown }
+    >();
+    env.database.query.mockImplementation(async (sql, values = []) => {
+      if (sql.startsWith('INSERT')) {
+        const key = values[5];
+        if (inserted.has(key)) return [];
+        const row = {
+          id: String(values[0]),
+          owner: String(values[1]),
+          status: String(values[2]),
+          payload: JSON.parse(String(values[3])) as unknown,
+        };
+        inserted.set(key, row);
+        return [{ id: row.id }];
+      }
+      if (sql.includes('submission_key=$2')) {
+        const row = inserted.get(values[1]);
+        return row ? [{ id: row.id }] : [];
+      }
+      const row = Array.from(inserted.values()).find(
+        (item) => item.id === values[1],
+      );
+      if (row && sql.includes('owner=$1 AND id=$2')) return [row];
+      return originalQuery(sql, values);
+    });
+    const key = '07983c97-0d51-4022-a973-ef2dd1a0492c';
+    const [first, replay] = await Promise.all([
+      env.service.restart('e1', 't1', key),
+      env.service.restart('e1', 't1', key),
+    ]);
+    expect(replay.id).toBe(first.id);
+    expect(inserted.size).toBe(1);
+    await expect(
+      env.service.restart('e1', 't1', 'b273224d-5ba7-4d13-ae15-33b623220b7f'),
+    ).resolves.not.toHaveProperty('id', first.id);
+    expect(inserted.size).toBe(2);
+  });
   it('marks interrupted turns failed after restart and fails dependent turns', async () => {
     const env = setup(),
       task = env.get();

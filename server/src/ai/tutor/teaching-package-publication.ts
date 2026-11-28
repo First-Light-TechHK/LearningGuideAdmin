@@ -6,7 +6,10 @@ import {
 import { validateReviewedTeachingPackage } from './reviewed-package-validator';
 import { snapshotHash } from './snapshot-hash';
 import { readLectureReferences } from './lecture-references';
-import type { TeachingPackageCompiler } from '../../ks/contract/teaching-package-compiler';
+import {
+  MAX_PUBLISHED_TEACHING_CARDS,
+  type TeachingPackageCompiler,
+} from '../../ks/contract/teaching-package-compiler';
 
 export function compileTeachingPackage(input: {
   courseId: string;
@@ -18,19 +21,28 @@ export function compileTeachingPackage(input: {
   if (
     !Array.isArray(authored.cards) ||
     !authored.cards.length ||
-    authored.cards.length > 200
+    authored.cards.length > MAX_PUBLISHED_TEACHING_CARDS
   )
-    throw new Error('cards must contain between 1 and 200 entries');
+    throw new Error(
+      `cards must contain between 1 and ${MAX_PUBLISHED_TEACHING_CARDS} entries`,
+    );
   const sourceByExcerpt = new Map<string, AnchoredChunk>();
   const cards = (authored.cards as unknown[]).map((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value))
       throw new Error('each card must be an object');
     const { evidence, ...fields } = value as Record<string, unknown>;
+    const payload = fields.approvedPayload as
+      Record<string, unknown> | undefined;
     if (
       !Array.isArray(evidence) ||
       (!evidence.length &&
         fields.type !== 'ref_obj' &&
-        fields.type !== 'professor_qa') ||
+        fields.type !== 'professor_qa' &&
+        !(
+          fields.type === 'concept' &&
+          payload?.definitionName &&
+          payload.answerMd
+        )) ||
       evidence.length > 8
     )
       throw new Error('each card requires 1–8 exact Markdown excerpts');
@@ -43,8 +55,6 @@ export function compileTeachingPackage(input: {
       }
       return source.anchor.id;
     });
-    const payload = fields.approvedPayload as
-      Record<string, unknown> | undefined;
     if (
       fields.type === 'concept' &&
       payload?.sourcePageId &&

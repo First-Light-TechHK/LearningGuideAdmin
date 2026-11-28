@@ -19,6 +19,7 @@ export function TutorManagerModal() {
   const tutors = useAiStore((s) => s.tutors)
   const loading = useAiStore((s) => s.tutorsLoading)
   const setTutorOnline = useAiStore((s) => s.setTutorOnline)
+  const pending = useAiStore((s) => s.pendingCourseActions)
   const { text } = useAiText()
 
   const [keyword, setKeyword] = useState('')
@@ -74,7 +75,7 @@ export function TutorManagerModal() {
           size="small"
           checked={row.online}
           // 已同步且有上线版本时开关才有意义；否则点了学员端也不会出现入口。
-          disabled={!row.externalId || !row.hasLiveRelease}
+          disabled={!row.externalId || !row.hasLiveRelease || Boolean(pending[row.courseId])}
           onChange={async (v) => {
             try {
               await setTutorOnline(row.courseId, v)

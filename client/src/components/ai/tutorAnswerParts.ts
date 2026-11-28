@@ -55,6 +55,18 @@ function readableCitation(original: string, items: string) {
   return sources.length ? `[${sources.join(', ')}]` : '';
 }
 
+export function normalizeTutorExhibitCitations(text: string) {
+  return text.replace(exhibitCitation, readableCitation);
+}
+
+export function normalizeTutorLegacyReferences(text: string, sourceNumbers: ReadonlySet<string | undefined>) {
+  return text
+    .replace(/(?<![\\[!])\[\[(\d+)\]\](?![[(:\]])/g, (full, id: string) => sourceNumbers.has(id) ? '[' + id + ']' : full)
+    .replace(/(\bis[ \t]+|是[ \t]*)[.。]([ \t]*\n\s*)([^\n[\]]+)\n\s*!\[\3\]\[(exhibit:[\w-]+:[\w-]+)\]/gi,
+      (_full, verb: string, gap: string, caption: string, key: string) =>
+        verb + caption.trim() + (/^是/u.test(verb) ? '。' : '.') + gap + '![' + caption + '][' + key + ']');
+}
+
 function mathDelimiters(text: string) {
   return text
     .replace(/\\\[([\s\S]+?)\\\]/g, (_match, body: string) => `\n$$\n${body.trim()}\n$$\n`)
@@ -84,8 +96,7 @@ export function tutorAnswerParts(text: string, _jackLecture = false): TutorAnswe
     const clean = name.trim().replace(/^\*\*|\*\*$/g, "").replace(/&#x20;$/i, "").trim();
     if (clean && !sources.includes(clean)) sources.push(clean);
   };
-  const prose = outsideCode(normalizeTutorIndent(text.replace(/\r\n?/g, "\n")), (part) => arithmeticStars(mathDelimiters(currencyDollars(part
-    .replace(exhibitCitation, readableCitation)
+  const prose = outsideCode(normalizeTutorIndent(text.replace(/\r\n?/g, "\n")), (part) => arithmeticStars(mathDelimiters(currencyDollars(normalizeTutorExhibitCitations(part)
     .replace(SOURCE, (_match, name: string) => { keep(name); return ""; })
     .replace(SOURCES_LIST, (_match, entries: string) => {
       // "[1] A [2] B" on one line is two entries.
@@ -101,11 +112,7 @@ export function tutorAnswerParts(text: string, _jackLecture = false): TutorAnswe
   // 历史回答可能把多行公式的定界符与矩阵或引用写在同一行。
   const sourceNumbers = new Set(sources.map((s) => /^\[(\d+)\]/.exec(s)?.[1]));
   const formatted = outsideCode(prose, (part) => part.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+\$)/).map((span, index) =>
-    index % 2 ? span : span
-      .replace(/(?<![\\[!])\[\[(\d+)\]\](?![[(:\]])/g, (full, id: string) => sourceNumbers.has(id) ? '[' + id + ']' : full)
-      .replace(/(\bis[ \t]+|是[ \t]*)[.。]([ \t]*\n\s*)([^\n[\]]+)\n\s*!\[\3\]\[(exhibit:[\w-]+:[\w-]+)\]/gi,
-        (_full, verb: string, gap: string, caption: string, key: string) =>
-          verb + caption.trim() + (/^是/.test(verb) ? '。' : '.') + gap + '![' + caption + '][' + key + ']'),
+    index % 2 ? span : normalizeTutorLegacyReferences(span, sourceNumbers),
   ).join('').replace(
     /(?<!\\)\$\$([\s\S]*?)\$\$/g,
     (block, body: string) => body.includes("\n") ? `\n$$\n${body.trim()}\n$$\n` : block,

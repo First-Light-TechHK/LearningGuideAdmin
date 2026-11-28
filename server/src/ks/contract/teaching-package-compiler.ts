@@ -1,4 +1,5 @@
 export const TEACHING_PACKAGE_COMPILER = Symbol('TEACHING_PACKAGE_COMPILER');
+export const MAX_PUBLISHED_TEACHING_CARDS = 2000;
 
 export type TeachingPackageCompiler = (input: {
   courseId: string;

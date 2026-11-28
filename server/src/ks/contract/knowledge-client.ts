@@ -56,6 +56,7 @@ export interface ProfessorQaSearch {
   status: 'ready' | 'missing' | 'degraded';
   cardIds: string[];
   teachingCardIds?: string[];
+  teachingParts?: Array<{ cardId: string; part: number }>;
   generation?: string;
 }
 
