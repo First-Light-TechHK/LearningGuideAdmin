@@ -33,7 +33,13 @@ const evidenceRoles = [
   'fact',
 ] as const;
 
-function supportedExcerpts(value: unknown, scope: string, answer: string) {
+function supportedExcerpts(
+  value: unknown,
+  scope: string,
+  answer: string,
+  requiredRole?: (typeof evidenceRoles)[number],
+  request = scope,
+) {
   if (!Array.isArray(value) || !value.length) return;
   const quotes = new Set<string>();
   const roles = new Set<string>();
@@ -63,12 +69,13 @@ function supportedExcerpts(value: unknown, scope: string, answer: string) {
       quotes.add(quote);
     }
   }
+  if (requiredRole && !roles.has(requiredRole)) return;
   const definition =
     /^(?:please\s+)?define\b|^(?:请问)?什么是|如何定义|的定义(?:是什么)?[?？]?$|^what is (?:a|an) [\p{L}-]+(?: [\p{L}-]+){0,3}[?？]$/iu.test(
-      scope,
-    ) && !/used for|used to|purpose|用途/iu.test(scope);
+      request,
+    ) && !/used for|used to|purpose|用途/iu.test(request);
   if (definition && !roles.has('definition')) return;
-  const subjects = comparisonSubjects(scope).map((s) => s.toLowerCase());
+  const subjects = comparisonSubjects(request).map((s) => s.toLowerCase());
   if (subjects.length === 2) {
     const sidesSupported = subjects.every((subject, i) =>
       [...subjectParts].some(
@@ -81,7 +88,7 @@ function supportedExcerpts(value: unknown, scope: string, answer: string) {
   }
   if (
     /^(?:is|are)\b[^?？.]{0,100}\b(?:stable|sufficient|applicable)\b|是否(?:足以|稳定|适用)|能否(?:据此)?断定/iu.test(
-      scope,
+      request,
     ) &&
     !(roles.has('criterion') && roles.has('conclusion'))
   )
@@ -110,6 +117,12 @@ export async function assessProfessorAnswer(
   signal?: AbortSignal,
   previousQuestion?: string,
   report?: (reason: string, missing?: string[]) => void,
+  followUp?: {
+    request: string;
+    requiredRole?: (typeof evidenceRoles)[number];
+    previousAnswer?: string;
+    anotherExample?: boolean;
+  },
 ): Promise<ProfessorEvidence | undefined> {
   // 只提交完整答案，按召回顺序保留优先候选的全部限制条件。
   let remaining = 36000;
@@ -146,6 +159,11 @@ export async function assessProfessorAnswer(
             'Use full only when the quoted evidence covers every requested requirement. Use partial only for an independently answerable part; for a comparison this can be the supported side. If the only requested conclusion cannot be established, or there is only topic overlap, ambiguity, conflict or a mismatch of premises, use none.',
             'For partial, use exact text from the current question for the supported scope and for each missing requirement, so course passages for the remaining parts can be retrieved. Check all applicable conditions, negations, numbers, units and exceptions, including those elsewhere in the question. For full use the entire question.',
             'Each excerpts array contains only verbatim passages needed for that part, with the complete sentences, attached qualifications, exceptions, units and relevant formulas. For an explicit quotation request select the requested original passage, the entire answer only if requested. The final tutor will see only these passages. For none use null cardId, empty support and missingRequirements containing the precise terms from the student question that need a course passage.',
+            ...(followUp
+              ? [
+                  'For a follow-up, assess the new request against the specific question carried forward. Later conditions replace conflicting older conditions. A related topic by itself is insufficient. An example must illustrate the requested relationship. If a different example is requested, reject evidence that repeats the preceding example, even in translation. When requiredRole is supplied, support must include it. The preceding reply may locate a claim or an earlier example; it is not evidence.',
+                ]
+              : []),
           ].join(' '),
         },
         {
@@ -153,6 +171,7 @@ export async function assessProfessorAnswer(
           content: JSON.stringify({
             currentQuestion: query,
             previousQuestion,
+            ...(followUp ?? {}),
             responseLanguage: language,
             candidates: available,
           }),
@@ -204,7 +223,13 @@ export async function assessProfessorAnswer(
     const card = available.find((c) => c.cardId === verdict.cardId);
     const excerpts =
       card && typeof scope === 'string'
-        ? supportedExcerpts(verdict.support, scope, card.answerMd)
+        ? supportedExcerpts(
+            verdict.support,
+            scope,
+            card.answerMd,
+            followUp?.requiredRole,
+            followUp?.request,
+          )
         : undefined;
     if (
       !card ||
@@ -243,6 +268,24 @@ export async function assessProfessorAnswer(
     if (measures(scope).some((measure) => !publishedMeasures.has(measure))) {
       report?.('unit_condition_changed');
       return;
+    }
+    if (followUp?.anotherExample && followUp.previousAnswer) {
+      const prior = followUp.previousAnswer.normalize('NFKC').toLowerCase();
+      const earlierMeasures = new Set(measures(prior));
+      if (
+        excerpts.some((excerpt) => {
+          const current = excerpt.normalize('NFKC').toLowerCase().trim();
+          const values = measures(current);
+          return (
+            (current.length >= 30 && prior.includes(current)) ||
+            (values.length > 0 &&
+              values.every((value) => earlierMeasures.has(value)))
+          );
+        })
+      ) {
+        report?.('repeated_example');
+        return;
+      }
     }
     report?.(verdict.coverage + '_coverage');
     return {

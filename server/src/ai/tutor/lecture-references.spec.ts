@@ -57,6 +57,22 @@ describe('mixed exhibit and source citations', () => {
     expect(result.split('![咖啡杯]')).toHaveLength(2);
   });
 
+  it('removes unavailable citation numbers without changing math brackets', () => {
+    const stream = createLectureReferenceStream(
+      [],
+      'course',
+      undefined,
+      false,
+      'release',
+      new Set([1]),
+    );
+    const answer =
+      [...'温度 [1, 99]。坐标 $[1, 2]$。 [42]']
+        .map((char) => stream.write(char))
+        .join('') + stream.finish();
+    expect(answer.trim()).toBe('温度 [1]。坐标 $[1, 2]$。');
+  });
+
   it('uses the adjacent full caption once, across stream chunks and at completion', () => {
     const label = 'Exhibit 1.2 · 咖啡杯的状态变量 · Coffee state variables';
     const coffee = { ...image, label };

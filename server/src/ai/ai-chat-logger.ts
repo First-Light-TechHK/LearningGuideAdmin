@@ -32,6 +32,14 @@ export interface AiChatLogEntry {
   latencyMs: number;
   status: AiChatStatus;
   promptHash?: string;
+  followUpRouting?: {
+    kind:
+      'example' | 'explain' | 'reason' | 'condition' | 'quotation' | 'clarify';
+    anchorHash?: string;
+    anchorQaId?: string;
+    result: 'professor_qa' | 'course_context' | 'clarify' | 'unavailable';
+    reason?: string;
+  };
   evidence?: {
     route:
       'course_context' | 'reviewed' | 'direct_clarification' | 'direct_answer';
@@ -150,6 +158,9 @@ export class AiChatLogger {
         latencyMs: entry.latencyMs,
         status: entry.status,
         ...(entry.promptHash ? { promptHash: entry.promptHash } : {}),
+        ...(entry.followUpRouting
+          ? { followUpRouting: entry.followUpRouting }
+          : {}),
         ...(entry.evidence ? { evidence: entry.evidence } : {}),
         ...(entry.teaching ? { teaching: entry.teaching } : {}),
         ...(entry.error ? { error: preview(entry.error, ERROR_LIMIT) } : {}),
